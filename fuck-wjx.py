@@ -632,6 +632,7 @@ class SurveyGUI:
         self.status_job = None
         self.update_info = None  # 存储更新信息
         self._build_ui()
+        self._center_window()  # 窗口居中显示
         self._check_updates_on_startup()  # 启动时检查更新
 
     def _build_ui(self):
@@ -2005,8 +2006,58 @@ class SurveyGUI:
 
     def on_close(self):
         self.stop_run()
-        self._save_config()
+        
+        # 如果有配置过题目，询问是否保存
+        if self.question_entries:
+            response = messagebox.askyesno(
+                "保存配置",
+                "是否保存题目配置以便下次使用？\n\n" +
+                f"当前已配置 {len(self.question_entries)} 道题目"
+            )
+            if response:
+                self._save_config()
+                messagebox.showinfo("保存成功", "配置已保存，下次启动时将自动加载")
+            else:
+                # 用户选择不保存，清除配置
+                config_path = self._get_config_path()
+                if os.path.exists(config_path):
+                    try:
+                        os.remove(config_path)
+                    except:
+                        pass
+        else:
+            # 没有配置过题目，直接清除配置
+            config_path = self._get_config_path()
+            if os.path.exists(config_path):
+                try:
+                    os.remove(config_path)
+                except:
+                    pass
+        
         self.root.destroy()
+
+    def _center_window(self):
+        """将窗口放在屏幕正中央"""
+        self.root.update_idletasks()
+        
+        # 获取窗口大小
+        window_width = self.root.winfo_width()
+        window_height = self.root.winfo_height()
+        
+        # 获取屏幕大小
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # 计算窗口应该放置的位置
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        # 确保坐标不为负数
+        x = max(0, x)
+        y = max(0, y)
+        
+        # 设置窗口位置
+        self.root.geometry(f"+{x}+{y}")
 
     def _get_config_path(self) -> str:
         return os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -2190,15 +2241,10 @@ class SurveyGUI:
     def show_about(self):
         """显示关于对话框"""
         about_text = (
-            f"问卷星速写\n"
-            f"版本 v{__VERSION__}\n\n"
-            f"一个强大的问卷自动填写工具\n\n"
-            f"GitHub: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n\n"
-            f"功能特性:\n"
-            f"• 支持多种题型自动填写\n"
-            f"• 灵活的概率配置\n"
-            f"• 多浏览器并发提交\n"
-            f"• 自动更新检查"
+            f"fuck-wjx（问卷星速写）\n\n"
+            f"当前版本 v{__VERSION__}\n\n"
+            f"GitHub项目地址: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n"
+            f"有问题可在 GitHub 提交issue或发送邮箱至help@hungrym0.top"
         )
         messagebox.showinfo("关于", about_text)
 

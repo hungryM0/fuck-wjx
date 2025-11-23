@@ -35,11 +35,13 @@
 - numpy
 - pyzbar
 - Pillow
+- requests
+- packaging
 
 例如，使用 pip 安装依赖：
 
 ```pwsh
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
 ---
