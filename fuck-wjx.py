@@ -35,7 +35,7 @@ except ImportError:
     version = None
 
 # 版本号
-__VERSION__ = "0.2"
+__VERSION__ = "0.2.0"
 
 
 url = ""
