@@ -2,3 +2,5 @@ numpy
 selenium
 pyzbar
 Pillow
+requests
+packaging

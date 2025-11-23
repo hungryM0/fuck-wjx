@@ -7,9 +7,12 @@ import time
 import traceback
 import json
 import os
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass, asdict
 from threading import Thread
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any
 
 import numpy
 import tkinter as tk
@@ -20,6 +23,19 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from PIL import Image
 from pyzbar.pyzbar import decode as pyzbar_decode
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
+try:
+    from packaging import version
+except ImportError:
+    version = None
+
+# 版本号
+__VERSION__ = "0.2"
 
 
 url = ""
@@ -39,6 +55,157 @@ cur_num = 0
 cur_fail = 0
 lock = threading.Lock()
 stop_event = threading.Event()
+
+# GitHub 更新配置
+GITHUB_OWNER = "hungryM0"
+GITHUB_REPO = "fuck-wjx"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+
+
+class UpdateManager:
+    """GitHub 自动更新管理器"""
+    
+    @staticmethod
+    def check_updates() -> Optional[Dict[str, Any]]:
+        """
+        检查 GitHub 上是否有新版本
+        
+        返回:
+            如果有新版本，返回更新信息字典，包括:
+            - has_update: 是否有更新
+            - version: 新版本号
+            - download_url: 下载地址
+            - release_notes: 发布说明
+            - file_name: 文件名
+            
+            如果无新版本或检查失败，返回 None
+        """
+        if not requests or not version:
+            logging.warning("更新功能依赖 requests 和 packaging 模块")
+            return None
+        
+        try:
+            response = requests.get(GITHUB_API_URL, timeout=5)
+            response.raise_for_status()
+            latest_release = response.json()
+            
+            latest_version = latest_release['tag_name'].lstrip('v')
+            current_version = __VERSION__
+            
+            # 比较版本号
+            try:
+                if version.parse(latest_version) <= version.parse(current_version):
+                    return None
+            except:
+                logging.warning(f"版本比较失败: {latest_version} vs {current_version}")
+                return None
+            
+            # 查找 .py 文件资源
+            download_url = None
+            file_name = None
+            for asset in latest_release.get('assets', []):
+                if asset['name'].endswith('.py') or asset['name'] == 'fuck-wjx.py':
+                    download_url = asset['browser_download_url']
+                    file_name = asset['name']
+                    break
+            
+            if not download_url:
+                logging.warning("Release 中没有找到 .py 文件")
+                return None
+            
+            return {
+                'has_update': True,
+                'version': latest_version,
+                'download_url': download_url,
+                'release_notes': latest_release.get('body', ''),
+                'file_name': file_name,
+                'current_version': current_version
+            }
+            
+        except requests.exceptions.Timeout:
+            logging.warning("检查更新超时")
+            return None
+        except requests.exceptions.RequestException as e:
+            logging.warning(f"检查更新失败: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"检查更新时发生错误: {e}")
+            return None
+    
+    @staticmethod
+    def download_update(download_url: str, target_file: str) -> bool:
+        """
+        下载更新文件并替换
+        
+        参数:
+            download_url: 下载链接
+            target_file: 目标文件路径
+            
+        返回:
+            是否成功
+        """
+        if not requests:
+            logging.error("下载更新需要 requests 模块")
+            return False
+        
+        try:
+            logging.info(f"正在下载更新文件: {download_url}")
+            response = requests.get(download_url, timeout=30, stream=True)
+            response.raise_for_status()
+            
+            # 获取文件大小
+            total_size = int(response.headers.get('content-length', 0))
+            
+            # 写入临时文件
+            temp_file = target_file + '.tmp'
+            downloaded_size = 0
+            
+            with open(temp_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            logging.debug(f"下载进度: {progress:.1f}%")
+            
+            # 创建备份
+            backup_file = target_file + '.bak'
+            if os.path.exists(target_file):
+                if os.path.exists(backup_file):
+                    os.remove(backup_file)
+                shutil.copy(target_file, backup_file)
+                logging.info(f"已备份原文件到: {backup_file}")
+            
+            # 替换文件
+            if os.path.exists(target_file):
+                os.remove(target_file)
+            os.rename(temp_file, target_file)
+            
+            logging.info(f"文件已成功更新: {target_file}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"下载或更新文件失败: {e}")
+            # 清理临时文件
+            temp_file = target_file + '.tmp'
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+            return False
+    
+    @staticmethod
+    def restart_application():
+        """重启应用程序"""
+        try:
+            python_exe = sys.executable
+            script_path = os.path.abspath(__file__)
+            subprocess.Popen([python_exe, script_path])
+            sys.exit(0)
+        except Exception as e:
+            logging.error(f"重启应用失败: {e}")
 
 
 def normalize_probabilities(values: List[float]) -> List[float]:
@@ -463,11 +630,23 @@ class SurveyGUI:
         self.active_drivers: List[WebDriver] = []  # 跟踪活跃的浏览器实例
         self.running = False
         self.status_job = None
+        self.update_info = None  # 存储更新信息
         self._build_ui()
+        self._check_updates_on_startup()  # 启动时检查更新
 
     def _build_ui(self):
         self.root.geometry("960x720")
         self.root.resizable(True, True)
+
+        # 创建菜单栏
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="帮助", menu=help_menu)
+        help_menu.add_command(label="检查更新", command=self.check_for_updates)
+        help_menu.add_separator()
+        help_menu.add_command(label="关于", command=self.show_about)
 
         settings_frame = ttk.LabelFrame(self.root, text="基础设置", padding=10)
         settings_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -1889,6 +2068,139 @@ class SurveyGUI:
                 print(f"已加载上次配置：{len(self.question_entries)} 道题目")
         except Exception as e:
             print(f"加载配置失败: {e}")
+
+    def _check_updates_on_startup(self):
+        """在启动时后台检查更新"""
+        def check():
+            try:
+                update_info = UpdateManager.check_updates()
+                if update_info:
+                    self.update_info = update_info
+                    self.root.after(0, self._show_update_notification)
+            except Exception as e:
+                logging.debug(f"启动时检查更新失败: {e}")
+        
+        thread = Thread(target=check, daemon=True)
+        thread.start()
+
+    def _show_update_notification(self):
+        """显示更新通知"""
+        if not self.update_info:
+            return
+        
+        info = self.update_info
+        msg = (
+            f"检测到新版本 v{info['version']}\n"
+            f"当前版本 v{info['current_version']}\n\n"
+            f"立即更新？"
+        )
+        
+        if messagebox.askyesno("检查到更新", msg):
+            self._perform_update()
+
+    def check_for_updates(self):
+        """手动检查更新"""
+        self.root.config(cursor="wait")
+        self.root.update()
+        
+        try:
+            update_info = UpdateManager.check_updates()
+            if update_info:
+                self.update_info = update_info
+                msg = (
+                    f"检测到新版本！\n\n"
+                    f"当前版本: v{update_info['current_version']}\n"
+                    f"新版本: v{update_info['version']}\n\n"
+                    f"发布说明:\n{update_info['release_notes'][:200]}\n\n"
+                    f"立即更新？"
+                )
+                if messagebox.askyesno("检查到更新", msg):
+                    self._perform_update()
+            else:
+                messagebox.showinfo("检查更新", f"当前已是最新版本 v{__VERSION__}")
+        except Exception as e:
+            messagebox.showerror("检查更新失败", f"错误: {str(e)}")
+        finally:
+            self.root.config(cursor="")
+
+    def _perform_update(self):
+        """执行更新"""
+        if not self.update_info:
+            return
+        
+        update_info = self.update_info
+        script_path = os.path.abspath(__file__)
+        
+        # 显示更新进度窗口
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title("正在更新")
+        progress_win.geometry("400x150")
+        progress_win.resizable(False, False)
+        progress_win.transient(self.root)
+        progress_win.grab_set()
+        
+        frame = ttk.Frame(progress_win, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text="正在下载和更新程序...").pack(pady=10)
+        
+        progress = ttk.Progressbar(frame, mode='indeterminate')
+        progress.pack(fill=tk.X, pady=10)
+        progress.start()
+        
+        status_label = ttk.Label(frame, text="准备中...", foreground="gray")
+        status_label.pack(pady=10)
+        
+        progress_win.update()
+        
+        def do_update():
+            try:
+                status_label.config(text="正在下载文件...")
+                progress_win.update()
+                
+                success = UpdateManager.download_update(
+                    update_info['download_url'],
+                    script_path
+                )
+                
+                if success:
+                    status_label.config(text="更新成功！即将重启程序...")
+                    progress_win.update()
+                    time.sleep(1)
+                    progress_win.destroy()
+                    self.on_close()  # 关闭当前程序
+                    UpdateManager.restart_application()  # 重启新版本
+                else:
+                    status_label.config(text="更新失败", foreground="red")
+                    progress_win.update()
+                    time.sleep(2)
+                    progress_win.destroy()
+                    messagebox.showerror("更新失败", "下载或更新文件失败，请稍后重试")
+            except Exception as e:
+                logging.error(f"更新过程中出错: {e}")
+                status_label.config(text=f"错误: {str(e)}", foreground="red")
+                progress_win.update()
+                time.sleep(2)
+                progress_win.destroy()
+                messagebox.showerror("更新失败", f"更新过程出错: {str(e)}")
+        
+        thread = Thread(target=do_update, daemon=True)
+        thread.start()
+
+    def show_about(self):
+        """显示关于对话框"""
+        about_text = (
+            f"问卷星速写\n"
+            f"版本 v{__VERSION__}\n\n"
+            f"一个强大的问卷自动填写工具\n\n"
+            f"GitHub: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n\n"
+            f"功能特性:\n"
+            f"• 支持多种题型自动填写\n"
+            f"• 灵活的概率配置\n"
+            f"• 多浏览器并发提交\n"
+            f"• 自动更新检查"
+        )
+        messagebox.showinfo("关于", about_text)
 
     def run(self):
         self.root.mainloop()
