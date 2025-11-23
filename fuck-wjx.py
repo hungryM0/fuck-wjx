@@ -170,11 +170,19 @@ class UpdateManager:
             # 获取文件大小
             total_size = int(response.headers.get('content-length', 0))
             
-            # 下载到当前目录，使用Release的原始文件名
-            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 确定下载目录：如果是exe运行，使用exe所在目录；如果是py运行，使用py所在目录
+            if getattr(sys, 'frozen', False):
+                # 从打包的exe运行
+                current_dir = os.path.dirname(sys.executable)
+            else:
+                # 从Python脚本运行
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+            
             target_file = os.path.join(current_dir, file_name)
             temp_file = target_file + '.tmp'
             downloaded_size = 0
+            
+            logging.info(f"下载目标目录: {current_dir}")
             
             with open(temp_file, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
@@ -193,6 +201,22 @@ class UpdateManager:
             os.rename(temp_file, target_file)
             
             logging.info(f"文件已成功下载到: {target_file}")
+            
+            # 删除旧版本的exe文件（排除当前下载的文件）
+            try:
+                for file in os.listdir(current_dir):
+                    if file.endswith('.exe') and file != file_name:
+                        old_file_path = os.path.join(current_dir, file)
+                        # 检查是否是程序相关的exe（包含项目名称）
+                        if 'fuck-wjx' in file.lower() or 'wjx' in file.lower():
+                            try:
+                                os.remove(old_file_path)
+                                logging.info(f"已删除旧版本: {old_file_path}")
+                            except Exception as e:
+                                logging.warning(f"无法删除旧版本 {old_file_path}: {e}")
+            except Exception as e:
+                logging.warning(f"清理旧版本时出错: {e}")
+            
             return target_file
             
         except Exception as e:
@@ -2301,4 +2325,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
