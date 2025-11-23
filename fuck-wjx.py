@@ -35,7 +35,7 @@ except ImportError:
     version = None
 
 # 版本号
-__VERSION__ = "0.2.1"
+__VERSION__ = "0.2.0"
 
 
 url = ""
@@ -60,6 +60,19 @@ stop_event = threading.Event()
 GITHUB_OWNER = "hungryM0"
 GITHUB_REPO = "fuck-wjx"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+
+# 可选：设置 GitHub Token 以避免 API 速率限制
+# 优先从环境变量读取，如果没有则尝试从配置文件读取
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+if not GITHUB_TOKEN:
+    # 尝试从同目录下的 .github_token 文件读取
+    token_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".github_token")
+    if os.path.exists(token_file):
+        try:
+            with open(token_file, 'r', encoding='utf-8') as f:
+                GITHUB_TOKEN = f.read().strip()
+        except:
+            pass
 
 
 class UpdateManager:
@@ -100,17 +113,17 @@ class UpdateManager:
                 logging.warning(f"版本比较失败: {latest_version} vs {current_version}")
                 return None
             
-            # 查找 .py 文件资源
+            # 查找 .exe 文件资源（Release中的最新exe文件）
             download_url = None
             file_name = None
             for asset in latest_release.get('assets', []):
-                if asset['name'].endswith('.py') or asset['name'] == 'fuck-wjx.py':
+                if asset['name'].endswith('.exe'):
                     download_url = asset['browser_download_url']
                     file_name = asset['name']
                     break
             
             if not download_url:
-                logging.warning("Release 中没有找到 .py 文件")
+                logging.warning("Release 中没有找到 .exe 文件")
                 return None
             
             return {
@@ -133,20 +146,21 @@ class UpdateManager:
             return None
     
     @staticmethod
-    def download_update(download_url: str, target_file: str) -> bool:
+    def download_update(download_url: str, file_name: str, progress_callback=None) -> Optional[str]:
         """
-        下载更新文件并替换
+        下载更新文件
         
         参数:
             download_url: 下载链接
-            target_file: 目标文件路径
+            file_name: 文件名（保留原始Release文件名）
+            progress_callback: 进度回调函数 (downloaded, total)
             
         返回:
-            是否成功
+            下载的文件路径，失败返回 None
         """
         if not requests:
             logging.error("下载更新需要 requests 模块")
-            return False
+            return None
         
         try:
             logging.info(f"正在下载更新文件: {download_url}")
@@ -156,7 +170,9 @@ class UpdateManager:
             # 获取文件大小
             total_size = int(response.headers.get('content-length', 0))
             
-            # 写入临时文件
+            # 下载到当前目录，使用Release的原始文件名
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            target_file = os.path.join(current_dir, file_name)
             temp_file = target_file + '.tmp'
             downloaded_size = 0
             
@@ -165,36 +181,32 @@ class UpdateManager:
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
+                        if progress_callback:
+                            progress_callback(downloaded_size, total_size)
                         if total_size > 0:
                             progress = (downloaded_size / total_size) * 100
                             logging.debug(f"下载进度: {progress:.1f}%")
             
-            # 创建备份
-            backup_file = target_file + '.bak'
-            if os.path.exists(target_file):
-                if os.path.exists(backup_file):
-                    os.remove(backup_file)
-                shutil.copy(target_file, backup_file)
-                logging.info(f"已备份原文件到: {backup_file}")
-            
-            # 替换文件
+            # 移动临时文件到目标位置
             if os.path.exists(target_file):
                 os.remove(target_file)
             os.rename(temp_file, target_file)
             
-            logging.info(f"文件已成功更新: {target_file}")
-            return True
+            logging.info(f"文件已成功下载到: {target_file}")
+            return target_file
             
         except Exception as e:
-            logging.error(f"下载或更新文件失败: {e}")
+            logging.error(f"下载文件失败: {e}")
             # 清理临时文件
-            temp_file = target_file + '.tmp'
-            if os.path.exists(temp_file):
-                try:
+            try:
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                target_file = os.path.join(current_dir, file_name)
+                temp_file = target_file + '.tmp'
+                if os.path.exists(temp_file):
                     os.remove(temp_file)
-                except:
-                    pass
-            return False
+            except:
+                pass
+            return None
     
     @staticmethod
     def restart_application():
@@ -2180,12 +2192,11 @@ class SurveyGUI:
             return
         
         update_info = self.update_info
-        script_path = os.path.abspath(__file__)
         
         # 显示更新进度窗口
         progress_win = tk.Toplevel(self.root)
         progress_win.title("正在更新")
-        progress_win.geometry("400x150")
+        progress_win.geometry("500x200")
         progress_win.resizable(False, False)
         progress_win.transient(self.root)
         progress_win.grab_set()
@@ -2193,40 +2204,71 @@ class SurveyGUI:
         frame = ttk.Frame(progress_win, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(frame, text="正在下载和更新程序...").pack(pady=10)
+        title_label = ttk.Label(frame, text="正在下载新版本...", font=('', 10, 'bold'))
+        title_label.pack(pady=(0, 10))
         
-        progress = ttk.Progressbar(frame, mode='indeterminate')
+        # 文件名标签
+        file_label = ttk.Label(frame, text=f"文件: {update_info['file_name']}", foreground="gray")
+        file_label.pack(pady=(0, 5))
+        
+        # 进度条（确定模式）
+        progress = ttk.Progressbar(frame, mode='determinate', maximum=100)
         progress.pack(fill=tk.X, pady=10)
-        progress.start()
         
-        status_label = ttk.Label(frame, text="准备中...", foreground="gray")
+        # 进度文字
+        progress_label = ttk.Label(frame, text="0%", foreground="gray")
+        progress_label.pack(pady=(0, 5))
+        
+        # 状态标签
+        status_label = ttk.Label(frame, text="准备下载...", foreground="gray", wraplength=450)
         status_label.pack(pady=10)
         
         progress_win.update()
+        
+        def update_progress(downloaded, total):
+            """更新进度条"""
+            if total > 0:
+                percent = (downloaded / total) * 100
+                progress['value'] = percent
+                # 格式化文件大小
+                downloaded_mb = downloaded / (1024 * 1024)
+                total_mb = total / (1024 * 1024)
+                progress_label.config(text=f"{percent:.1f}% ({downloaded_mb:.1f}MB / {total_mb:.1f}MB)")
+                progress_win.update()
         
         def do_update():
             try:
                 status_label.config(text="正在下载文件...")
                 progress_win.update()
                 
-                success = UpdateManager.download_update(
+                downloaded_file = UpdateManager.download_update(
                     update_info['download_url'],
-                    script_path
+                    update_info['file_name'],
+                    progress_callback=update_progress
                 )
                 
-                if success:
-                    status_label.config(text="更新成功！即将重启程序...")
-                    progress_win.update()
-                    time.sleep(1)
-                    progress_win.destroy()
-                    self.on_close()  # 关闭当前程序
-                    UpdateManager.restart_application()  # 重启新版本
-                else:
-                    status_label.config(text="更新失败", foreground="red")
+                if downloaded_file:
+                    status_label.config(text=f"下载成功！文件已保存到:\n{downloaded_file}")
+                    progress_label.config(text="100%")
+                    progress['value'] = 100
                     progress_win.update()
                     time.sleep(2)
                     progress_win.destroy()
-                    messagebox.showerror("更新失败", "下载或更新文件失败，请稍后重试")
+                    
+                    # 询问是否立即运行新版本
+                    if messagebox.askyesno("更新完成", 
+                        f"新版本已下载到:\n{downloaded_file}\n\n是否立即运行新版本？"):
+                        try:
+                            subprocess.Popen([downloaded_file])
+                            self.on_close()
+                        except Exception as e:
+                            messagebox.showerror("启动失败", f"无法启动新版本: {e}")
+                else:
+                    status_label.config(text="下载失败", foreground="red")
+                    progress_win.update()
+                    time.sleep(2)
+                    progress_win.destroy()
+                    messagebox.showerror("更新失败", "下载文件失败，请稍后重试")
             except Exception as e:
                 logging.error(f"更新过程中出错: {e}")
                 status_label.config(text=f"错误: {str(e)}", foreground="red")
