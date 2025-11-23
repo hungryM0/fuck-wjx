@@ -1,0 +1,1822 @@
+import logging
+import math
+import random
+import re
+import threading
+import time
+import traceback
+import json
+import os
+from dataclasses import dataclass, asdict
+from threading import Thread
+from typing import List, Optional, Union
+
+import numpy
+import tkinter as tk
+from tkinter import ttk, messagebox
+from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webdriver import WebDriver
+
+
+url = ""
+
+single_prob: List[Union[List[float], int]] = []
+droplist_prob: List[Union[List[float], int]] = []
+multiple_prob: List[List[float]] = []
+matrix_prob: List[Union[List[float], int]] = []
+scale_prob: List[Union[List[float], int]] = []
+texts: List[List[str]] = []
+texts_prob: List[List[float]] = []
+
+target_num = 1
+fail_threshold = 1
+num_threads = 1
+cur_num = 0
+cur_fail = 0
+lock = threading.Lock()
+stop_event = threading.Event()
+
+
+def normalize_probabilities(values: List[float]) -> List[float]:
+    if not values:
+        raise ValueError("概率列表不能为空")
+    total = sum(values)
+    if total <= 0:
+        raise ValueError("概率列表的和必须大于0")
+    return [value / total for value in values]
+
+
+@dataclass
+class QuestionEntry:
+    question_type: str
+    probabilities: Union[List[float], int, None]
+    texts: Optional[List[str]] = None
+    rows: int = 1
+    option_count: int = 0
+    distribution_mode: str = "random"  # random, equal, custom
+    custom_weights: Optional[List[float]] = None
+
+    def summary(self) -> str:
+        if self.question_type == "text":
+            sample = " | ".join(self.texts or [])
+            return f"答案: {sample or '默认空'}"
+        if self.question_type == "matrix":
+            mode_text = {"random": "完全随机", "equal": "均等概率", "custom": "自定义权重"}.get(self.distribution_mode, "完全随机")
+            return f"{self.rows}行 × {self.option_count}列 - {mode_text}"
+        if self.question_type == "multiple" and self.probabilities == -1:
+            return f"{self.option_count}个选项 - 完全随机选择"
+        if self.probabilities == -1:
+            return f"{self.option_count}个选项 - 完全随机"
+        mode_text = {"random": "完全随机", "equal": "均等概率", "custom": "自定义权重"}.get(self.distribution_mode, "完全随机")
+        if self.question_type == "multiple" and self.custom_weights:
+            weights_str = ",".join(f"{int(w)}%" for w in self.custom_weights)
+            return f"{self.option_count}个选项 - 选中概率 {weights_str}"
+        if self.distribution_mode == "custom" and self.custom_weights:
+            weights_str = ":".join(str(int(w)) for w in self.custom_weights)
+            return f"{self.option_count}个选项 - 权重 {weights_str}"
+        return f"{self.option_count}个选项 - {mode_text}"
+
+
+QUESTION_TYPE_LABELS = {
+    "single": "单选题",
+    "multiple": "多选题",
+    "dropdown": "下拉题",
+    "matrix": "矩阵题",
+    "scale": "量表题",
+    "text": "填空题",
+}
+
+
+def configure_probabilities(entries: List[QuestionEntry]):
+    global single_prob, droplist_prob, multiple_prob, matrix_prob, scale_prob, texts, texts_prob
+    single_prob = []
+    droplist_prob = []
+    multiple_prob = []
+    matrix_prob = []
+    scale_prob = []
+    texts = []
+    texts_prob = []
+
+    for entry in entries:
+        probs = entry.probabilities
+        if entry.question_type == "single":
+            single_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+        elif entry.question_type == "dropdown":
+            droplist_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+        elif entry.question_type == "multiple":
+            if not isinstance(probs, list):
+                raise ValueError("多选题必须提供概率列表，数值范围0-100")
+            multiple_prob.append([float(value) for value in probs])
+        elif entry.question_type == "matrix":
+            rows = max(1, entry.rows)
+            if isinstance(probs, list):
+                normalized = normalize_probabilities(probs)
+                for _ in range(rows):
+                    matrix_prob.append(list(normalized))
+            else:
+                for _ in range(rows):
+                    matrix_prob.append(-1)
+        elif entry.question_type == "scale":
+            scale_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+        elif entry.question_type == "text":
+            values = entry.texts or []
+            if not values:
+                raise ValueError("填空题至少需要一个候选答案")
+            if isinstance(probs, list):
+                if len(probs) != len(values):
+                    raise ValueError("填空题概率数量需与答案数量一致")
+                normalized = normalize_probabilities(probs)
+            else:
+                normalized = normalize_probabilities([1.0] * len(values))
+            texts.append(values)
+            texts_prob.append(normalized)
+
+
+
+def detect(driver: WebDriver) -> List[int]:
+    question_counts_per_page: List[int] = []
+    total_pages = len(driver.find_elements(By.XPATH, '//*[@id="divQuestion"]/fieldset'))
+    for page_index in range(1, total_pages + 1):
+        page_questions = driver.find_elements(By.XPATH, f'//*[@id="fieldset{page_index}"]/div')
+        valid_question_count = 0
+        for question_element in page_questions:
+            topic_attr = question_element.get_attribute("topic")
+            if topic_attr and topic_attr.isdigit():
+                valid_question_count += 1
+        question_counts_per_page.append(valid_question_count)
+    return question_counts_per_page
+
+
+def vacant(driver: WebDriver, current, index):
+    answer_candidates = texts[index] if index < len(texts) else [""]
+    selection_probabilities = texts_prob[index] if index < len(texts_prob) else [1.0]
+    if not answer_candidates:
+        answer_candidates = [""]
+    if len(selection_probabilities) != len(answer_candidates):
+        selection_probabilities = normalize_probabilities([1.0] * len(answer_candidates))
+    selected_index = numpy.random.choice(a=numpy.arange(0, len(selection_probabilities)), p=selection_probabilities)
+    driver.find_element(By.CSS_SELECTOR, f"#q{current}").send_keys(answer_candidates[selected_index])
+
+
+def single(driver: WebDriver, current, index):
+    options_xpath = f'//*[@id="div{current}"]/div[2]/div'
+    option_elements = driver.find_elements(By.XPATH, options_xpath)
+    probabilities = single_prob[index] if index < len(single_prob) else -1
+    if probabilities == -1:
+        selected_option = random.randint(1, len(option_elements))
+    else:
+        assert len(probabilities) == len(option_elements), f"第{current}题参数长度：{len(probabilities)},选项长度{len(option_elements)},不一致！"
+        selected_option = numpy.random.choice(a=numpy.arange(1, len(option_elements) + 1), p=probabilities)
+    driver.find_element(
+        By.CSS_SELECTOR, f"#div{current} > div.ui-controlgroup > div:nth-child({selected_option})"
+    ).click()
+
+
+# 下拉框处理函数
+def droplist(driver: WebDriver, current, index):
+    # 先点击“请选择”
+    driver.find_element(By.CSS_SELECTOR, f"#select2-q{current}-container").click()
+    time.sleep(0.5)
+    # 选项数量
+    options = driver.find_elements(
+        By.XPATH, f"//*[@id='select2-q{current}-results']/li"
+    )
+    if len(options) <= 1:
+        return
+    p = droplist_prob[index] if index < len(droplist_prob) else -1
+    if p == -1:
+        p = normalize_probabilities([1.0] * (len(options) - 1))
+    r = numpy.random.choice(a=numpy.arange(1, len(options)), p=p)
+    driver.find_element(
+        By.XPATH, f"//*[@id='select2-q{current}-results']/li[{r + 1}]"
+    ).click()
+
+
+def multiple(driver: WebDriver, current, index):
+    options_xpath = f'//*[@id="div{current}"]/div[2]/div'
+    option_elements = driver.find_elements(By.XPATH, options_xpath)
+    if not option_elements:
+        return
+    selection_probabilities = multiple_prob[index] if index < len(multiple_prob) else [50.0] * len(option_elements)
+    
+    if selection_probabilities == -1 or (isinstance(selection_probabilities, list) and len(selection_probabilities) == 1 and selection_probabilities[0] == -1):
+        num_to_select = random.randint(1, max(1, len(option_elements)))
+        selected_indices = random.sample(range(len(option_elements)), num_to_select)
+        for option_idx in selected_indices:
+            selector = f"#div{current} > div.ui-controlgroup > div:nth-child({option_idx + 1})"
+            driver.find_element(By.CSS_SELECTOR, selector).click()
+        return
+    
+    assert len(option_elements) == len(selection_probabilities), f"第{current}题概率值和选项值不一致"
+    selection_mask = []
+    while sum(selection_mask) == 0:
+        selection_mask = [
+            numpy.random.choice(a=numpy.arange(0, 2), p=[1 - (prob / 100), prob / 100])
+            for prob in selection_probabilities
+        ]
+    for option_idx, is_selected in enumerate(selection_mask):
+        if is_selected == 1:
+            selector = f"#div{current} > div.ui-controlgroup > div:nth-child({option_idx + 1})"
+            driver.find_element(By.CSS_SELECTOR, selector).click()
+
+
+def matrix(driver: WebDriver, current, index):
+    rows_xpath = f'//*[@id="divRefTab{current}"]/tbody/tr'
+    row_elements = driver.find_elements(By.XPATH, rows_xpath)
+    matrix_row_count = sum(1 for row in row_elements if row.get_attribute("rowindex") is not None)
+    
+    columns_xpath = f'//*[@id="drv{current}_1"]/td'
+    column_elements = driver.find_elements(By.XPATH, columns_xpath)
+    if len(column_elements) <= 1:
+        return index
+    
+    for row_index in range(1, matrix_row_count + 1):
+        probabilities = matrix_prob[index] if index < len(matrix_prob) else -1
+        index += 1
+        if probabilities == -1:
+            selected_column = random.randint(2, len(column_elements))
+        else:
+            selected_column = numpy.random.choice(a=numpy.arange(2, len(column_elements) + 1), p=probabilities)
+        driver.find_element(
+            By.CSS_SELECTOR, f"#drv{current}_{row_index} > td:nth-child({selected_column})"
+        ).click()
+    return index
+
+
+def reorder(driver: WebDriver, current):
+    items_xpath = f'//*[@id="div{current}"]/ul/li'
+    order_items = driver.find_elements(By.XPATH, items_xpath)
+    for position in range(1, len(order_items) + 1):
+        selected_item = random.randint(position, len(order_items))
+        driver.find_element(
+            By.CSS_SELECTOR, f"#div{current} > ul > li:nth-child({selected_item})"
+        ).click()
+        time.sleep(0.4)
+
+
+def scale(driver: WebDriver, current, index):
+    scale_items_xpath = f'//*[@id="div{current}"]/div[2]/div/ul/li'
+    scale_options = driver.find_elements(By.XPATH, scale_items_xpath)
+    probabilities = scale_prob[index] if index < len(scale_prob) else -1
+    if probabilities == -1:
+        selected_option = random.randint(1, len(scale_options))
+    else:
+        selected_option = numpy.random.choice(a=numpy.arange(1, len(scale_options) + 1), p=probabilities)
+    driver.find_element(
+        By.CSS_SELECTOR, f"#div{current} > div.scale-div > div > ul > li:nth-child({selected_option})"
+    ).click()
+
+
+def brush(driver: WebDriver):
+    questions_per_page = detect(driver)
+    single_question_index = 0
+    vacant_question_index = 0
+    droplist_question_index = 0
+    multiple_question_index = 0
+    matrix_question_index = 0
+    scale_question_index = 0
+    current_question_number = 0
+    
+    for questions_count in questions_per_page:
+        for _ in range(1, questions_count + 1):
+            current_question_number += 1
+            question_type = driver.find_element(
+                By.CSS_SELECTOR, f"#div{current_question_number}"
+            ).get_attribute("type")
+            
+            if question_type in ("1", "2"):
+                vacant(driver, current_question_number, vacant_question_index)
+                vacant_question_index += 1
+            elif question_type == "3":
+                single(driver, current_question_number, single_question_index)
+                single_question_index += 1
+            elif question_type == "4":
+                multiple(driver, current_question_number, multiple_question_index)
+                multiple_question_index += 1
+            elif question_type == "5":
+                scale(driver, current_question_number, scale_question_index)
+                scale_question_index += 1
+            elif question_type == "6":
+                matrix_question_index = matrix(driver, current_question_number, matrix_question_index)
+            elif question_type == "7":
+                droplist(driver, current_question_number, droplist_question_index)
+                droplist_question_index += 1
+            elif question_type == "8":
+                slider_score = random.randint(1, 100)
+                driver.find_element(By.CSS_SELECTOR, f"#q{current_question_number}").send_keys(str(slider_score))
+            elif question_type == "11":
+                reorder(driver, current_question_number)
+            else:
+                print(f"第{current_question_number}题为不支持题型！")
+        time.sleep(0.5)
+        try:
+            driver.find_element(By.CSS_SELECTOR, "#divNext").click()
+            time.sleep(0.5)
+        except:
+            driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
+    submit(driver)
+
+
+def submit(driver: WebDriver):
+    time.sleep(1)
+    try:
+        driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
+        time.sleep(1)
+    except:
+        pass
+    try:
+        driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]').click()
+        time.sleep(0.5)
+    except:
+        pass
+    try:
+        slider_text_element = driver.find_element(By.XPATH, '//*[@id="nc_1__scale_text"]/span')
+        slider_handle = driver.find_element(By.XPATH, '//*[@id="nc_1_n1z"]')
+        if str(slider_text_element.text).startswith("请按住滑块"):
+            slider_width = slider_text_element.size.get("width") or 0
+            ActionChains(driver).drag_and_drop_by_offset(
+                slider_handle, int(slider_width), 0
+            ).perform()
+    except:
+        pass
+
+
+def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=None):
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    
+    global cur_num, cur_fail
+    while cur_num < target_num and not stop_signal.is_set():
+        driver = None
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            if gui_instance and hasattr(gui_instance, 'active_drivers'):
+                gui_instance.active_drivers.append(driver)
+            driver.set_window_size(550, 650)
+            driver.set_window_position(x=window_x_pos, y=window_y_pos)
+            driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {
+                    "source": 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+                },
+            )
+            driver.get(url)
+            initial_url = driver.current_url
+            brush(driver)
+            time.sleep(0.5)
+            final_url = driver.current_url
+            if initial_url != final_url:
+                with lock:
+                    cur_num += 1
+                    print(
+                        f"已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))} "
+                    )
+        except:
+            traceback.print_exc()
+            with lock:
+                cur_fail += 1
+                print(f"已失败{cur_fail}次,失败超过{int(fail_threshold)}次将强制停止")
+            if cur_fail >= fail_threshold:
+                logging.critical("失败次数过多，程序将强制停止，请检查代码是否正确")
+                stop_signal.set()
+                break
+        finally:
+            if driver:
+                try:
+                    if gui_instance and hasattr(gui_instance, 'active_drivers') and driver in gui_instance.active_drivers:
+                        gui_instance.active_drivers.remove(driver)
+                    driver.quit()
+                except:
+                    pass
+
+
+TYPE_OPTIONS = [
+    ("single", "单选题"),
+    ("multiple", "多选题"),
+    ("dropdown", "下拉题"),
+    ("matrix", "矩阵题"),
+    ("scale", "量表题"),
+    ("text", "填空题"),
+]
+
+LABEL_TO_TYPE = {label: value for value, label in TYPE_OPTIONS}
+
+
+class SurveyGUI:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("问卷星速写")
+        self.question_entries: List[QuestionEntry] = []
+        self.runner_thread: Optional[Thread] = None
+        self.worker_threads: List[Thread] = []
+        self.active_drivers: List[WebDriver] = []  # 跟踪活跃的浏览器实例
+        self.running = False
+        self.status_job = None
+        self._build_ui()
+
+    def _build_ui(self):
+        self.root.geometry("960x720")
+        self.root.resizable(True, True)
+
+        settings_frame = ttk.LabelFrame(self.root, text="基础设置", padding=10)
+        settings_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(settings_frame, text="问卷链接：").grid(row=0, column=0, sticky="w")
+        self.url_var = tk.StringVar()
+        url_entry = ttk.Entry(settings_frame, textvariable=self.url_var, width=65)
+        url_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.preview_button = ttk.Button(settings_frame, text="预览问卷", command=self.preview_survey)
+        self.preview_button.grid(row=0, column=2, padx=5, pady=5)
+
+        ttk.Label(settings_frame, text="目标份数：").grid(row=1, column=0, sticky="w")
+        self.target_var = tk.StringVar(value="3")
+        ttk.Entry(settings_frame, textvariable=self.target_var, width=10).grid(
+            row=1, column=1, sticky="w"
+        )
+
+        ttk.Label(settings_frame, text="浏览器数量：").grid(row=2, column=0, sticky="w")
+        self.thread_var = tk.StringVar(value="2")
+        ttk.Entry(settings_frame, textvariable=self.thread_var, width=10).grid(
+            row=2, column=1, sticky="w"
+        )
+
+        question_frame = ttk.LabelFrame(self.root, text="题目配置", padding=10)
+        question_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # 限制question_frame的最小高度，防止挤出底部按钮
+        self.root.update_idletasks()
+        question_frame.config(height=400)
+
+        # Row 0: 题型选择
+        ttk.Label(question_frame, text="题型：").grid(row=0, column=0, sticky="w", pady=5)
+        self.question_type_var = tk.StringVar(value=TYPE_OPTIONS[0][1])
+        self.question_type_combo = ttk.Combobox(
+            question_frame,
+            textvariable=self.question_type_var,
+            state="readonly",
+            values=[item[1] for item in TYPE_OPTIONS],
+            width=15,
+        )
+        self.question_type_combo.grid(row=0, column=1, sticky="w", pady=5)
+        self.question_type_combo.bind("<<ComboboxSelected>>", lambda *_: self._refresh_dynamic_fields())
+
+        # Row 1: 选项个数（单选/多选/下拉/量表/矩阵）
+        self.option_count_label = ttk.Label(question_frame, text="选项个数：")
+        self.option_count_label.grid(row=1, column=0, sticky="w", pady=5)
+        self.option_count_var = tk.StringVar(value="4")
+        self.option_count_entry = ttk.Entry(
+            question_frame, textvariable=self.option_count_var, width=10
+        )
+        self.option_count_entry.grid(row=1, column=1, sticky="w", pady=5)
+        ttk.Label(question_frame, text="（该题有多少个选项）", foreground="gray").grid(
+            row=1, column=2, sticky="w", padx=5
+        )
+
+        # Row 2: 分布方式
+        self.distribution_label = ttk.Label(question_frame, text="分布方式：")
+        self.distribution_label.grid(row=2, column=0, sticky="w", pady=5)
+        self.distribution_var = tk.StringVar(value="random")
+        distribution_frame = ttk.Frame(question_frame)
+        distribution_frame.grid(row=2, column=1, columnspan=2, sticky="w", pady=5)
+        ttk.Radiobutton(distribution_frame, text="完全随机", variable=self.distribution_var, 
+                       value="random", command=self._on_distribution_change).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(distribution_frame, text="均等概率", variable=self.distribution_var, 
+                       value="equal", command=self._on_distribution_change).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(distribution_frame, text="自定义权重", variable=self.distribution_var, 
+                       value="custom", command=self._on_distribution_change).pack(side=tk.LEFT, padx=5)
+
+        # Row 3: 权重比例（自定义时显示）
+        self.weights_label = ttk.Label(question_frame, text="权重比例：")
+        self.weights_label.grid(row=3, column=0, sticky="w", pady=5)
+        self.weights_var = tk.StringVar(value="1,1,1,1")
+        self.weights_entry = ttk.Entry(
+            question_frame, textvariable=self.weights_var, width=30
+        )
+        self.weights_entry.grid(row=3, column=1, sticky="w", pady=5)
+        self.weights_hint = ttk.Label(question_frame, text="（如 3:2:1 表示第一项权重3倍）", foreground="gray")
+        self.weights_hint.grid(row=3, column=2, sticky="w", padx=5)
+
+        # Row 4: 填空答案
+        self.text_values_label = ttk.Label(question_frame, text="填空答案：")
+        self.text_values_label.grid(row=4, column=0, sticky="w", pady=5)
+        self.text_values_var = tk.StringVar()
+        self.text_values_entry = ttk.Entry(
+            question_frame, textvariable=self.text_values_var, width=40
+        )
+        self.text_values_entry.grid(row=4, column=1, sticky="w", pady=5)
+        self.text_hint = ttk.Label(question_frame, text="（用 | 或 , 分隔多个答案）", foreground="gray")
+        self.text_hint.grid(row=4, column=2, sticky="w", padx=5)
+
+        # Row 5: 矩阵行数
+        self.matrix_rows_label = ttk.Label(question_frame, text="矩阵行数：")
+        self.matrix_rows_label.grid(row=5, column=0, sticky="w", pady=5)
+        self.matrix_rows_var = tk.StringVar(value="1")
+        self.matrix_rows_entry = ttk.Entry(
+            question_frame, textvariable=self.matrix_rows_var, width=10
+        )
+        self.matrix_rows_entry.grid(row=5, column=1, sticky="w", pady=5)
+        ttk.Label(question_frame, text="（矩阵题有多少行小题）", foreground="gray").grid(
+            row=5, column=2, sticky="w", padx=5
+        )
+
+        # Row 5.5: 多选题随机选项
+        self.multiple_random_label = ttk.Label(question_frame, text="多选方式：")
+        self.multiple_random_label.grid(row=5, column=0, sticky="w", pady=5)
+        self.multiple_random_var = tk.BooleanVar(value=False)
+        self.multiple_random_check = ttk.Checkbutton(
+            question_frame, 
+            text="完全随机（随机选择若干项）",
+            variable=self.multiple_random_var,
+            command=self._on_multiple_random_change
+        )
+        self.multiple_random_check.grid(row=5, column=1, columnspan=2, sticky="w", pady=5)
+
+        # 分隔符
+        ttk.Separator(question_frame, orient='horizontal').grid(row=10, column=0, columnspan=3, sticky="ew", pady=10)
+
+        # 提示信息
+        self.info_label = ttk.Label(
+            question_frame, 
+            text="💡 提示：排序题和滑块题会自动随机处理，无需手动添加配置",
+            foreground="#0066cc",
+            font=("TkDefaultFont", 9)
+        )
+        self.info_label.grid(row=11, column=0, columnspan=3, sticky="w", pady=(0, 5), padx=5)
+
+        # 按钮区域（使用固定行）
+        btn_frame = ttk.Frame(question_frame)
+        btn_frame.grid(row=12, column=0, columnspan=3, pady=5, sticky="w")
+        
+        # 全选复选框
+        self.select_all_var = tk.BooleanVar(value=False)
+        self.select_all_check = ttk.Checkbutton(
+            btn_frame, 
+            text="全选",
+            variable=self.select_all_var,
+            command=self.toggle_select_all
+        )
+        self.select_all_check.grid(row=0, column=0, padx=5)
+        
+        ttk.Button(btn_frame, text="手动添加题目", command=self.add_question).grid(
+            row=0, column=1, padx=5
+        )
+        ttk.Button(btn_frame, text="编辑选中", command=self.edit_question).grid(
+            row=0, column=2, padx=5
+        )
+        ttk.Button(btn_frame, text="删除选中", command=self.remove_question).grid(
+            row=0, column=3, padx=5
+        )
+
+        # 题目列表区域
+        tree_frame = ttk.Frame(question_frame)
+        tree_frame.grid(row=13, column=0, columnspan=3, sticky="nsew", pady=(5, 0))
+        
+        # 创建带滚动条的Canvas（限制高度）
+        canvas = tk.Canvas(tree_frame, highlightthickness=0, height=200)
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.questions_canvas = canvas
+        self.questions_frame = scrollable_frame
+        self.question_items = []
+
+        question_frame.rowconfigure(13, weight=1)
+        question_frame.columnconfigure(2, weight=1)
+
+        action_frame = ttk.Frame(self.root, padding=10)
+        action_frame.pack(fill=tk.X)
+
+        self.start_button = ttk.Button(action_frame, text="开始执行", command=self.start_run)
+        self.start_button.grid(row=0, column=0, padx=5)
+        self.stop_button = ttk.Button(action_frame, text="停止", command=self.stop_run, state=tk.DISABLED)
+        self.stop_button.grid(row=0, column=1, padx=5)
+
+        self.status_var = tk.StringVar(value="等待配置...")
+        ttk.Label(action_frame, textvariable=self.status_var).grid(
+            row=0, column=2, padx=10, sticky="w"
+        )
+
+        self._refresh_dynamic_fields()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        self._load_config()
+
+    def _refresh_dynamic_fields(self):
+        q_type = LABEL_TO_TYPE.get(self.question_type_var.get(), "single")
+        
+        # 填空题：只显示填空答案
+        if q_type == "text":
+            self._hide_widget(self.option_count_label)
+            self._hide_widget(self.option_count_entry)
+            self._hide_widget(self.distribution_label)
+            self._hide_widget(self.distribution_label.master.grid_slaves(row=2, column=1)[0] if self.distribution_label.master.grid_slaves(row=2, column=1) else None)
+            self._hide_widget(self.weights_label)
+            self._hide_widget(self.weights_entry)
+            self._hide_widget(self.weights_hint)
+            self._hide_widget(self.matrix_rows_label)
+            self._hide_widget(self.matrix_rows_entry)
+            self._hide_widget(self.multiple_random_label)
+            self._hide_widget(self.multiple_random_check)
+            self._show_widget(self.text_values_label, 4, 0)
+            self._show_widget(self.text_values_entry, 4, 1)
+            self._show_widget(self.text_hint, 4, 2)
+            self.text_values_entry.config(state=tk.NORMAL)
+        # 矩阵题：显示选项个数、分布方式、权重比例、矩阵行数
+        elif q_type == "matrix":
+            self._show_widget(self.option_count_label, 1, 0)
+            self._show_widget(self.option_count_entry, 1, 1)
+            self._show_widget(self.distribution_label, 2, 0)
+            self._show_widget(self.matrix_rows_label, 5, 0)
+            self._show_widget(self.matrix_rows_entry, 5, 1)
+            self._hide_widget(self.multiple_random_label)
+            self._hide_widget(self.multiple_random_check)
+            self._hide_widget(self.text_values_label)
+            self._hide_widget(self.text_values_entry)
+            self._hide_widget(self.text_hint)
+            self.matrix_rows_entry.config(state=tk.NORMAL)
+            self._on_distribution_change()
+        # 多选题：显示选项个数、随机选项、权重比例
+        elif q_type == "multiple":
+            self._show_widget(self.option_count_label, 1, 0)
+            self._show_widget(self.option_count_entry, 1, 1)
+            self._hide_widget(self.distribution_label)
+            self._show_widget(self.multiple_random_label, 5, 0)
+            self._show_widget(self.multiple_random_check, 5, 1)
+            self._hide_widget(self.matrix_rows_label)
+            self._hide_widget(self.matrix_rows_entry)
+            self._hide_widget(self.text_values_label)
+            self._hide_widget(self.text_values_entry)
+            self._hide_widget(self.text_hint)
+            # 根据随机选项状态决定是否显示权重
+            if not self.multiple_random_var.get():
+                self._show_widget(self.weights_label, 3, 0)
+                self._show_widget(self.weights_entry, 3, 1)
+                self._show_widget(self.weights_hint, 3, 2)
+                self.weights_entry.config(state=tk.NORMAL)
+                self.weights_hint.config(text="（每项选中概率 0-100，如 100,50,30）")
+            else:
+                self._hide_widget(self.weights_label)
+                self._hide_widget(self.weights_entry)
+                self._hide_widget(self.weights_hint)
+        # 其他题型：显示选项个数、分布方式、权重比例
+        else:
+            self._show_widget(self.option_count_label, 1, 0)
+            self._show_widget(self.option_count_entry, 1, 1)
+            self._show_widget(self.distribution_label, 2, 0)
+            self._hide_widget(self.matrix_rows_label)
+            self._hide_widget(self.matrix_rows_entry)
+            self._hide_widget(self.multiple_random_label)
+            self._hide_widget(self.multiple_random_check)
+            self._hide_widget(self.text_values_label)
+            self._hide_widget(self.text_values_entry)
+            self._hide_widget(self.text_hint)
+            self._on_distribution_change()
+            self.weights_hint.config(text="（如 3:2:1 表示第一项权重3倍）")
+
+    def _show_widget(self, widget, row, column):
+        if widget:
+            widget.grid(row=row, column=column, sticky="w", pady=5, padx=5 if column == 2 else 0)
+
+    def _hide_widget(self, widget):
+        if widget:
+            widget.grid_remove()
+
+    def _on_distribution_change(self):
+        q_type = LABEL_TO_TYPE.get(self.question_type_var.get(), "single")
+        if q_type == "text":
+            return
+        
+        mode = self.distribution_var.get()
+        if mode == "custom":
+            self._show_widget(self.weights_label, 3, 0)
+            self._show_widget(self.weights_entry, 3, 1)
+            self._show_widget(self.weights_hint, 3, 2)
+            self.weights_entry.config(state=tk.NORMAL)
+        else:
+            self._hide_widget(self.weights_label)
+            self._hide_widget(self.weights_entry)
+            self._hide_widget(self.weights_hint)
+
+    def _on_multiple_random_change(self):
+        if self.multiple_random_var.get():
+            self.weights_entry.config(state=tk.DISABLED)
+            self._hide_widget(self.weights_label)
+            self._hide_widget(self.weights_entry)
+            self._hide_widget(self.weights_hint)
+        else:
+            self._show_widget(self.weights_label, 3, 0)
+            self._show_widget(self.weights_entry, 3, 1)
+            self._show_widget(self.weights_hint, 3, 2)
+            self.weights_entry.config(state=tk.NORMAL)
+
+    def add_question(self):
+        try:
+            q_type = LABEL_TO_TYPE.get(self.question_type_var.get(), "single")
+            option_count = 0
+            distribution_mode = "random"
+            custom_weights = None
+            probabilities = None
+            texts_values = None
+            rows = 1
+            
+            if q_type == "text":
+                texts_values = self._parse_text_values()
+                option_count = len(texts_values)
+                probabilities = normalize_probabilities([1.0] * option_count)
+            elif q_type == "multiple":
+                option_count = self._parse_option_count()
+                if self.multiple_random_var.get():
+                    probabilities = -1
+                    distribution_mode = "random"
+                    custom_weights = None
+                else:
+                    custom_weights = self._parse_weights_for_multiple(option_count)
+                    probabilities = custom_weights
+                    distribution_mode = "custom"
+            elif q_type == "matrix":
+                option_count = self._parse_option_count()
+                rows = self._parse_matrix_rows()
+                distribution_mode = self.distribution_var.get()
+                if distribution_mode == "random":
+                    probabilities = -1
+                elif distribution_mode == "equal":
+                    probabilities = normalize_probabilities([1.0] * option_count)
+                else:
+                    custom_weights = self._parse_weights(option_count)
+                    probabilities = normalize_probabilities(custom_weights)
+            else:
+                option_count = self._parse_option_count()
+                distribution_mode = self.distribution_var.get()
+                if distribution_mode == "random":
+                    probabilities = -1
+                elif distribution_mode == "equal":
+                    probabilities = normalize_probabilities([1.0] * option_count)
+                else:
+                    custom_weights = self._parse_weights(option_count)
+                    probabilities = normalize_probabilities(custom_weights)
+            
+            entry = QuestionEntry(
+                question_type=q_type,
+                probabilities=probabilities,
+                texts=texts_values,
+                rows=rows,
+                option_count=option_count,
+                distribution_mode=distribution_mode,
+                custom_weights=custom_weights,
+            )
+            self.question_entries.append(entry)
+            self._refresh_tree()
+            
+            if q_type == "text":
+                self.text_values_var.set("")
+            else:
+                self.weights_var.set("1,1,1,1")
+        except ValueError as exc:
+            messagebox.showerror("参数错误", str(exc))
+
+    def _get_selected_indices(self):
+        return sorted([item['index'] for item in self.question_items if item['var'].get()])
+
+    def toggle_select_all(self):
+        """全选/取消全选所有题目"""
+        select_all = self.select_all_var.get()
+        for item in self.question_items:
+            item['var'].set(select_all)
+
+    def remove_question(self):
+        selected_indices = self._get_selected_indices()
+        if not selected_indices:
+            messagebox.showinfo("提示", "请先勾选要删除的题目")
+            return
+        
+        for index in sorted(selected_indices, reverse=True):
+            if 0 <= index < len(self.question_entries):
+                self.question_entries.pop(index)
+        
+        self._refresh_tree()
+
+    def edit_question(self):
+        selected_indices = self._get_selected_indices()
+        if not selected_indices:
+            messagebox.showinfo("提示", "请先勾选要编辑的题目")
+            return
+        if len(selected_indices) > 1:
+            messagebox.showinfo("提示", "一次只能编辑一道题目")
+            return
+        index = selected_indices[0]
+        if 0 <= index < len(self.question_entries):
+            entry = self.question_entries[index]
+            self._show_edit_dialog(entry, index)
+
+    def _refresh_tree(self):
+        # 清除所有旧项目
+        for item in self.question_items:
+            item['frame'].destroy()
+        self.question_items.clear()
+        
+        # 为每个问题创建一行
+        for idx, entry in enumerate(self.question_entries):
+            # 创建一行的Frame
+            row_frame = ttk.Frame(self.questions_frame)
+            row_frame.pack(fill=tk.X, pady=2, padx=5)
+            
+            # 复选框（使用ttk样式）
+            var = tk.BooleanVar(value=False)
+            var.trace_add("write", lambda *args: self._update_select_all_state())
+            cb = ttk.Checkbutton(row_frame, variable=var)
+            cb.pack(side=tk.LEFT, padx=(0, 10))
+            
+            # 题型标签
+            type_label = ttk.Label(row_frame, text=QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type), 
+                                  width=12, anchor="w")
+            type_label.pack(side=tk.LEFT, padx=(0, 10))
+            
+            # 配置信息标签
+            detail_label = ttk.Label(row_frame, text=entry.summary(), anchor="w")
+            detail_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            
+            # 保存引用
+            self.question_items.append({
+                'frame': row_frame,
+                'checkbox': cb,
+                'var': var,
+                'index': idx
+            })
+        
+        # 更新全选复选框状态
+        self._update_select_all_state()
+
+    def _update_select_all_state(self):
+        """根据单个复选框状态更新全选复选框"""
+        if not self.question_items:
+            self.select_all_var.set(False)
+            return
+        
+        all_selected = all(item['var'].get() for item in self.question_items)
+        self.select_all_var.set(all_selected)
+
+    def _show_edit_dialog(self, entry, index):
+        edit_win = tk.Toplevel(self.root)
+        edit_win.title(f"编辑第 {index + 1} 题")
+        edit_win.geometry("550x550")
+        edit_win.transient(self.root)
+        edit_win.grab_set()
+        
+        frame = ttk.Frame(edit_win, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text=f"题型: {QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)}", 
+                 font=("TkDefaultFont", 10, "bold")).pack(pady=(0, 20))
+        
+        if entry.question_type == "text":
+            ttk.Label(frame, text="填空答案列表：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5)
+            
+            answers_frame = ttk.Frame(frame)
+            answers_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+            
+            canvas = tk.Canvas(answers_frame, height=200)
+            scrollbar = ttk.Scrollbar(answers_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            answer_vars = []
+            
+            def add_answer_field(initial_value=""):
+                row_frame = ttk.Frame(scrollable_frame)
+                row_frame.pack(fill=tk.X, pady=5, padx=5)
+                
+                ttk.Label(row_frame, text=f"答案{len(answer_vars)+1}:", width=8).pack(side=tk.LEFT)
+                
+                var = tk.StringVar(value=initial_value)
+                entry_widget = ttk.Entry(row_frame, textvariable=var, width=40)
+                entry_widget.pack(side=tk.LEFT, padx=5)
+                
+                def remove_field():
+                    row_frame.destroy()
+                    answer_vars.remove(var)
+                    update_labels()
+                
+                if len(answer_vars) > 0:
+                    ttk.Button(row_frame, text="✖", width=3, command=remove_field).pack(side=tk.LEFT)
+                
+                answer_vars.append(var)
+                return var
+            
+            def update_labels():
+                for i, child in enumerate(scrollable_frame.winfo_children()):
+                    label = child.winfo_children()[0]
+                    if isinstance(label, ttk.Label):
+                        label.config(text=f"答案{i+1}:")
+            
+            for answer in (entry.texts if entry.texts else ["默认答案"]):
+                add_answer_field(answer)
+            
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            add_btn_frame = ttk.Frame(frame)
+            add_btn_frame.pack(fill=tk.X, pady=(5, 0))
+            ttk.Button(add_btn_frame, text="➕ 添加答案", command=lambda: add_answer_field()).pack(anchor="w")
+            
+            def save_text():
+                values = [var.get().strip() for var in answer_vars if var.get().strip()]
+                if not values:
+                    messagebox.showerror("错误", "请填写至少一个答案")
+                    return
+                entry.texts = values
+                entry.probabilities = normalize_probabilities([1.0] * len(values))
+                entry.option_count = len(values)
+                self._refresh_tree()
+                edit_win.destroy()
+            
+            save_btn = ttk.Button(frame, text="保存", command=save_text)
+            save_btn.pack(pady=20, ipadx=20, ipady=5)
+            
+        elif entry.question_type == "multiple":
+            ttk.Label(frame, text=f"多选题（{entry.option_count}个选项）").pack(anchor="w", pady=5)
+            ttk.Label(frame, text="设置每个选项的选中概率（0-100%）：", 
+                     foreground="gray").pack(anchor="w", pady=5)
+            
+            sliders = []
+            slider_frame = ttk.Frame(frame)
+            slider_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+            
+            canvas = tk.Canvas(slider_frame, height=200)
+            scrollbar = ttk.Scrollbar(slider_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            current_probs = entry.custom_weights if entry.custom_weights else [50.0] * entry.option_count
+            
+            for i in range(entry.option_count):
+                row_frame = ttk.Frame(scrollable_frame)
+                row_frame.pack(fill=tk.X, pady=5)
+                
+                ttk.Label(row_frame, text=f"选项 {i+1}:", width=8).pack(side=tk.LEFT)
+                
+                var = tk.DoubleVar(value=current_probs[i] if i < len(current_probs) else 50.0)
+                slider = ttk.Scale(row_frame, from_=0, to=100, variable=var, orient=tk.HORIZONTAL, length=250)
+                slider.pack(side=tk.LEFT, padx=10)
+                
+                label = ttk.Label(row_frame, text=f"{int(var.get())}%", width=5)
+                label.pack(side=tk.LEFT)
+                
+                var.trace_add("write", lambda *args, l=label, v=var: l.config(text=f"{int(v.get())}%"))
+                
+                sliders.append(var)
+            
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            def save_multiple():
+                probs = [var.get() for var in sliders]
+                entry.custom_weights = probs
+                entry.probabilities = probs
+                entry.distribution_mode = "custom"
+                self._refresh_tree()
+                edit_win.destroy()
+            
+            save_btn = ttk.Button(frame, text="保存", command=save_multiple)
+            save_btn.pack(pady=10, ipadx=20, ipady=5)
+            
+        else:
+            ttk.Label(frame, text=f"选项数: {entry.option_count}").pack(anchor="w", pady=5)
+            if entry.question_type == "matrix":
+                ttk.Label(frame, text=f"矩阵行数: {entry.rows}").pack(anchor="w", pady=5)
+            
+            ttk.Label(frame, text="选择分布方式：").pack(anchor="w", pady=10)
+            
+            dist_var = tk.StringVar(value=entry.distribution_mode)
+            ttk.Radiobutton(frame, text="完全随机", variable=dist_var, value="random").pack(anchor="w")
+            ttk.Radiobutton(frame, text="均等概率", variable=dist_var, value="equal").pack(anchor="w")
+            ttk.Radiobutton(frame, text="自定义权重", variable=dist_var, value="custom").pack(anchor="w")
+            
+            ttk.Label(frame, text="权重比例（用:or,分隔，如 3:2:1）：").pack(anchor="w", pady=10)
+            weight_var = tk.StringVar(value=":".join(str(int(w)) for w in entry.custom_weights) if entry.custom_weights else "")
+            weight_entry = ttk.Entry(frame, textvariable=weight_var, width=40)
+            weight_entry.pack(fill=tk.X, pady=5)
+            
+            def save_other():
+                mode = dist_var.get()
+                if mode == "random":
+                    entry.probabilities = -1
+                    entry.custom_weights = None
+                elif mode == "equal":
+                    entry.probabilities = normalize_probabilities([1.0] * entry.option_count)
+                    entry.custom_weights = [1.0] * entry.option_count
+                else:
+                    raw = weight_var.get().strip()
+                    if not raw:
+                        messagebox.showerror("错误", "请填写权重比例")
+                        return
+                    normalized = raw.replace("：", ":").replace("，", ",").replace(" ", "")
+                    parts = normalized.split(":") if ":" in normalized else normalized.split(",")
+                    try:
+                        weights = [float(item.strip()) for item in parts if item.strip()]
+                        if len(weights) != entry.option_count:
+                            messagebox.showerror("错误", f"权重数量({len(weights)})与选项数({entry.option_count})不匹配")
+                            return
+                        entry.custom_weights = weights
+                        entry.probabilities = normalize_probabilities(weights)
+                    except:
+                        messagebox.showerror("错误", "权重格式错误")
+                        return
+                
+                entry.distribution_mode = mode
+                self._refresh_tree()
+                edit_win.destroy()
+            
+            save_btn = ttk.Button(frame, text="保存", command=save_other)
+            save_btn.pack(pady=20, ipadx=20, ipady=5)
+
+    def _parse_option_count(self) -> int:
+        try:
+            count = int(self.option_count_var.get())
+            if count <= 0:
+                raise ValueError
+            return count
+        except ValueError:
+            raise ValueError("选项个数必须为正整数")
+
+    def _parse_matrix_rows(self) -> int:
+        try:
+            rows = int(self.matrix_rows_var.get())
+            if rows <= 0:
+                raise ValueError
+            return rows
+        except ValueError:
+            raise ValueError("矩阵行数必须为正整数")
+
+    def _parse_weights(self, expected_count: int) -> List[float]:
+        raw = self.weights_var.get().strip()
+        if not raw:
+            raise ValueError("请填写权重比例")
+        
+        normalized = raw.replace("：", ":").replace("，", ",").replace(" ", "")
+        if ":" in normalized:
+            parts = normalized.split(":")
+        else:
+            parts = normalized.split(",")
+        
+        try:
+            weights = [float(item.strip()) for item in parts if item.strip()]
+            if len(weights) != expected_count:
+                raise ValueError(f"权重数量({len(weights)})与选项个数({expected_count})不匹配")
+            if any(w < 0 for w in weights):
+                raise ValueError("权重值不能为负数")
+            if sum(weights) <= 0:
+                raise ValueError("权重总和必须大于0")
+            return weights
+        except (ValueError, TypeError) as exc:
+            if "不匹配" in str(exc) or "不能为负" in str(exc) or "必须大于" in str(exc):
+                raise
+            raise ValueError("权重格式错误，请使用逗号或冒号分隔的数字，如 3:2:1 或 3,2,1")
+
+    def _parse_weights_for_multiple(self, expected_count: int) -> List[float]:
+        raw = self.weights_var.get().strip()
+        if not raw:
+            # 默认所有选项50%概率
+            return [50.0] * expected_count
+        
+        normalized = raw.replace("，", ",").replace(" ", "")
+        parts = normalized.split(",")
+        
+        try:
+            weights = [float(item.strip()) for item in parts if item.strip()]
+            if len(weights) != expected_count:
+                raise ValueError(f"概率数量({len(weights)})与选项个数({expected_count})不匹配")
+            if any(w < 0 or w > 100 for w in weights):
+                raise ValueError("概率值必须在0-100之间")
+            return weights
+        except (ValueError, TypeError) as exc:
+            if "不匹配" in str(exc) or "必须在" in str(exc):
+                raise
+            raise ValueError("概率格式错误，请使用逗号分隔的数字(0-100)，如 100,50,30")
+
+    def _parse_text_values(self) -> List[str]:
+        raw = self.text_values_var.get().strip()
+        if not raw:
+            raise ValueError("请填写至少一个填空答案")
+        parts = re.split(r"[|\n,]", raw)
+        values = [item.strip() for item in parts if item.strip()]
+        if not values:
+            raise ValueError("请填写至少一个填空答案")
+        return values
+
+    def preview_survey(self):
+        url_value = self.url_var.get().strip()
+        if not url_value:
+            messagebox.showerror("错误", "请先填写问卷链接")
+            return
+        
+        self.preview_button.config(state=tk.DISABLED, text="加载中...")
+        preview_thread = Thread(target=self._parse_and_show_survey, args=(url_value,), daemon=True)
+        preview_thread.start()
+
+    def _parse_and_show_survey(self, survey_url):
+        driver = None
+        try:
+            chrome_options = webdriver.ChromeOptions()
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option("useAutomationExtension", False)
+            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            
+            print(f"正在加载问卷: {survey_url}")
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.get(survey_url)
+            time.sleep(3)
+            
+            print("开始解析题目...")
+            questions_info = []
+            questions_per_page = detect(driver)
+            print(f"检测到 {len(questions_per_page)} 页，总题数: {sum(questions_per_page)}")
+            current_question_num = 0
+            
+            for page_idx, questions_count in enumerate(questions_per_page, 1):
+                print(f"正在解析第{page_idx}页，共{questions_count}题")
+                for _ in range(questions_count):
+                    current_question_num += 1
+                    try:
+                        question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current_question_num}")
+                        question_type = question_div.get_attribute("type")
+                        
+                        title_text = ""
+                        try:
+                            title_element = question_div.find_element(By.CSS_SELECTOR, ".topichtml")
+                            title_text = title_element.text.strip()
+                        except:
+                            try:
+                                title_element = question_div.find_element(By.CSS_SELECTOR, ".field-label")
+                                full_text = title_element.text.strip()
+                                lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+                                for line in lines:
+                                    if not line.startswith('*') and not line.endswith('.'):
+                                        title_text = line
+                                        break
+                            except:
+                                pass
+                        
+                        if not title_text:
+                            title_text = f"第{current_question_num}题"
+                        
+                        type_name = self._get_question_type_name(question_type)
+                        option_count = 0
+                        matrix_rows = 0
+                        
+                        if question_type in ("3", "4", "5", "7"):
+                            if question_type == "7":
+                                try:
+                                    options = driver.find_elements(By.XPATH, f"//*[@id='q{current_question_num}']/option")
+                                    option_count = max(0, len(options) - 1)
+                                except:
+                                    option_count = 0
+                            else:
+                                try:
+                                    options = driver.find_elements(By.XPATH, f'//*[@id="div{current_question_num}"]/div[2]/div')
+                                    option_count = len(options)
+                                except:
+                                    options = driver.find_elements(By.XPATH, f'//*[@id="div{current_question_num}"]//div[@class="ui-radio"]')
+                                    option_count = len(options)
+                        elif question_type == "6":
+                            try:
+                                rows = driver.find_elements(By.XPATH, f'//*[@id="divRefTab{current_question_num}"]/tbody/tr')
+                                matrix_rows = sum(1 for row in rows if row.get_attribute("rowindex") is not None)
+                                columns = driver.find_elements(By.XPATH, f'//*[@id="drv{current_question_num}_1"]/td')
+                                option_count = max(0, len(columns) - 1)
+                            except:
+                                matrix_rows = 0
+                                option_count = 0
+                        
+                        questions_info.append({
+                            "num": current_question_num,
+                            "title": title_text,
+                            "type": type_name,
+                            "type_code": question_type,
+                            "options": option_count,
+                            "rows": matrix_rows,
+                            "page": page_idx
+                        })
+                        print(f"  ✓ 第{current_question_num}题: {type_name} - {title_text[:30]}")
+                    except Exception as e:
+                        print(f"  ✗ 第{current_question_num}题解析失败: {e}")
+                        traceback.print_exc()
+                        questions_info.append({
+                            "num": current_question_num,
+                            "title": "[解析失败]",
+                            "type": "未知",
+                            "type_code": "0",
+                            "options": 0,
+                            "rows": 0,
+                            "page": page_idx
+                        })
+                
+                if page_idx < len(questions_per_page):
+                    try:
+                        next_button = driver.find_element(By.CSS_SELECTOR, "#divNext")
+                        next_button.click()
+                        time.sleep(1.5)
+                        print(f"已翻页到第{page_idx + 1}页")
+                    except Exception as e:
+                        print(f"翻页失败: {e}")
+            
+            print(f"解析完成，共{len(questions_info)}题")
+            self.root.after(0, lambda: self._show_preview_window(questions_info))
+            self.root.after(0, lambda: self.preview_button.config(state=tk.NORMAL, text="预览问卷"))
+            
+        except Exception as e:
+            error_msg = f"解析问卷失败: {str(e)}\n\n请检查:\n1. 问卷链接是否正确\n2. 网络连接是否正常\n3. Chrome浏览器是否安装正常"
+            print(f"错误: {error_msg}")
+            traceback.print_exc()
+            self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
+            self.root.after(0, lambda: self.preview_button.config(state=tk.NORMAL, text="预览问卷"))
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+    def _get_question_type_name(self, type_code):
+        type_map = {
+            "1": "填空题(单行)",
+            "2": "填空题(多行)",
+            "3": "单选题",
+            "4": "多选题",
+            "5": "量表题",
+            "6": "矩阵题",
+            "7": "下拉题",
+            "8": "滑块题",
+            "11": "排序题"
+        }
+        return type_map.get(type_code, f"未知类型({type_code})")
+
+    def _show_preview_window(self, questions_info):
+        preview_win = tk.Toplevel(self.root)
+        preview_win.title("问卷预览")
+        preview_win.geometry("900x600")
+        
+        frame = ttk.Frame(preview_win, padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text=f"问卷共 {len(questions_info)} 题", font=("TkDefaultFont", 11, "bold")).pack(pady=(0, 10))
+        
+        tree_frame = ttk.Frame(frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        columns = ("num", "title", "type", "details", "page")
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=20)
+        tree.heading("num", text="题号")
+        tree.heading("title", text="题目标题")
+        tree.heading("type", text="题型")
+        tree.heading("details", text="详情")
+        tree.heading("page", text="页码")
+        
+        tree.column("num", width=50, anchor="center")
+        tree.column("title", width=400, anchor="w")
+        tree.column("type", width=120, anchor="center")
+        tree.column("details", width=180, anchor="center")
+        tree.column("page", width=60, anchor="center")
+        
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        for q in questions_info:
+            details = ""
+            if q["type_code"] == "6":
+                details = f"{q['rows']}行 × {q['options']}列"
+            elif q["type_code"] in ("3", "4", "5", "7"):
+                details = f"{q['options']}个选项"
+            elif q["type_code"] in ("1", "2"):
+                details = "文本输入"
+            elif q["type_code"] == "8":
+                details = "滑块(1-100)"
+            elif q["type_code"] == "11":
+                details = "拖拽排序"
+            
+            tree.insert("", "end", values=(
+                q["num"],
+                q["title"][:80] + "..." if len(q["title"]) > 80 else q["title"],
+                q["type"],
+                details,
+                f"第{q['page']}页"
+            ))
+        
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(pady=(10, 0))
+        
+        wizard_btn = ttk.Button(btn_frame, text="开始配置题目", 
+                               command=lambda: self._start_config_wizard(questions_info, preview_win))
+        wizard_btn.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(btn_frame, text="关闭", command=preview_win.destroy).pack(side=tk.LEFT, padx=5)
+
+    def _start_config_wizard(self, questions_info, preview_win):
+        preview_win.destroy()
+        self.question_entries.clear()
+        self._show_wizard_for_question(questions_info, 0)
+
+    def _show_wizard_for_question(self, questions_info, current_index):
+        if current_index >= len(questions_info):
+            self._refresh_tree()
+            messagebox.showinfo("完成", 
+                              f"配置完成！\n\n"
+                              f"已配置 {len(self.question_entries)} 道题目。\n"
+                              f"可在下方题目列表中查看和编辑。")
+            return
+        
+        q = questions_info[current_index]
+        type_code = q["type_code"]
+        
+        if type_code in ("8", "11"):
+            self._show_wizard_for_question(questions_info, current_index + 1)
+            return
+        
+        wizard_win = tk.Toplevel(self.root)
+        wizard_win.title(f"配置向导 - 第 {current_index + 1}/{len(questions_info)} 题")
+        wizard_win.geometry("700x750")
+        wizard_win.transient(self.root)
+        wizard_win.grab_set()
+        
+        frame = ttk.Frame(wizard_win, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        progress_text = f"进度: {current_index + 1} / {len(questions_info)}"
+        ttk.Label(frame, text=progress_text, foreground="gray").pack(anchor="w")
+        
+        ttk.Label(frame, text=f"第 {q['num']} 题", 
+                 font=("TkDefaultFont", 12, "bold")).pack(pady=(10, 5))
+        ttk.Label(frame, text=q["title"][:100], 
+                 font=("TkDefaultFont", 10)).pack(pady=(0, 10))
+        ttk.Label(frame, text=f"题型: {q['type']}", 
+                 foreground="blue").pack(pady=(0, 20))
+        
+        config_frame = ttk.Frame(frame)
+        config_frame.pack(fill=tk.BOTH, expand=True)
+        
+        def skip_question():
+            wizard_win.destroy()
+            self._show_wizard_for_question(questions_info, current_index + 1)
+        
+        if type_code in ("1", "2"):
+            ttk.Label(config_frame, text="填空答案列表：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5)
+            
+            answers_frame = ttk.Frame(config_frame)
+            answers_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+            
+            canvas = tk.Canvas(answers_frame, height=200)
+            scrollbar = ttk.Scrollbar(answers_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            answer_vars = []
+            
+            def add_answer_field(initial_value=""):
+                row_frame = ttk.Frame(scrollable_frame)
+                row_frame.pack(fill=tk.X, pady=5, padx=5)
+                
+                ttk.Label(row_frame, text=f"答案{len(answer_vars)+1}:", width=8).pack(side=tk.LEFT)
+                
+                var = tk.StringVar(value=initial_value)
+                entry_widget = ttk.Entry(row_frame, textvariable=var, width=40)
+                entry_widget.pack(side=tk.LEFT, padx=5)
+                
+                def remove_field():
+                    row_frame.destroy()
+                    answer_vars.remove(var)
+                    update_labels()
+                
+                if len(answer_vars) > 0:
+                    ttk.Button(row_frame, text="✖", width=3, command=remove_field).pack(side=tk.LEFT)
+                
+                answer_vars.append(var)
+                return var
+            
+            def update_labels():
+                for i, child in enumerate(scrollable_frame.winfo_children()):
+                    label = child.winfo_children()[0]
+                    if isinstance(label, ttk.Label):
+                        label.config(text=f"答案{i+1}:")
+            
+            add_answer_field("默认答案")
+            
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            add_btn_frame = ttk.Frame(config_frame)
+            add_btn_frame.pack(fill=tk.X, pady=(5, 0))
+            ttk.Button(add_btn_frame, text="➕ 添加答案", command=lambda: add_answer_field()).pack(anchor="w")
+            
+            def save_and_next():
+                values = [var.get().strip() for var in answer_vars if var.get().strip()]
+                if not values:
+                    messagebox.showerror("错误", "请填写至少一个答案")
+                    return
+                entry = QuestionEntry(
+                    question_type="text",
+                    probabilities=normalize_probabilities([1.0] * len(values)),
+                    texts=values,
+                    rows=1,
+                    option_count=len(values),
+                    distribution_mode="equal",
+                    custom_weights=None
+                )
+                self.question_entries.append(entry)
+                wizard_win.destroy()
+                self._show_wizard_for_question(questions_info, current_index + 1)
+        
+        elif type_code == "4":
+            ttk.Label(config_frame, text=f"多选题（共 {q['options']} 个选项）").pack(anchor="w", pady=5)
+            ttk.Label(config_frame, text="拖动滑块设置每个选项的选中概率：", 
+                     foreground="gray").pack(anchor="w", pady=5)
+            
+            slider_container = ttk.Frame(config_frame)
+            slider_container.pack(fill=tk.BOTH, expand=True, pady=10)
+            
+            canvas = tk.Canvas(slider_container, height=250)
+            scrollbar = ttk.Scrollbar(slider_container, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            sliders = []
+            for i in range(q['options']):
+                row_frame = ttk.Frame(scrollable_frame)
+                row_frame.pack(fill=tk.X, pady=8, padx=10)
+                
+                ttk.Label(row_frame, text=f"选项 {i+1}:", width=10).pack(side=tk.LEFT)
+                
+                var = tk.DoubleVar(value=50.0)
+                slider = ttk.Scale(row_frame, from_=0, to=100, variable=var, orient=tk.HORIZONTAL, length=300)
+                slider.pack(side=tk.LEFT, padx=10)
+                
+                label = ttk.Label(row_frame, text="50%", width=6)
+                label.pack(side=tk.LEFT)
+                
+                var.trace_add("write", lambda *args, l=label, v=var: l.config(text=f"{int(v.get())}%"))
+                
+                sliders.append(var)
+            
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            def save_and_next():
+                probs = [var.get() for var in sliders]
+                entry = QuestionEntry(
+                    question_type="multiple",
+                    probabilities=probs,
+                    texts=None,
+                    rows=1,
+                    option_count=q['options'],
+                    distribution_mode="custom",
+                    custom_weights=probs
+                )
+                self.question_entries.append(entry)
+                wizard_win.destroy()
+                self._show_wizard_for_question(questions_info, current_index + 1)
+        
+        else:
+            option_text = f"共 {q['options']} 个选项"
+            if type_code == "6":
+                option_text = f"{q['rows']} 行 × {q['options']} 列"
+            ttk.Label(config_frame, text=option_text).pack(anchor="w", pady=10)
+            
+            ttk.Label(config_frame, text="选择分布方式：").pack(anchor="w", pady=10)
+            
+            dist_var = tk.StringVar(value="equal")
+            
+            # 权重输入区域（初始隐藏）
+            weight_frame = ttk.Frame(config_frame)
+            
+            ttk.Radiobutton(config_frame, text="完全随机（每次随机选择）", 
+                          variable=dist_var, value="random",
+                          command=lambda: weight_frame.pack_forget()).pack(anchor="w", pady=5)
+            ttk.Radiobutton(config_frame, text="均等概率（每个选项概率相同）", 
+                          variable=dist_var, value="equal",
+                          command=lambda: weight_frame.pack_forget()).pack(anchor="w", pady=5)
+            ttk.Radiobutton(config_frame, text="自定义权重（使用滑块设置）", 
+                          variable=dist_var, value="custom",
+                          command=lambda: weight_frame.pack(fill=tk.BOTH, expand=True, pady=10)).pack(anchor="w", pady=5)
+            
+            # 创建滑块容器
+            ttk.Label(weight_frame, text="拖动滑块设置每个选项的权重比例：", 
+                     foreground="gray").pack(anchor="w", pady=(10, 5))
+            
+            slider_container = ttk.Frame(weight_frame)
+            slider_container.pack(fill=tk.BOTH, expand=True)
+            
+            canvas = tk.Canvas(slider_container, height=200)
+            scrollbar = ttk.Scrollbar(slider_container, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            slider_vars = []
+            for i in range(q['options']):
+                slider_frame = ttk.Frame(scrollable_frame)
+                slider_frame.pack(fill=tk.X, pady=5, padx=10)
+                
+                ttk.Label(slider_frame, text=f"选项 {i+1}:", width=8).pack(side=tk.LEFT)
+                
+                var = tk.DoubleVar(value=1.0)
+                slider = ttk.Scale(slider_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
+                slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+                
+                value_label = ttk.Label(slider_frame, text="1.0", width=5)
+                value_label.pack(side=tk.LEFT)
+                
+                def update_label(v=var, l=value_label):
+                    l.config(text=f"{v.get():.1f}")
+                
+                var.trace_add("write", lambda *args, v=var, l=value_label: update_label(v, l))
+                slider_vars.append(var)
+            
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            def save_and_next():
+                mode = dist_var.get()
+                q_type_map = {"3": "single", "5": "scale", "6": "matrix", "7": "dropdown"}
+                q_type = q_type_map.get(type_code, "single")
+                
+                if mode == "random":
+                    probs = -1
+                    weights = None
+                elif mode == "equal":
+                    weights = [1.0] * q['options']
+                    probs = normalize_probabilities(weights)
+                else:
+                    # 从滑块获取权重
+                    weights = [var.get() for var in slider_vars]
+                    if all(w == 0 for w in weights):
+                        messagebox.showerror("错误", "至少要有一个选项的权重大于0")
+                        return
+                    probs = normalize_probabilities(weights)
+                
+                entry = QuestionEntry(
+                    question_type=q_type,
+                    probabilities=probs,
+                    texts=None,
+                    rows=q['rows'] if type_code == "6" else 1,
+                    option_count=q['options'],
+                    distribution_mode=mode,
+                    custom_weights=weights
+                )
+                self.question_entries.append(entry)
+                wizard_win.destroy()
+                self._show_wizard_for_question(questions_info, current_index + 1)
+        
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(side=tk.BOTTOM, pady=20, fill=tk.X)
+        
+        if current_index > 0:
+            ttk.Button(btn_frame, text="← 上一题", 
+                      command=lambda: self._go_back_in_wizard(wizard_win, questions_info, current_index)).pack(side=tk.LEFT, padx=5, ipadx=10, ipady=5)
+        
+        ttk.Button(btn_frame, text="跳过", command=skip_question).pack(side=tk.LEFT, padx=5, ipadx=10, ipady=5)
+        ttk.Button(btn_frame, text="下一题 →", command=save_and_next).pack(side=tk.LEFT, padx=5, ipadx=10, ipady=5)
+        ttk.Button(btn_frame, text="取消向导", command=wizard_win.destroy).pack(side=tk.LEFT, padx=5, ipadx=10, ipady=5)
+
+    def _go_back_in_wizard(self, current_win, questions_info, current_index):
+        if current_index > 0 and len(self.question_entries) > 0:
+            self.question_entries.pop()
+        current_win.destroy()
+        self._show_wizard_for_question(questions_info, max(0, current_index - 1))
+
+    def start_run(self):
+        url_value = self.url_var.get().strip()
+        if not url_value:
+            messagebox.showerror("参数错误", "请填写问卷链接")
+            return
+        try:
+            target = int(self.target_var.get())
+            threads_count = int(self.thread_var.get())
+            if target <= 0 or threads_count <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("参数错误", "目标份数和浏览器数量必须为正整数")
+            return
+        try:
+            configure_probabilities(self.question_entries)
+        except ValueError as exc:
+            messagebox.showerror("配置错误", str(exc))
+            return
+
+        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event
+        url = url_value
+        target_num = target
+        num_threads = threads_count
+        fail_threshold = max(1, math.ceil(target_num / 4) + 1)
+        cur_num = 0
+        cur_fail = 0
+        stop_event = threading.Event()
+
+        self.running = True
+        self.start_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.NORMAL)
+        self.status_var.set("正在启动浏览器...")
+
+        self.runner_thread = Thread(target=self._launch_threads, daemon=True)
+        self.runner_thread.start()
+        self._schedule_status_update()
+
+    def _launch_threads(self):
+        print(f"正在启动 {num_threads} 个浏览器窗口...")
+        threads: List[Thread] = []
+        for browser_index in range(num_threads):
+            window_x = 50 + browser_index * 60
+            window_y = 50
+            thread = Thread(target=run, args=(window_x, window_y, stop_event, self), daemon=True)
+            threads.append(thread)
+        for thread in threads:
+            thread.start()
+            time.sleep(0.1)
+        print("浏览器启动中，请稍候...")
+        for thread in threads:
+            thread.join()
+        self.worker_threads = threads
+        self.root.after(0, self._on_run_finished)
+
+    def _schedule_status_update(self):
+        status = f"已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次"
+        self.status_var.set(status)
+        if self.running:
+            self.status_job = self.root.after(500, self._schedule_status_update)
+
+    def _on_run_finished(self):
+        self.running = False
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED, text="停止")
+        if self.status_job:
+            self.root.after_cancel(self.status_job)
+            self.status_job = None
+        if cur_num >= target_num:
+            msg = "任务完成"
+        elif stop_event.is_set():
+            msg = "已停止"
+        else:
+            msg = "已结束"
+        self.status_var.set(f"{msg} | 已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次")
+
+    def stop_run(self):
+        if not self.running:
+            return
+        stop_event.set()
+        self.stop_button.config(state=tk.DISABLED, text="强制停止中...")
+        self.status_var.set("正在强制停止所有浏览器...")
+        
+        for driver in self.active_drivers:
+            try:
+                driver.quit()
+            except:
+                pass
+        self.active_drivers.clear()
+        
+        try:
+            import subprocess
+            if os.name == 'nt':
+                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe", "/T"], 
+                             capture_output=True, timeout=2)
+                subprocess.run(["taskkill", "/F", "/IM", "chromedriver.exe", "/T"], 
+                             capture_output=True, timeout=2)
+            else:
+                subprocess.run(["pkill", "-9", "chrome"], capture_output=True, timeout=2)
+                subprocess.run(["pkill", "-9", "chromedriver"], capture_output=True, timeout=2)
+        except:
+            pass
+        
+        print("已强制停止所有浏览器")
+
+    def on_close(self):
+        self.stop_run()
+        self._save_config()
+        self.root.destroy()
+
+    def _get_config_path(self) -> str:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+    def _save_config(self):
+        try:
+            config = {
+                "url": self.url_var.get(),
+                "target_num": self.target_var.get(),
+                "num_threads": self.thread_var.get(),
+                "questions": [
+                    {
+                        "question_type": entry.question_type,
+                        "probabilities": entry.probabilities if not isinstance(entry.probabilities, int) else entry.probabilities,
+                        "texts": entry.texts,
+                        "rows": entry.rows,
+                        "option_count": entry.option_count,
+                        "distribution_mode": entry.distribution_mode,
+                        "custom_weights": entry.custom_weights,
+                    }
+                    for entry in self.question_entries
+                ],
+            }
+            with open(self._get_config_path(), "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存配置失败: {e}")
+
+    def _load_config(self):
+        config_path = self._get_config_path()
+        if not os.path.exists(config_path):
+            return
+        
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            
+            if "url" in config:
+                self.url_var.set(config["url"])
+            if "target_num" in config:
+                self.target_var.set(config["target_num"])
+            if "num_threads" in config:
+                self.thread_var.set(config["num_threads"])
+            
+            if "questions" in config and config["questions"]:
+                self.question_entries.clear()
+                for q_data in config["questions"]:
+                    entry = QuestionEntry(
+                        question_type=q_data.get("question_type", "single"),
+                        probabilities=q_data.get("probabilities", -1),
+                        texts=q_data.get("texts"),
+                        rows=q_data.get("rows", 1),
+                        option_count=q_data.get("option_count", 0),
+                        distribution_mode=q_data.get("distribution_mode", "random"),
+                        custom_weights=q_data.get("custom_weights"),
+                    )
+                    self.question_entries.append(entry)
+                self._refresh_tree()
+                print(f"已加载上次配置：{len(self.question_entries)} 道题目")
+        except Exception as e:
+            print(f"加载配置失败: {e}")
+
+    def run(self):
+        self.root.mainloop()
+
+
+def main():
+    gui = SurveyGUI()
+    gui.run()
+
+
+if __name__ == "__main__":
+    main()
