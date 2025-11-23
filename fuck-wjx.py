@@ -13,11 +13,13 @@ from typing import List, Optional, Union
 
 import numpy
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
+from PIL import Image
+from pyzbar.pyzbar import decode as pyzbar_decode
 
 
 url = ""
@@ -133,6 +135,48 @@ def configure_probabilities(entries: List[QuestionEntry]):
             texts.append(values)
             texts_prob.append(normalized)
 
+
+def decode_qrcode(image_source: Union[str, Image.Image]) -> Optional[str]:
+    """
+    解码二维码图片,提取其中的链接
+    
+    参数:
+        image_source: 图片文件路径(str)或PIL Image对象
+    
+    返回:
+        str: 解码出的链接,如果解码失败返回None
+    
+    示例:
+        >>> url = decode_qrcode("qrcode.png")
+        >>> url = decode_qrcode(Image.open("qrcode.png"))
+    """
+    try:
+        # 如果是文件路径,打开图片
+        if isinstance(image_source, str):
+            if not os.path.exists(image_source):
+                raise FileNotFoundError(f"图片文件不存在: {image_source}")
+            image = Image.open(image_source)
+        else:
+            image = image_source
+        
+        # 解码二维码
+        decoded_objects = pyzbar_decode(image)
+        
+        if not decoded_objects:
+            return None
+        
+        # 获取第一个二维码的数据
+        qr_data = decoded_objects[0].data.decode('utf-8')
+        
+        # 验证是否为有效URL
+        if qr_data.startswith(('http://', 'https://', 'www.')):
+            return qr_data
+        
+        return qr_data
+        
+    except Exception as e:
+        logging.error(f"二维码解码失败: {str(e)}")
+        return None
 
 
 def detect(driver: WebDriver) -> List[int]:
@@ -434,6 +478,11 @@ class SurveyGUI:
         url_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         self.preview_button = ttk.Button(settings_frame, text="预览问卷", command=self.preview_survey)
         self.preview_button.grid(row=0, column=2, padx=5, pady=5)
+        
+        # 添加二维码上传功能
+        ttk.Label(settings_frame, text="或解析二维码：").grid(row=0, column=3, sticky="w", padx=(10, 0))
+        qr_upload_button = ttk.Button(settings_frame, text="上传二维码", command=self.upload_qrcode)
+        qr_upload_button.grid(row=0, column=4, padx=5, pady=5)
 
         ttk.Label(settings_frame, text="目标份数：").grid(row=1, column=0, sticky="w")
         self.target_var = tk.StringVar(value="3")
@@ -806,6 +855,12 @@ class SurveyGUI:
             messagebox.showinfo("提示", "请先勾选要删除的题目")
             return
         
+        # 添加确认弹窗
+        count = len(selected_indices)
+        confirm_msg = f"确定要删除选中的 {count} 道题目吗？\n\n此操作无法撤销！"
+        if not messagebox.askyesno("确认删除", confirm_msg, icon='warning'):
+            return
+        
         for index in sorted(selected_indices, reverse=True):
             if 0 <= index < len(self.question_entries):
                 self.question_entries.pop(index)
@@ -1133,6 +1188,32 @@ class SurveyGUI:
         if not values:
             raise ValueError("请填写至少一个填空答案")
         return values
+
+    def upload_qrcode(self):
+        """上传二维码图片并解析链接"""
+        file_path = filedialog.askopenfilename(
+            title="选择二维码图片",
+            filetypes=[
+                ("图片文件", "*.png *.jpg *.jpeg *.bmp *.gif"),
+                ("所有文件", "*.*")
+            ]
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # 解码二维码
+            url = decode_qrcode(file_path)
+            
+            if url:
+                self.url_var.set(url)
+                messagebox.showinfo("成功", f"二维码解析成功！\n链接: {url}")
+            else:
+                messagebox.showerror("错误", "未能从图片中识别出二维码，请确认图片包含有效的二维码。")
+        except Exception as e:
+            logging.error(f"二维码解析失败: {str(e)}")
+            messagebox.showerror("错误", f"二维码解析失败: {str(e)}")
 
     def preview_survey(self):
         url_value = self.url_var.get().strip()
