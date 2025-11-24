@@ -35,7 +35,7 @@ except ImportError:
     version = None
 
 # 版本号
-__VERSION__ = "0.2.1"
+__VERSION__ = "0.2.2"
 
 
 url = ""
@@ -1438,12 +1438,75 @@ class SurveyGUI:
             return
         
         self.preview_button.config(state=tk.DISABLED, text="加载中...")
-        preview_thread = Thread(target=self._parse_and_show_survey, args=(url_value,), daemon=True)
+        
+        # 创建进度窗口
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title("正在加载问卷")
+        progress_win.geometry("400x200")
+        progress_win.resizable(False, False)
+        progress_win.transient(self.root)
+        
+        # 居中显示进度窗口
+        progress_win.update_idletasks()
+        win_width = progress_win.winfo_width()
+        win_height = progress_win.winfo_height()
+        screen_width = progress_win.winfo_screenwidth()
+        screen_height = progress_win.winfo_screenheight()
+        
+        try:
+            import ctypes
+            from ctypes.wintypes import RECT
+            work_area = RECT()
+            ctypes.windll.user32.SystemParametersInfoA(48, 0, ctypes.byref(work_area), 0)
+            work_width = work_area.right - work_area.left
+            work_height = work_area.bottom - work_area.top
+            work_x = work_area.left
+            work_y = work_area.top
+            x = work_x + (work_width - win_width) // 2
+            y = work_y + (work_height - win_height) // 2
+        except:
+            x = (screen_width - win_width) // 2
+            y = (screen_height - win_height) // 2
+        
+        x = max(0, x)
+        y = max(0, y)
+        progress_win.geometry(f"+{x}+{y}")
+        
+        frame = ttk.Frame(progress_win, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text="正在加载问卷...", font=('', 11, 'bold')).pack(pady=(0, 15))
+        
+        status_label = ttk.Label(frame, text="初始化浏览器...", foreground="gray")
+        status_label.pack(pady=(0, 10))
+        
+        # 使用确定进度模式
+        progress_bar = ttk.Progressbar(frame, mode='determinate', maximum=100, length=300)
+        progress_bar.pack(fill=tk.X, pady=5)
+        
+        percentage_label = ttk.Label(frame, text="0%", font=('', 10, 'bold'))
+        percentage_label.pack(pady=(5, 0))
+        
+        progress_win.update()
+        
+        preview_thread = Thread(target=self._parse_and_show_survey, args=(url_value, progress_win, status_label, progress_bar, percentage_label), daemon=True)
         preview_thread.start()
 
-    def _parse_and_show_survey(self, survey_url):
+    def _parse_and_show_survey(self, survey_url, progress_win=None, status_label=None, progress_bar=None, percentage_label=None):
         driver = None
         try:
+            # 更新进度函数
+            def update_progress(percent, status_text):
+                if progress_bar is not None:
+                    self.root.after(0, lambda p=percent, pb=progress_bar: pb.config(value=p) if pb else None)
+                if percentage_label is not None:
+                    self.root.after(0, lambda p=percent, pl=percentage_label: pl.config(text=f"{int(p)}%") if pl else None)
+                if status_label is not None:
+                    self.root.after(0, lambda s=status_text, sl=status_label: sl.config(text=s) if sl else None)
+            
+            # 更新状态
+            update_progress(5, "初始化浏览器...")
+            
             chrome_options = webdriver.ChromeOptions()
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option("useAutomationExtension", False)
@@ -1455,19 +1518,31 @@ class SurveyGUI:
             
             print(f"正在加载问卷: {survey_url}")
             driver = webdriver.Chrome(options=chrome_options)
+            
+            update_progress(15, "加载问卷页面...")
+            
             driver.get(survey_url)
             time.sleep(3)
+            
+            update_progress(30, "检测题目结构...")
             
             print("开始解析题目...")
             questions_info = []
             questions_per_page = detect(driver)
-            print(f"检测到 {len(questions_per_page)} 页，总题数: {sum(questions_per_page)}")
+            total_questions = sum(questions_per_page)
+            print(f"检测到 {len(questions_per_page)} 页，总题数: {total_questions}")
             current_question_num = 0
             
             for page_idx, questions_count in enumerate(questions_per_page, 1):
                 print(f"正在解析第{page_idx}页，共{questions_count}题")
+                
                 for _ in range(questions_count):
                     current_question_num += 1
+                    
+                    # 计算进度百分比（30%~95%）
+                    progress_percent = 30 + (current_question_num / max(total_questions, 1)) * 65
+                    update_progress(progress_percent, f"正在解析第 {page_idx}/{len(questions_per_page)} 页 (已解析 {current_question_num}/{total_questions} 题)...")
+                    
                     try:
                         question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current_question_num}")
                         question_type = question_div.get_attribute("type")
@@ -1494,30 +1569,44 @@ class SurveyGUI:
                         type_name = self._get_question_type_name(question_type)
                         option_count = 0
                         matrix_rows = 0
+                        option_texts = []  # 存储选项文本
                         
                         if question_type in ("3", "4", "5", "7"):
                             if question_type == "7":
                                 try:
                                     options = driver.find_elements(By.XPATH, f"//*[@id='q{current_question_num}']/option")
                                     option_count = max(0, len(options) - 1)
+                                    # 提取下拉题选项文本
+                                    option_texts = [opt.text.strip() for opt in options[1:]] if len(options) > 1 else []
                                 except:
                                     option_count = 0
+                                    option_texts = []
                             else:
                                 try:
                                     options = driver.find_elements(By.XPATH, f'//*[@id="div{current_question_num}"]/div[2]/div')
                                     option_count = len(options)
+                                    # 提取单选/多选/量表题选项文本
+                                    option_texts = [opt.text.strip() for opt in options]
                                 except:
-                                    options = driver.find_elements(By.XPATH, f'//*[@id="div{current_question_num}"]//div[@class="ui-radio"]')
-                                    option_count = len(options)
+                                    try:
+                                        options = driver.find_elements(By.XPATH, f'//*[@id="div{current_question_num}"]//div[@class="ui-radio"]')
+                                        option_count = len(options)
+                                        option_texts = [opt.text.strip() for opt in options]
+                                    except:
+                                        option_count = 0
+                                        option_texts = []
                         elif question_type == "6":
                             try:
                                 rows = driver.find_elements(By.XPATH, f'//*[@id="divRefTab{current_question_num}"]/tbody/tr')
                                 matrix_rows = sum(1 for row in rows if row.get_attribute("rowindex") is not None)
                                 columns = driver.find_elements(By.XPATH, f'//*[@id="drv{current_question_num}_1"]/td')
                                 option_count = max(0, len(columns) - 1)
+                                # 提取矩阵题列标题
+                                option_texts = [col.text.strip() for col in columns[1:]] if len(columns) > 1 else []
                             except:
                                 matrix_rows = 0
                                 option_count = 0
+                                option_texts = []
                         
                         questions_info.append({
                             "num": current_question_num,
@@ -1526,7 +1615,8 @@ class SurveyGUI:
                             "type_code": question_type,
                             "options": option_count,
                             "rows": matrix_rows,
-                            "page": page_idx
+                            "page": page_idx,
+                            "option_texts": option_texts
                         })
                         print(f"  ✓ 第{current_question_num}题: {type_name} - {title_text[:30]}")
                     except Exception as e:
@@ -1539,7 +1629,8 @@ class SurveyGUI:
                             "type_code": "0",
                             "options": 0,
                             "rows": 0,
-                            "page": page_idx
+                            "page": page_idx,
+                            "option_texts": []
                         })
                 
                 if page_idx < len(questions_per_page):
@@ -1552,6 +1643,10 @@ class SurveyGUI:
                         print(f"翻页失败: {e}")
             
             print(f"解析完成，共{len(questions_info)}题")
+            update_progress(100, "解析完成，正在显示结果...")
+            time.sleep(0.5)
+            if progress_win:
+                self.root.after(0, lambda: progress_win.destroy())
             self.root.after(0, lambda: self._show_preview_window(questions_info))
             self.root.after(0, lambda: self.preview_button.config(state=tk.NORMAL, text="预览问卷"))
             
@@ -1559,6 +1654,8 @@ class SurveyGUI:
             error_msg = f"解析问卷失败: {str(e)}\n\n请检查:\n1. 问卷链接是否正确\n2. 网络连接是否正常\n3. Chrome浏览器是否安装正常"
             print(f"错误: {error_msg}")
             traceback.print_exc()
+            if progress_win:
+                self.root.after(0, lambda: progress_win.destroy())
             self.root.after(0, lambda: messagebox.showerror("错误", error_msg))
             self.root.after(0, lambda: self.preview_button.config(state=tk.NORMAL, text="预览问卷"))
         finally:
@@ -1791,11 +1888,18 @@ class SurveyGUI:
                 row_frame = ttk.Frame(scrollable_frame)
                 row_frame.pack(fill=tk.X, pady=8, padx=10)
                 
-                ttk.Label(row_frame, text=f"选项 {i+1}:", width=10).pack(side=tk.LEFT)
+                # 显示选项文本（如果有的话）
+                option_label = f"选项 {i+1}"
+                if i < len(q.get('option_texts', [])) and q['option_texts'][i]:
+                    option_label = f"选项 {i+1}: {q['option_texts'][i][:30]}"
+                    if len(q['option_texts'][i]) > 30:
+                        option_label += "..."
+                
+                ttk.Label(row_frame, text=option_label, width=35).pack(side=tk.LEFT)
                 
                 var = tk.DoubleVar(value=50.0)
-                slider = ttk.Scale(row_frame, from_=0, to=100, variable=var, orient=tk.HORIZONTAL, length=300)
-                slider.pack(side=tk.LEFT, padx=10)
+                slider = ttk.Scale(row_frame, from_=0, to=100, variable=var, orient=tk.HORIZONTAL, length=200)
+                slider.pack(side=tk.LEFT, padx=5)
                 
                 label = ttk.Label(row_frame, text="50%", width=6)
                 label.pack(side=tk.LEFT)
@@ -1827,6 +1931,25 @@ class SurveyGUI:
             if type_code == "6":
                 option_text = f"{q['rows']} 行 × {q['options']} 列"
             ttk.Label(config_frame, text=option_text).pack(anchor="w", pady=10)
+            
+            # 对于矩阵题，显示列标题
+            if type_code == "6" and q.get('option_texts'):
+                ttk.Label(config_frame, text="列标题：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(5, 0))
+                options_info_text = " | ".join([f"{i+1}: {text[:20]}{'...' if len(text) > 20 else ''}" for i, text in enumerate(q['option_texts'])])
+                ttk.Label(config_frame, text=options_info_text, foreground="gray", wraplength=600).pack(anchor="w", pady=(0, 10))
+            
+            # 对于单选题、量表题、下拉题，显示选项列表
+            elif q.get('option_texts'):
+                ttk.Label(config_frame, text="选项列表：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(5, 0))
+                options_list_frame = ttk.Frame(config_frame)
+                options_list_frame.pack(anchor="w", fill=tk.X, pady=(0, 10), padx=(20, 0))
+                
+                max_options_display = min(5, len(q['option_texts']))
+                for i in range(max_options_display):
+                    ttk.Label(options_list_frame, text=f"  • {q['option_texts'][i]}", foreground="gray").pack(anchor="w")
+                
+                if len(q['option_texts']) > 5:
+                    ttk.Label(options_list_frame, text=f"  ... 共 {len(q['option_texts'])} 个选项", foreground="gray").pack(anchor="w")
             
             ttk.Label(config_frame, text="选择分布方式：").pack(anchor="w", pady=10)
             
@@ -1869,7 +1992,14 @@ class SurveyGUI:
                 slider_frame = ttk.Frame(scrollable_frame)
                 slider_frame.pack(fill=tk.X, pady=5, padx=10)
                 
-                ttk.Label(slider_frame, text=f"选项 {i+1}:", width=8).pack(side=tk.LEFT)
+                # 显示选项文本（如果有的话）
+                option_label = f"选项 {i+1}"
+                if i < len(q.get('option_texts', [])) and q['option_texts'][i]:
+                    option_label = f"选项 {i+1}: {q['option_texts'][i][:25]}"
+                    if len(q['option_texts'][i]) > 25:
+                        option_label += "..."
+                
+                ttk.Label(slider_frame, text=option_label, width=35).pack(side=tk.LEFT)
                 
                 var = tk.DoubleVar(value=1.0)
                 slider = ttk.Scale(slider_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
@@ -2043,32 +2173,91 @@ class SurveyGUI:
     def on_close(self):
         self.stop_run()
         
-        # 如果有配置过题目，询问是否保存
-        if self.question_entries:
-            response = messagebox.askyesno(
-                "保存配置",
-                "是否保存题目配置以便下次使用？\n\n" +
-                f"当前已配置 {len(self.question_entries)} 道题目"
-            )
-            if response:
+        # 检查是否有问卷链接或题目配置
+        has_url = bool(self.url_var.get().strip())
+        has_questions = bool(self.question_entries)
+        
+        if has_url or has_questions:
+            # 生成保存提示信息
+            if has_questions:
+                msg = f"是否保存配置以便下次使用？\n\n已配置 {len(self.question_entries)} 道题目"
+            else:
+                msg = "是否保存问卷链接以便下次使用？"
+            
+            # 创建自定义对话框，包含保存、不保存、取消三个按钮
+            dialog = tk.Toplevel(self.root)
+            dialog.title("保存配置")
+            dialog.geometry("300x150")
+            dialog.resizable(False, False)
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # 居中显示对话框
+            dialog.update_idletasks()
+            dialog_width = dialog.winfo_width()
+            dialog_height = dialog.winfo_height()
+            screen_width = dialog.winfo_screenwidth()
+            screen_height = dialog.winfo_screenheight()
+            
+            try:
+                import ctypes
+                from ctypes.wintypes import RECT
+                work_area = RECT()
+                ctypes.windll.user32.SystemParametersInfoA(48, 0, ctypes.byref(work_area), 0)
+                work_width = work_area.right - work_area.left
+                work_height = work_area.bottom - work_area.top
+                work_x = work_area.left
+                work_y = work_area.top
+                x = work_x + (work_width - dialog_width) // 2
+                y = work_y + (work_height - dialog_height) // 2
+            except:
+                x = (screen_width - dialog_width) // 2
+                y = (screen_height - dialog_height) // 2
+            
+            x = max(0, x)
+            y = max(0, y)
+            dialog.geometry(f"+{x}+{y}")
+            
+            # 消息标签
+            ttk.Label(dialog, text=msg, wraplength=280, justify=tk.CENTER).pack(pady=20)
+            
+            # 按钮容器
+            button_frame = ttk.Frame(dialog)
+            button_frame.pack(pady=(0, 10))
+            
+            # 结果变量
+            result = tk.IntVar(value=None)
+            
+            def save_config():
                 self._save_config()
                 messagebox.showinfo("保存成功", "配置已保存，下次启动时将自动加载")
-            else:
-                # 用户选择不保存，清除配置
+                result.set(1)
+                dialog.destroy()
+                self.root.destroy()
+            
+            def discard_config():
                 config_path = self._get_config_path()
                 if os.path.exists(config_path):
                     try:
                         os.remove(config_path)
                     except:
                         pass
-        else:
-            # 没有配置过题目，直接清除配置
-            config_path = self._get_config_path()
-            if os.path.exists(config_path):
-                try:
-                    os.remove(config_path)
-                except:
-                    pass
+                result.set(0)
+                dialog.destroy()
+                self.root.destroy()
+            
+            def cancel_close():
+                result.set(-1)
+                dialog.destroy()
+            
+            ttk.Button(button_frame, text="保存", command=save_config, width=10).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="不保存", command=discard_config, width=10).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="取消", command=cancel_close, width=10).pack(side=tk.LEFT, padx=5)
+            
+            # 焦点设置到取消按钮作为默认
+            dialog.focus_set()
+            
+            return
         
         self.root.destroy()
 
@@ -2080,13 +2269,31 @@ class SurveyGUI:
         window_width = self.root.winfo_width()
         window_height = self.root.winfo_height()
         
-        # 获取屏幕大小
+        # 获取屏幕大小（包括任务栏）
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         
-        # 计算窗口应该放置的位置
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
+        # 在 Windows 上获取工作区（不包括任务栏）
+        try:
+            import ctypes
+            from ctypes.wintypes import RECT
+            
+            # 获取工作区坐标
+            work_area = RECT()
+            ctypes.windll.user32.SystemParametersInfoA(48, 0, ctypes.byref(work_area), 0)
+            
+            work_width = work_area.right - work_area.left
+            work_height = work_area.bottom - work_area.top
+            work_x = work_area.left
+            work_y = work_area.top
+            
+            # 使用工作区计算位置
+            x = work_x + (work_width - window_width) // 2
+            y = work_y + (work_height - window_height) // 2
+        except:
+            # 如果获取工作区失败，回退到简单计算
+            x = (screen_width - window_width) // 2
+            y = (screen_height - window_height) // 2
         
         # 确保坐标不为负数
         x = max(0, x)
@@ -2225,6 +2432,32 @@ class SurveyGUI:
         progress_win.transient(self.root)
         progress_win.grab_set()
         
+        # 居中显示进度窗口
+        progress_win.update_idletasks()
+        win_width = progress_win.winfo_width()
+        win_height = progress_win.winfo_height()
+        screen_width = progress_win.winfo_screenwidth()
+        screen_height = progress_win.winfo_screenheight()
+        
+        try:
+            import ctypes
+            from ctypes.wintypes import RECT
+            work_area = RECT()
+            ctypes.windll.user32.SystemParametersInfoA(48, 0, ctypes.byref(work_area), 0)
+            work_width = work_area.right - work_area.left
+            work_height = work_area.bottom - work_area.top
+            work_x = work_area.left
+            work_y = work_area.top
+            x = work_x + (work_width - win_width) // 2
+            y = work_y + (work_height - win_height) // 2
+        except:
+            x = (screen_width - win_width) // 2
+            y = (screen_height - win_height) // 2
+        
+        x = max(0, x)
+        y = max(0, y)
+        progress_win.geometry(f"+{x}+{y}")
+        
         frame = ttk.Frame(progress_win, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
         
@@ -2310,7 +2543,7 @@ class SurveyGUI:
             f"fuck-wjx（问卷星速写）\n\n"
             f"当前版本 v{__VERSION__}\n\n"
             f"GitHub项目地址: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n"
-            f"有问题可在 GitHub 提交issue或发送邮箱至help@hungrym0.top"
+            f"有问题可在 GitHub 提交 issue 或发送电子邮件至 help@hungrym0.top"
         )
         messagebox.showinfo("关于", about_text)
 
