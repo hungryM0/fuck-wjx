@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, asdict
+from datetime import datetime
 from threading import Thread
 from typing import List, Optional, Union, Dict, Any
 
@@ -35,7 +36,39 @@ except ImportError:
     version = None
 
 # 版本号
-__VERSION__ = "0.2.2"
+__VERSION__ = "0.3"
+
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+LOG_BUFFER_CAPACITY = 2000
+LOG_DIR_NAME = "logs"
+
+
+class LogBufferHandler(logging.Handler):
+    def __init__(self, capacity: int = LOG_BUFFER_CAPACITY):
+        super().__init__()
+        self.capacity = capacity
+        self.records: List[str] = []
+        self.setFormatter(logging.Formatter(LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            message = self.format(record)
+            self.records.append(message)
+            if self.capacity and len(self.records) > self.capacity:
+                self.records.pop(0)
+        except Exception:
+            self.handleError(record)
+
+    def get_records(self) -> List[str]:
+        return list(self.records)
+
+
+LOG_BUFFER_HANDLER = LogBufferHandler()
+# 立即把缓冲处理器注册到根日志记录器，保证启动前的日志也能被收集
+_root_logger = logging.getLogger()
+if not any(isinstance(h, LogBufferHandler) for h in _root_logger.handlers):
+    _root_logger.addHandler(LOG_BUFFER_HANDLER)
+_root_logger.setLevel(logging.INFO)
 
 
 url = ""
@@ -242,6 +275,15 @@ class UpdateManager:
             sys.exit(0)
         except Exception as e:
             logging.error(f"重启应用失败: {e}")
+
+
+def setup_logging():
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S")
+    root_logger.setLevel(logging.INFO)
+    if not any(isinstance(handler, LogBufferHandler) for handler in root_logger.handlers):
+        root_logger.addHandler(LOG_BUFFER_HANDLER)
 
 
 def normalize_probabilities(values: List[float]) -> List[float]:
@@ -600,7 +642,11 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
     chrome_options.add_argument("--disable-gpu")
     
     global cur_num, cur_fail
-    while cur_num < target_num and not stop_signal.is_set():
+    while True:
+        # 使用锁检查并响应停止/完成条件，避免竞态导致超额提交
+        with lock:
+            if stop_signal.is_set() or (target_num > 0 and cur_num >= target_num):
+                break
         driver = None
         try:
             driver = webdriver.Chrome(options=chrome_options)
@@ -621,10 +667,19 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             final_url = driver.current_url
             if initial_url != final_url:
                 with lock:
-                    cur_num += 1
-                    print(
-                        f"已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))} "
-                    )
+                    # 再次检查，避免并发导致超额
+                    if target_num <= 0 or cur_num < target_num:
+                        cur_num += 1
+                        print(
+                            f"已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))} "
+                        )
+                        # 达到目标后通知其他线程停止
+                        if target_num > 0 and cur_num >= target_num:
+                            stop_signal.set()
+                    else:
+                        # 已经达到或超过目标，设置停止并退出本线程
+                        stop_signal.set()
+                        break
         except:
             traceback.print_exc()
             with lock:
@@ -657,9 +712,35 @@ LABEL_TO_TYPE = {label: value for value, label in TYPE_OPTIONS}
 
 
 class SurveyGUI:
+
+    def _generate_log_file(self):
+        records = LOG_BUFFER_HANDLER.get_records()
+        if not records:
+            messagebox.showinfo("生成日志文件", "当前尚无日志可保存。", parent=self.root)
+            return
+
+        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOG_DIR_NAME)
+        os.makedirs(logs_dir, exist_ok=True)
+        file_name = datetime.now().strftime("log_%Y%m%d_%H%M%S.txt")
+        file_path = os.path.join(logs_dir, file_name)
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(records))
+            logging.info(f"已生成日志文件: {file_path}")
+            messagebox.showinfo("生成日志文件", f"日志已保存到:\n{file_path}", parent=self.root)
+        except Exception as exc:
+            logging.error(f"保存日志文件失败: {exc}")
+            messagebox.showerror("生成日志文件失败", f"无法保存日志: {exc}", parent=self.root)
+
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("问卷星速写")
+        # 在窗口标题中显示当前版本号
+        try:
+            ver = __VERSION__
+        except NameError:
+            ver = "0.0.0"
+        self.root.title(f"问卷星速写 v{ver}")
         self.question_entries: List[QuestionEntry] = []
         self.runner_thread: Optional[Thread] = None
         self.worker_threads: List[Thread] = []
@@ -667,6 +748,9 @@ class SurveyGUI:
         self.running = False
         self.status_job = None
         self.update_info = None  # 存储更新信息
+        self.progress_value = 0  # 进度值 (0-100)
+        self.total_submissions = 0  # 总提交数
+        self.current_submissions = 0  # 当前提交数
         self._build_ui()
         self._center_window()  # 窗口居中显示
         self._check_updates_on_startup()  # 启动时检查更新
@@ -681,43 +765,164 @@ class SurveyGUI:
         
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="帮助", menu=help_menu)
+        log_menu = tk.Menu(menubar, tearoff=0)
+        log_menu.add_command(label="生成日志文件", command=self._generate_log_file)
+        menubar.add_cascade(label="日志", menu=log_menu)
         help_menu.add_command(label="检查更新", command=self.check_for_updates)
         help_menu.add_separator()
         help_menu.add_command(label="关于", command=self.show_about)
 
-        settings_frame = ttk.LabelFrame(self.root, text="基础设置", padding=10)
-        settings_frame.pack(fill=tk.X, padx=10, pady=10)
-
-        ttk.Label(settings_frame, text="问卷链接：").grid(row=0, column=0, sticky="w")
-        self.url_var = tk.StringVar()
-        url_entry = ttk.Entry(settings_frame, textvariable=self.url_var, width=65)
-        url_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-        self.preview_button = ttk.Button(settings_frame, text="预览问卷", command=self.preview_survey)
-        self.preview_button.grid(row=0, column=2, padx=5, pady=5)
+        # 创建主容器：Canvas + Scrollbar 用于整页滚动
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill=tk.BOTH, expand=True)
         
-        # 添加二维码上传功能
-        ttk.Label(settings_frame, text="或解析二维码：").grid(row=0, column=3, sticky="w", padx=(10, 0))
-        qr_upload_button = ttk.Button(settings_frame, text="上传二维码", command=self.upload_qrcode)
-        qr_upload_button.grid(row=0, column=4, padx=5, pady=5)
+        # 创建 Canvas 和 Scrollbar
+        main_canvas = tk.Canvas(main_container, highlightthickness=0, bg="#f0f0f0")
+        main_scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=main_canvas.yview)
+        
+        # 创建可滚动的内容框架
+        self.scrollable_content = ttk.Frame(main_canvas)
+        
+        # 创建窗口
+        canvas_frame = main_canvas.create_window((0, 0), window=self.scrollable_content, anchor="nw")
+        
+        # 配置 scrollregion - 立即设置，避免空白
+        def _update_scrollregion():
+            self.scrollable_content.update_idletasks()
+            main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        
+        self.scrollable_content.bind("<Configure>", lambda e: _update_scrollregion())
+        
+        # 当 Canvas 大小改变时，调整内容宽度
+        def _on_canvas_configure(event):
+            if event.width > 1:
+                main_canvas.itemconfig(canvas_frame, width=event.width)
+        
+        main_canvas.bind("<Configure>", _on_canvas_configure)
+        main_canvas.configure(yscrollcommand=main_scrollbar.set)
+        
+        # 布局 Canvas 和 Scrollbar
+        main_canvas.pack(side="left", fill="both", expand=True)
+        main_scrollbar.pack(side="right", fill="y")
+        
+        # 绑定鼠标滚轮事件（仅在鼠标在主窗口时）
+        def _on_mousewheel(event):
+            # 阻止向上滚动超出顶部
+            if event.delta > 0 and main_canvas.yview()[0] <= 0:
+                return
+            main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def _bind_mousewheel(event):
+            main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        def _unbind_mousewheel(event):
+            main_canvas.unbind_all("<MouseWheel>")
+        
+        # 当鼠标进入/离开主窗口时绑定/解绑滚轮事件
+        self.root.bind("<Enter>", _bind_mousewheel)
+        self.root.bind("<Leave>", _unbind_mousewheel)
+        
+        # 保存引用以便后续使用
+        self.main_canvas = main_canvas
+        self.main_scrollbar = main_scrollbar
 
-        ttk.Label(settings_frame, text="目标份数：").grid(row=1, column=0, sticky="w")
+        # 问卷链接输入区域
+        step1_frame = ttk.LabelFrame(self.scrollable_content, text="🔗 问卷链接", padding=10)
+        step1_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        # 问卷链接输入行
+        url_input_frame = ttk.Frame(step1_frame)
+        url_input_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(url_input_frame, text="问卷链接：").pack(side=tk.LEFT, padx=(0, 5))
+        self.url_var = tk.StringVar()
+        url_entry = ttk.Entry(url_input_frame, textvariable=self.url_var, width=50)
+        url_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # 二维码上传区域（独立一行，更醒目）
+        qr_frame = ttk.Frame(step1_frame)
+        qr_frame.pack(fill=tk.X, pady=(0, 5))
+
+        qr_upload_button = ttk.Button(
+            qr_frame, 
+            text="📂上传问卷二维码图片", 
+            command=self.upload_qrcode,
+            width=24,
+            style="Accent.TButton"
+        )
+        qr_upload_button.pack(side=tk.LEFT, padx=5, pady=5, ipady=2)
+
+        # 配置题目区域
+        step2_frame = ttk.LabelFrame(self.scrollable_content, text="⚙️ 配置题目", padding=10)
+        step2_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # 推荐方式：自动配置
+        auto_config_frame = ttk.Frame(step2_frame)
+        auto_config_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.preview_button = ttk.Button(
+            auto_config_frame, 
+            text="⚡ 自动配置问卷", 
+            command=self.preview_survey,
+            style="Accent.TButton"
+        )
+        self.preview_button.pack(side=tk.LEFT, padx=5)
+        
+        auto_hint = ttk.Label(
+            auto_config_frame,
+            text="← 自动解析问卷并开始引导配置答案，简单快捷",
+            foreground="#01A034",
+            font=("TkDefaultFont", 9)
+        )
+        auto_hint.pack(side=tk.LEFT, padx=10)
+
+        # 执行设置区域（放在配置题目下方）
+        step3_frame = ttk.LabelFrame(self.scrollable_content, text="⚙️ 执行设置", padding=10)
+        step3_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        settings_grid = ttk.Frame(step3_frame)
+        settings_grid.pack(fill=tk.X)
+        
+        ttk.Label(settings_grid, text="目标份数：").grid(row=0, column=0, sticky="w", padx=5)
         self.target_var = tk.StringVar(value="3")
-        ttk.Entry(settings_frame, textvariable=self.target_var, width=10).grid(
-            row=1, column=1, sticky="w"
+        ttk.Entry(settings_grid, textvariable=self.target_var, width=10).grid(
+            row=0, column=1, sticky="w", padx=5
         )
 
-        ttk.Label(settings_frame, text="浏览器数量：").grid(row=2, column=0, sticky="w")
+        ttk.Label(settings_grid, text="浏览器并发数量：").grid(row=0, column=2, sticky="w", padx=(20, 5))
         self.thread_var = tk.StringVar(value="2")
-        ttk.Entry(settings_frame, textvariable=self.thread_var, width=10).grid(
-            row=2, column=1, sticky="w"
+        ttk.Entry(settings_grid, textvariable=self.thread_var, width=10).grid(
+            row=0, column=3, sticky="w", padx=5
         )
 
-        question_frame = ttk.LabelFrame(self.root, text="题目配置", padding=10)
-        question_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        # 限制question_frame的最小高度，防止挤出底部按钮
-        self.root.update_idletasks()
-        question_frame.config(height=400)
+        # 高级选项：手动配置（默认折叠）
+        # 使用 manual_config_visible 控制高级选项的展开/收起
+        self.manual_config_visible = tk.BooleanVar(value=False)
 
+        manual_toggle_frame = ttk.Frame(self.scrollable_content)
+        manual_toggle_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        
+        self.manual_toggle_btn = ttk.Button(
+            manual_toggle_frame,
+            text="🔧 展开高级选项",
+            command=self.toggle_manual_config,
+            width=30
+        )
+        self.manual_toggle_btn.pack(side=tk.LEFT)
+        ttk.Label(
+            manual_toggle_frame,
+            text="例如：删除或编辑已配置的选项，手动添加答案或题目配置",
+            foreground="blue",
+            font=("TkDefaultFont", 8)
+        ).pack(side=tk.LEFT, padx=10)
+
+        # 高级选项区域（初始隐藏）
+        self.manual_config_frame = ttk.LabelFrame(self.scrollable_content, text="🔧 高级选项（手动添加题目）", padding=10)
+        # 不立即pack，等待用户点击展开
+        
+        question_frame = ttk.Frame(self.manual_config_frame, padding=5)
+        question_frame.pack(fill=tk.BOTH, expand=True)
+        
         # Row 0: 题型选择
         ttk.Label(question_frame, text="题型：").grid(row=0, column=0, sticky="w", pady=5)
         self.question_type_var = tk.StringVar(value=TYPE_OPTIONS[0][1])
@@ -786,9 +991,8 @@ class SurveyGUI:
             question_frame, textvariable=self.matrix_rows_var, width=10
         )
         self.matrix_rows_entry.grid(row=5, column=1, sticky="w", pady=5)
-        ttk.Label(question_frame, text="（矩阵题有多少行小题）", foreground="gray").grid(
-            row=5, column=2, sticky="w", padx=5
-        )
+        self.matrix_rows_hint = ttk.Label(question_frame, text="（矩阵题有多少行小题）", foreground="gray")
+        self.matrix_rows_hint.grid(row=5, column=2, sticky="w", padx=5)
 
         # Row 5.5: 多选题随机选项
         self.multiple_random_label = ttk.Label(question_frame, text="多选方式：")
@@ -808,7 +1012,7 @@ class SurveyGUI:
         # 提示信息
         self.info_label = ttk.Label(
             question_frame, 
-            text="💡 提示：排序题和滑块题会自动随机处理，无需手动添加配置",
+            text="💡 提示：无需填写题号；排序题和滑块题会自动随机处理，无需手动添加配置",
             foreground="#0066cc",
             font=("TkDefaultFont", 9)
         )
@@ -828,7 +1032,7 @@ class SurveyGUI:
         )
         self.select_all_check.grid(row=0, column=0, padx=5)
         
-        ttk.Button(btn_frame, text="手动添加题目", command=self.add_question).grid(
+        ttk.Button(btn_frame, text="添加配置", command=self.add_question).grid(
             row=0, column=1, padx=5
         )
         ttk.Button(btn_frame, text="编辑选中", command=self.edit_question).grid(
@@ -838,9 +1042,13 @@ class SurveyGUI:
             row=0, column=3, padx=5
         )
 
-        # 题目列表区域
-        tree_frame = ttk.Frame(question_frame)
-        tree_frame.grid(row=13, column=0, columnspan=3, sticky="nsew", pady=(5, 0))
+        # 题目列表区域（放在最后）
+        question_list_frame = ttk.LabelFrame(self.scrollable_content, text="📝 已配置的题目", padding=10)
+        question_list_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.question_list_frame = question_list_frame
+        
+        tree_frame = ttk.Frame(question_list_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
         
         # 创建带滚动条的Canvas（限制高度）
         canvas = tk.Canvas(tree_frame, highlightthickness=0, height=200)
@@ -862,26 +1070,69 @@ class SurveyGUI:
         self.questions_frame = scrollable_frame
         self.question_items = []
 
-        question_frame.rowconfigure(13, weight=1)
-        question_frame.columnconfigure(2, weight=1)
-
-        action_frame = ttk.Frame(self.root, padding=10)
-        action_frame.pack(fill=tk.X)
-
-        self.start_button = ttk.Button(action_frame, text="开始执行", command=self.start_run)
-        self.start_button.grid(row=0, column=0, padx=5)
-        self.stop_button = ttk.Button(action_frame, text="停止", command=self.stop_run, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=1, padx=5)
-
-        self.status_var = tk.StringVar(value="等待配置...")
-        ttk.Label(action_frame, textvariable=self.status_var).grid(
-            row=0, column=2, padx=10, sticky="w"
-        )
-
         self._refresh_dynamic_fields()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
         self._load_config()
+        
+        # 执行按钮区域（固定在窗口底部，不参与滚动）
+        action_frame = ttk.Frame(self.root, padding=10)
+        action_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        # 进度条区域（在上面）
+        progress_frame = ttk.Frame(action_frame)
+        progress_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(progress_frame, text="执行进度:", font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.progress_bar = ttk.Progressbar(
+            progress_frame, 
+            mode='determinate', 
+            maximum=100,
+            length=300
+        )
+        self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        self.progress_label = ttk.Label(progress_frame, text="0%", width=5, font=("TkDefaultFont", 9))
+        self.progress_label.pack(side=tk.LEFT, padx=5)
+        
+        # 按钮行（在下面）
+        button_frame = ttk.Frame(action_frame)
+        button_frame.pack(fill=tk.X)
+        
+        self.start_button = ttk.Button(
+            button_frame, 
+            text="✔️ 开始执行", 
+            command=self.start_run,
+            style="Accent.TButton"
+        )
+        self.start_button.pack(side=tk.LEFT, padx=5)
+        self.stop_button = ttk.Button(button_frame, text="🚫 停止", command=self.stop_run, state=tk.DISABLED)
+        self.stop_button.pack(side=tk.LEFT, padx=5)
+
+        self.status_var = tk.StringVar(value="等待配置...")
+        status_label = ttk.Label(button_frame, textvariable=self.status_var)
+        status_label.pack(side=tk.LEFT, padx=10)
+    
+    def toggle_manual_config(self):
+        """切换手动配置区域的显示/隐藏"""
+        if self.manual_config_visible.get():
+            self.manual_config_frame.pack_forget()
+            self.manual_toggle_btn.config(text="▶ 展开高级选项（手动添加题目）")
+            self.manual_config_visible.set(False)
+        else:
+            self.manual_config_frame.pack(fill=tk.X, padx=10, pady=(0, 10), before=self.question_list_frame)
+            self.manual_toggle_btn.config(text="▼ 收起高级选项")
+            self.manual_config_visible.set(True)
+            # 初始化动态字段的可见性，确保像矩阵提示只在矩阵题时显示
+            try:
+                self._refresh_dynamic_fields()
+            except Exception:
+                pass
+        
+        # 更新滚动区域
+        self.scrollable_content.update_idletasks()
+        self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
 
     def _refresh_dynamic_fields(self):
         q_type = LABEL_TO_TYPE.get(self.question_type_var.get(), "single")
@@ -897,6 +1148,7 @@ class SurveyGUI:
             self._hide_widget(self.weights_hint)
             self._hide_widget(self.matrix_rows_label)
             self._hide_widget(self.matrix_rows_entry)
+            self._hide_widget(self.matrix_rows_hint)
             self._hide_widget(self.multiple_random_label)
             self._hide_widget(self.multiple_random_check)
             self._show_widget(self.text_values_label, 4, 0)
@@ -910,6 +1162,7 @@ class SurveyGUI:
             self._show_widget(self.distribution_label, 2, 0)
             self._show_widget(self.matrix_rows_label, 5, 0)
             self._show_widget(self.matrix_rows_entry, 5, 1)
+            self._show_widget(self.matrix_rows_hint, 5, 2)
             self._hide_widget(self.multiple_random_label)
             self._hide_widget(self.multiple_random_check)
             self._hide_widget(self.text_values_label)
@@ -926,6 +1179,7 @@ class SurveyGUI:
             self._show_widget(self.multiple_random_check, 5, 1)
             self._hide_widget(self.matrix_rows_label)
             self._hide_widget(self.matrix_rows_entry)
+            self._hide_widget(self.matrix_rows_hint)
             self._hide_widget(self.text_values_label)
             self._hide_widget(self.text_values_entry)
             self._hide_widget(self.text_hint)
@@ -947,6 +1201,7 @@ class SurveyGUI:
             self._show_widget(self.distribution_label, 2, 0)
             self._hide_widget(self.matrix_rows_label)
             self._hide_widget(self.matrix_rows_entry)
+            self._hide_widget(self.matrix_rows_hint)
             self._hide_widget(self.multiple_random_label)
             self._hide_widget(self.multiple_random_check)
             self._hide_widget(self.text_values_label)
@@ -1408,10 +1663,9 @@ class SurveyGUI:
     def upload_qrcode(self):
         """上传二维码图片并解析链接"""
         file_path = filedialog.askopenfilename(
-            title="选择二维码图片",
+            title="选择问卷二维码图片",
             filetypes=[
-                ("图片文件", "*.png *.jpg *.jpeg *.bmp *.gif"),
-                ("所有文件", "*.*")
+                ("图片文件", "*.png *.jpg *.jpeg *.webp *.bmp *.gif")
             ]
         )
         
@@ -2093,6 +2347,13 @@ class SurveyGUI:
         cur_num = 0
         cur_fail = 0
         stop_event = threading.Event()
+        
+        # 重置进度条
+        self.progress_value = 0
+        self.total_submissions = target
+        self.current_submissions = 0
+        self.progress_bar['value'] = 0
+        self.progress_label.config(text="0%")
 
         self.running = True
         self.start_button.config(state=tk.DISABLED)
@@ -2123,6 +2384,13 @@ class SurveyGUI:
     def _schedule_status_update(self):
         status = f"已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次"
         self.status_var.set(status)
+        
+        # 更新进度条
+        if target_num > 0:
+            progress = int((cur_num / target_num) * 100)
+            self.progress_bar['value'] = progress
+            self.progress_label.config(text=f"{progress}%")
+        
         if self.running:
             self.status_job = self.root.after(500, self._schedule_status_update)
 
@@ -2140,6 +2408,16 @@ class SurveyGUI:
         else:
             msg = "已结束"
         self.status_var.set(f"{msg} | 已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次")
+        
+        # 最终更新进度条
+        if cur_num >= target_num:
+            self.progress_bar['value'] = 100
+            self.progress_label.config(text="100%")
+        else:
+            if target_num > 0:
+                progress = int((cur_num / target_num) * 100)
+                self.progress_bar['value'] = progress
+                self.progress_label.config(text=f"{progress}%")
 
     def stop_run(self):
         if not self.running:
@@ -2383,10 +2661,17 @@ class SurveyGUI:
             return
         
         info = self.update_info
+        release_notes = info.get('release_notes', '')
+        # 限制发布说明长度，避免弹窗过大
+        release_notes_preview = release_notes[:300] if release_notes else "暂无更新说明"
+        if len(release_notes) > 300:
+            release_notes_preview += "\n..."
+        
         msg = (
             f"检测到新版本 v{info['version']}\n"
             f"当前版本 v{info['current_version']}\n\n"
-            f"立即更新？"
+            f"发布说明:\n{release_notes_preview}\n\n"
+            f"是否要立即下载更新？"
         )
         
         if messagebox.askyesno("检查到更新", msg):
@@ -2543,7 +2828,9 @@ class SurveyGUI:
             f"fuck-wjx（问卷星速写）\n\n"
             f"当前版本 v{__VERSION__}\n\n"
             f"GitHub项目地址: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n"
-            f"有问题可在 GitHub 提交 issue 或发送电子邮件至 help@hungrym0.top"
+            f"有问题可在 GitHub 提交 issue 或发送电子邮件至 help@hungrym0.top\n\n"
+            f"官方网站: https://www.hungrym0.top/fuck-wjx\n"
+            f"©2025 HUNGRY_M0 版权所有"
         )
         messagebox.showinfo("关于", about_text)
 
@@ -2552,6 +2839,7 @@ class SurveyGUI:
 
 
 def main():
+    setup_logging()
     gui = SurveyGUI()
     gui.run()
 
