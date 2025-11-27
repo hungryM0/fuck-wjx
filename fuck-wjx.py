@@ -22,6 +22,10 @@ from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
+try:
+    from selenium.webdriver.chrome.service import Service as ChromeService
+except ImportError:
+    ChromeService = None
 from PIL import Image
 from pyzbar.pyzbar import decode as pyzbar_decode
 
@@ -35,12 +39,105 @@ try:
 except ImportError:
     version = None
 
+try:
+    from webdriver_manager.chrome import ChromeDriverManager  # type: ignore[import]
+except ImportError:
+    ChromeDriverManager = None
+
 # 版本号
 __VERSION__ = "0.3"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
 LOG_DIR_NAME = "logs"
+CHROMEDRIVER_CACHE_DIR = "chromedriver_cache"
+
+ORIGINAL_STDOUT = sys.stdout
+ORIGINAL_STDERR = sys.stderr
+ORIGINAL_EXCEPTHOOK = sys.excepthook
+_chromedriver_lock = threading.Lock()
+_cached_chromedriver_path: Optional[str] = None
+
+
+class StreamToLogger:
+    def __init__(self, logger: logging.Logger, level: int, stream=None):
+        self.logger = logger
+        self.level = level
+        self.stream = stream
+        self._buffer = ""
+
+    def write(self, message: str):
+        if message is None:
+            return
+        text = str(message)
+        self._buffer += text.replace("\r", "")
+        if "\n" in self._buffer:
+            parts = self._buffer.split("\n")
+            self._buffer = parts.pop()
+            for line in parts:
+                self.logger.log(self.level, line)
+        if self.stream:
+            try:
+                self.stream.write(message)
+            except Exception:
+                pass
+
+    def flush(self):
+        if self._buffer:
+            self.logger.log(self.level, self._buffer)
+            self._buffer = ""
+        if self.stream:
+            try:
+                self.stream.flush()
+            except Exception:
+                pass
+
+
+def _get_runtime_directory() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _get_chromedriver_cache_dir() -> str:
+    cache_dir = os.path.join(_get_runtime_directory(), CHROMEDRIVER_CACHE_DIR)
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def _ensure_chromedriver_download() -> Optional[str]:
+    if not ChromeDriverManager:
+        logging.debug("webdriver_manager 未安装，依赖 PATH 中的 chromedriver")
+        return None
+    cache_dir = _get_chromedriver_cache_dir()
+    try:
+        driver_path = ChromeDriverManager(path=cache_dir).install()
+        if driver_path and os.path.exists(driver_path):
+            logging.info(f"Chromedriver 可用，已缓存: {driver_path}")
+            return driver_path
+    except Exception as exc:
+        logging.warning(f"自动下载 ChromeDriver 失败: {exc}")
+    return None
+
+
+def resolve_chromedriver_path() -> Optional[str]:
+    global _cached_chromedriver_path
+    with _chromedriver_lock:
+        if _cached_chromedriver_path and os.path.exists(_cached_chromedriver_path):
+            return _cached_chromedriver_path
+        driver_path = _ensure_chromedriver_download()
+        if driver_path:
+            _cached_chromedriver_path = driver_path
+        return driver_path
+
+
+def build_chrome_driver_kwargs() -> Dict[str, Any]:
+    driver_path = resolve_chromedriver_path()
+    if not driver_path:
+        return {}
+    if ChromeService:
+        return {"service": ChromeService(executable_path=driver_path)}
+    return {"executable_path": driver_path}
 
 
 class LogBufferHandler(logging.Handler):
@@ -284,6 +381,23 @@ def setup_logging():
     root_logger.setLevel(logging.INFO)
     if not any(isinstance(handler, LogBufferHandler) for handler in root_logger.handlers):
         root_logger.addHandler(LOG_BUFFER_HANDLER)
+    if not getattr(setup_logging, "_streams_hooked", False):
+        stdout_logger = StreamToLogger(root_logger, logging.INFO, stream=ORIGINAL_STDOUT)
+        stderr_logger = StreamToLogger(root_logger, logging.ERROR, stream=ORIGINAL_STDERR)
+        sys.stdout = stdout_logger
+        sys.stderr = stderr_logger
+
+        def _handle_unhandled_exception(exc_type, exc_value, exc_traceback):
+            if issubclass(exc_type, KeyboardInterrupt):
+                if ORIGINAL_EXCEPTHOOK:
+                    ORIGINAL_EXCEPTHOOK(exc_type, exc_value, exc_traceback)
+                return
+            root_logger.error("未处理的异常", exc_info=(exc_type, exc_value, exc_traceback))
+            if ORIGINAL_EXCEPTHOOK:
+                ORIGINAL_EXCEPTHOOK(exc_type, exc_value, exc_traceback)
+
+        sys.excepthook = _handle_unhandled_exception
+        setattr(setup_logging, "_streams_hooked", True)
 
 
 def normalize_probabilities(values: List[float]) -> List[float]:
@@ -649,7 +763,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 break
         driver = None
         try:
-            driver = webdriver.Chrome(options=chrome_options)
+            driver_kwargs = build_chrome_driver_kwargs()
+            driver = webdriver.Chrome(**driver_kwargs, options=chrome_options)
             if gui_instance and hasattr(gui_instance, 'active_drivers'):
                 gui_instance.active_drivers.append(driver)
             driver.set_window_size(550, 650)
@@ -1771,7 +1886,8 @@ class SurveyGUI:
             chrome_options.add_argument("--disable-dev-shm-usage")
             
             print(f"正在加载问卷: {survey_url}")
-            driver = webdriver.Chrome(options=chrome_options)
+            driver_kwargs = build_chrome_driver_kwargs()
+            driver = webdriver.Chrome(**driver_kwargs, options=chrome_options)
             
             update_progress(15, "加载问卷页面...")
             
