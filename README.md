@@ -1,4 +1,4 @@
-# fuck-wjx (问卷星速填)
+# fuck-wjx (问卷星速写)
 
 参考了   https://github.com/Zemelee/wjx   的仓库，请不要忘记给这位佬给出一个star⭐
 
