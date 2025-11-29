@@ -43,18 +43,85 @@ try:
 except ImportError:
     version = None
 
-try:
-    from webdriver_manager.chrome import ChromeDriverManager  # type: ignore[import]
-except ImportError:
-    ChromeDriverManager = None
+# webdriver-manager 已弃用，现使用 Selenium 4.6+ 内置的 Selenium Manager
+# try:
+#     from webdriver_manager.chrome import ChromeDriverManager  # type: ignore[import]
+# except ImportError:
+#     ChromeDriverManager = None
+ChromeDriverManager = None
 
 # 版本号
-__VERSION__ = "0.4"
+__VERSION__ = "0.4.1"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
 LOG_DIR_NAME = "logs"
 CHROMEDRIVER_CACHE_DIR = "chromedriver_cache"
+PANED_MIN_LEFT_WIDTH = 360
+PANED_MIN_RIGHT_WIDTH = 280
+
+
+class LoadingSplash:
+    def __init__(self, master: Optional[tk.Tk], title: str = "正在加载", message: str = "程序正在启动，请稍候...", width: int = 360, height: int = 140):
+        self.master = master or tk.Tk()
+        self.width = width
+        self.height = height
+        self.window = tk.Toplevel(self.master)
+        self.window.withdraw()
+        self.window.overrideredirect(True)
+        self.window.attributes("-topmost", True)
+        self.window.configure(bg="#f8fafb")
+        self.message_var = tk.StringVar(value=message)
+        self.progress_value = 0
+
+        self.window.title(title)
+        frame = ttk.Frame(self.window, padding=15, relief="solid", borderwidth=1)
+        frame.pack(expand=True, fill=tk.BOTH)
+
+        ttk.Label(frame, text=title, font=("Segoe UI", 11, "bold")).pack(anchor="center")
+        ttk.Label(frame, textvariable=self.message_var, wraplength=width - 30, justify="center").pack(pady=(8, 12))
+        
+        # 创建进度条容器
+        progress_frame = ttk.Frame(frame)
+        progress_frame.pack(fill=tk.X)
+        
+        self.progress = ttk.Progressbar(progress_frame, mode="determinate", length=width - 60, maximum=100)
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.progress_label = ttk.Label(progress_frame, text="0%", width=4, anchor="center")
+        self.progress_label.pack(side=tk.LEFT, padx=(5, 0))
+
+    def show(self):
+        self._center()
+        self.window.deiconify()
+        self.window.update()
+
+    def update_progress(self, percent: int, message: Optional[str] = None):
+        """更新进度条和消息"""
+        self.progress_value = min(100, max(0, percent))
+        self.progress['value'] = self.progress_value
+        self.progress_label.config(text=f"{self.progress_value}%")
+        if message is not None:
+            self.message_var.set(message)
+        self.window.update_idletasks()
+
+    def update_message(self, message: str):
+        self.message_var.set(message)
+        self.window.update_idletasks()
+
+    def close(self):
+        if self.window.winfo_exists():
+            self.window.destroy()
+
+    def _center(self):
+        self.window.update_idletasks()
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        x = (screen_width - self.width) // 2
+        y = (screen_height - self.height) // 2
+        self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
+PANED_MIN_LEFT_WIDTH = 360
+PANED_MIN_RIGHT_WIDTH = 280
 
 ORIGINAL_STDOUT = sys.stdout
 ORIGINAL_STDERR = sys.stderr
@@ -110,18 +177,23 @@ def _get_chromedriver_cache_dir() -> str:
 
 
 def _ensure_chromedriver_download() -> Optional[str]:
-    if not ChromeDriverManager:
-        logging.debug("webdriver_manager 未安装，依赖 PATH 中的 chromedriver")
-        return None
-    cache_dir = _get_chromedriver_cache_dir()
-    try:
-        driver_path = ChromeDriverManager(path=cache_dir).install()
-        if driver_path and os.path.exists(driver_path):
-            logging.info(f"Chromedriver 可用，已缓存: {driver_path}")
-            return driver_path
-    except Exception as exc:
-        logging.warning(f"自动下载 ChromeDriver 失败: {exc}")
+    # 优先使用 Selenium 4.6+ 内置的 Selenium Manager，无需额外依赖
+    # Selenium Manager 会自动检测系统中的 Chrome 浏览器并下载匹配的 ChromeDriver
+    logging.debug("使用 Selenium 内置的自动驱动管理 (Selenium Manager)")
     return None
+    
+    # 以下代码已弃用，保留仅供参考
+    # if not ChromeDriverManager:
+    #     logging.debug("webdriver_manager 未安装，将使用 Selenium 内置的自动驱动管理")
+    #     return None
+    # try:
+    #     driver_path = ChromeDriverManager().install()
+    #     if driver_path and os.path.exists(driver_path):
+    #         logging.info(f"Chromedriver 可用，已缓存: {driver_path}")
+    #         return driver_path
+    # except Exception as exc:
+    #     logging.warning(f"webdriver_manager 下载失败，将回退到 Selenium 内置管理: {exc}")
+    # return None
 
 
 def resolve_chromedriver_path() -> Optional[str]:
@@ -135,13 +207,59 @@ def resolve_chromedriver_path() -> Optional[str]:
         return driver_path
 
 
+def _find_chrome_binary() -> Optional[str]:
+    """查找 Chrome 或 Chromium 的可执行文件路径"""
+    # 常见的 Chrome/Chromium 安装路径
+    possible_paths = [
+        # Windows 常见路径
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+        # Chromium
+        r"C:\Program Files\Chromium\Application\chrome.exe",
+        r"C:\Program Files (x86)\Chromium\Application\chrome.exe",
+        # 便携版可能在程序同目录
+        os.path.join(_get_runtime_directory(), "chrome.exe"),
+        os.path.join(_get_runtime_directory(), "chromium", "chrome.exe"),
+        os.path.join(_get_runtime_directory(), "chrome", "chrome.exe"),
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            logging.info(f"找到 Chrome 浏览器: {path}")
+            return path
+    
+    # 如果都找不到，返回 None，让 Selenium Manager 自动处理
+    logging.debug("未找到本地 Chrome 浏览器，将使用 Selenium Manager 自动检测")
+    return None
+
+
 def build_chrome_driver_kwargs() -> Dict[str, Any]:
-    driver_path = resolve_chromedriver_path()
-    if not driver_path:
-        return {}
-    if ChromeService:
-        return {"service": ChromeService(executable_path=driver_path)}
-    return {"executable_path": driver_path}
+    # 返回空字典，让 Selenium 4.6+ 的 Selenium Manager 自动处理
+    # Selenium Manager 会自动检测系统中的 Chrome 浏览器并下载匹配的 ChromeDriver
+    return {}
+
+
+def setup_chrome_options() -> webdriver.ChromeOptions:
+    """创建并配置 Chrome 选项"""
+    chrome_options = webdriver.ChromeOptions()
+    
+    # 尝试查找并设置 Chrome 二进制文件路径
+    chrome_binary = _find_chrome_binary()
+    if chrome_binary:
+        chrome_options.binary_location = chrome_binary
+    
+    # 反自动化检测
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    
+    # 性能优化
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    
+    return chrome_options
 
 
 class LogBufferHandler(logging.Handler):
@@ -200,7 +318,7 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/rel
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 if not GITHUB_TOKEN:
     # 尝试从同目录下的 .github_token 文件读取
-    token_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".github_token")
+    token_file = os.path.join(_get_runtime_directory(), ".github_token")
     if os.path.exists(token_file):
         try:
             with open(token_file, 'r', encoding='utf-8') as f:
@@ -304,13 +422,8 @@ class UpdateManager:
             # 获取文件大小
             total_size = int(response.headers.get('content-length', 0))
             
-            # 确定下载目录：如果是exe运行，使用exe所在目录；如果是py运行，使用py所在目录
-            if getattr(sys, 'frozen', False):
-                # 从打包的exe运行
-                current_dir = os.path.dirname(sys.executable)
-            else:
-                # 从Python脚本运行
-                current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 确定下载目录：统一使用运行时目录，保证与当前可执行文件同级
+            current_dir = _get_runtime_directory()
             
             target_file = os.path.join(current_dir, file_name)
             temp_file = target_file + '.tmp'
@@ -344,7 +457,7 @@ class UpdateManager:
             logging.error(f"下载文件失败: {e}")
             # 清理临时文件
             try:
-                current_dir = os.path.dirname(os.path.abspath(__file__))
+                current_dir = _get_runtime_directory()
                 target_file = os.path.join(current_dir, file_name)
                 temp_file = target_file + '.tmp'
                 if os.path.exists(temp_file):
@@ -440,6 +553,7 @@ def setup_logging():
     root_logger.setLevel(logging.INFO)
     if not any(isinstance(handler, LogBufferHandler) for handler in root_logger.handlers):
         root_logger.addHandler(LOG_BUFFER_HANDLER)
+    
     if not getattr(setup_logging, "_streams_hooked", False):
         stdout_logger = StreamToLogger(root_logger, logging.INFO, stream=ORIGINAL_STDOUT)
         stderr_logger = StreamToLogger(root_logger, logging.ERROR, stream=ORIGINAL_STDERR)
@@ -857,13 +971,7 @@ def submit(driver: WebDriver):
 
 
 def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=None):
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option("useAutomationExtension", False)
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
+    chrome_options = setup_chrome_options()
     
     global cur_num, cur_fail
     while True:
@@ -948,7 +1056,7 @@ class SurveyGUI:
             self._log_popup_info("保存日志文件", "当前尚无日志可保存。", parent=parent_window)
             return
 
-        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOG_DIR_NAME)
+        logs_dir = os.path.join(_get_runtime_directory(), LOG_DIR_NAME)
         os.makedirs(logs_dir, exist_ok=True)
         file_name = datetime.now().strftime("log_%Y%m%d_%H%M%S.txt")
         file_path = os.path.join(logs_dir, file_name)
@@ -1010,14 +1118,16 @@ class SurveyGUI:
         # 继续定期刷新
         self._log_refresh_job = self.root.after(500, self._schedule_log_refresh)
 
-    def __init__(self):
-        self.root = tk.Tk()
+    def __init__(self, root: Optional[tk.Tk] = None, loading_splash: Optional[LoadingSplash] = None):
+        self._shared_root = root is not None
+        self.root = root if root is not None else tk.Tk()
+        self._loading_splash = loading_splash
         # 在窗口标题中显示当前版本号
         try:
             ver = __VERSION__
         except NameError:
             ver = "0.0.0"
-        self.root.title(f"问卷星速写 v{ver}")
+        self.root.title(f"问卷星速填 v{ver}")
         self.root.bind("<FocusIn>", self._on_root_focus)
         self.question_entries: List[QuestionEntry] = []
         self.runner_thread: Optional[Thread] = None
@@ -1030,10 +1140,11 @@ class SurveyGUI:
         self.total_submissions = 0  # 总提交数
         self.current_submissions = 0  # 当前提交数
         self._log_window: Optional[tk.Toplevel] = None
-        self._log_text_widget: Optional[ScrolledText] = None
+        self._log_text_widget: Optional[tk.Text] = None
         self._log_refresh_job: Optional[str] = None
         self._paned_position_restored = False
         self._default_paned_position_applied = False
+        self._paned_configure_binding: Optional[str] = None
         self._config_changed = False  # 跟踪配置是否有改动
         self._initial_config: Dict[str, Any] = {}  # 存储初始配置以便比较
         self._wizard_history: List[int] = []
@@ -1044,6 +1155,10 @@ class SurveyGUI:
         self.thread_var = tk.StringVar(value="2")
         self.preview_button: Optional[ttk.Button] = None
         self._build_ui()
+        if self._loading_splash:
+            self._loading_splash.update_progress(90, "主界面加载完成，即将显示...")
+        if self._shared_root:
+            self.root.deiconify()
         self._center_window()  # 窗口居中显示
         self._check_updates_on_startup()  # 启动时检查更新
         self._schedule_log_refresh()  # 启动日志刷新
@@ -1065,10 +1180,11 @@ class SurveyGUI:
         # 创建主容器，使用 PanedWindow 分左右两部分
         self.main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self._paned_configure_binding = self.main_paned.bind("<Configure>", self._on_main_paned_configure)
         
         # 左侧：配置区域（可滚动）
         config_container = ttk.Frame(self.main_paned)
-        self.main_paned.add(config_container, weight=1)
+        self.main_paned.add(config_container, weight=3)
         
         # 创建 Canvas 和 Scrollbar 用于整页滚动
         main_canvas = tk.Canvas(config_container, highlightthickness=0, bg="#f0f0f0")
@@ -1121,12 +1237,35 @@ class SurveyGUI:
         self.main_scrollbar = main_scrollbar
 
         # 右侧：日志区域
-        log_container = ttk.LabelFrame(self.main_paned, text="📋 执行日志", padding=5)
+        log_container = ttk.LabelFrame(self.main_paned, text="📋 运行日志", padding=5)
         self.main_paned.add(log_container, weight=2)
         
-        # 创建日志显示区域（ScrolledText）
-        self._log_text_widget = ScrolledText(log_container, wrap=tk.NONE, state="disabled")
-        self._log_text_widget.pack(fill=tk.BOTH, expand=True)
+        # 创建日志显示区域（带水平和垂直滚动条）
+        # 使用 Frame 包装 Text 和滚动条
+        log_frame = ttk.Frame(log_container)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建垂直滚动条
+        v_scrollbar = ttk.Scrollbar(log_frame, orient="vertical")
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 创建水平滚动条
+        h_scrollbar = ttk.Scrollbar(log_frame, orient="horizontal")
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # 创建 Text Widget
+        self._log_text_widget = tk.Text(
+            log_frame, 
+            wrap=tk.NONE, 
+            state="disabled",
+            yscrollcommand=v_scrollbar.set,
+            xscrollcommand=h_scrollbar.set
+        )
+        self._log_text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # 配置滚动条
+        v_scrollbar.config(command=self._log_text_widget.yview)
+        h_scrollbar.config(command=self._log_text_widget.xview)
         
         # 日志按钮区域
         log_button_frame = ttk.Frame(log_container)
@@ -1176,16 +1315,18 @@ class SurveyGUI:
 
         auto_hint_frame = ttk.Frame(step2_frame)
         auto_hint_frame.pack(fill=tk.X, pady=(0, 10))
+        auto_hint_box = tk.Frame(auto_hint_frame, bg="#edf7ec", bd=1, relief="solid")
+        auto_hint_box.pack(fill=tk.X, expand=True, padx=4, pady=2)
         self._auto_hint_label = ttk.Label(
-            auto_hint_frame,
-            text="← 自动解析问卷并开始引导配置答案，简单快捷",
-            foreground="#01A034",
-            font=("TkDefaultFont", 9),
-            wraplength=350,
+            auto_hint_box,
+            text="  💡通过配置向导可快速预设答案并保持原始题型结构",
+            foreground="#1b5e20",
+            font=("Segoe UI", 9),
+            wraplength=520,
             justify="left"
         )
-        self._auto_hint_label.pack(anchor="w", fill=tk.X)
-        auto_hint_frame.bind("<Configure>", lambda e: self._auto_hint_label.configure(wraplength=max(100, e.width - 20)))
+        self._auto_hint_label.pack(anchor="w", padx=8, pady=6)
+        auto_hint_frame.bind("<Configure>", lambda e: self._auto_hint_label.configure(wraplength=max(180, e.width - 30)))
 
         # 执行设置区域（放在配置题目下方）
         step3_frame = ttk.LabelFrame(self.scrollable_content, text="⚙️ 执行设置", padding=10)
@@ -1265,16 +1406,18 @@ class SurveyGUI:
         # 提示信息（放在按钮下，避免被树状控件遮挡）
         info_frame = ttk.Frame(self.manual_config_frame)
         info_frame.pack(fill=tk.X, padx=5, pady=(0, 6))
+        manual_hint_box = tk.Frame(info_frame, bg="#eef2fb", bd=1, relief="solid")
+        manual_hint_box.pack(fill=tk.X, expand=True, padx=4, pady=2)
         self._manual_hint_label = ttk.Label(
-            info_frame, 
-            text="💡 提示：排序题和滑块题会自动随机处理，无需手动配置；点击\"添加配置\"弹出窗口设置题目参数",
-            foreground="#0066cc",
-            font=("TkDefaultFont", 9),
-            wraplength=350,
+            manual_hint_box, 
+            text="  💡提示：排序题/滑块题会自动随机填写",
+            foreground="#0f3d7a",
+            font=("Segoe UI", 9),
+            wraplength=520,
             justify="left"
         )
-        self._manual_hint_label.pack(anchor="w", fill=tk.X)
-        info_frame.bind("<Configure>", lambda e: self._manual_hint_label.configure(wraplength=max(100, e.width - 20)))
+        self._manual_hint_label.pack(anchor="w", padx=8, pady=6)
+        info_frame.bind("<Configure>", lambda e: self._manual_hint_label.configure(wraplength=max(180, e.width - 30)))
 
         # 分隔符
         ttk.Separator(self.manual_config_frame, orient='horizontal').pack(fill=tk.X, pady=(0, 5))
@@ -1309,9 +1452,6 @@ class SurveyGUI:
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
-        self._load_config()
-        self.root.after(200, self._ensure_default_paned_position)
-        
         # 执行按钮区域（固定在窗口底部，不参与滚动）
         action_frame = ttk.Frame(self.root, padding=10)
         action_frame.pack(fill=tk.X, side=tk.BOTTOM)
@@ -1339,7 +1479,7 @@ class SurveyGUI:
         
         self.start_button = ttk.Button(
             button_frame, 
-            text="✔️ 开始执行", 
+            text="开始执行", 
             command=self.start_run,
             style="Accent.TButton"
         )
@@ -1350,6 +1490,26 @@ class SurveyGUI:
         self.status_var = tk.StringVar(value="等待配置...")
         status_label = ttk.Label(button_frame, textvariable=self.status_var)
         status_label.pack(side=tk.LEFT, padx=10)
+        
+        self._load_config()
+        self.root.after(200, self._ensure_default_paned_position)
+
+    def _notify_loading(self, message: str):
+        if self._loading_splash:
+            self._loading_splash.update_message(message)
+
+    def _on_main_paned_configure(self, event):
+        width = getattr(event, "width", 0) or self.main_paned.winfo_width()
+        if width <= 0:
+            return
+        if not self._paned_position_restored and not self._default_paned_position_applied:
+            desired = max(PANED_MIN_LEFT_WIDTH, width // 2)
+            try:
+                self.main_paned.sashpos(0, desired)
+                self._default_paned_position_applied = True
+            except tk.TclError:
+                self.root.after(150, self._ensure_default_paned_position)
+        self._enforce_paned_minimums()
 
     def _ensure_default_paned_position(self):
         if self._paned_position_restored or self._default_paned_position_applied:
@@ -1358,12 +1518,34 @@ class SurveyGUI:
         if pane_width <= 0:
             self.root.after(100, self._ensure_default_paned_position)
             return
-        desired = max(200, pane_width // 2)
+        desired = max(320, pane_width // 2)
         try:
             self.main_paned.sashpos(0, desired)
             self._default_paned_position_applied = True
         except Exception:
-            pass
+            self.root.after(150, self._ensure_default_paned_position)
+        self._enforce_paned_minimums()
+
+    def _enforce_paned_minimums(self):
+        try:
+            width = self.main_paned.winfo_width()
+            if width <= 0:
+                return
+            sash_pos = self.main_paned.sashpos(0)
+        except Exception:
+            return
+        min_left = PANED_MIN_LEFT_WIDTH
+        min_right = PANED_MIN_RIGHT_WIDTH
+        max_allowed = max(min_left, width - min_right)
+        max_allowed = min(max_allowed, width - 1)
+        max_allowed = max(0, max_allowed)
+        min_target = min(min_left, max(0, width - 1))
+        desired = min(max_allowed, max(min_target, sash_pos))
+        if desired != sash_pos:
+            try:
+                self.main_paned.sashpos(0, desired)
+            except Exception:
+                pass
 
 
     def add_question_dialog(self):
@@ -2218,14 +2400,8 @@ class SurveyGUI:
             # 更新状态
             update_progress(5, "初始化浏览器...")
             
-            chrome_options = webdriver.ChromeOptions()
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option("useAutomationExtension", False)
-            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+            chrome_options = setup_chrome_options()
             chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
             
             print(f"正在加载问卷: {survey_url}")
             driver_kwargs = build_chrome_driver_kwargs()
@@ -2364,7 +2540,13 @@ class SurveyGUI:
             self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
             
         except Exception as e:
-            error_msg = f"解析问卷失败: {str(e)}\n\n请检查:\n1. 问卷链接是否正确\n2. 网络连接是否正常\n3. Chrome浏览器是否安装正常"
+            error_str = str(e)
+            if "cannot find Chrome binary" in error_str or "chrome not found" in error_str.lower():
+                error_msg = "找不到 Chrome 浏览器\n\n请安装 Google Chrome 浏览器后重试"
+            elif "chromedriver" in error_str.lower() or "webdriver" in error_str.lower():
+                error_msg = f"浏览器驱动初始化失败: {error_str}\n\n请检查:\n1. Chrome 浏览器是否安装正确\n2. 网络连接是否正常（首次运行需要自动下载驱动）\n3. 尝试重启程序"
+            else:
+                error_msg = f"解析问卷失败: {error_str}\n\n请检查:\n1. 问卷链接是否正确\n2. 网络连接是否正常\n3. Chrome浏览器是否安装正常"
             print(f"错误: {error_msg}")
             clean_error_msg = error_msg.replace("\n", " ")
             logging.error(f"[Action Log] Preview parsing failed: {clean_error_msg}")
@@ -2395,10 +2577,7 @@ class SurveyGUI:
             return
 
         try:
-            chrome_options = webdriver.ChromeOptions()
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option("useAutomationExtension", False)
-            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+            chrome_options = setup_chrome_options()
 
             driver_kwargs = build_chrome_driver_kwargs()
             driver = webdriver.Chrome(**driver_kwargs, options=chrome_options)
@@ -3199,7 +3378,7 @@ class SurveyGUI:
         self.root.geometry(f"+{x}+{y}")
 
     def _get_config_path(self) -> str:
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        return os.path.join(_get_runtime_directory(), "config.json")
 
     def _save_config(self):
         try:
@@ -3521,12 +3700,12 @@ class SurveyGUI:
     def show_about(self):
         """显示关于对话框"""
         about_text = (
-            f"fuck-wjx（问卷星速写）\n\n"
+            f"fuck-wjx（问卷星速填）\n\n"
             f"当前版本 v{__VERSION__}\n\n"
             f"GitHub项目地址: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n"
             f"有问题可在 GitHub 提交 issue 或发送电子邮件至 help@hungrym0.top\n\n"
             f"官方网站: https://www.hungrym0.top/fuck-wjx\n"
-            f"©2025 HUNGRY_M0 版权所有"
+            f"©2025 HUNGRY_M0 版权所有  MIT Lisence"
         )
         logging.info("[Action Log] Displaying About dialog")
         self._log_popup_info("关于", about_text)
@@ -3537,8 +3716,22 @@ class SurveyGUI:
 
 def main():
     setup_logging()
-    gui = SurveyGUI()
-    gui.run()
+    base_root = tk.Tk()
+    base_root.withdraw()
+    splash = LoadingSplash(base_root, title="加载中", message="正在准备问卷星速填...")
+    splash.show()
+    
+    splash.update_progress(20, "正在初始化环境...")
+    splash.update_progress(40, "正在加载界面...")
+    
+    gui = None
+    try:
+        gui = SurveyGUI(root=base_root, loading_splash=splash)
+        splash.update_progress(80, "主界面加载完成...")
+    finally:
+        splash.close()
+    if gui:
+        gui.run()
 
 
 if __name__ == "__main__":
