@@ -4,3 +4,4 @@ pyzbar
 Pillow
 requests
 packaging
+beautifulsoup4

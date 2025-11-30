@@ -7,29 +7,27 @@ import time
 import traceback
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 from copy import deepcopy
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 from threading import Thread
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional, Union, Dict, Any, Tuple
 
 import numpy
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from tkinter.scrolledtext import ScrolledText
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.remote.webdriver import WebDriver
 try:
-    from selenium.webdriver.chrome.service import Service as ChromeService
+    from selenium.webdriver.edge.options import Options as EdgeOptions
 except ImportError:
-    ChromeService = None
+    EdgeOptions = None
 from PIL import Image
 from pyzbar.pyzbar import decode as pyzbar_decode
 
@@ -43,6 +41,11 @@ try:
 except ImportError:
     version = None
 
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+
 # webdriver-manager 已弃用，现使用 Selenium 4.6+ 内置的 Selenium Manager
 # try:
 #     from webdriver_manager.chrome import ChromeDriverManager  # type: ignore[import]
@@ -51,7 +54,7 @@ except ImportError:
 ChromeDriverManager = None
 
 # 版本号
-__VERSION__ = "0.4.1"
+__VERSION__ = "0.4.2"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
@@ -59,6 +62,15 @@ LOG_DIR_NAME = "logs"
 CHROMEDRIVER_CACHE_DIR = "chromedriver_cache"
 PANED_MIN_LEFT_WIDTH = 360
 PANED_MIN_RIGHT_WIDTH = 280
+DEFAULT_HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Connection": "close",
+}
+_HTML_SPACE_RE = re.compile(r"\s+")
+BROWSER_PREFERENCE = ("edge", "chrome")
+HEADLESS_WINDOW_SIZE = "1920,1080"
 
 
 class LoadingSplash:
@@ -233,33 +245,88 @@ def _find_chrome_binary() -> Optional[str]:
     logging.debug("未找到本地 Chrome 浏览器，将使用 Selenium Manager 自动检测")
     return None
 
+def _find_edge_binary() -> Optional[str]:
+    """尝试定位 Microsoft Edge 可执行文件"""
+    possible_paths = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        os.path.expanduser(r"~\AppData\Local\Microsoft\Edge\Application\msedge.exe"),
+        os.path.join(_get_runtime_directory(), "msedge.exe"),
+        os.path.join(_get_runtime_directory(), "edge", "msedge.exe"),
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            logging.info(f"找到了 Edge 浏览器: {path}")
+            return path
+    logging.debug("未找到 Edge 浏览器，可交由 Selenium Manager 自动处理")
+    return None
 
-def build_chrome_driver_kwargs() -> Dict[str, Any]:
-    # 返回空字典，让 Selenium 4.6+ 的 Selenium Manager 自动处理
-    # Selenium Manager 会自动检测系统中的 Chrome 浏览器并下载匹配的 ChromeDriver
-    return {}
 
 
-def setup_chrome_options() -> webdriver.ChromeOptions:
-    """创建并配置 Chrome 选项"""
-    chrome_options = webdriver.ChromeOptions()
-    
-    # 尝试查找并设置 Chrome 二进制文件路径
-    chrome_binary = _find_chrome_binary()
-    if chrome_binary:
-        chrome_options.binary_location = chrome_binary
-    
-    # 反自动化检测
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option("useAutomationExtension", False)
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    
-    # 性能优化
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    
-    return chrome_options
+def _apply_common_browser_options(options, headless: bool = False) -> None:
+    try:
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option("useAutomationExtension", False)
+    except Exception:
+        pass
+    if hasattr(options, "add_argument"):
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        if headless:
+            options.add_argument("--headless=new")
+            options.add_argument(f"--window-size={HEADLESS_WINDOW_SIZE}")
+            options.add_argument("--disable-software-rasterizer")
+
+
+def setup_browser_options(browser: str, headless: bool = False):
+    browser_key = (browser or "").lower()
+    if browser_key not in ("chrome", "edge"):
+        raise ValueError(f"不支持的浏览器类型: {browser}")
+    if browser_key == "edge":
+        if EdgeOptions is None:
+            raise RuntimeError("当前环境未提供 EdgeOptions，请确认 selenium 版本 >= 4.6")
+        options = EdgeOptions()
+        binary = _find_edge_binary()
+    else:
+        options = webdriver.ChromeOptions()
+        binary = _find_chrome_binary()
+    if binary:
+        try:
+            options.binary_location = binary
+        except Exception:
+            pass
+    _apply_common_browser_options(options, headless=headless)
+    return options
+
+
+def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None) -> Tuple[WebDriver, str]:
+    candidates = prefer_browsers or list(BROWSER_PREFERENCE)
+    if not candidates:
+        candidates = list(BROWSER_PREFERENCE)
+    last_exc: Optional[Exception] = None
+    for browser in candidates:
+        try:
+            options = setup_browser_options(browser, headless=headless)
+        except Exception as exc:
+            logging.debug(f"构建 {browser} 选项失败: {exc}")
+            last_exc = exc
+            continue
+        try:
+            if browser == "edge":
+                driver = webdriver.Edge(options=options)  # type: ignore[arg-type]
+            else:
+                driver = webdriver.Chrome(options=options)  # type: ignore[arg-type]
+            logging.info(f"使用 {browser.capitalize()} WebDriver")
+            return driver, browser
+        except Exception as exc:
+            logging.warning(f"启动 {browser.capitalize()} WebDriver 失败: {exc}")
+            last_exc = exc
+    raise RuntimeError(f"无法启动任何浏览器驱动: {last_exc}")
+
+
+
 
 
 class LogBufferHandler(logging.Handler):
@@ -711,6 +778,157 @@ def decode_qrcode(image_source: Union[str, Image.Image]) -> Optional[str]:
         return None
 
 
+def _normalize_html_text(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return _HTML_SPACE_RE.sub(" ", value).strip()
+
+
+def _extract_question_number_from_div(question_div) -> Optional[int]:
+    topic_attr = question_div.get("topic")
+    if topic_attr and topic_attr.isdigit():
+        return int(topic_attr)
+    id_attr = question_div.get("id") or ""
+    match = re.search(r"div(\d+)", id_attr)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _cleanup_question_title(raw_title: str) -> str:
+    title = _normalize_html_text(raw_title)
+    if not title:
+        return ""
+    title = re.sub(r"^\*?\s*\d+\.\s*", "", title)
+    title = title.replace("【单选题】", "").replace("【多选题】", "")
+    return title.strip()
+
+
+def _collect_choice_option_texts(question_div) -> List[str]:
+    selectors = [".label", "li span", "li"]
+    texts: List[str] = []
+    seen = set()
+    for selector in selectors:
+        elements = question_div.select(selector)
+        for element in elements:
+            text = _normalize_html_text(element.get_text(" ", strip=True))
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            texts.append(text)
+        if texts:
+            break
+    return texts
+
+
+def _collect_select_option_texts(question_div, soup, question_number: int) -> List[str]:
+    select = question_div.find("select")
+    if not select and soup:
+        select = soup.find("select", id=f"q{question_number}")
+    if not select:
+        return []
+    options: List[str] = []
+    option_elements = select.find_all("option")
+    for idx, option in enumerate(option_elements):
+        value = (option.get("value") or "").strip()
+        text = _normalize_html_text(option.get_text(" ", strip=True))
+        if idx == 0 and (value == "" or value == "0"):
+            continue
+        if not text:
+            continue
+        options.append(text)
+    return options
+
+
+def _collect_matrix_option_texts(soup, question_number: int) -> Tuple[int, List[str]]:
+    option_texts: List[str] = []
+    matrix_rows = 0
+    table = soup.find(id=f"divRefTab{question_number}") if soup else None
+    if table:
+        for row in table.find_all("tr"):
+            row_index = str(row.get("rowindex") or "").strip()
+            if row_index and str(row_index).isdigit():
+                matrix_rows += 1
+    header_row = soup.find(id=f"drv{question_number}_1") if soup else None
+    if header_row:
+        cells = header_row.find_all("td")
+        if len(cells) > 1:
+            option_texts = [_normalize_html_text(td.get_text(" ", strip=True)) for td in cells[1:]]
+            option_texts = [text for text in option_texts if text]
+    if not option_texts and table:
+        header_cells = table.find_all("th")
+        if len(header_cells) > 1:
+            option_texts = [_normalize_html_text(th.get_text(" ", strip=True)) for th in header_cells[1:]]
+            option_texts = [text for text in option_texts if text]
+    return matrix_rows, option_texts
+
+
+def _extract_question_title(question_div, fallback_number: int) -> str:
+    title_element = question_div.find(class_="topichtml")
+    if title_element:
+        title_text = _cleanup_question_title(title_element.get_text(" ", strip=True))
+        if title_text:
+            return title_text
+    label_element = question_div.find(class_="field-label")
+    if label_element:
+        title_text = _cleanup_question_title(label_element.get_text(" ", strip=True))
+        if title_text:
+            return title_text
+    return f"第{fallback_number}题"
+
+
+def _extract_question_metadata_from_html(soup, question_div, question_number: int, type_code: str):
+    option_texts: List[str] = []
+    option_count = 0
+    matrix_rows = 0
+    if type_code in {"3", "4", "5", "11"}:
+        option_texts = _collect_choice_option_texts(question_div)
+        option_count = len(option_texts)
+    elif type_code == "7":
+        option_texts = _collect_select_option_texts(question_div, soup, question_number)
+        option_count = len(option_texts)
+    elif type_code == "6":
+        matrix_rows, option_texts = _collect_matrix_option_texts(soup, question_number)
+        option_count = len(option_texts)
+    return option_texts, option_count, matrix_rows
+
+
+def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
+    if not BeautifulSoup:
+        raise RuntimeError("BeautifulSoup is required for HTML parsing")
+    soup = BeautifulSoup(html, "html.parser")
+    container = soup.find("div", id="divQuestion")
+    if not container:
+        return []
+    fieldsets = container.find_all("fieldset")
+    if not fieldsets:
+        fieldsets = [container]
+    questions_info: List[Dict[str, Any]] = []
+    for page_index, fieldset in enumerate(fieldsets, 1):
+        question_divs = fieldset.find_all("div", attrs={"topic": True}, recursive=False)
+        if not question_divs:
+            question_divs = fieldset.find_all("div", attrs={"topic": True})
+        for question_div in question_divs:
+            question_number = _extract_question_number_from_div(question_div)
+            if question_number is None:
+                continue
+            type_code = str(question_div.get("type") or "").strip() or "0"
+            title_text = _extract_question_title(question_div, question_number)
+            option_texts, option_count, matrix_rows = _extract_question_metadata_from_html(
+                soup, question_div, question_number, type_code
+            )
+            questions_info.append({
+                "num": question_number,
+                "title": title_text,
+                "type_code": type_code,
+                "options": option_count,
+                "rows": matrix_rows,
+                "page": page_index,
+                "option_texts": option_texts,
+            })
+    return questions_info
+
+
 def detect(driver: WebDriver) -> List[int]:
     question_counts_per_page: List[int] = []
     total_pages = len(driver.find_elements(By.XPATH, '//*[@id="divQuestion"]/fieldset'))
@@ -971,27 +1189,24 @@ def submit(driver: WebDriver):
 
 
 def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=None):
-    chrome_options = setup_chrome_options()
-    
     global cur_num, cur_fail
+    preferred_browsers = list(BROWSER_PREFERENCE)
     while True:
-        # 使用锁检查并响应停止/完成条件，避免竞态导致超额提交
+        # 使用锁并响应停止/完成等动态地触发提交
         with lock:
             if stop_signal.is_set() or (target_num > 0 and cur_num >= target_num):
                 break
         driver = None
         try:
-            driver_kwargs = build_chrome_driver_kwargs()
-            driver = webdriver.Chrome(**driver_kwargs, options=chrome_options)
+            driver, active_browser = create_selenium_driver(headless=False, prefer_browsers=list(preferred_browsers) if preferred_browsers else None)
+            preferred_browsers = [active_browser] + [b for b in BROWSER_PREFERENCE if b != active_browser]
             if gui_instance and hasattr(gui_instance, 'active_drivers'):
                 gui_instance.active_drivers.append(driver)
             driver.set_window_size(550, 650)
             driver.set_window_position(x=window_x_pos, y=window_y_pos)
             driver.execute_cdp_cmd(
                 "Page.addScriptToEvaluateOnNewDocument",
-                {
-                    "source": 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-                },
+                {"source": 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'},
             )
             driver.get(url)
             initial_url = driver.current_url
@@ -1000,26 +1215,23 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             final_url = driver.current_url
             if initial_url != final_url:
                 with lock:
-                    # 再次检查，避免并发导致超额
                     if target_num <= 0 or cur_num < target_num:
                         cur_num += 1
                         print(
                             f"已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))} "
                         )
-                        # 达到目标后通知其他线程停止
                         if target_num > 0 and cur_num >= target_num:
                             stop_signal.set()
                     else:
-                        # 已经达到或超过目标，设置停止并退出本线程
                         stop_signal.set()
                         break
-        except:
+        except Exception:
             traceback.print_exc()
             with lock:
                 cur_fail += 1
-                print(f"已失败{cur_fail}次,失败超过{int(fail_threshold)}次将强制停止")
+                print(f"已失败{cur_fail}次, 失败次数达到{int(fail_threshold)}次将强制停止")
             if cur_fail >= fail_threshold:
-                logging.critical("失败次数过多，程序将强制停止，请检查代码是否正确")
+                logging.critical("失败次数过多，强制停止，请检查配置是否正确")
                 stop_signal.set()
                 break
         finally:
@@ -1028,8 +1240,11 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     if gui_instance and hasattr(gui_instance, 'active_drivers') and driver in gui_instance.active_drivers:
                         gui_instance.active_drivers.remove(driver)
                     driver.quit()
-                except:
+                except Exception:
                     pass
+
+
+
 
 
 TYPE_OPTIONS = [
@@ -2398,21 +2613,32 @@ class SurveyGUI:
                     self.root.after(0, lambda s=status_text, sl=status_label: sl.config(text=s) if sl else None)
             
             # 更新状态
-            update_progress(5, "初始化浏览器...")
+            update_progress(5, "开始准备解析...")
             
-            chrome_options = setup_chrome_options()
-            chrome_options.add_argument("--headless")
+            questions_info = self._try_parse_survey_via_http(survey_url, update_progress)
+            if questions_info is not None:
+                print(f"已成功通过 HTTP 解析，共 {len(questions_info)} 题")
+                update_progress(100, "解析完成，正在显示结果...")
+                time.sleep(0.5)
+                if progress_win:
+                    self.root.after(0, lambda: progress_win.destroy())
+                self._cache_parsed_survey(questions_info, survey_url)
+                self.root.after(0, lambda: self._show_preview_window(questions_info))
+                self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
+                return
+            
+            update_progress(30, "HTTP 解析失败，准备启动浏览器...")
             
             print(f"正在加载问卷: {survey_url}")
-            driver_kwargs = build_chrome_driver_kwargs()
-            driver = webdriver.Chrome(**driver_kwargs, options=chrome_options)
+            driver, browser_name = create_selenium_driver(headless=True)
+            logging.info(f"Fallback 到 {browser_name.capitalize()} WebDriver 解析问卷")
             
-            update_progress(15, "加载问卷页面...")
+            update_progress(45, "正在打开问卷页面...")
             
             driver.get(survey_url)
             time.sleep(3)
             
-            update_progress(30, "检测题目结构...")
+            update_progress(60, "正在解析题目结构...")
             
             print("开始解析题目...")
             questions_info = []
@@ -2541,12 +2767,31 @@ class SurveyGUI:
             
         except Exception as e:
             error_str = str(e)
-            if "cannot find Chrome binary" in error_str or "chrome not found" in error_str.lower():
-                error_msg = "找不到 Chrome 浏览器\n\n请安装 Google Chrome 浏览器后重试"
-            elif "chromedriver" in error_str.lower() or "webdriver" in error_str.lower():
-                error_msg = f"浏览器驱动初始化失败: {error_str}\n\n请检查:\n1. Chrome 浏览器是否安装正确\n2. 网络连接是否正常（首次运行需要自动下载驱动）\n3. 尝试重启程序"
+            error_lower = error_str.lower()
+            if "chrome" in error_lower or "edge" in error_lower:
+                if "binary" in error_lower or "not found" in error_lower or "browser" in error_lower:
+                    error_msg = (
+                        "未找到可用浏览器 (Edge/Chrome)\n\n"
+                        "请确认系统已安装 Microsoft Edge 或 Google Chrome"
+                    )
+                elif "webdriver" in error_lower or "driver" in error_lower:
+                    error_msg = (
+                        f"浏览器驱动初始化失败: {error_str}\n\n"
+                        "建议:\n"
+                        "1. Edge/Chrome 是否已安装并可独立启动\n"
+                        "2. Selenium 版本需 >= 4.6 以启用 Selenium Manager\n"
+                        "3. 检查安全软件是否拦截 WebDriver"
+                    )
+                else:
+                    error_msg = f"浏览器启动失败: {error_str}\n\n请检查 Edge/Chrome 是否能够手动打开问卷"
             else:
-                error_msg = f"解析问卷失败: {error_str}\n\n请检查:\n1. 问卷链接是否正确\n2. 网络连接是否正常\n3. Chrome浏览器是否安装正常"
+                error_msg = (
+                    f"解析问卷失败: {error_str}\n\n"
+                    "请检查:\n"
+                    "1. 问卷链接是否正确\n"
+                    "2. 网络连接是否正常\n"
+                    "3. 问卷是否需要额外登录"
+                )
             print(f"错误: {error_msg}")
             clean_error_msg = error_msg.replace("\n", " ")
             logging.error(f"[Action Log] Preview parsing failed: {clean_error_msg}")
@@ -2562,6 +2807,31 @@ class SurveyGUI:
                 except:
                     pass
 
+    def _try_parse_survey_via_http(self, survey_url: str, progress_callback=None) -> Optional[List[Dict[str, Any]]]:
+        if not requests or not BeautifulSoup:
+            logging.debug("HTTP 解析依赖缺失，跳过无浏览器解析")
+            return None
+        try:
+            if progress_callback:
+                progress_callback(10, "正在获取问卷页面...")
+            headers = dict(DEFAULT_HTTP_HEADERS)
+            headers["Referer"] = survey_url
+            response = requests.get(survey_url, headers=headers, timeout=15)
+            response.raise_for_status()
+            html = response.text
+            if progress_callback:
+                progress_callback(25, "正在解析题目结构...")
+            questions_info = parse_survey_questions_from_html(html)
+            if not questions_info:
+                logging.info("HTTP 解析未能找到任何题目，将回退到浏览器模式")
+                return None
+            for question in questions_info:
+                question["type"] = self._get_question_type_name(question.get("type_code"))
+            return questions_info
+        except Exception as exc:
+            logging.debug(f"HTTP 解析问卷失败: {exc}")
+            return None
+
     def _cache_parsed_survey(self, questions_info: List[Dict[str, Any]], url: str):
         """缓存解析结果以便预览和配置向导复用"""
         self._last_parsed_url = url
@@ -2572,15 +2842,16 @@ class SurveyGUI:
         try:
             configure_probabilities(self.question_entries)
         except ValueError as exc:
-            self.root.after(0, lambda: self._log_popup_error("预览失败", str(exc)))
-            self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
+            error_text = str(exc)
+            self.root.after(0, lambda msg=error_text: self._log_popup_error("预览失败", msg))
+            self.root.after(
+                0,
+                lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()),
+            )
             return
 
         try:
-            chrome_options = setup_chrome_options()
-
-            driver_kwargs = build_chrome_driver_kwargs()
-            driver = webdriver.Chrome(**driver_kwargs, options=chrome_options)
+            driver, browser_name = create_selenium_driver(headless=False)
             driver.maximize_window()
             driver.get(url)
 
@@ -3660,7 +3931,7 @@ class SurveyGUI:
                 )
                 
                 if downloaded_file:
-                    status_label.config(text=f"新版本下载成功！合并文件中...")
+                    status_label.config(text="新版本下载成功！合并文件中...")
                     progress_label.config(text="100%")
                     progress['value'] = 100
                     progress_win.update()
