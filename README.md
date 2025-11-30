@@ -6,7 +6,7 @@
 
 **注意：此项目仅供学习与测试目的使用，请确保对目标问卷有自动提交的授权，避免滥用或违反他人服务条款，严禁污染他人的问卷数据**
 
-<img width="1000" height="842" alt="gui" src="https://github.com/user-attachments/assets/45ba2ad4-683e-43c6-af0b-46736be3120c" />
+<img width="600" height="505" alt="gui" src="https://github.com/user-attachments/assets/45ba2ad4-683e-43c6-af0b-46736be3120c" />
 
 ---
 
@@ -88,6 +88,7 @@ python fuck-wjx.py
 - 增加对更多题型/页面结构的兼容
 - 改进并发与错误处理
 - 加速提交速度
+
 
 
 
