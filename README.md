@@ -27,6 +27,12 @@
 
 ---
 
+一个神秘的 QQ 群聊，有问题也可以直接在群内询问~
+
+<img width="256" height="456" alt="qrcode_1764588750716" src="https://github.com/user-attachments/assets/7f25caaa-b157-4185-acae-78882f56871d" />
+
+---
+
 **运行环境**
 
 - Windows 10/11、 Linux 均可运行
@@ -78,12 +84,6 @@ python fuck-wjx.py
 
 ---
 
-一个神秘的 QQ 群聊，有问题也可以直接在群内询问~
-
-<img width="256" height="456" alt="qrcode_1764588750716" src="https://github.com/user-attachments/assets/7f25caaa-b157-4185-acae-78882f56871d" />
-
----
-
 **安全与合规**
 
 ⚠请仅在得到授权或用于测试目的时运行此工具。自动提交问卷可能违反服务条款或法律法规，请自行承担风险。严禁在未经授权的情况下污染他人的问卷数据！
@@ -97,6 +97,7 @@ python fuck-wjx.py
 - 增加对更多题型/页面结构的兼容
 - 改进并发与错误处理
 - 加速提交速度
+
 
 
 
