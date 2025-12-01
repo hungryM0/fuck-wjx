@@ -14,7 +14,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Thread
-from typing import List, Optional, Union, Dict, Any, Tuple, Callable
+from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set
 from urllib.parse import urlparse
 import webbrowser
 
@@ -51,7 +51,7 @@ except ImportError:
     BeautifulSoup = None
 
 # 版本号
-__VERSION__ = "0.4.3"
+__VERSION__ = "0.4.4"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
@@ -71,6 +71,57 @@ SUBMIT_INITIAL_DELAY = 0.35
 SUBMIT_CLICK_SETTLE_DELAY = 0.25
 POST_SUBMIT_URL_MAX_WAIT = 0.5
 POST_SUBMIT_URL_POLL_INTERVAL = 0.1
+
+_MULTI_LIMIT_ATTRIBUTE_NAMES = (
+    "max",
+    "maxvalue",
+    "maxValue",
+    "maxcount",
+    "maxCount",
+    "maxchoice",
+    "maxChoice",
+    "maxselect",
+    "maxSelect",
+    "selectmax",
+    "selectMax",
+    "maxsel",
+    "maxSel",
+    "maxnum",
+    "maxNum",
+    "maxlimit",
+    "maxLimit",
+    "data-max",
+    "data-maxvalue",
+    "data-maxcount",
+    "data-maxchoice",
+    "data-maxselect",
+    "data-selectmax",
+)
+_MULTI_LIMIT_VALUE_KEYS = (
+    "max",
+    "maxvalue",
+    "maxcount",
+    "maxchoice",
+    "maxselect",
+    "selectmax",
+    "maxnum",
+    "maxlimit",
+)
+_MULTI_LIMIT_VALUE_KEYSET = {name.lower() for name in _MULTI_LIMIT_VALUE_KEYS}
+_SELECTION_KEYWORDS_CN = ("选", "選", "选择", "多选", "复选")
+_SELECTION_KEYWORDS_EN = ("option", "options", "choice", "choices", "select", "choose")
+_CHINESE_MULTI_LIMIT_PATTERNS = (
+    re.compile(r"最多(?:只能|可|可以)?(?:选|选择)?[^\d]{0,3}(\d+)", re.IGNORECASE),
+    re.compile(r"(?:至多|不超过|不超過|限选)[^\d]{0,3}(\d+)", re.IGNORECASE),
+    re.compile(r"(?:选|选择)[^\d]{0,3}(\d+)[^\d]{0,3}(?:项以内|项以下|项之内)?", re.IGNORECASE),
+)
+_ENGLISH_MULTI_LIMIT_PATTERNS = (
+    re.compile(r"(?:select|choose)\s+(?:up to|no more than|at most|a maximum of)\s*(\d+)", re.IGNORECASE),
+    re.compile(r"(?:up to|no more than|at most|maximum of)\s*(\d+)\s*(?:options?|choices?|items)", re.IGNORECASE),
+    re.compile(r"(?:maximum|max)\s*(?:of\s*)?(\d+)\s*(?:options?|choices?)", re.IGNORECASE),
+)
+_DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
+_REPORTED_MULTI_LIMITS: Set[Tuple[str, int]] = set()
 
 
 class AliyunCaptchaBypassError(RuntimeError):
@@ -1072,7 +1123,298 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
     return questions_info
 
 
+def _extract_text_from_element(element) -> str:
+    try:
+        text = element.text or ""
+    except Exception:
+        text = ""
+    text = text.strip()
+    if text:
+        return text
+    try:
+        text = (element.get_attribute("textContent") or "").strip()
+    except Exception:
+        text = ""
+    return text
+
+
+def _safe_positive_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        int_value = int(value)
+        return int_value if int_value > 0 else None
+    try:
+        text = str(value).strip()
+    except Exception:
+        return None
+    if not text:
+        return None
+    if text.isdigit():
+        int_value = int(text)
+        return int_value if int_value > 0 else None
+    match = re.search(r"(\d+)", text)
+    if match:
+        int_value = int(match.group(1))
+        return int_value if int_value > 0 else None
+    return None
+
+
+def _extract_limit_from_json_obj(obj: Any) -> Optional[int]:
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            normalized_key = str(key).lower()
+            if normalized_key in _MULTI_LIMIT_VALUE_KEYSET:
+                limit = _safe_positive_int(value)
+                if limit:
+                    return limit
+            nested = _extract_limit_from_json_obj(value)
+            if nested:
+                return nested
+    elif isinstance(obj, list):
+        for item in obj:
+            nested = _extract_limit_from_json_obj(item)
+            if nested:
+                return nested
+    return None
+
+
+def _extract_limit_from_possible_json(text: Optional[str]) -> Optional[int]:
+    if not text:
+        return None
+    normalized = text.strip()
+    if not normalized:
+        return None
+    candidates = [normalized]
+    if normalized.startswith("{") and "'" in normalized and '"' not in normalized:
+        candidates.append(normalized.replace("'", '"'))
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            continue
+        limit = _extract_limit_from_json_obj(parsed)
+        if limit:
+            return limit
+    for key in _MULTI_LIMIT_VALUE_KEYSET:
+        pattern = re.compile(rf"{re.escape(key)}\s*[:=]\s*(\d+)", re.IGNORECASE)
+        match = pattern.search(normalized)
+        if match:
+            limit = _safe_positive_int(match.group(1))
+            if limit:
+                return limit
+    return None
+
+
+def _extract_limit_from_attributes(element) -> Optional[int]:
+    for attr in _MULTI_LIMIT_ATTRIBUTE_NAMES:
+        try:
+            raw_value = element.get_attribute(attr)
+        except Exception:
+            continue
+        limit = _safe_positive_int(raw_value)
+        if limit:
+            return limit
+    return None
+
+
+def _extract_multi_limit_from_text(text: Optional[str]) -> Optional[int]:
+    if not text:
+        return None
+    normalized = text.strip()
+    if not normalized:
+        return None
+    normalized_lower = normalized.lower()
+    contains_cn_keyword = any(keyword in normalized for keyword in _SELECTION_KEYWORDS_CN)
+    contains_en_keyword = any(keyword in normalized_lower for keyword in _SELECTION_KEYWORDS_EN)
+    if contains_cn_keyword:
+        for pattern in _CHINESE_MULTI_LIMIT_PATTERNS:
+            match = pattern.search(normalized)
+            if match:
+                limit = _safe_positive_int(match.group(1))
+                if limit:
+                    return limit
+    if contains_en_keyword:
+        for pattern in _ENGLISH_MULTI_LIMIT_PATTERNS:
+            match = pattern.search(normalized)
+            if match:
+                limit = _safe_positive_int(match.group(1))
+                if limit:
+                    return limit
+    return None
+
+
+def _get_driver_session_key(driver: WebDriver) -> str:
+    session_id = getattr(driver, "session_id", None)
+    if session_id:
+        return str(session_id)
+    return f"id-{id(driver)}"
+
+
+def detect_multiple_choice_limit(driver: WebDriver, question_number: int) -> Optional[int]:
+    cache_key = (_get_driver_session_key(driver), question_number)
+    if cache_key in _DETECTED_MULTI_LIMITS:
+        return _DETECTED_MULTI_LIMITS[cache_key]
+    limit: Optional[int] = None
+    try:
+        container = driver.find_element(By.CSS_SELECTOR, f"#div{question_number}")
+    except NoSuchElementException:
+        container = None
+    if container is not None:
+        limit = _extract_limit_from_attributes(container)
+        if limit is None:
+            for attr_name in ("data", "data-setting", "data-validate"):
+                limit = _extract_limit_from_possible_json(container.get_attribute(attr_name))
+                if limit:
+                    break
+        if limit is None:
+            fragments: List[str] = []
+            for selector in (".qtypetip", ".topichtml", ".field-label"):
+                try:
+                    fragments.append(container.find_element(By.CSS_SELECTOR, selector).text)
+                except Exception:
+                    continue
+            fragments.append(container.text)
+            for fragment in fragments:
+                limit = _extract_multi_limit_from_text(fragment)
+                if limit:
+                    break
+        if limit is None:
+            html = container.get_attribute("outerHTML")
+            limit = _extract_limit_from_possible_json(html)
+            if limit is None:
+                limit = _extract_multi_limit_from_text(html)
+    _DETECTED_MULTI_LIMITS[cache_key] = limit
+    return limit
+
+
+def _log_multi_limit_once(driver: WebDriver, question_number: int, limit: Optional[int]) -> None:
+    if not limit:
+        return
+    cache_key = (_get_driver_session_key(driver), question_number)
+    if cache_key in _REPORTED_MULTI_LIMITS:
+        return
+    print(f"第{question_number}题检测到最多可选 {limit} 项，自动限制选择数量。")
+    _REPORTED_MULTI_LIMITS.add(cache_key)
+
+
+def try_click_start_answer_button(driver: WebDriver, timeout: float = 1.0) -> bool:
+    """
+    快速检测开屏“开始作答”按钮，若存在立即点击；否则立即继续，无需额外等待。
+    """
+    poll_interval = 0.2
+    total_window = max(0.0, timeout)
+    max_checks = max(1, int(math.ceil(total_window / max(poll_interval, 0.05)))) if total_window else 1
+    locator_candidates = [
+        (By.CSS_SELECTOR, "div.slideChunkWord"),
+        (By.XPATH, "//div[contains(@class,'slideChunkWord') and contains(normalize-space(),'开始作答')]"),
+        (By.XPATH, "//*[contains(text(),'开始作答')]"),
+    ]
+    already_reported = False
+    for attempt in range(max_checks):
+        for by, value in locator_candidates:
+            try:
+                elements = driver.find_elements(by, value)
+            except Exception:
+                continue
+            for element in elements:
+                try:
+                    displayed = element.is_displayed()
+                except Exception:
+                    continue
+                if not displayed:
+                    continue
+                text = _extract_text_from_element(element)
+                if "开始作答" not in text:
+                    continue
+                if not already_reported:
+                    print("检测到“开始作答”按钮，尝试自动点击...")
+                    already_reported = True
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center', inline:'center'});", element)
+                except Exception:
+                    pass
+                clicked = False
+                try:
+                    element.click()
+                    clicked = True
+                except Exception:
+                    try:
+                        driver.execute_script("arguments[0].click();", element)
+                        clicked = True
+                    except Exception:
+                        try:
+                            ActionChains(driver).move_to_element(element).click().perform()
+                            clicked = True
+                        except Exception:
+                            clicked = False
+                if clicked:
+                    time.sleep(0.3)
+                    return True
+        if attempt < max_checks - 1:
+            time.sleep(poll_interval)
+    return False
+
+
+def dismiss_resume_dialog_if_present(driver: WebDriver, timeout: float = 1.0) -> bool:
+    """
+    快速检查“继续上次作答”弹窗，如有立即点击“取消”；否则不额外等待。
+    """
+    poll_interval = 0.2
+    total_window = max(0.0, timeout)
+    max_checks = max(1, int(math.ceil(total_window / max(poll_interval, 0.05)))) if total_window else 1
+    locator_candidates = [
+        (By.CSS_SELECTOR, "a.layui-layer-btn1"),
+        (By.XPATH, "//a[contains(@class,'layui-layer-btn1') and contains(normalize-space(),'取消')]"),
+        (By.XPATH, "//div[contains(@class,'layui-layer-btn')]//a[contains(text(),'取消')]"),
+    ]
+    clicked_once = False
+    for attempt in range(max_checks):
+        for by, value in locator_candidates:
+            try:
+                buttons = driver.find_elements(by, value)
+            except Exception:
+                continue
+            for button in buttons:
+                try:
+                    displayed = button.is_displayed()
+                except Exception:
+                    continue
+                if not displayed:
+                    continue
+                text = _extract_text_from_element(button)
+                if text and "取消" not in text:
+                    continue
+                if not clicked_once:
+                    print("检测到“继续上次作答”弹窗，自动点击取消以开始新作答...")
+                    clicked_once = True
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
+                except Exception:
+                    pass
+                try:
+                    button.click()
+                    return True
+                except Exception:
+                    try:
+                        driver.execute_script("arguments[0].click();", button)
+                        return True
+                    except Exception:
+                        try:
+                            ActionChains(driver).move_to_element(button).click().perform()
+                            return True
+                        except Exception:
+                            continue
+        if attempt < max_checks - 1:
+            time.sleep(poll_interval)
+    return False
+
+
 def detect(driver: WebDriver) -> List[int]:
+    dismiss_resume_dialog_if_present(driver)
+    try_click_start_answer_button(driver)
     question_counts_per_page: List[int] = []
     total_pages = len(driver.find_elements(By.XPATH, '//*[@id="divQuestion"]/fieldset'))
     for page_index in range(1, total_pages + 1):
@@ -1136,10 +1478,16 @@ def multiple(driver: WebDriver, current, index):
     option_elements = driver.find_elements(By.XPATH, options_xpath)
     if not option_elements:
         return
+    max_select_limit = detect_multiple_choice_limit(driver, current)
+    if max_select_limit is not None:
+        effective_limit = max(1, min(max_select_limit, len(option_elements)))
+        _log_multi_limit_once(driver, current, max_select_limit)
+    else:
+        effective_limit = len(option_elements)
     selection_probabilities = multiple_prob[index] if index < len(multiple_prob) else [50.0] * len(option_elements)
-    
+
     if selection_probabilities == -1 or (isinstance(selection_probabilities, list) and len(selection_probabilities) == 1 and selection_probabilities[0] == -1):
-        num_to_select = random.randint(1, max(1, len(option_elements)))
+        num_to_select = random.randint(1, max(1, effective_limit))
         selected_indices = random.sample(range(len(option_elements)), num_to_select)
         for option_idx in selected_indices:
             selector = f"#div{current} > div.ui-controlgroup > div:nth-child({option_idx + 1})"
@@ -1147,16 +1495,21 @@ def multiple(driver: WebDriver, current, index):
         return
     
     assert len(option_elements) == len(selection_probabilities), f"第{current}题概率值和选项值不一致"
-    selection_mask = []
+    selection_mask: List[int] = []
     while sum(selection_mask) == 0:
         selection_mask = [
             numpy.random.choice(a=numpy.arange(0, 2), p=[1 - (prob / 100), prob / 100])
             for prob in selection_probabilities
         ]
-    for option_idx, is_selected in enumerate(selection_mask):
-        if is_selected == 1:
-            selector = f"#div{current} > div.ui-controlgroup > div:nth-child({option_idx + 1})"
-            driver.find_element(By.CSS_SELECTOR, selector).click()
+    selected_indices = [idx for idx, selected in enumerate(selection_mask) if selected == 1]
+    if max_select_limit is not None and len(selected_indices) > effective_limit:
+        random.shuffle(selected_indices)
+        selected_indices = selected_indices[:effective_limit]
+    if not selected_indices:
+        selected_indices = [random.randrange(len(option_elements))]
+    for option_idx in selected_indices:
+        selector = f"#div{current} > div.ui-controlgroup > div:nth-child({option_idx + 1})"
+        driver.find_element(By.CSS_SELECTOR, selector).click()
 
 
 def matrix(driver: WebDriver, current, index):
@@ -2101,6 +2454,32 @@ class SurveyGUI:
                 self.main_paned.sashpos(0, desired)
             except Exception:
                 pass
+
+    def _restore_saved_paned_position(self, target_position: int, attempts: int = 5, delay_ms: int = 120) -> None:
+        """
+        多次尝试恢复保存的分隔线位置，避免布局未稳定时被默认值覆盖。
+        """
+
+        def _attempt(remaining: int):
+            if remaining <= 0:
+                return
+            try:
+                width = self.main_paned.winfo_width()
+                if width <= 0:
+                    raise RuntimeError("paned window width is zero")
+                max_allowed = max(PANED_MIN_LEFT_WIDTH, width - PANED_MIN_RIGHT_WIDTH)
+                max_allowed = min(max_allowed, width - 1)
+                max_allowed = max(0, max_allowed)
+                adjusted = min(max_allowed, max(PANED_MIN_LEFT_WIDTH, target_position))
+                self.main_paned.sashpos(0, adjusted)
+                self._paned_position_restored = True
+            except Exception:
+                pass
+            finally:
+                if remaining - 1 > 0:
+                    self.root.after(delay_ms, lambda: _attempt(remaining - 1))
+
+        self.root.after(0, lambda: _attempt(max(1, attempts)))
 
 
     def add_question_dialog(self):
@@ -4079,8 +4458,10 @@ class SurveyGUI:
             result = tk.IntVar(value=None)
             
             def save_config():
-                self._save_config()
-                logging.info("[Action Log] Saved configuration before exit")
+                saved = self._save_config_as_dialog(show_popup=False)
+                if not saved:
+                    return
+                logging.info("[Action Log] Saved configuration via dialog before exit")
                 result.set(1)
                 dialog.destroy()
                 if self._log_refresh_job:
@@ -4274,13 +4655,12 @@ class SurveyGUI:
 
         paned_position = config.get("paned_position")
         if paned_position is not None:
-            def restore_pos():
-                try:
-                    self.main_paned.sashpos(0, paned_position)
-                    self._paned_position_restored = True
-                except Exception:
-                    pass
-            self.root.after(100, restore_pos)
+            try:
+                desired_position = int(paned_position)
+            except (TypeError, ValueError):
+                desired_position = None
+            if desired_position is not None:
+                self._restore_saved_paned_position(desired_position)
 
         questions_data = config.get("questions") or []
         self.question_entries.clear()
@@ -4321,7 +4701,7 @@ class SurveyGUI:
         except Exception as e:
             print(f"加载配置失败: {e}")
 
-    def _save_config_as_dialog(self):
+    def _save_config_as_dialog(self, *, show_popup: bool = True) -> bool:
         """通过对话框保存配置到用户自定义文件。"""
         configs_dir = self._get_configs_directory()
         default_name = f"wjx_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -4334,13 +4714,16 @@ class SurveyGUI:
             filetypes=(("JSON 配置文件", "*.json"), ("所有文件", "*.*")),
         )
         if not file_path:
-            return
+            return False
         try:
             self._write_config_file(file_path)
-            self._log_popup_info("保存配置", f"配置已保存到:\n{file_path}")
+            if show_popup:
+                self._log_popup_info("保存配置", f"配置已保存到:\n{file_path}")
+            return True
         except Exception as exc:
             logging.error(f"保存配置失败: {exc}")
             self._log_popup_error("保存配置失败", f"无法保存配置:\n{exc}")
+            return False
 
     def _load_config_from_dialog(self):
         """通过对话框加载用户选择的配置文件。"""

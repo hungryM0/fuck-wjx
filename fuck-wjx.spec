@@ -26,6 +26,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
+    icon='icon.ico',
     name='fuck-wjx',
     debug=False,
     bootloader_ignore_signals=False,
