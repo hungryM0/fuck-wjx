@@ -14,7 +14,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Thread
-from typing import List, Optional, Union, Dict, Any, Tuple
+from typing import List, Optional, Union, Dict, Any, Tuple, Callable
+from urllib.parse import urlparse
+import webbrowser
 
 import numpy
 import tkinter as tk
@@ -22,8 +24,10 @@ from tkinter import ttk, messagebox, filedialog
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 try:
     from selenium.webdriver.edge.options import Options as EdgeOptions
 except ImportError:
@@ -46,20 +50,12 @@ try:
 except ImportError:
     BeautifulSoup = None
 
-# webdriver-manager 已弃用，现使用 Selenium 4.6+ 内置的 Selenium Manager
-# try:
-#     from webdriver_manager.chrome import ChromeDriverManager  # type: ignore[import]
-# except ImportError:
-#     ChromeDriverManager = None
-ChromeDriverManager = None
-
 # 版本号
-__VERSION__ = "0.4.2"
+__VERSION__ = "0.4.3"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
 LOG_DIR_NAME = "logs"
-CHROMEDRIVER_CACHE_DIR = "chromedriver_cache"
 PANED_MIN_LEFT_WIDTH = 360
 PANED_MIN_RIGHT_WIDTH = 280
 DEFAULT_HTTP_HEADERS = {
@@ -71,6 +67,14 @@ DEFAULT_HTTP_HEADERS = {
 _HTML_SPACE_RE = re.compile(r"\s+")
 BROWSER_PREFERENCE = ("edge", "chrome")
 HEADLESS_WINDOW_SIZE = "1920,1080"
+SUBMIT_INITIAL_DELAY = 0.35
+SUBMIT_CLICK_SETTLE_DELAY = 0.25
+POST_SUBMIT_URL_MAX_WAIT = 0.5
+POST_SUBMIT_URL_POLL_INTERVAL = 0.1
+
+
+class AliyunCaptchaBypassError(RuntimeError):
+    """在阿里云智能验证无法自动通过时抛出。"""
 
 
 class LoadingSplash:
@@ -138,8 +142,6 @@ PANED_MIN_RIGHT_WIDTH = 280
 ORIGINAL_STDOUT = sys.stdout
 ORIGINAL_STDERR = sys.stderr
 ORIGINAL_EXCEPTHOOK = sys.excepthook
-_chromedriver_lock = threading.Lock()
-_cached_chromedriver_path: Optional[str] = None
 
 
 class StreamToLogger:
@@ -180,43 +182,6 @@ def _get_runtime_directory() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
-
-
-def _get_chromedriver_cache_dir() -> str:
-    cache_dir = os.path.join(_get_runtime_directory(), CHROMEDRIVER_CACHE_DIR)
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
-def _ensure_chromedriver_download() -> Optional[str]:
-    # 优先使用 Selenium 4.6+ 内置的 Selenium Manager，无需额外依赖
-    # Selenium Manager 会自动检测系统中的 Chrome 浏览器并下载匹配的 ChromeDriver
-    logging.debug("使用 Selenium 内置的自动驱动管理 (Selenium Manager)")
-    return None
-    
-    # 以下代码已弃用，保留仅供参考
-    # if not ChromeDriverManager:
-    #     logging.debug("webdriver_manager 未安装，将使用 Selenium 内置的自动驱动管理")
-    #     return None
-    # try:
-    #     driver_path = ChromeDriverManager().install()
-    #     if driver_path and os.path.exists(driver_path):
-    #         logging.info(f"Chromedriver 可用，已缓存: {driver_path}")
-    #         return driver_path
-    # except Exception as exc:
-    #     logging.warning(f"webdriver_manager 下载失败，将回退到 Selenium 内置管理: {exc}")
-    # return None
-
-
-def resolve_chromedriver_path() -> Optional[str]:
-    global _cached_chromedriver_path
-    with _chromedriver_lock:
-        if _cached_chromedriver_path and os.path.exists(_cached_chromedriver_path):
-            return _cached_chromedriver_path
-        driver_path = _ensure_chromedriver_download()
-        if driver_path:
-            _cached_chromedriver_path = driver_path
-        return driver_path
 
 
 def _find_chrome_binary() -> Optional[str]:
@@ -262,6 +227,118 @@ def _find_edge_binary() -> Optional[str]:
     return None
 
 
+
+
+
+def handle_aliyun_captcha(
+    driver: WebDriver, timeout: int = 3, stop_signal: Optional[threading.Event] = None
+) -> bool:
+    """检测并尝试自动通过阿里云智能验证弹窗。"""
+    popup_locator = (By.ID, "aliyunCaptcha-window-popup")
+    mask_locator = (By.ID, "aliyunCaptcha-mask")
+    clickable_locators = [
+        (By.ID, "aliyunCaptcha-checkbox-body"),
+        (By.ID, "aliyunCaptcha-checkbox-left"),
+        (By.ID, "aliyunCaptcha-checkbox-text"),
+        (By.CSS_SELECTOR, "#aliyunCaptcha-checkbox-text-box"),
+    ]
+    wait = WebDriverWait(driver, timeout, poll_frequency=0.2)
+    short_wait = WebDriverWait(driver, 1.5, poll_frequency=0.2)
+
+    def _popup_visible() -> bool:
+        try:
+            popup = driver.find_element(*popup_locator)
+            return popup.is_displayed()
+        except NoSuchElementException:
+            return False
+        except Exception:
+            return False
+
+    def _mask_visible() -> bool:
+        try:
+            mask = driver.find_element(*mask_locator)
+            return mask.is_displayed()
+        except NoSuchElementException:
+            return False
+        except Exception:
+            return False
+
+    def _wait_for_popup() -> bool:
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            if stop_signal and stop_signal.is_set():
+                return False
+            if _popup_visible():
+                return True
+            time.sleep(0.15)
+        return _popup_visible()
+
+    if not _wait_for_popup():
+        return False
+    if stop_signal and stop_signal.is_set():
+        return False
+
+    logging.info("检测到阿里云智能验证弹窗，尝试自动点击“开始智能验证”。")
+
+    def _click_candidate(element) -> bool:
+        clicked = False
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+        except Exception:
+            pass
+        try:
+            ActionChains(driver).move_to_element(element).pause(0.05).click(element).perform()
+            clicked = True
+        except Exception:
+            pass
+        if not clicked:
+            try:
+                element.click()
+                clicked = True
+            except Exception:
+                pass
+        if not clicked:
+            try:
+                driver.execute_script("arguments[0].click();", element)
+                clicked = True
+            except Exception:
+                pass
+        return clicked
+
+    max_attempts = 4
+    for attempt in range(max_attempts):
+        if stop_signal and stop_signal.is_set():
+            return False
+        target_element = None
+        for locator in clickable_locators:
+            try:
+                target_element = wait.until(EC.visibility_of_element_located(locator))
+                if target_element and target_element.is_enabled():
+                    break
+            except TimeoutException:
+                continue
+        if not target_element:
+            if not _popup_visible():
+                logging.info("阿里云智能验证弹窗已关闭，继续执行。")
+                return True
+            logging.warning("未能定位到可点击的阿里云验证控件。")
+            raise AliyunCaptchaBypassError("未能定位可点击的阿里云智能验证控件。")
+
+        if _click_candidate(target_element):
+            try:
+                short_wait.until(lambda _: not _popup_visible() or not _mask_visible())
+            except TimeoutException:
+                pass
+            if not _popup_visible():
+                logging.info("阿里云智能验证弹窗已关闭，继续执行。")
+                return True
+        time.sleep(0.3)
+
+    if not _popup_visible():
+        logging.info("阿里云智能验证弹窗已关闭，继续执行。")
+        return True
+    logging.warning("多次尝试点击阿里云智能验证失败，可能需要人工干预。")
+    raise AliyunCaptchaBypassError("自动处理阿里云智能验证失败。")
 
 def _apply_common_browser_options(options, headless: bool = False) -> None:
     try:
@@ -329,24 +406,87 @@ def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[Lis
 
 
 
+@dataclass
+class LogBufferEntry:
+    text: str
+    category: str
+
+
 class LogBufferHandler(logging.Handler):
     def __init__(self, capacity: int = LOG_BUFFER_CAPACITY):
         super().__init__()
         self.capacity = capacity
-        self.records: List[str] = []
+        self.records: List[LogBufferEntry] = []
         self.setFormatter(logging.Formatter(LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
 
     def emit(self, record: logging.LogRecord):
         try:
+            original_level = record.levelname
             message = self.format(record)
-            self.records.append(message)
+            category = self._determine_category(record, message)
+            display_text = self._apply_category_label(message, original_level, category)
+            self.records.append(LogBufferEntry(text=display_text, category=category))
             if self.capacity and len(self.records) > self.capacity:
                 self.records.pop(0)
         except Exception:
             self.handleError(record)
 
-    def get_records(self) -> List[str]:
+    def get_records(self) -> List[LogBufferEntry]:
         return list(self.records)
+
+    @staticmethod
+    def _determine_category(record: logging.LogRecord, message: str) -> str:
+        custom_category = getattr(record, "log_category", None)
+        if isinstance(custom_category, str):
+            normalized = custom_category.strip().upper()
+            if normalized in {"INFO", "OK", "WARNING", "ERROR"}:
+                return normalized
+
+        level = record.levelname.upper()
+        if level in {"ERROR", "CRITICAL"}:
+            return "ERROR"
+        if level == "WARNING":
+            return "WARNING"
+        if level in {"OK", "SUCCESS"}:
+            return "OK"
+
+        normalized_message = message.upper()
+        ok_markers = ("[OK]", "[SUCCESS]", "✅", "✔")
+        ok_keywords = (
+            "成功",
+            "已完成",
+            "解析完成",
+            "填写完成",
+            "填写成功",
+            "提交成功",
+            "保存成功",
+            "恢复成功",
+            "加载上次配置",
+            "已加载上次配置",
+            "加载完成",
+        )
+        negative_keywords = ("未成功", "未完成", "失败", "错误", "异常")
+        if any(marker in message for marker in ok_markers):
+            return "OK"
+        if normalized_message.startswith("OK"):
+            return "OK"
+        if any(keyword in message for keyword in ok_keywords):
+            if not any(neg in message for neg in negative_keywords):
+                return "OK"
+
+        return "INFO"
+
+    @staticmethod
+    def _apply_category_label(message: str, original_level: str, category: str) -> str:
+        if not message or not original_level:
+            return message
+        original_label = f"[{original_level.upper()}]"
+        if category.upper() == original_level.upper():
+            return message
+        replacement_label = f"[{category.upper()}]"
+        if original_label in message:
+            return message.replace(original_label, replacement_label, 1)
+        return message
 
 
 LOG_BUFFER_HANDLER = LogBufferHandler()
@@ -372,6 +512,7 @@ fail_threshold = 1
 num_threads = 1
 cur_num = 0
 cur_fail = 0
+submit_interval_seconds = 0
 lock = threading.Lock()
 stop_event = threading.Event()
 
@@ -379,6 +520,7 @@ stop_event = threading.Event()
 GITHUB_OWNER = "hungryM0"
 GITHUB_REPO = "fuck-wjx"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+ISSUE_FEEDBACK_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/issues/new"
 
 # 可选：设置 GitHub Token 以避免 API 速率限制
 # 优先从环境变量读取，如果没有则尝试从配置文件读取
@@ -658,6 +800,7 @@ class QuestionEntry:
     option_count: int = 0
     distribution_mode: str = "random"  # random, equal, custom
     custom_weights: Optional[List[float]] = None
+    question_num: Optional[str] = None
 
     def summary(self) -> str:
         if self.question_type == "text":
@@ -1114,7 +1257,8 @@ def slider_question(driver: WebDriver, current: int, score: int):
     _set_slider_input_value(driver, current, score)
 
 
-def brush(driver: WebDriver):
+def brush(driver: WebDriver, stop_signal: Optional[threading.Event] = None) -> bool:
+    """批量填写一份问卷；返回 True 代表完整提交，False 代表过程中被用户打断。"""
     questions_per_page = detect(driver)
     single_question_index = 0
     vacant_question_index = 0
@@ -1123,14 +1267,23 @@ def brush(driver: WebDriver):
     matrix_question_index = 0
     scale_question_index = 0
     current_question_number = 0
-    
+    active_stop = stop_signal or stop_event
+
+    def _abort_requested() -> bool:
+        return bool(active_stop and active_stop.is_set())
+
+    if _abort_requested():
+        return False
+
     for questions_count in questions_per_page:
         for _ in range(1, questions_count + 1):
+            if _abort_requested():
+                return False
             current_question_number += 1
             question_type = driver.find_element(
                 By.CSS_SELECTOR, f"#div{current_question_number}"
             ).get_attribute("type")
-            
+
             if question_type in ("1", "2"):
                 vacant(driver, current_question_number, vacant_question_index)
                 vacant_question_index += 1
@@ -1154,28 +1307,50 @@ def brush(driver: WebDriver):
             elif question_type == "11":
                 reorder(driver, current_question_number)
             else:
-                print(f"第{current_question_number}题为不支持题型！")
+                print(f"第{current_question_number}题为不支持类型")
+        if _abort_requested():
+            return False
         time.sleep(0.5)
         try:
             driver.find_element(By.CSS_SELECTOR, "#divNext").click()
             time.sleep(0.5)
         except:
             driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
-    submit(driver)
+    if _abort_requested():
+        return False
+    submit(driver, stop_signal=active_stop)
+    return True
+def submit(driver: WebDriver, stop_signal: Optional[threading.Event] = None):
+    def _click_submit_buttons():
+        try:
+            driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
+            if SUBMIT_CLICK_SETTLE_DELAY > 0:
+                time.sleep(SUBMIT_CLICK_SETTLE_DELAY)
+        except:
+            pass
+        try:
+            driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]').click()
+            if SUBMIT_CLICK_SETTLE_DELAY > 0:
+                time.sleep(SUBMIT_CLICK_SETTLE_DELAY)
+        except:
+            pass
 
-
-def submit(driver: WebDriver):
-    time.sleep(1)
+    if SUBMIT_INITIAL_DELAY > 0:
+        time.sleep(SUBMIT_INITIAL_DELAY)
+    _click_submit_buttons()
+    if stop_signal and stop_signal.is_set():
+        return
     try:
-        driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
-        time.sleep(1)
-    except:
-        pass
-    try:
-        driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]').click()
-        time.sleep(0.5)
-    except:
-        pass
+        captcha_bypassed = handle_aliyun_captcha(driver, timeout=3, stop_signal=stop_signal)
+    except AliyunCaptchaBypassError as exc:
+        logging.error("阿里云智能验证无法绕过，本次提交将被标记为失败: %s", exc)
+        raise
+    if captcha_bypassed:
+        if stop_signal and stop_signal.is_set():
+            return
+        if SUBMIT_CLICK_SETTLE_DELAY > 0:
+            time.sleep(SUBMIT_CLICK_SETTLE_DELAY)
+        _click_submit_buttons()
     try:
         slider_text_element = driver.find_element(By.XPATH, '//*[@id="nc_1__scale_text"]/span')
         slider_handle = driver.find_element(By.XPATH, '//*[@id="nc_1_n1z"]')
@@ -1192,12 +1367,18 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
     global cur_num, cur_fail
     preferred_browsers = list(BROWSER_PREFERENCE)
     while True:
+        if stop_signal.is_set():
+            break
         # 使用锁并响应停止/完成等动态地触发提交
         with lock:
             if stop_signal.is_set() or (target_num > 0 and cur_num >= target_num):
                 break
+        if stop_signal.is_set():
+            break
         driver = None
         try:
+            if stop_signal.is_set():
+                break
             driver, active_browser = create_selenium_driver(headless=False, prefer_browsers=list(preferred_browsers) if preferred_browsers else None)
             preferred_browsers = [active_browser] + [b for b in BROWSER_PREFERENCE if b != active_browser]
             if gui_instance and hasattr(gui_instance, 'active_drivers'):
@@ -1208,11 +1389,27 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 "Page.addScriptToEvaluateOnNewDocument",
                 {"source": 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'},
             )
+            if stop_signal.is_set():
+                break
             driver.get(url)
+            if stop_signal.is_set():
+                break
             initial_url = driver.current_url
-            brush(driver)
-            time.sleep(0.5)
+            if stop_signal.is_set():
+                break
+            finished = brush(driver, stop_signal=stop_signal)
+            if stop_signal.is_set() or not finished:
+                break
+            wait_deadline = time.time() + POST_SUBMIT_URL_MAX_WAIT
+            while time.time() < wait_deadline:
+                if stop_signal.is_set():
+                    break
+                if driver.current_url != initial_url:
+                    break
+                time.sleep(POST_SUBMIT_URL_POLL_INTERVAL)
             final_url = driver.current_url
+            if stop_signal.is_set():
+                break
             if initial_url != final_url:
                 with lock:
                     if target_num <= 0 or cur_num < target_num:
@@ -1242,6 +1439,11 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     driver.quit()
                 except Exception:
                     pass
+        if stop_signal.is_set():
+            break
+        if submit_interval_seconds > 0:
+            if stop_signal.wait(submit_interval_seconds):
+                break
 
 
 
@@ -1277,8 +1479,9 @@ class SurveyGUI:
         file_path = os.path.join(logs_dir, file_name)
 
         try:
+            text_records = [entry.text for entry in records]
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(records))
+                f.write("\n".join(text_records))
             logging.info(f"已保存日志文件: {file_path}")
             self._log_popup_info("保存日志文件", f"日志已保存到:\n{file_path}", parent=parent_window)
         except Exception as exc:
@@ -1290,12 +1493,81 @@ class SurveyGUI:
         if not text_widget:
             return
         records = LOG_BUFFER_HANDLER.get_records()
-        text_widget.configure(state="normal")
-        text_widget.delete("1.0", tk.END)
-        if records:
-            text_widget.insert("1.0", "\n".join(records))
-            text_widget.see(tk.END)
-        text_widget.configure(state="disabled")
+        total_records = len(records)
+        prev_count = getattr(self, "_log_rendered_count", 0)
+        prev_first = getattr(self, "_log_first_rendered_record", None)
+        current_first = records[0].text if records else None
+
+        def _append_entries(entries, has_existing_content):
+            needs_newline = has_existing_content
+            for entry in entries:
+                if needs_newline:
+                    text_widget.insert(tk.END, "\n")
+                text_widget.insert(tk.END, entry.text, entry.category)
+                needs_newline = True
+
+        try:
+            _, view_bottom = text_widget.yview()
+        except tk.TclError:
+            view_bottom = 1.0
+        auto_follow = view_bottom >= 0.999
+
+        need_full_reload = False
+        if prev_count > total_records:
+            need_full_reload = True
+        elif prev_count and total_records and prev_count == total_records and prev_first != current_first:
+            need_full_reload = True
+
+        if need_full_reload:
+            text_widget.delete("1.0", tk.END)
+            prev_count = 0
+
+        if total_records == 0:
+            if prev_count:
+                text_widget.delete("1.0", tk.END)
+            self._log_rendered_count = 0
+            self._log_first_rendered_record = None
+            return
+
+        if prev_count == total_records:
+            return
+
+        if prev_count == 0:
+            text_widget.delete("1.0", tk.END)
+            _append_entries(records, False)
+        else:
+            new_records = records[prev_count:]
+            if not new_records:
+                return
+            _append_entries(new_records, prev_count > 0)
+
+        if auto_follow:
+            text_widget.yview_moveto(1.0)
+            text_widget.xview_moveto(0.0)
+
+        self._log_rendered_count = total_records
+        self._log_first_rendered_record = current_first
+
+    def _on_log_text_keypress(self, event):
+        """阻止日志窗口被键盘输入修改"""
+        control_pressed = bool(event.state & 0x4)
+        navigation_keys = {
+            "Left", "Right", "Up", "Down", "Home", "End", "Next", "Prior", "Insert"
+        }
+        if control_pressed:
+            key = event.keysym.lower()
+            if key in ("c", "a"):
+                return None
+            if event.keysym in navigation_keys:
+                return None
+            return "break"
+        if event.keysym in navigation_keys:
+            return None
+        if event.keysym in ("BackSpace", "Delete"):
+            return "break"
+        if event.char:
+            return "break"
+        return None
 
     def _log_popup_info(self, title: str, message: str, **kwargs):
         logging.info(f"[Popup Info] {title} | {message}")
@@ -1309,6 +1581,43 @@ class SurveyGUI:
         logging.info(f"[Popup Confirm] {title} | {message}")
         return messagebox.askyesno(title, message, **kwargs)
 
+    def _is_supported_wjx_url(self, url: str) -> bool:
+        if not url:
+            return False
+        candidate = url.strip()
+        parsed = None
+        try:
+            parsed = urlparse(candidate)
+            if not parsed.scheme or not parsed.netloc:
+                parsed = urlparse(f"https://{candidate}")
+        except Exception:
+            return False
+        host = (parsed.netloc or "").lower()
+        return bool(host) and (host == "wjx.cn" or host.endswith(".wjx.cn"))
+
+    def _validate_wjx_url(self, url: str) -> bool:
+        if not self._is_supported_wjx_url(url):
+            self._log_popup_error("链接错误", "当前仅支持 wjx.cn 的问卷链接，请检查后重试。")
+            return False
+        return True
+
+    def _open_issue_feedback(self):
+        message = (
+            "将打开浏览器访问 GitHub Issue 页面以反馈问题：\n"
+            f"{ISSUE_FEEDBACK_URL}\n\n"
+            "提醒：该网站可能在国内访问较慢或需要额外网络配置。\n"
+            "是否继续？"
+        )
+        if not self._log_popup_confirm("问题反馈", message):
+            return
+        try:
+            opened = webbrowser.open(ISSUE_FEEDBACK_URL, new=2, autoraise=True)
+            if not opened:
+                raise RuntimeError("浏览器未响应")
+        except Exception as exc:
+            logging.error(f"打开问题反馈链接失败: {exc}")
+            self._log_popup_error("打开失败", f"请复制并手动访问：\n{ISSUE_FEEDBACK_URL}\n\n错误: {exc}")
+
     def _on_root_focus(self, event=None):
         pass
 
@@ -1318,9 +1627,9 @@ class SurveyGUI:
         LOG_BUFFER_HANDLER.records.clear()
         # 清空 UI 显示
         if self._log_text_widget:
-            self._log_text_widget.config(state="normal")
-            self._log_text_widget.delete(1.0, tk.END)
-            self._log_text_widget.config(state="disabled")
+            self._log_text_widget.delete("1.0", tk.END)
+        self._log_rendered_count = 0
+        self._log_first_rendered_record = None
 
     def _schedule_log_refresh(self):
         """定期刷新日志显示"""
@@ -1337,6 +1646,7 @@ class SurveyGUI:
         self._shared_root = root is not None
         self.root = root if root is not None else tk.Tk()
         self._loading_splash = loading_splash
+        self._configs_dir = self._get_configs_directory()
         # 在窗口标题中显示当前版本号
         try:
             ver = __VERSION__
@@ -1357,17 +1667,22 @@ class SurveyGUI:
         self._log_window: Optional[tk.Toplevel] = None
         self._log_text_widget: Optional[tk.Text] = None
         self._log_refresh_job: Optional[str] = None
+        self._log_rendered_count = 0
+        self._log_first_rendered_record: Optional[str] = None
         self._paned_position_restored = False
         self._default_paned_position_applied = False
         self._paned_configure_binding: Optional[str] = None
         self._config_changed = False  # 跟踪配置是否有改动
         self._initial_config: Dict[str, Any] = {}  # 存储初始配置以便比较
         self._wizard_history: List[int] = []
+        self._wizard_commit_log: List[Dict[str, Any]] = []
         self._last_parsed_url: Optional[str] = None
         self._last_questions_info: Optional[List[Dict[str, Any]]] = None
         self.url_var = tk.StringVar()
         self.target_var = tk.StringVar(value="")
         self.thread_var = tk.StringVar(value="2")
+        self.interval_minutes_var = tk.StringVar(value="0")
+        self.interval_seconds_var = tk.StringVar(value="0")
         self.preview_button: Optional[ttk.Button] = None
         self._build_ui()
         if self._loading_splash:
@@ -1385,10 +1700,16 @@ class SurveyGUI:
         # 创建菜单栏
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="文件", menu=file_menu)
+        file_menu.add_command(label="载入配置", command=self._load_config_from_dialog)
+        file_menu.add_command(label="保存配置", command=self._save_config_as_dialog)
         
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="帮助", menu=help_menu)
         help_menu.add_command(label="检查更新", command=self.check_for_updates)
+        help_menu.add_command(label="问题反馈", command=self._open_issue_feedback)
         help_menu.add_separator()
         help_menu.add_command(label="关于", command=self.show_about)
 
@@ -1470,13 +1791,21 @@ class SurveyGUI:
         
         # 创建 Text Widget
         self._log_text_widget = tk.Text(
-            log_frame, 
-            wrap=tk.NONE, 
-            state="disabled",
+            log_frame,
+            wrap=tk.NONE,
+            state="normal",
             yscrollcommand=v_scrollbar.set,
             xscrollcommand=h_scrollbar.set
         )
+        default_log_color = self._log_text_widget.cget("fg") or "#000000"
+        self._log_text_widget.tag_configure("INFO", foreground=default_log_color)
+        self._log_text_widget.tag_configure("OK", foreground="#2e7d32")
+        self._log_text_widget.tag_configure("WARNING", foreground="#f5a623")
+        self._log_text_widget.tag_configure("ERROR", foreground="#d32f2f")
         self._log_text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._log_text_widget.bind("<Key>", self._on_log_text_keypress)
+        for sequence in ("<<Paste>>", "<<Cut>>", "<<Clear>>"):
+            self._log_text_widget.bind(sequence, lambda e: "break")
         
         # 配置滚动条
         v_scrollbar.config(command=self._log_text_widget.yview)
@@ -1564,6 +1893,8 @@ class SurveyGUI:
             justify="left"
         ).grid(row=1, column=0, sticky="w", padx=5, pady=(8, 0))
         self.thread_var.trace("w", lambda *args: self._mark_config_changed())
+        self.interval_minutes_var.trace("w", lambda *args: self._mark_config_changed())
+        self.interval_seconds_var.trace("w", lambda *args: self._mark_config_changed())
         
         def adjust_thread_count(delta: int) -> None:
             try:
@@ -1589,6 +1920,15 @@ class SurveyGUI:
             width=2,
             command=lambda: adjust_thread_count(1)
         ).grid(row=0, column=2, padx=(2, 0))
+        
+        ttk.Label(settings_grid, text="提交间隔：").grid(row=2, column=0, sticky="w", padx=5, pady=(8, 0))
+        interval_frame = ttk.Frame(settings_grid)
+        interval_frame.grid(row=2, column=1, sticky="w", padx=5, pady=(8, 0))
+        ttk.Entry(interval_frame, textvariable=self.interval_minutes_var, width=5).grid(row=0, column=0)
+        ttk.Label(interval_frame, text="分").grid(row=0, column=1, padx=(2, 6))
+        ttk.Entry(interval_frame, textvariable=self.interval_seconds_var, width=5).grid(row=0, column=2)
+        ttk.Label(interval_frame, text="秒").grid(row=0, column=3, padx=(2, 6))
+        ttk.Label(interval_frame, text="（0 表示不延迟）").grid(row=0, column=4, sticky="w")
 
         # 高级选项：手动配置（始终显示）
         self.manual_config_frame = ttk.LabelFrame(self.scrollable_content, text="🔧 高级选项", padding=10)
@@ -2535,35 +2875,110 @@ class SurveyGUI:
         if not url_value:
             self._log_popup_error("错误", "请先填写问卷链接")
             return
+        if not self._validate_wjx_url(url_value):
+            return
         logging.info(f"[Action Log] Preview survey requested for URL: {url_value}")
+        if self.question_entries:
+            choice = self._show_preview_choice_dialog(len(self.question_entries))
+            if choice is None:
+                return
+            if choice == "preview":
+                self._start_preview_only(url_value, preserve_existing=True)
+                return
+            self._start_auto_config(url_value, preserve_existing=True)
+            return
+        self._start_auto_config(url_value, preserve_existing=False)
+
+    def _show_preview_choice_dialog(self, configured_count: int) -> Optional[str]:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("请选择操作")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        message = (
+            f"当前已配置 {configured_count} 道题目。\n"
+            f"请选择要执行的操作：\n\n"
+            f"继续自动配置：解析问卷并根据必要题目追加/覆盖。\n"
+            f"仅预览：仅查看问卷结构或快速演示填写。"
+        )
+        ttk.Label(frame, text=message, justify="left", wraplength=360).pack(pady=(0, 12))
+
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X)
+
+        result = tk.StringVar(value="")
+
+        def choose(value: str):
+            result.set(value)
+            dialog.destroy()
+
+        ttk.Button(button_frame, text="仅预览", command=lambda: choose("preview")).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="继续自动配置", command=lambda: choose("auto")).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="取消", command=lambda: choose("")).pack(side=tk.RIGHT, padx=5)
+
+        def on_close():
+            result.set("")
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", on_close)
+        dialog.update_idletasks()
+        win_w = dialog.winfo_width()
+        win_h = dialog.winfo_height()
+        screen_w = dialog.winfo_screenwidth()
+        screen_h = dialog.winfo_screenheight()
+        x = max(0, (screen_w - win_w) // 2)
+        y = max(0, (screen_h - win_h) // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        self.root.wait_window(dialog)
+        value = result.get()
+        return value if value else None
+
+    def _start_preview_only(self, url_value: str, preserve_existing: bool):
         if self.question_entries and self._last_parsed_url == url_value and self._last_questions_info:
             self._safe_preview_button_config(state=tk.DISABLED, text="正在预览...")
             Thread(target=self._launch_preview_browser_session, args=(url_value,), daemon=True).start()
             return
-
         if self._last_parsed_url == url_value and self._last_questions_info:
-            self._show_preview_window(deepcopy(self._last_questions_info))
+            self._show_preview_window(deepcopy(self._last_questions_info), preserve_existing=preserve_existing)
             return
+        self._start_survey_parsing(
+            url_value,
+            lambda info: self._show_preview_window(info, preserve_existing=preserve_existing),
+        )
 
+    def _start_auto_config(self, url_value: str, preserve_existing: bool):
+        if self._last_parsed_url == url_value and self._last_questions_info:
+            self._show_preview_window(deepcopy(self._last_questions_info), preserve_existing=preserve_existing)
+            return
+        self._start_survey_parsing(
+            url_value,
+            lambda info: self._show_preview_window(info, preserve_existing=preserve_existing),
+        )
+
+    def _start_survey_parsing(self, url_value: str, result_handler: Callable[[List[Dict[str, Any]]], None]):
         self._safe_preview_button_config(state=tk.DISABLED, text="加载中...")
-        
-        # 创建进度窗口
         progress_win = tk.Toplevel(self.root)
         progress_win.title("正在加载问卷")
         progress_win.geometry("400x200")
         progress_win.resizable(False, False)
         progress_win.transient(self.root)
-        
-        # 居中显示进度窗口
+        progress_win.grab_set()
+
         progress_win.update_idletasks()
         win_width = progress_win.winfo_width()
         win_height = progress_win.winfo_height()
         screen_width = progress_win.winfo_screenwidth()
         screen_height = progress_win.winfo_screenheight()
-        
+
         try:
             import ctypes
             from ctypes.wintypes import RECT
+
             work_area = RECT()
             ctypes.windll.user32.SystemParametersInfoA(48, 0, ctypes.byref(work_area), 0)
             work_width = work_area.right - work_area.left
@@ -2572,35 +2987,37 @@ class SurveyGUI:
             work_y = work_area.top
             x = work_x + (work_width - win_width) // 2
             y = work_y + (work_height - win_height) // 2
-        except:
+        except Exception:
             x = (screen_width - win_width) // 2
             y = (screen_height - win_height) // 2
-        
+
         x = max(0, x)
         y = max(0, y)
         progress_win.geometry(f"+{x}+{y}")
-        
+
         frame = ttk.Frame(progress_win, padding=20)
         frame.pack(fill=tk.BOTH, expand=True)
-        
-        ttk.Label(frame, text="正在加载问卷...", font=('', 11, 'bold')).pack(pady=(0, 15))
-        
+
+        ttk.Label(frame, text="正在加载问卷...", font=("", 11, "bold")).pack(pady=(0, 15))
         status_label = ttk.Label(frame, text="初始化浏览器...", foreground="gray")
         status_label.pack(pady=(0, 10))
-        
-        # 使用确定进度模式
-        progress_bar = ttk.Progressbar(frame, mode='determinate', maximum=100, length=300)
+
+        progress_bar = ttk.Progressbar(frame, mode="determinate", maximum=100, length=300)
         progress_bar.pack(fill=tk.X, pady=5)
-        
-        percentage_label = ttk.Label(frame, text="0%", font=('', 10, 'bold'))
+
+        percentage_label = ttk.Label(frame, text="0%", font=("", 10, "bold"))
         percentage_label.pack(pady=(5, 0))
-        
+
         progress_win.update()
-        
-        preview_thread = Thread(target=self._parse_and_show_survey, args=(url_value, progress_win, status_label, progress_bar, percentage_label), daemon=True)
+
+        preview_thread = Thread(
+            target=self._parse_and_show_survey,
+            args=(url_value, progress_win, status_label, progress_bar, percentage_label, result_handler),
+            daemon=True,
+        )
         preview_thread.start()
 
-    def _parse_and_show_survey(self, survey_url, progress_win=None, status_label=None, progress_bar=None, percentage_label=None):
+    def _parse_and_show_survey(self, survey_url, progress_win=None, status_label=None, progress_bar=None, percentage_label=None, result_handler: Optional[Callable[[List[Dict[str, Any]]], None]] = None):
         driver = None
         try:
             # 更新进度函数
@@ -2623,7 +3040,9 @@ class SurveyGUI:
                 if progress_win:
                     self.root.after(0, lambda: progress_win.destroy())
                 self._cache_parsed_survey(questions_info, survey_url)
-                self.root.after(0, lambda: self._show_preview_window(questions_info))
+                handler = result_handler or (lambda data: self._show_preview_window(data))
+                info_copy = deepcopy(questions_info)
+                self.root.after(0, lambda data=info_copy: handler(data))
                 self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
                 return
             
@@ -2762,7 +3181,9 @@ class SurveyGUI:
             if progress_win:
                 self.root.after(0, lambda: progress_win.destroy())
             self._cache_parsed_survey(questions_info, survey_url)
-            self.root.after(0, lambda: self._show_preview_window(questions_info))
+            handler = result_handler or (lambda data: self._show_preview_window(data))
+            info_copy = deepcopy(questions_info)
+            self.root.after(0, lambda data=info_copy: handler(data))
             self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
             
         except Exception as e:
@@ -2909,7 +3330,7 @@ class SurveyGUI:
             self.preview_button.config(**kwargs)
 
     def _get_preview_button_label(self) -> str:
-        return "预览问卷" if self.question_entries else "⚡ 自动配置问卷"
+        return "预览 / 继续配置" if self.question_entries else "⚡ 自动配置问卷"
 
     def _get_question_type_name(self, type_code):
         type_map = {
@@ -2925,7 +3346,7 @@ class SurveyGUI:
         }
         return type_map.get(type_code, f"未知类型({type_code})")
 
-    def _show_preview_window(self, questions_info):
+    def _show_preview_window(self, questions_info, preserve_existing: bool = False):
         preview_win = tk.Toplevel(self.root)
         preview_win.title("问卷预览")
         preview_win.geometry("900x600")
@@ -2982,16 +3403,92 @@ class SurveyGUI:
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(pady=(10, 0))
         
-        wizard_btn = ttk.Button(btn_frame, text="开始配置题目", 
-                               command=lambda: self._start_config_wizard(questions_info, preview_win))
+        wizard_btn = ttk.Button(
+            btn_frame,
+            text="开始配置题目",
+            command=lambda: self._start_config_wizard(questions_info, preview_win, preserve_existing=preserve_existing),
+        )
         wizard_btn.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(btn_frame, text="关闭", command=preview_win.destroy).pack(side=tk.LEFT, padx=5)
 
-    def _start_config_wizard(self, questions_info, preview_win):
+    def _normalize_question_identifier(self, value: Optional[Union[str, int]]) -> Optional[str]:
+        if value is None:
+            return None
+        try:
+            normalized = str(value).strip()
+            return normalized or None
+        except Exception:
+            return None
+
+    def _find_entry_index_by_question(self, question_id: Optional[str]) -> Optional[int]:
+        if not question_id:
+            return None
+        for idx, entry in enumerate(self.question_entries):
+            if entry.question_num == question_id:
+                return idx
+        return None
+
+    def _handle_auto_config_entry(self, entry: QuestionEntry, question_meta: Optional[Dict[str, Any]] = None):
+        question_id = None
+        question_title = ""
+        if question_meta:
+            question_id = self._normalize_question_identifier(question_meta.get("num"))
+            question_title = question_meta.get("title", "")
+        entry.question_num = question_id
+        conflict_index = self._find_entry_index_by_question(question_id)
+        if conflict_index is not None:
+            question_label = f"第 {question_id} 题" if question_id else "该题目"
+            title_suffix = f"「{question_title[:40]}{'...' if len(question_title) > 40 else ''}」" if question_title else ""
+            message = (
+                f"{question_label}{title_suffix} 已存在配置。\n\n"
+                f"选择“是”：覆盖已有配置并使用最新设置。\n"
+                f"选择“否”：跳过本题保留原配置。"
+            )
+            overwrite = self._log_popup_confirm("检测到重复配置", message, icon="question")
+            if overwrite:
+                previous_entry = deepcopy(self.question_entries[conflict_index])
+                self.question_entries[conflict_index] = entry
+                self._wizard_commit_log.append(
+                    {"action": "replace", "index": conflict_index, "previous": previous_entry}
+                )
+                logging.info(f"[Action Log] Wizard overwrote configuration for question {question_id or '?'}")
+            else:
+                self._wizard_commit_log.append({"action": "skip"})
+                logging.info(f"[Action Log] Wizard skipped configuring question {question_id or '?'}")
+            return
+        self.question_entries.append(entry)
+        self._wizard_commit_log.append({"action": "append", "index": len(self.question_entries) - 1})
+        logging.info(f"[Action Log] Wizard stored configuration (total={len(self.question_entries)})")
+
+    def _revert_last_wizard_action(self):
+        if not self._wizard_commit_log:
+            return
+        action = self._wizard_commit_log.pop()
+        action_type = action.get("action")
+        if action_type == "append":
+            idx = action.get("index")
+            if idx is not None and 0 <= idx < len(self.question_entries):
+                self.question_entries.pop(idx)
+        elif action_type == "replace":
+            idx = action.get("index")
+            previous_entry = action.get("previous")
+            if (
+                idx is not None
+                and previous_entry is not None
+                and 0 <= idx < len(self.question_entries)
+                and isinstance(previous_entry, QuestionEntry)
+            ):
+                self.question_entries[idx] = previous_entry
+        elif action_type == "skip":
+            pass
+
+    def _start_config_wizard(self, questions_info, preview_win, preserve_existing: bool = False):
         preview_win.destroy()
-        self.question_entries.clear()
+        if not preserve_existing:
+            self.question_entries.clear()
         self._wizard_history = []
+        self._wizard_commit_log = []
         self._show_wizard_for_question(questions_info, 0)
 
     def _show_wizard_for_question(self, questions_info, current_index):
@@ -3003,6 +3500,7 @@ class SurveyGUI:
                               f"已配置 {len(self.question_entries)} 道题目。\n"
                               f"可在下方题目列表中查看和编辑。")
             self._wizard_history.clear()
+            self._wizard_commit_log.clear()
             return
         
         q = questions_info[current_index]
@@ -3084,6 +3582,7 @@ class SurveyGUI:
         config_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
         def skip_question():
+            self._wizard_commit_log.append({"action": "skip"})
             wizard_win.destroy()
             self._show_wizard_for_question(questions_info, current_index + 1)
         
@@ -3142,8 +3641,7 @@ class SurveyGUI:
                     distribution_mode="equal",
                     custom_weights=None
                 )
-                self.question_entries.append(entry)
-                logging.info(f"[Action Log] Wizard added text question #{current_index+1}")
+                self._handle_auto_config_entry(entry, q)
                 wizard_win.destroy()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
@@ -3195,7 +3693,7 @@ class SurveyGUI:
                     distribution_mode="custom",
                     custom_weights=probs
                 )
-                self.question_entries.append(entry)
+                self._handle_auto_config_entry(entry, q)
                 wizard_win.destroy()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
@@ -3306,10 +3804,7 @@ class SurveyGUI:
                     distribution_mode=mode,
                     custom_weights=weights
                 )
-                self.question_entries.append(entry)
-                logging.info(
-                    f"[Action Log] Wizard saved question #{current_index+1} type={q_type} mode={mode}"
-                )
+                self._handle_auto_config_entry(entry, q)
                 wizard_win.destroy()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
@@ -3345,8 +3840,7 @@ class SurveyGUI:
         prev_index = 0
         if self._wizard_history:
             prev_index = self._wizard_history.pop()
-        if self.question_entries:
-            self.question_entries.pop()
+        self._revert_last_wizard_action()
         current_win.destroy()
         self._show_wizard_for_question(questions_info, prev_index)
 
@@ -3354,6 +3848,8 @@ class SurveyGUI:
         url_value = self.url_var.get().strip()
         if not url_value:
             self._log_popup_error("参数错误", "请填写问卷链接")
+            return
+        if not self._validate_wjx_url(url_value):
             return
         target_value = self.target_var.get().strip()
         if not target_value:
@@ -3367,6 +3863,31 @@ class SurveyGUI:
         except ValueError:
             self._log_popup_error("参数错误", "目标份数和浏览器数量必须为正整数")
             return
+        minute_text = self.interval_minutes_var.get().strip()
+        second_text = self.interval_seconds_var.get().strip()
+        try:
+            interval_minutes = int(minute_text) if minute_text else 0
+            interval_seconds = int(second_text) if second_text else 0
+        except ValueError:
+            self._log_popup_error("参数错误", "提交间隔请输入整数分钟和秒")
+            return
+        if interval_minutes < 0 or interval_seconds < 0:
+            self._log_popup_error("参数错误", "提交间隔必须为非负数")
+            return
+        if interval_seconds >= 60:
+            self._log_popup_error("参数错误", "秒数范围应为 0-59")
+            return
+        interval_total_seconds = interval_minutes * 60 + interval_seconds
+        if not self.question_entries:
+            msg = (
+                "当前尚未配置任何题目。\n\n"
+                "是否先预览问卷页面以确认题目？\n"
+                "选择“是”：立即打开预览窗口，不会开始执行。\n"
+                "选择“否”：直接开始执行（默认随机填写/跳过未配置题目）。"
+            )
+            if self._log_popup_confirm("提示", msg):
+                self.preview_survey()
+                return
         try:
             configure_probabilities(self.question_entries)
         except ValueError as exc:
@@ -3377,10 +3898,11 @@ class SurveyGUI:
             f"[Action Log] Starting run url={url_value} target={target} threads={threads_count}"
         )
 
-        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event
+        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_seconds
         url = url_value
         target_num = target
         num_threads = threads_count
+        submit_interval_seconds = interval_total_seconds
         fail_threshold = max(1, math.ceil(target_num / 4) + 1)
         cur_num = 0
         cur_fail = 0
@@ -3461,30 +3983,24 @@ class SurveyGUI:
         if not self.running:
             return
         stop_event.set()
-        self.stop_button.config(state=tk.DISABLED, text="强制停止中...")
-        self.status_var.set("正在强制停止所有浏览器...")
-        
+        self.running = False
+        self.stop_button.config(state=tk.DISABLED, text="停止中...")
+        self.status_var.set("已发送停止请求，正在等待当前任务结束...")
+        if self.status_job:
+            try:
+                self.root.after_cancel(self.status_job)
+            except Exception:
+                pass
+            self.status_job = None
+
         for driver in self.active_drivers:
             try:
                 driver.quit()
             except:
                 pass
         self.active_drivers.clear()
-        
-        try:
-            import subprocess
-            if os.name == 'nt':
-                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe", "/T"], 
-                             capture_output=True, timeout=2)
-                subprocess.run(["taskkill", "/F", "/IM", "chromedriver.exe", "/T"], 
-                             capture_output=True, timeout=2)
-            else:
-                subprocess.run(["pkill", "-9", "chrome"], capture_output=True, timeout=2)
-                subprocess.run(["pkill", "-9", "chromedriver"], capture_output=True, timeout=2)
-        except:
-            pass
-        
-        print("已强制停止所有浏览器")
+        logging.info("收到停止请求，等待当前提交线程完成")
+        print("已暂停新的问卷提交，等待现有流程退出")
 
     def on_close(self):
         # 停止日志刷新
@@ -3651,37 +4167,148 @@ class SurveyGUI:
     def _get_config_path(self) -> str:
         return os.path.join(_get_runtime_directory(), "config.json")
 
+    def _get_configs_directory(self) -> str:
+        """返回多配置保存目录，并在需要时创建。"""
+        configs_dir = os.path.join(_get_runtime_directory(), "configs")
+        os.makedirs(configs_dir, exist_ok=True)
+        return configs_dir
+
+    def _build_current_config_data(self) -> Dict[str, Any]:
+        """收集当前界面上的配置数据。"""
+        paned_sash_pos = None
+        try:
+            paned_sash_pos = self.main_paned.sashpos(0)
+        except Exception:
+            pass
+
+        return {
+            "url": self.url_var.get(),
+            "target_num": self.target_var.get(),
+            "num_threads": self.thread_var.get(),
+            "submit_interval": self._serialize_submit_interval(),
+            "paned_position": paned_sash_pos,
+            "questions": [
+                {
+                    "question_type": entry.question_type,
+                    "probabilities": entry.probabilities
+                    if not isinstance(entry.probabilities, int)
+                    else entry.probabilities,
+                    "texts": entry.texts,
+                    "rows": entry.rows,
+                    "option_count": entry.option_count,
+                    "distribution_mode": entry.distribution_mode,
+                    "custom_weights": entry.custom_weights,
+                    "question_num": entry.question_num,
+                }
+                for entry in self.question_entries
+            ],
+        }
+
+    def _serialize_submit_interval(self) -> Dict[str, int]:
+        def _normalize(value: Any, *, cap_seconds: bool = False) -> int:
+            try:
+                text = str(value).strip()
+            except Exception:
+                text = ""
+            if not text:
+                parsed = 0
+            else:
+                try:
+                    parsed = int(text)
+                except ValueError:
+                    parsed = 0
+            parsed = max(0, parsed)
+            if cap_seconds:
+                parsed = min(59, parsed)
+            return parsed
+
+        minutes = _normalize(self.interval_minutes_var.get())
+        seconds = _normalize(self.interval_seconds_var.get(), cap_seconds=True)
+        return {"minutes": minutes, "seconds": seconds}
+
+    def _apply_submit_interval_config(self, interval_config: Optional[Dict[str, Any]]):
+        if not isinstance(interval_config, dict):
+            interval_config = {}
+
+        def _format_value(raw_value: Any, *, cap_seconds: bool = False) -> str:
+            try:
+                text = str(raw_value).strip()
+            except Exception:
+                text = ""
+            if not text:
+                parsed = 0
+            else:
+                try:
+                    parsed = int(text)
+                except ValueError:
+                    parsed = 0
+            parsed = max(0, parsed)
+            if cap_seconds:
+                parsed = min(59, parsed)
+            return str(parsed)
+
+        self.interval_minutes_var.set(_format_value(interval_config.get("minutes")))
+        self.interval_seconds_var.set(_format_value(interval_config.get("seconds"), cap_seconds=True))
+
+    def _write_config_file(self, file_path: str, config_data: Optional[Dict[str, Any]] = None):
+        """将配置写入指定文件。"""
+        config_to_save = config_data if config_data is not None else self._build_current_config_data()
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(config_to_save, f, ensure_ascii=False, indent=2)
+
     def _save_config(self):
         try:
-            # 获取 PanedWindow 分隔条位置
-            paned_sash_pos = None
-            try:
-                paned_sash_pos = self.main_paned.sashpos(0)
-            except Exception:
-                pass
-            
-            config = {
-                "url": self.url_var.get(),
-                "target_num": self.target_var.get(),
-                "num_threads": self.thread_var.get(),
-                "paned_position": paned_sash_pos,
-                "questions": [
-                    {
-                        "question_type": entry.question_type,
-                        "probabilities": entry.probabilities if not isinstance(entry.probabilities, int) else entry.probabilities,
-                        "texts": entry.texts,
-                        "rows": entry.rows,
-                        "option_count": entry.option_count,
-                        "distribution_mode": entry.distribution_mode,
-                        "custom_weights": entry.custom_weights,
-                    }
-                    for entry in self.question_entries
-                ],
-            }
-            with open(self._get_config_path(), "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            self._write_config_file(self._get_config_path())
         except Exception as e:
             print(f"保存配置失败: {e}")
+
+    def _apply_config_data(self, config: Dict[str, Any]):
+        """将配置数据应用到界面。"""
+        if not isinstance(config, dict):
+            raise ValueError("配置文件格式不正确")
+
+        self.url_var.set(config.get("url", ""))
+        self.target_var.set(config.get("target_num", ""))
+        self.thread_var.set(config.get("num_threads", ""))
+        self._apply_submit_interval_config(config.get("submit_interval"))
+
+        paned_position = config.get("paned_position")
+        if paned_position is not None:
+            def restore_pos():
+                try:
+                    self.main_paned.sashpos(0, paned_position)
+                    self._paned_position_restored = True
+                except Exception:
+                    pass
+            self.root.after(100, restore_pos)
+
+        questions_data = config.get("questions") or []
+        self.question_entries.clear()
+        if isinstance(questions_data, list):
+            for q_data in questions_data:
+                entry = QuestionEntry(
+                    question_type=q_data.get("question_type", "single"),
+                    probabilities=q_data.get("probabilities", -1),
+                    texts=q_data.get("texts"),
+                    rows=q_data.get("rows", 1),
+                    option_count=q_data.get("option_count", 0),
+                    distribution_mode=q_data.get("distribution_mode", "random"),
+                    custom_weights=q_data.get("custom_weights"),
+                    question_num=q_data.get("question_num"),
+                )
+                self.question_entries.append(entry)
+        self._refresh_tree()
+
+        self._save_initial_config()
+        self._config_changed = False
+
+    def _load_config_from_file(self, file_path: str, *, silent: bool = False):
+        """从指定路径加载配置。"""
+        with open(file_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        self._apply_config_data(config)
+        if not silent:
+            print(f"已加载配置：{os.path.basename(file_path)}")
 
     def _load_config(self):
         config_path = self._get_config_path()
@@ -3689,47 +4316,49 @@ class SurveyGUI:
             return
         
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            
-            if "url" in config:
-                self.url_var.set(config["url"])
-            if "target_num" in config:
-                self.target_var.set(config["target_num"])
-            if "num_threads" in config:
-                self.thread_var.set(config["num_threads"])
-            
-            # 恢复 PanedWindow 分隔条位置
-            if "paned_position" in config and config["paned_position"] is not None:
-                def restore_paned_pos():
-                    try:
-                        self.main_paned.sashpos(0, config["paned_position"])
-                        self._paned_position_restored = True
-                    except Exception:
-                        pass
-                self.root.after(100, restore_paned_pos)
-            
-            if "questions" in config and config["questions"]:
-                self.question_entries.clear()
-                for q_data in config["questions"]:
-                    entry = QuestionEntry(
-                        question_type=q_data.get("question_type", "single"),
-                        probabilities=q_data.get("probabilities", -1),
-                        texts=q_data.get("texts"),
-                        rows=q_data.get("rows", 1),
-                        option_count=q_data.get("option_count", 0),
-                        distribution_mode=q_data.get("distribution_mode", "random"),
-                        custom_weights=q_data.get("custom_weights"),
-                    )
-                    self.question_entries.append(entry)
-                self._refresh_tree()
-                print(f"已加载上次配置：{len(self.question_entries)} 道题目")
-            
-            # 加载完成后保存初始配置以用于变化检测
-            self._save_initial_config()
-            self._config_changed = False
+            self._load_config_from_file(config_path, silent=True)
+            print(f"已加载上次配置：{len(self.question_entries)} 道题目")
         except Exception as e:
             print(f"加载配置失败: {e}")
+
+    def _save_config_as_dialog(self):
+        """通过对话框保存配置到用户自定义文件。"""
+        configs_dir = self._get_configs_directory()
+        default_name = f"wjx_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        file_path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="保存配置",
+            defaultextension=".json",
+            initialfile=f"{default_name}.json",
+            initialdir=configs_dir,
+            filetypes=(("JSON 配置文件", "*.json"), ("所有文件", "*.*")),
+        )
+        if not file_path:
+            return
+        try:
+            self._write_config_file(file_path)
+            self._log_popup_info("保存配置", f"配置已保存到:\n{file_path}")
+        except Exception as exc:
+            logging.error(f"保存配置失败: {exc}")
+            self._log_popup_error("保存配置失败", f"无法保存配置:\n{exc}")
+
+    def _load_config_from_dialog(self):
+        """通过对话框加载用户选择的配置文件。"""
+        configs_dir = self._get_configs_directory()
+        file_path = filedialog.askopenfilename(
+            parent=self.root,
+            title="加载配置",
+            initialdir=configs_dir,
+            filetypes=(("JSON 配置文件", "*.json"), ("所有文件", "*.*")),
+        )
+        if not file_path:
+            return
+        try:
+            self._load_config_from_file(file_path)
+            self._log_popup_info("加载配置", f"已加载配置:\n{file_path}")
+        except Exception as exc:
+            logging.error(f"加载配置失败: {exc}")
+            self._log_popup_error("加载配置失败", f"无法加载配置:\n{exc}")
 
     def _save_initial_config(self):
         """保存初始配置状态以便检测后续变化"""
@@ -3737,6 +4366,7 @@ class SurveyGUI:
             "url": self.url_var.get(),
             "target_num": self.target_var.get(),
             "num_threads": self.thread_var.get(),
+            "submit_interval": self._serialize_submit_interval(),
             "questions": [
                 {
                     "question_type": entry.question_type,
@@ -3746,6 +4376,7 @@ class SurveyGUI:
                     "option_count": entry.option_count,
                     "distribution_mode": entry.distribution_mode,
                     "custom_weights": entry.custom_weights,
+                    "question_num": entry.question_num,
                 }
                 for entry in self.question_entries
             ],
@@ -3761,6 +4392,7 @@ class SurveyGUI:
             "url": self.url_var.get(),
             "target_num": self.target_var.get(),
             "num_threads": self.thread_var.get(),
+            "submit_interval": self._serialize_submit_interval(),
             "questions": [
                 {
                     "question_type": entry.question_type,
@@ -3770,6 +4402,7 @@ class SurveyGUI:
                     "option_count": entry.option_count,
                     "distribution_mode": entry.distribution_mode,
                     "custom_weights": entry.custom_weights,
+                    "question_num": entry.question_num,
                 }
                 for entry in self.question_entries
             ],
