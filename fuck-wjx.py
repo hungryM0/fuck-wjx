@@ -10,11 +10,12 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Thread
-from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set
+from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set, Deque
 from urllib.parse import urlparse
 import webbrowser
 
@@ -32,7 +33,7 @@ try:
     from selenium.webdriver.edge.options import Options as EdgeOptions
 except ImportError:
     EdgeOptions = None
-from PIL import Image
+from PIL import Image, ImageTk
 from pyzbar.pyzbar import decode as pyzbar_decode
 
 try:
@@ -51,11 +52,12 @@ except ImportError:
     BeautifulSoup = None
 
 # 版本号
-__VERSION__ = "0.4.4"
+__VERSION__ = "0.5"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
 LOG_DIR_NAME = "logs"
+QQ_GROUP_QR_RELATIVE_PATH = os.path.join("assets", "QQ_group.jpg")
 PANED_MIN_LEFT_WIDTH = 360
 PANED_MIN_RIGHT_WIDTH = 280
 DEFAULT_HTTP_HEADERS = {
@@ -407,6 +409,42 @@ def _apply_common_browser_options(options, headless: bool = False) -> None:
             options.add_argument(f"--window-size={HEADLESS_WINDOW_SIZE}")
             options.add_argument("--disable-software-rasterizer")
 
+def _disable_driver_http_retry(driver: WebDriver) -> None:
+    """
+    Selenium 4.10+ 默认会对 WebDriver 的 HTTP 请求做指数退避重试。
+    如果驱动意外挂掉，重试将导致“幽灵”进程堆积，所以下面尝试清零重试次数。
+    """
+    try:
+        executor = getattr(driver, 'command_executor', None)
+        if executor is None:
+            return
+        http_client = getattr(executor, '_conn', None)
+        if http_client is None:
+            return
+        session = getattr(http_client, 'session', None)
+        if session is None:
+            return
+        adapters = getattr(session, 'adapters', None)
+        if not adapters:
+            return
+        for adapter in adapters.values():
+            retries = getattr(adapter, 'max_retries', None)
+            if retries is None:
+                continue
+            try:
+                retries.total = 0
+                retries.connect = 0
+                retries.read = 0
+                retries.redirect = 0
+                retries.status = 0
+                retries.respect_retry_after_header = False
+            except Exception:
+                try:
+                    adapter.max_retries = 0  # type: ignore[assignment]
+                except Exception:
+                    pass
+    except Exception as exc:
+        logging.debug('Failed to disable driver HTTP retry: %s', exc)
 
 def setup_browser_options(browser: str, headless: bool = False):
     browser_key = (browser or "").lower()
@@ -446,6 +484,7 @@ def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[Lis
                 driver = webdriver.Edge(options=options)  # type: ignore[arg-type]
             else:
                 driver = webdriver.Chrome(options=options)  # type: ignore[arg-type]
+            _disable_driver_http_retry(driver)
             logging.info(f"使用 {browser.capitalize()} WebDriver")
             return driver, browser
         except Exception as exc:
@@ -563,9 +602,17 @@ fail_threshold = 1
 num_threads = 1
 cur_num = 0
 cur_fail = 0
-submit_interval_seconds = 0
+submit_interval_range_seconds: Tuple[int, int] = (0, 0)
+answer_duration_range_seconds: Tuple[int, int] = (0, 0)
 lock = threading.Lock()
 stop_event = threading.Event()
+full_simulation_enabled = False
+full_simulation_estimated_seconds = 0
+full_simulation_total_duration_seconds = 0
+full_simulation_schedule: Deque[float] = deque()
+full_simulation_end_timestamp = 0.0
+FULL_SIM_DURATION_JITTER = 0.2
+FULL_SIM_MIN_DELAY_SECONDS = 0.15
 
 # GitHub 更新配置
 GITHUB_OWNER = "hungryM0"
@@ -976,6 +1023,75 @@ def _normalize_html_text(value: Optional[str]) -> str:
     if not value:
         return ""
     return _HTML_SPACE_RE.sub(" ", value).strip()
+
+
+_INVALID_FILENAME_CHARS_RE = re.compile(r'[\\/:*?"<>|]+')
+
+
+def _sanitize_filename(value: str, max_length: int = 80) -> str:
+    """将字符串转换为适合作为文件名的形式。"""
+    text = value.strip()
+    if not text:
+        return ""
+    text = _INVALID_FILENAME_CHARS_RE.sub("_", text)
+    text = text.strip(" ._")
+    if max_length and len(text) > max_length:
+        text = text[:max_length].rstrip(" ._")
+    return text
+
+
+def _extract_survey_title_from_html(html: str) -> Optional[str]:
+    """尝试从问卷 HTML 文本中提取标题。"""
+    if not BeautifulSoup:
+        return None
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return None
+
+    selectors = [
+        "#divTitle h1",
+        "#divTitle",
+        ".surveytitle",
+        ".survey-title",
+        ".surveyTitle",
+        ".wjdcTitle",
+        ".htitle",
+        ".topic_tit",
+        "#htitle",
+        "#lbTitle",
+    ]
+    candidates: List[str] = []
+    for selector in selectors:
+        element = soup.select_one(selector)
+        if element:
+            text = _normalize_html_text(element.get_text(" ", strip=True))
+            if text:
+                candidates.append(text)
+
+    if not candidates:
+        for tag_name in ("h1", "h2"):
+            header = soup.find(tag_name)
+            if header:
+                text = _normalize_html_text(header.get_text(" ", strip=True))
+                if text:
+                    candidates.append(text)
+                if candidates:
+                    break
+
+    title_tag = soup.find("title")
+    if title_tag:
+        text = _normalize_html_text(title_tag.get_text(" ", strip=True))
+        if text:
+            candidates.append(text)
+
+    for raw in candidates:
+        cleaned = raw
+        cleaned = re.sub(r"(?:[-|]\s*)?(?:问卷星.*)$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.strip(" -_|")
+        if cleaned:
+            return cleaned
+    return None
 
 
 def _extract_question_number_from_div(question_div) -> Optional[int]:
@@ -1610,9 +1726,121 @@ def slider_question(driver: WebDriver, current: int, score: int):
     _set_slider_input_value(driver, current, score)
 
 
+def _full_simulation_active() -> bool:
+    return bool(full_simulation_enabled and full_simulation_estimated_seconds > 0)
+
+
+def _reset_full_simulation_runtime_state() -> None:
+    global full_simulation_schedule, full_simulation_end_timestamp
+    try:
+        full_simulation_schedule.clear()
+    except Exception:
+        full_simulation_schedule = deque()
+    full_simulation_end_timestamp = 0.0
+
+
+def _prepare_full_simulation_schedule(run_count: int, total_duration_seconds: int) -> Deque[float]:
+    global full_simulation_end_timestamp
+    schedule: Deque[float] = deque()
+    if run_count <= 0:
+        full_simulation_end_timestamp = 0.0
+        return schedule
+    now = time.time()
+    total_span = max(0, total_duration_seconds)
+    if total_span <= 0:
+        for idx in range(run_count):
+            schedule.append(now + idx * 5)
+        full_simulation_end_timestamp = now + run_count * 5
+        return schedule
+    base_interval = total_span / max(1, run_count)
+    jitter_window = base_interval * 0.6
+    offsets: List[float] = []
+    for index in range(run_count):
+        ideal = index * base_interval
+        jitter = random.uniform(-jitter_window, jitter_window) if jitter_window > 0 else 0.0
+        offset = max(0.0, min(total_span * 0.98, ideal + jitter))
+        offsets.append(offset)
+    offsets.sort()
+    for offset in offsets:
+        schedule.append(now + offset)
+    full_simulation_end_timestamp = now + total_span
+    return schedule
+
+
+def _wait_for_next_full_simulation_slot(stop_signal: threading.Event) -> bool:
+    with lock:
+        if not full_simulation_schedule:
+            return False
+        next_slot = full_simulation_schedule.popleft()
+    while True:
+        if stop_signal.is_set():
+            return False
+        delay = next_slot - time.time()
+        if delay <= 0:
+            break
+        wait_time = min(delay, 1.0)
+        if wait_time <= 0:
+            break
+        if stop_signal.wait(wait_time):
+            return False
+    return True
+
+
+def _calculate_full_simulation_run_target() -> float:
+    base = max(5.0, float(full_simulation_estimated_seconds))
+    jitter = max(0.05, min(0.5, FULL_SIM_DURATION_JITTER))
+    lower = max(2.0, base * (1 - jitter))
+    upper = max(lower + 0.5, base * (1 + jitter))
+    return random.uniform(lower, upper)
+
+
+def _build_per_question_delay_plan(question_count: int, target_seconds: float) -> List[float]:
+    if question_count <= 0 or target_seconds <= 0:
+        return []
+    avg_delay = target_seconds / max(1, question_count)
+    min_delay = max(FULL_SIM_MIN_DELAY_SECONDS, avg_delay * 0.6)
+    max_possible_min = target_seconds / max(1, question_count)
+    if min_delay > max_possible_min:
+        min_delay = max(FULL_SIM_MIN_DELAY_SECONDS * 0.2, max_possible_min)
+    min_delay = max(0.02, min_delay)
+    baseline_total = min_delay * question_count
+    remaining = max(0.0, target_seconds - baseline_total)
+    if remaining <= 0:
+        return [target_seconds / max(1, question_count)] * question_count
+    weights = [random.uniform(0.3, 1.2) for _ in range(question_count)]
+    total_weight = sum(weights) or 1.0
+    extras = [remaining * (w / total_weight) for w in weights]
+    return [min_delay + extra for extra in extras]
+
+
+def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = None) -> bool:
+    """根据配置在提交前等待一段时间，返回 True 表示等待过程中被中断。"""
+    if _full_simulation_active():
+        return False
+    global answer_duration_range_seconds
+    min_delay, max_delay = answer_duration_range_seconds
+    min_delay = max(0, min_delay)
+    max_delay = max(min_delay, max(0, max_delay))
+    if max_delay <= 0:
+        return False
+    wait_seconds = random.uniform(min_delay, max_delay)
+    if wait_seconds <= 0:
+        return False
+    logging.info(
+        "[Action Log] Simulating answer duration: waiting %.1f seconds before submit",
+        wait_seconds,
+    )
+    if stop_signal:
+        interrupted = stop_signal.wait(wait_seconds)
+        return bool(interrupted and stop_signal.is_set())
+    time.sleep(wait_seconds)
+    return False
+
+
 def brush(driver: WebDriver, stop_signal: Optional[threading.Event] = None) -> bool:
     """批量填写一份问卷；返回 True 代表完整提交，False 代表过程中被用户打断。"""
     questions_per_page = detect(driver)
+    total_question_count = sum(questions_per_page)
     single_question_index = 0
     vacant_question_index = 0
     droplist_question_index = 0
@@ -1621,6 +1849,16 @@ def brush(driver: WebDriver, stop_signal: Optional[threading.Event] = None) -> b
     scale_question_index = 0
     current_question_number = 0
     active_stop = stop_signal or stop_event
+    question_delay_plan: Optional[List[float]] = None
+    if _full_simulation_active() and total_question_count > 0:
+        target_seconds = _calculate_full_simulation_run_target()
+        question_delay_plan = _build_per_question_delay_plan(total_question_count, target_seconds)
+        planned_total = sum(question_delay_plan)
+        logging.info(
+            "[Action Log] ȫ��ģ�⣺���μƻ���ʱԼ %.1f �룬�� %d ��",
+            planned_total,
+            total_question_count,
+        )
 
     def _abort_requested() -> bool:
         return bool(active_stop and active_stop.is_set())
@@ -1628,7 +1866,8 @@ def brush(driver: WebDriver, stop_signal: Optional[threading.Event] = None) -> b
     if _abort_requested():
         return False
 
-    for questions_count in questions_per_page:
+    total_pages = len(questions_per_page)
+    for page_index, questions_count in enumerate(questions_per_page):
         for _ in range(1, questions_count + 1):
             if _abort_requested():
                 return False
@@ -1661,9 +1900,28 @@ def brush(driver: WebDriver, stop_signal: Optional[threading.Event] = None) -> b
                 reorder(driver, current_question_number)
             else:
                 print(f"第{current_question_number}题为不支持类型")
+        if (
+            question_delay_plan
+            and current_question_number < total_question_count
+        ):
+            plan_index = min(current_question_number - 1, len(question_delay_plan) - 1)
+            if plan_index >= 0:
+                delay_seconds = question_delay_plan[plan_index]
+                if delay_seconds > 0.01:
+                    if active_stop:
+                        if active_stop.wait(delay_seconds):
+                            return False
+                    else:
+                        time.sleep(delay_seconds)
         if _abort_requested():
             return False
         time.sleep(0.5)
+        is_last_page = (page_index == total_pages - 1)
+        if is_last_page:
+            if _simulate_answer_duration_delay(active_stop):
+                return False
+            if _abort_requested():
+                return False
         try:
             driver.find_element(By.CSS_SELECTOR, "#divNext").click()
             time.sleep(0.5)
@@ -1726,6 +1984,10 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         with lock:
             if stop_signal.is_set() or (target_num > 0 and cur_num >= target_num):
                 break
+        if _full_simulation_active():
+            if not _wait_for_next_full_simulation_slot(stop_signal):
+                break
+            logging.info("[Action Log] ȫ��ģ��ʱ����������༭����������...")
         if stop_signal.is_set():
             break
         driver = None
@@ -1794,9 +2056,12 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     pass
         if stop_signal.is_set():
             break
-        if submit_interval_seconds > 0:
-            if stop_signal.wait(submit_interval_seconds):
-                break
+        if not _full_simulation_active():
+            min_wait, max_wait = submit_interval_range_seconds
+            if max_wait > 0:
+                wait_seconds = min_wait if max_wait == min_wait else random.uniform(min_wait, max_wait)
+                if stop_signal.wait(wait_seconds):
+                    break
 
 
 
@@ -1971,6 +2236,96 @@ class SurveyGUI:
             logging.error(f"打开问题反馈链接失败: {exc}")
             self._log_popup_error("打开失败", f"请复制并手动访问：\n{ISSUE_FEEDBACK_URL}\n\n错误: {exc}")
 
+
+    def _open_qq_group_dialog(self):
+        if self._qq_group_window and self._qq_group_window.winfo_exists():
+            try:
+                self._qq_group_window.deiconify()
+                self._qq_group_window.lift()
+                self._qq_group_window.focus_force()
+            except Exception:
+                pass
+            return
+
+        qr_image_path = os.path.join(_get_runtime_directory(), QQ_GROUP_QR_RELATIVE_PATH)
+        if not os.path.exists(qr_image_path):
+            logging.error(f"未找到 QQ 群二维码图片: {qr_image_path}")
+            self._log_popup_error("资源缺失", f"没有找到 QQ 群二维码图片：\n{qr_image_path}")
+            return
+
+        try:
+            with Image.open(qr_image_path) as qr_image:
+                display_image = qr_image.copy()
+        except Exception as exc:
+            logging.error(f"加载 QQ 群二维码失败: {exc}")
+            self._log_popup_error("加载失败", f"二维码图片加载失败：\n{exc}")
+            return
+
+        max_qr_size = 420
+        # 兼容新旧版本的 Pillow
+        try:
+            from PIL.Image import Resampling
+            resample_method = Resampling.LANCZOS
+        except (ImportError, AttributeError):
+            resample_method = 1  # LANCZOS 的值
+        try:
+            if display_image.width > max_qr_size or display_image.height > max_qr_size:
+                display_image.thumbnail((max_qr_size, max_qr_size), resample=resample_method)  # type: ignore
+        except Exception as exc:
+            logging.debug(f"调整 QQ 群二维码尺寸失败: {exc}")
+
+        self._qq_group_photo = ImageTk.PhotoImage(display_image)
+        self._qq_group_image_path = qr_image_path
+        try:
+            display_image.close()
+        except Exception:
+            pass
+
+        window = tk.Toplevel(self.root)
+        window.title("加入QQ群")
+        window.resizable(False, False)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", self._close_qq_group_window)
+
+        container = ttk.Frame(window, padding=20)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(container, text="扫描加入官方QQ群\n解决使用过程中的问题，或提出功能建议\n(点击二维码打开原图)").pack(pady=(0, 12))
+        qr_label = ttk.Label(container, image=self._qq_group_photo, cursor="hand2")
+        qr_label.pack()
+        qr_label.bind("<Button-1>", self._show_qq_group_full_image)
+
+        self._qq_group_window = window
+        self._center_child_window(window)
+
+    def _close_qq_group_window(self):
+        if not self._qq_group_window:
+            return
+        try:
+            if self._qq_group_window.winfo_exists():
+                self._qq_group_window.destroy()
+        except Exception:
+            pass
+        finally:
+            self._qq_group_window = None
+            self._qq_group_photo = None
+            self._qq_group_image_path = None
+
+    def _show_qq_group_full_image(self, event=None):
+        if not self._qq_group_image_path:
+            return
+        image_path = self._qq_group_image_path
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(image_path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", image_path], close_fds=True)
+            else:
+                subprocess.Popen(["xdg-open", image_path], close_fds=True)
+        except Exception as exc:
+            logging.error(f"打开 QQ 群二维码原图失败: {exc}")
+            self._log_popup_error("打开失败", f"无法打开原图：\n{image_path}\n\n错误: {exc}")
+
     def _on_root_focus(self, event=None):
         pass
 
@@ -2018,6 +2373,7 @@ class SurveyGUI:
         self.total_submissions = 0  # 总提交数
         self.current_submissions = 0  # 当前提交数
         self._log_window: Optional[tk.Toplevel] = None
+        self._settings_window: Optional[tk.Toplevel] = None
         self._log_text_widget: Optional[tk.Text] = None
         self._log_refresh_job: Optional[str] = None
         self._log_rendered_count = 0
@@ -2025,17 +2381,36 @@ class SurveyGUI:
         self._paned_position_restored = False
         self._default_paned_position_applied = False
         self._paned_configure_binding: Optional[str] = None
+        self._qq_group_window: Optional[tk.Toplevel] = None
+        self._qq_group_photo: Optional[ImageTk.PhotoImage] = None
+        self._qq_group_image_path: Optional[str] = None
         self._config_changed = False  # 跟踪配置是否有改动
         self._initial_config: Dict[str, Any] = {}  # 存储初始配置以便比较
         self._wizard_history: List[int] = []
         self._wizard_commit_log: List[Dict[str, Any]] = []
         self._last_parsed_url: Optional[str] = None
         self._last_questions_info: Optional[List[Dict[str, Any]]] = None
+        self._last_survey_title: Optional[str] = None
+        self._main_parameter_widgets: List[tk.Widget] = []
+        self._settings_window_widgets: List[tk.Widget] = []
+        self._full_simulation_window: Optional[tk.Toplevel] = None
+        self._full_sim_status_label: Optional[ttk.Label] = None
         self.url_var = tk.StringVar()
         self.target_var = tk.StringVar(value="")
         self.thread_var = tk.StringVar(value="2")
         self.interval_minutes_var = tk.StringVar(value="0")
         self.interval_seconds_var = tk.StringVar(value="0")
+        self.interval_max_minutes_var = tk.StringVar(value="0")
+        self.interval_max_seconds_var = tk.StringVar(value="0")
+        self.answer_duration_min_var = tk.StringVar(value="0")
+        self.answer_duration_max_var = tk.StringVar(value="0")
+        self.full_simulation_enabled_var = tk.BooleanVar(value=False)
+        self.full_sim_target_var = tk.StringVar(value="")
+        self.full_sim_estimated_minutes_var = tk.StringVar(value="3")
+        self.full_sim_estimated_seconds_var = tk.StringVar(value="0")
+        self.full_sim_total_minutes_var = tk.StringVar(value="30")
+        self.full_sim_total_seconds_var = tk.StringVar(value="0")
+        self._full_simulation_control_widgets: List[tk.Widget] = []
         self.preview_button: Optional[ttk.Button] = None
         self._build_ui()
         if self._loading_splash:
@@ -2058,11 +2433,14 @@ class SurveyGUI:
         menubar.add_cascade(label="文件", menu=file_menu)
         file_menu.add_command(label="载入配置", command=self._load_config_from_dialog)
         file_menu.add_command(label="保存配置", command=self._save_config_as_dialog)
-        
+
+        menubar.add_command(label="设置", command=self._open_settings_window)
+
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="帮助", menu=help_menu)
         help_menu.add_command(label="检查更新", command=self.check_for_updates)
         help_menu.add_command(label="问题反馈", command=self._open_issue_feedback)
+        help_menu.add_command(label="加入QQ群", command=self._open_qq_group_dialog)
         help_menu.add_separator()
         help_menu.add_command(label="关于", command=self.show_about)
 
@@ -2235,9 +2613,9 @@ class SurveyGUI:
         
         ttk.Label(settings_grid, text="目标份数：").grid(row=0, column=0, sticky="w", padx=5)
         self.target_var.trace("w", lambda *args: self._mark_config_changed())
-        ttk.Entry(settings_grid, textvariable=self.target_var, width=10).grid(
-            row=0, column=1, sticky="w", padx=5
-        )
+        target_entry = ttk.Entry(settings_grid, textvariable=self.target_var, width=10)
+        target_entry.grid(row=0, column=1, sticky="w", padx=5)
+        self._main_parameter_widgets.append(target_entry)
 
         ttk.Label(
             settings_grid,
@@ -2248,7 +2626,18 @@ class SurveyGUI:
         self.thread_var.trace("w", lambda *args: self._mark_config_changed())
         self.interval_minutes_var.trace("w", lambda *args: self._mark_config_changed())
         self.interval_seconds_var.trace("w", lambda *args: self._mark_config_changed())
-        
+        self.interval_max_minutes_var.trace("w", lambda *args: self._mark_config_changed())
+        self.interval_max_seconds_var.trace("w", lambda *args: self._mark_config_changed())
+        self.answer_duration_min_var.trace("w", lambda *args: self._mark_config_changed())
+        self.answer_duration_max_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_sim_target_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_sim_target_var.trace_add("write", lambda *args: self._sync_full_sim_target_to_main())
+        self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_sim_estimated_seconds_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_sim_total_minutes_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_sim_total_seconds_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_simulation_enabled_var.trace_add("write", lambda *args: self._on_full_simulation_toggle())
+
         def adjust_thread_count(delta: int) -> None:
             try:
                 current = int(self.thread_var.get())
@@ -2260,29 +2649,25 @@ class SurveyGUI:
 
         thread_control_frame = ttk.Frame(settings_grid)
         thread_control_frame.grid(row=1, column=1, sticky="w", padx=5, pady=(8, 0))
-        ttk.Button(
+        thread_dec_button = ttk.Button(
             thread_control_frame,
             text="−",
             width=2,
             command=lambda: adjust_thread_count(-1)
-        ).grid(row=0, column=0, padx=(0, 2))
-        ttk.Entry(thread_control_frame, textvariable=self.thread_var, width=5).grid(row=0, column=1, padx=2)
-        ttk.Button(
+        )
+        thread_dec_button.grid(row=0, column=0, padx=(0, 2))
+        thread_entry = ttk.Entry(thread_control_frame, textvariable=self.thread_var, width=5)
+        thread_entry.grid(row=0, column=1, padx=2)
+        thread_inc_button = ttk.Button(
             thread_control_frame,
             text="＋",
             width=2,
             command=lambda: adjust_thread_count(1)
-        ).grid(row=0, column=2, padx=(2, 0))
-        
-        ttk.Label(settings_grid, text="提交间隔：").grid(row=2, column=0, sticky="w", padx=5, pady=(8, 0))
-        interval_frame = ttk.Frame(settings_grid)
-        interval_frame.grid(row=2, column=1, sticky="w", padx=5, pady=(8, 0))
-        ttk.Entry(interval_frame, textvariable=self.interval_minutes_var, width=5).grid(row=0, column=0)
-        ttk.Label(interval_frame, text="分").grid(row=0, column=1, padx=(2, 6))
-        ttk.Entry(interval_frame, textvariable=self.interval_seconds_var, width=5).grid(row=0, column=2)
-        ttk.Label(interval_frame, text="秒").grid(row=0, column=3, padx=(2, 6))
-        ttk.Label(interval_frame, text="（0 表示不延迟）").grid(row=0, column=4, sticky="w")
+        )
+        thread_inc_button.grid(row=0, column=2, padx=(2, 0))
+        self._main_parameter_widgets.extend([thread_dec_button, thread_entry, thread_inc_button])
 
+        
         # 高级选项：手动配置（始终显示）
         self.manual_config_frame = ttk.LabelFrame(self.scrollable_content, text="🔧 高级选项", padding=10)
         self.manual_config_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -2400,6 +2785,8 @@ class SurveyGUI:
         status_label.pack(side=tk.LEFT, padx=10)
         
         self._load_config()
+        self._update_full_simulation_controls_state()
+        self._update_parameter_widgets_state()
         self.root.after(200, self._ensure_default_paned_position)
 
     def _notify_loading(self, message: str):
@@ -2455,6 +2842,67 @@ class SurveyGUI:
             except Exception:
                 pass
 
+    def _update_full_simulation_controls_state(self):
+        state = tk.NORMAL if self.full_simulation_enabled_var.get() else tk.DISABLED
+        cleaned: List[tk.Widget] = []
+        for widget in getattr(self, "_full_simulation_control_widgets", []):
+            if widget is None:
+                continue
+            try:
+                if widget.winfo_exists():
+                    widget.configure(state=state)
+                    cleaned.append(widget)
+            except Exception:
+                try:
+                    if widget.winfo_exists():
+                        widget["state"] = state
+                        cleaned.append(widget)
+                except Exception:
+                    continue
+        self._full_simulation_control_widgets = cleaned
+
+    def _update_parameter_widgets_state(self):
+        state = tk.DISABLED if self.full_simulation_enabled_var.get() else tk.NORMAL
+        targets = [w for w in getattr(self, '_main_parameter_widgets', []) if w is not None]
+        targets += [w for w in getattr(self, '_settings_window_widgets', []) if w is not None]
+        for widget in targets:
+            try:
+                if widget.winfo_exists():
+                    widget.configure(state=state)
+            except Exception:
+                try:
+                    if widget.winfo_exists():
+                        widget["state"] = state
+                except Exception:
+                    continue
+
+    def _refresh_full_simulation_status_label(self):
+        label = getattr(self, '_full_sim_status_label', None)
+        if not label or not label.winfo_exists():
+            return
+        enabled = bool(self.full_simulation_enabled_var.get())
+        status_text = "已开启" if enabled else "未开启"
+        color = "#2e7d32" if enabled else "#616161"
+        label.config(text=f"当前状态：{status_text}", foreground=color)
+
+    def _sync_full_sim_target_to_main(self):
+        if not self.full_simulation_enabled_var.get():
+            return
+        target_value = self.full_sim_target_var.get().strip()
+        if target_value:
+            self.target_var.set(target_value)
+
+    def _on_full_simulation_toggle(self, *args):
+        if self.full_simulation_enabled_var.get() and not self.full_sim_target_var.get().strip():
+            current_target = self.target_var.get().strip()
+            if current_target:
+                self.full_sim_target_var.set(current_target)
+        self._sync_full_sim_target_to_main()
+        self._update_full_simulation_controls_state()
+        self._update_parameter_widgets_state()
+        self._refresh_full_simulation_status_label()
+        self._mark_config_changed()
+
     def _restore_saved_paned_position(self, target_position: int, attempts: int = 5, delay_ms: int = 120) -> None:
         """
         多次尝试恢复保存的分隔线位置，避免布局未稳定时被默认值覆盖。
@@ -2481,6 +2929,229 @@ class SurveyGUI:
 
         self.root.after(0, lambda: _attempt(max(1, attempts)))
 
+
+    def _open_settings_window(self):
+        existing = getattr(self, "_settings_window", None)
+        if existing:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    existing.focus_force()
+                    self._center_child_window(existing)
+                    return
+                else:
+                    self._settings_window = None
+            except tk.TclError:
+                self._settings_window = None
+
+        window = tk.Toplevel(self.root)
+        window.title("设置")
+        window.resizable(False, False)
+        window.transient(self.root)
+        self._settings_window = window
+        self._settings_window_widgets = []
+        self._full_sim_status_label = None
+
+        def _on_close():
+            if self._settings_window is window:
+                self._settings_window = None
+                self._settings_window_widgets = []
+                self._full_sim_status_label = None
+            try:
+                window.destroy()
+            except Exception:
+                pass
+
+        window.protocol("WM_DELETE_WINDOW", _on_close)
+
+        content = ttk.Frame(window, padding=20)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        header_frame = ttk.Frame(content)
+        header_frame.pack(fill=tk.X, pady=(0, 12))
+        ttk.Button(
+            header_frame,
+            text="全真模拟设置",
+            command=self._open_full_simulation_window,
+            style="Accent.TButton"
+        ).pack(side=tk.LEFT)
+        status_label = ttk.Label(header_frame, text="当前状态：未开启", foreground="#616161")
+        status_label.pack(side=tk.LEFT, padx=(12, 0))
+        self._full_sim_status_label = status_label
+        self._refresh_full_simulation_status_label()
+
+        interval_frame = ttk.LabelFrame(content, text="提交间隔", padding=15)
+        interval_frame.pack(fill=tk.X)
+        ttk.Label(
+            interval_frame,
+            text="设置每次自动提交后的等待范围，可模拟更加自然的提交节奏；设置为 0 表示不延迟。",
+            wraplength=320,
+            justify="left",
+        ).pack(anchor="w")
+
+        input_frame = ttk.Frame(interval_frame)
+        input_frame.pack(anchor="w", pady=(12, 0))
+        ttk.Label(input_frame, text="最短等待").grid(row=0, column=0, sticky="w")
+        interval_min_entry = ttk.Entry(input_frame, textvariable=self.interval_minutes_var, width=6)
+        interval_min_entry.grid(row=0, column=1, padx=(6, 0))
+        self._settings_window_widgets.append(interval_min_entry)
+        ttk.Label(input_frame, text="分").grid(row=0, column=2, padx=(4, 6))
+        interval_sec_entry = ttk.Entry(input_frame, textvariable=self.interval_seconds_var, width=6)
+        interval_sec_entry.grid(row=0, column=3)
+        self._settings_window_widgets.append(interval_sec_entry)
+        ttk.Label(input_frame, text="秒").grid(row=0, column=4, padx=(4, 10))
+
+        ttk.Label(input_frame, text="最长等待").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        interval_max_min_entry = ttk.Entry(input_frame, textvariable=self.interval_max_minutes_var, width=6)
+        interval_max_min_entry.grid(row=1, column=1, padx=(6, 0), pady=(10, 0))
+        self._settings_window_widgets.append(interval_max_min_entry)
+        ttk.Label(input_frame, text="分").grid(row=1, column=2, padx=(4, 6), pady=(10, 0))
+        interval_max_sec_entry = ttk.Entry(input_frame, textvariable=self.interval_max_seconds_var, width=6)
+        interval_max_sec_entry.grid(row=1, column=3, pady=(10, 0))
+        self._settings_window_widgets.append(interval_max_sec_entry)
+        ttk.Label(input_frame, text="秒").grid(row=1, column=4, padx=(4, 10), pady=(10, 0))
+
+        ttk.Label(input_frame, text="最长等待会被自动取不小于最短等待的数值。").grid(row=2, column=0, columnspan=5, sticky="w", pady=(12, 0))
+
+        answer_frame = ttk.LabelFrame(content, text="作答时长", padding=15)
+        answer_frame.pack(fill=tk.X, pady=(15, 0))
+        ttk.Label(
+            answer_frame,
+            text="每份问卷在提交前会停留一段时间以模拟真人作答，具体秒数会在设定范围内随机选择。",
+            wraplength=320,
+            justify="left",
+        ).pack(anchor="w")
+
+        answer_range_frame = ttk.Frame(answer_frame)
+        answer_range_frame.pack(anchor="w", pady=(12, 0))
+        ttk.Label(answer_range_frame, text="最短停留").grid(row=0, column=0, sticky="w")
+        answer_min_entry = ttk.Entry(answer_range_frame, textvariable=self.answer_duration_min_var, width=8)
+        answer_min_entry.grid(row=0, column=1, padx=(4, 6))
+        self._settings_window_widgets.append(answer_min_entry)
+        ttk.Label(answer_range_frame, text="秒").grid(row=0, column=2, sticky="w")
+        ttk.Label(answer_range_frame, text="最长停留").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        answer_max_entry = ttk.Entry(answer_range_frame, textvariable=self.answer_duration_max_var, width=8)
+        answer_max_entry.grid(row=1, column=1, padx=(4, 6), pady=(8, 0))
+        self._settings_window_widgets.append(answer_max_entry)
+        ttk.Label(answer_range_frame, text="秒").grid(row=1, column=2, sticky="w", pady=(8, 0))
+        ttk.Label(answer_range_frame, text="（设为 0 表示不等待）").grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+        button_frame = ttk.Frame(content)
+        button_frame.pack(fill=tk.X, pady=(18, 0))
+        ttk.Button(button_frame, text="关闭", command=_on_close, width=10).pack(anchor="e")
+
+        self._update_parameter_widgets_state()
+        window.update_idletasks()
+        self._center_child_window(window)
+        window.lift()
+        window.focus_force()
+
+
+    def _open_full_simulation_window(self):
+        existing = getattr(self, "_full_simulation_window", None)
+        if existing:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    existing.focus_force()
+                    self._center_child_window(existing)
+                    return
+                else:
+                    self._full_simulation_window = None
+            except tk.TclError:
+                self._full_simulation_window = None
+
+        window = tk.Toplevel(self.root)
+        window.title("全真模拟设置")
+        window.resizable(False, False)
+        window.transient(self.root)
+        self._full_simulation_window = window
+
+        def _on_close():
+            if self._full_simulation_window is window:
+                self._full_simulation_window = None
+                self._full_simulation_control_widgets = []
+            try:
+                window.destroy()
+            except Exception:
+                pass
+
+        window.protocol("WM_DELETE_WINDOW", _on_close)
+
+        container = ttk.Frame(window, padding=20)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            container,
+            text="在特定时段内按照真实考试节奏自动填答与提交。",
+            wraplength=360,
+            justify="left"
+        ).pack(anchor="w")
+
+        ttk.Checkbutton(
+            container,
+            text="启用全真模拟（任务会被节奏管控，仅允许单线程执行）",
+            variable=self.full_simulation_enabled_var
+        ).pack(anchor="w", pady=(8, 6))
+
+        if not self.full_sim_target_var.get().strip():
+            current_target = self.target_var.get().strip()
+            if current_target:
+                self.full_sim_target_var.set(current_target)
+
+        target_frame = ttk.Frame(container)
+        target_frame.pack(fill=tk.X, pady=(4, 6))
+        ttk.Label(target_frame, text="目标份数：").grid(row=0, column=0, sticky="w")
+        target_entry = ttk.Entry(target_frame, textvariable=self.full_sim_target_var, width=10)
+        target_entry.grid(row=0, column=1, padx=(6, 0))
+        ttk.Label(target_frame, text="（覆盖主面板的目标设置）", foreground="#616161").grid(row=0, column=2, padx=(8, 0), sticky="w")
+
+        timing_frame = ttk.LabelFrame(container, text="时间参数", padding=12)
+        timing_frame.pack(fill=tk.X, pady=(4, 0))
+
+        ttk.Label(timing_frame, text="预计单次作答").grid(row=0, column=0, sticky="w")
+        est_min_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_estimated_minutes_var, width=6)
+        est_min_entry.grid(row=0, column=1, padx=(8, 4))
+        ttk.Label(timing_frame, text="分").grid(row=0, column=2, padx=(0, 8))
+        est_sec_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_estimated_seconds_var, width=6)
+        est_sec_entry.grid(row=0, column=3, padx=(0, 4))
+        ttk.Label(timing_frame, text="秒").grid(row=0, column=4, padx=(0, 12))
+
+        ttk.Label(timing_frame, text="模拟总时长").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        total_min_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_total_minutes_var, width=6)
+        total_min_entry.grid(row=1, column=1, padx=(8, 4), pady=(10, 0))
+        ttk.Label(timing_frame, text="分").grid(row=1, column=2, padx=(0, 8), pady=(10, 0))
+        total_sec_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_total_seconds_var, width=6)
+        total_sec_entry.grid(row=1, column=3, padx=(0, 4), pady=(10, 0))
+        ttk.Label(timing_frame, text="秒").grid(row=1, column=4, padx=(0, 12), pady=(10, 0))
+
+        ttk.Label(
+            container,
+            text="启动后所有执行参数全部锁定，仅使用本窗口中的设置。",
+            foreground="#d84315",
+            wraplength=360,
+            justify="left"
+        ).pack(anchor="w", pady=(10, 0))
+
+        action_frame = ttk.Frame(container)
+        action_frame.pack(fill=tk.X, pady=(12, 0))
+        ttk.Button(action_frame, text="完成", command=_on_close, width=10).pack(side=tk.RIGHT)
+
+        self._full_simulation_control_widgets = [
+            target_entry,
+            est_min_entry,
+            est_sec_entry,
+            total_min_entry,
+            total_sec_entry,
+        ]
+        self._update_full_simulation_controls_state()
+        self._refresh_full_simulation_status_label()
+        self._update_parameter_widgets_state()
+
+        window.update_idletasks()
+        self._center_child_window(window)
+        window.lift()
+        window.focus_force()
 
     def add_question_dialog(self):
         """弹出对话框来添加新的题目配置"""
@@ -3175,44 +3846,74 @@ class SurveyGUI:
             ttk.Label(frame, text=f"选项数: {entry.option_count}").pack(anchor="w", pady=5, fill=tk.X)
             if entry.question_type == "matrix":
                 ttk.Label(frame, text=f"矩阵行数: {entry.rows}").pack(anchor="w", pady=5, fill=tk.X)
-            
+
             ttk.Label(frame, text="选择分布方式：").pack(anchor="w", pady=10, fill=tk.X)
-            
+
             dist_var = tk.StringVar(value=entry.distribution_mode if entry.distribution_mode in ["random", "custom"] else "random")
-            ttk.Radiobutton(frame, text="完全随机", variable=dist_var, value="random").pack(anchor="w", fill=tk.X)
-            ttk.Radiobutton(frame, text="自定义权重", variable=dist_var, value="custom").pack(anchor="w", fill=tk.X)
-            
-            ttk.Label(frame, text="权重比例（用:or,分隔，如 3:2:1）：").pack(anchor="w", pady=10, fill=tk.X)
-            weight_var = tk.StringVar(value=":".join(str(int(w)) for w in entry.custom_weights) if entry.custom_weights else "")
-            weight_entry = ttk.Entry(frame, textvariable=weight_var, width=40)
-            weight_entry.pack(fill=tk.X, pady=5)
-            
+
+            weight_frame = ttk.Frame(frame)
+            slider_vars: List[tk.DoubleVar] = []
+            option_texts = entry.texts if entry.texts else []
+            initial_weights = entry.custom_weights if entry.custom_weights else [1.0] * entry.option_count
+            slider_hint = "拖动滑块设置每个选项的权重（0-10）：" if entry.question_type != "matrix" else "拖动滑块设置每列被选中的优先级（0-10）："
+            ttk.Label(weight_frame, text=slider_hint, foreground="gray").pack(anchor="w", pady=(5, 8), fill=tk.X)
+
+            sliders_container = ttk.Frame(weight_frame)
+            sliders_container.pack(fill=tk.BOTH, expand=True)
+
+            for i in range(entry.option_count):
+                row_frame = ttk.Frame(sliders_container)
+                row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
+                row_frame.columnconfigure(1, weight=1)
+
+                option_text = option_texts[i] if i < len(option_texts) and option_texts[i] else ""
+                text_value = f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}"
+                ttk.Label(row_frame, text=text_value, anchor="w", wraplength=420).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
+                initial_value = float(initial_weights[i]) if i < len(initial_weights) else 1.0
+                var = tk.DoubleVar(value=initial_value)
+                slider = ttk.Scale(row_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
+                slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
+
+                value_label = ttk.Label(row_frame, text=f"{initial_value:.1f}", width=6, anchor="e")
+                value_label.grid(row=1, column=2, sticky="e")
+
+                def _update_value_label(v=var, lbl=value_label):
+                    lbl.config(text=f"{v.get():.1f}")
+
+                var.trace_add("write", lambda *args, v=var, lbl=value_label: _update_value_label(v, lbl))
+                slider_vars.append(var)
+
+            def _toggle_weight_frame(*_):
+                if dist_var.get() == "custom":
+                    if not weight_frame.winfo_ismapped():
+                        weight_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+                else:
+                    if weight_frame.winfo_ismapped():
+                        weight_frame.pack_forget()
+
+            ttk.Radiobutton(frame, text="完全随机", variable=dist_var, value="random", command=_toggle_weight_frame).pack(anchor="w", fill=tk.X)
+            ttk.Radiobutton(frame, text="自定义权重（使用滑块设置）", variable=dist_var, value="custom", command=_toggle_weight_frame).pack(anchor="w", fill=tk.X)
+
+            _toggle_weight_frame()
+
             def save_other():
                 mode = dist_var.get()
                 if mode == "random":
                     entry.probabilities = -1
                     entry.custom_weights = None
                 elif mode == "equal":
-                    entry.probabilities = normalize_probabilities([1.0] * entry.option_count)
-                    entry.custom_weights = [1.0] * entry.option_count
+                    weights = [1.0] * entry.option_count
+                    entry.custom_weights = weights
+                    entry.probabilities = normalize_probabilities(weights)
                 else:
-                    raw = weight_var.get().strip()
-                    if not raw:
-                        self._log_popup_error("错误", "请填写权重比例")
+                    weights = [var.get() for var in slider_vars]
+                    if not weights or all(w <= 0 for w in weights):
+                        self._log_popup_error("错误", "至少需要一个选项的权重大于 0")
                         return
-                    normalized = raw.replace("：", ":").replace("，", ",").replace(" ", "")
-                    parts = normalized.split(":") if ":" in normalized else normalized.split(",")
-                    try:
-                        weights = [float(item.strip()) for item in parts if item.strip()]
-                        if len(weights) != entry.option_count:
-                            self._log_popup_error("错误", f"权重数量({len(weights)})与选项数({entry.option_count})不匹配")
-                            return
-                        entry.custom_weights = weights
-                        entry.probabilities = normalize_probabilities(weights)
-                    except:
-                        self._log_popup_error("错误", "权重格式错误")
-                        return
-                
+                    entry.custom_weights = weights
+                    entry.probabilities = normalize_probabilities(weights)
+
                 entry.distribution_mode = mode
                 self._refresh_tree()
                 edit_win.destroy()
@@ -3340,6 +4041,7 @@ class SurveyGUI:
         )
 
     def _start_survey_parsing(self, url_value: str, result_handler: Callable[[List[Dict[str, Any]]], None]):
+        self._last_survey_title = None
         self._safe_preview_button_config(state=tk.DISABLED, text="加载中...")
         progress_win = tk.Toplevel(self.root)
         progress_win.title("正在加载问卷")
@@ -3435,6 +4137,24 @@ class SurveyGUI:
             
             driver.get(survey_url)
             time.sleep(3)
+            
+            page_source = ""
+            try:
+                page_source = driver.page_source
+            except Exception:
+                page_source = ""
+            extracted_title = _extract_survey_title_from_html(page_source) if page_source else None
+            if extracted_title:
+                self._last_survey_title = extracted_title
+            else:
+                try:
+                    driver_title = driver.title
+                except Exception:
+                    driver_title = ""
+                cleaned = _normalize_html_text(driver_title)
+                cleaned = re.sub(r"(?:[-|]\s*)?(?:问卷星.*)$", "", cleaned, flags=re.IGNORECASE).strip(" -_|")
+                if cleaned:
+                    self._last_survey_title = cleaned
             
             update_progress(60, "正在解析题目结构...")
             
@@ -3619,6 +4339,7 @@ class SurveyGUI:
             response = requests.get(survey_url, headers=headers, timeout=15)
             response.raise_for_status()
             html = response.text
+            self._last_survey_title = _extract_survey_title_from_html(html)
             if progress_callback:
                 progress_callback(25, "正在解析题目结构...")
             questions_info = parse_survey_questions_from_html(html)
@@ -4231,6 +4952,13 @@ class SurveyGUI:
         if not self._validate_wjx_url(url_value):
             return
         target_value = self.target_var.get().strip()
+        full_sim_enabled = bool(self.full_simulation_enabled_var.get())
+        if full_sim_enabled:
+            target_value = self.full_sim_target_var.get().strip()
+            if not target_value:
+                self._log_popup_error("参数错误", "请在全真模拟设置中填写目标份数")
+                return
+            self.target_var.set(target_value)
         if not target_value:
             self._log_popup_error("参数错误", "目标份数不能为空")
             return
@@ -4240,23 +4968,86 @@ class SurveyGUI:
             if target <= 0 or threads_count <= 0:
                 raise ValueError
         except ValueError:
-            self._log_popup_error("参数错误", "目标份数和浏览器数量必须为正整数")
+            self._log_popup_error("参数错误", "目标份数和线程数必须为正整数")
             return
         minute_text = self.interval_minutes_var.get().strip()
         second_text = self.interval_seconds_var.get().strip()
+        max_minute_text = self.interval_max_minutes_var.get().strip()
+        max_second_text = self.interval_max_seconds_var.get().strip()
+        answer_min_text = self.answer_duration_min_var.get().strip()
+        answer_max_text = self.answer_duration_max_var.get().strip()
+        full_sim_est_min_text = self.full_sim_estimated_minutes_var.get().strip()
+        full_sim_est_sec_text = self.full_sim_estimated_seconds_var.get().strip()
+        full_sim_total_min_text = self.full_sim_total_minutes_var.get().strip()
+        full_sim_total_sec_text = self.full_sim_total_seconds_var.get().strip()
         try:
             interval_minutes = int(minute_text) if minute_text else 0
             interval_seconds = int(second_text) if second_text else 0
+            interval_max_minutes = int(max_minute_text) if max_minute_text else 0
+            interval_max_seconds = int(max_second_text) if max_second_text else 0
         except ValueError:
             self._log_popup_error("参数错误", "提交间隔请输入整数分钟和秒")
             return
-        if interval_minutes < 0 or interval_seconds < 0:
+        try:
+            answer_min_seconds = int(answer_min_text) if answer_min_text else 0
+            answer_max_seconds = int(answer_max_text) if answer_max_text else 0
+        except ValueError:
+            self._log_popup_error("参数错误", "作答时长请输入整数秒")
+            return
+        full_sim_est_seconds = 0
+        full_sim_total_seconds = 0
+        if full_sim_enabled:
+            try:
+                est_minutes = int(full_sim_est_min_text) if full_sim_est_min_text else 0
+                est_seconds = int(full_sim_est_sec_text) if full_sim_est_sec_text else 0
+                total_minutes = int(full_sim_total_min_text) if full_sim_total_min_text else 0
+                total_seconds = int(full_sim_total_sec_text) if full_sim_total_sec_text else 0
+            except ValueError:
+                self._log_popup_error("参数错误", "全真模拟时间请输入整数")
+                return
+            if est_minutes < 0 or est_seconds < 0 or total_minutes < 0 or total_seconds < 0:
+                self._log_popup_error("参数错误", "全真模拟时间不允许为负数")
+                return
+            if est_seconds >= 60 or total_seconds >= 60:
+                self._log_popup_error("参数错误", "全真模拟时间中的秒数应在 0-59 之间")
+                return
+            full_sim_est_seconds = est_minutes * 60 + est_seconds
+            full_sim_total_seconds = total_minutes * 60 + total_seconds
+            if full_sim_est_seconds <= 0:
+                self._log_popup_error("参数错误", "请填写预计单次作答时长")
+                return
+            if full_sim_total_seconds <= 0:
+                self._log_popup_error("参数错误", "请填写模拟总时长")
+                return
+            if threads_count != 1:
+                threads_count = 1
+                self.thread_var.set("1")
+                logging.info("全真模拟模式强制使用单线程执行")
+        max_fields_empty = (not max_minute_text) and (not max_second_text)
+        if interval_minutes < 0 or interval_seconds < 0 or interval_max_minutes < 0 or interval_max_seconds < 0:
             self._log_popup_error("参数错误", "提交间隔必须为非负数")
             return
-        if interval_seconds >= 60:
+        if interval_seconds >= 60 or interval_max_seconds >= 60:
             self._log_popup_error("参数错误", "秒数范围应为 0-59")
             return
+        if answer_min_seconds < 0 or answer_max_seconds < 0:
+            self._log_popup_error("参数错误", "作答时长必须为非负秒数")
+            return
+        if answer_max_seconds < answer_min_seconds:
+            self._log_popup_error("参数错误", "最长作答时长需大于或等于最短作答时长")
+            return
+        if full_sim_enabled and full_sim_total_seconds < full_sim_est_seconds * max(1, target):
+            logging.warning("全真模拟总时长可能偏短，作答间隔会自动压缩以完成既定份数")
         interval_total_seconds = interval_minutes * 60 + interval_seconds
+        max_interval_total_seconds = (
+            interval_total_seconds
+            if max_fields_empty
+            else interval_max_minutes * 60 + interval_max_seconds
+        )
+        if max_interval_total_seconds < interval_total_seconds:
+            max_interval_total_seconds = interval_total_seconds
+            self.interval_max_minutes_var.set(str(interval_minutes))
+            self.interval_max_seconds_var.set(str(interval_seconds))
         if not self.question_entries:
             msg = (
                 "当前尚未配置任何题目。\n\n"
@@ -4277,11 +5068,25 @@ class SurveyGUI:
             f"[Action Log] Starting run url={url_value} target={target} threads={threads_count}"
         )
 
-        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_seconds
+        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule
         url = url_value
         target_num = target
         num_threads = threads_count
-        submit_interval_seconds = interval_total_seconds
+        submit_interval_range_seconds = (interval_total_seconds, max_interval_total_seconds)
+        answer_duration_range_seconds = (answer_min_seconds, answer_max_seconds)
+        full_simulation_enabled = full_sim_enabled
+        if full_sim_enabled:
+            full_simulation_estimated_seconds = full_sim_est_seconds
+            full_simulation_total_duration_seconds = full_sim_total_seconds
+            schedule = _prepare_full_simulation_schedule(target, full_sim_total_seconds)
+            if not schedule:
+                self._log_popup_error("参数错误", "模拟时间设置无效")
+                return
+            full_simulation_schedule = schedule
+        else:
+            full_simulation_estimated_seconds = 0
+            full_simulation_total_duration_seconds = 0
+            _reset_full_simulation_runtime_state()
         fail_threshold = max(1, math.ceil(target_num / 4) + 1)
         cur_num = 0
         cur_fail = 0
@@ -4504,6 +5309,20 @@ class SurveyGUI:
                 pass
         self.root.destroy()
 
+    def _center_child_window(self, window: tk.Toplevel):
+        """使指定窗口居中显示。"""
+        try:
+            window.update_idletasks()
+            width = window.winfo_width()
+            height = window.winfo_height()
+            screen_width = window.winfo_screenwidth()
+            screen_height = window.winfo_screenheight()
+            x = max(0, (screen_width - width) // 2)
+            y = max(0, (screen_height - height) // 2)
+            window.geometry(f"+{int(x)}+{int(y)}")
+        except Exception:
+            pass
+
     def _center_window(self):
         """将窗口放在屏幕上方中央"""
         self.root.update_idletasks()
@@ -4554,6 +5373,14 @@ class SurveyGUI:
         os.makedirs(configs_dir, exist_ok=True)
         return configs_dir
 
+    def _get_default_config_initial_name(self) -> str:
+        """根据问卷标题生成默认的配置文件名。"""
+        if self._last_survey_title:
+            sanitized = _sanitize_filename(self._last_survey_title)
+            if sanitized:
+                return sanitized
+        return f"wjx_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     def _build_current_config_data(self) -> Dict[str, Any]:
         """收集当前界面上的配置数据。"""
         paned_sash_pos = None
@@ -4567,6 +5394,8 @@ class SurveyGUI:
             "target_num": self.target_var.get(),
             "num_threads": self.thread_var.get(),
             "submit_interval": self._serialize_submit_interval(),
+            "answer_duration_range": self._serialize_answer_duration_config(),
+            "full_simulation": self._serialize_full_simulation_config(),
             "paned_position": paned_sash_pos,
             "questions": [
                 {
@@ -4603,9 +5432,75 @@ class SurveyGUI:
                 parsed = min(59, parsed)
             return parsed
 
-        minutes = _normalize(self.interval_minutes_var.get())
-        seconds = _normalize(self.interval_seconds_var.get(), cap_seconds=True)
-        return {"minutes": minutes, "seconds": seconds}
+        minutes_text = self.interval_minutes_var.get()
+        seconds_text = self.interval_seconds_var.get()
+        max_minutes_text = self.interval_max_minutes_var.get()
+        max_seconds_text = self.interval_max_seconds_var.get()
+
+        minutes = _normalize(minutes_text)
+        seconds = _normalize(seconds_text, cap_seconds=True)
+        max_minutes = _normalize(max_minutes_text, cap_seconds=False)
+        max_seconds = _normalize(max_seconds_text, cap_seconds=True)
+
+        min_total = minutes * 60 + seconds
+        max_total = max_minutes * 60 + max_seconds
+        if (not str(max_minutes_text).strip() and not str(max_seconds_text).strip()) or max_total < min_total:
+            max_minutes, max_seconds = minutes, seconds
+
+        return {
+            "minutes": minutes,
+            "seconds": seconds,
+            "max_minutes": max_minutes,
+            "max_seconds": max_seconds,
+        }
+
+    def _serialize_answer_duration_config(self) -> Dict[str, int]:
+        def _normalize(value: Any) -> int:
+            try:
+                text = str(value).strip()
+            except Exception:
+                text = ""
+            if not text:
+                parsed = 0
+            else:
+                try:
+                    parsed = int(text)
+                except ValueError:
+                    parsed = 0
+            return max(0, parsed)
+
+        min_seconds = _normalize(self.answer_duration_min_var.get())
+        max_seconds = _normalize(self.answer_duration_max_var.get())
+        if max_seconds < min_seconds:
+            max_seconds = min_seconds
+        return {"min_seconds": min_seconds, "max_seconds": max_seconds}
+
+    def _serialize_full_simulation_config(self) -> Dict[str, Any]:
+        def _normalize(value: Any, *, cap_seconds: bool = False) -> int:
+            try:
+                text = str(value).strip()
+            except Exception:
+                text = ""
+            if not text:
+                parsed = 0
+            else:
+                try:
+                    parsed = int(text)
+                except ValueError:
+                    parsed = 0
+            parsed = max(0, parsed)
+            if cap_seconds:
+                parsed = min(59, parsed)
+            return parsed
+
+        return {
+            "enabled": bool(self.full_simulation_enabled_var.get()),
+            "target": _normalize(self.full_sim_target_var.get()),
+            "estimated_minutes": _normalize(self.full_sim_estimated_minutes_var.get()),
+            "estimated_seconds": _normalize(self.full_sim_estimated_seconds_var.get(), cap_seconds=True),
+            "total_minutes": _normalize(self.full_sim_total_minutes_var.get()),
+            "total_seconds": _normalize(self.full_sim_total_seconds_var.get(), cap_seconds=True),
+        }
 
     def _apply_submit_interval_config(self, interval_config: Optional[Dict[str, Any]]):
         if not isinstance(interval_config, dict):
@@ -4628,8 +5523,73 @@ class SurveyGUI:
                 parsed = min(59, parsed)
             return str(parsed)
 
-        self.interval_minutes_var.set(_format_value(interval_config.get("minutes")))
-        self.interval_seconds_var.set(_format_value(interval_config.get("seconds"), cap_seconds=True))
+        minutes_value = interval_config.get("minutes")
+        seconds_value = interval_config.get("seconds")
+        max_minutes_value = interval_config.get("max_minutes")
+        max_seconds_value = interval_config.get("max_seconds")
+
+        if max_minutes_value is None and max_seconds_value is None:
+            max_minutes_value = minutes_value
+            max_seconds_value = seconds_value
+
+        self.interval_minutes_var.set(_format_value(minutes_value))
+        self.interval_seconds_var.set(_format_value(seconds_value, cap_seconds=True))
+        self.interval_max_minutes_var.set(_format_value(max_minutes_value if max_minutes_value is not None else minutes_value))
+        self.interval_max_seconds_var.set(
+            _format_value(
+                max_seconds_value if max_seconds_value is not None else seconds_value,
+                cap_seconds=True,
+            )
+        )
+
+    def _apply_answer_duration_config(self, config: Optional[Dict[str, Any]]):
+        if not isinstance(config, dict):
+            config = {}
+
+        def _format_value(raw_value: Any) -> str:
+            try:
+                text = str(raw_value).strip()
+            except Exception:
+                text = ""
+            if not text:
+                parsed = 0
+            else:
+                try:
+                    parsed = int(text)
+                except ValueError:
+                    parsed = 0
+            return str(max(0, parsed))
+
+        self.answer_duration_min_var.set(_format_value(config.get("min_seconds")))
+        self.answer_duration_max_var.set(_format_value(config.get("max_seconds")))
+
+    def _apply_full_simulation_config(self, config: Optional[Dict[str, Any]]):
+        if not isinstance(config, dict):
+            config = {}
+
+        def _format(raw_value: Any, *, cap_seconds: bool = False) -> str:
+            try:
+                text = str(raw_value).strip()
+            except Exception:
+                text = ""
+            if not text:
+                parsed = 0
+            else:
+                try:
+                    parsed = int(text)
+                except ValueError:
+                    parsed = 0
+            parsed = max(0, parsed)
+            if cap_seconds:
+                parsed = min(59, parsed)
+            return str(parsed)
+
+        self.full_simulation_enabled_var.set(bool(config.get("enabled")))
+        self.full_sim_target_var.set(_format(config.get("target")))
+        self.full_sim_estimated_minutes_var.set(_format(config.get("estimated_minutes")))
+        self.full_sim_estimated_seconds_var.set(_format(config.get("estimated_seconds"), cap_seconds=True))
+        self.full_sim_total_minutes_var.set(_format(config.get("total_minutes")))
+        self.full_sim_total_seconds_var.set(_format(config.get("total_seconds"), cap_seconds=True))
 
     def _write_config_file(self, file_path: str, config_data: Optional[Dict[str, Any]] = None):
         """将配置写入指定文件。"""
@@ -4652,6 +5612,8 @@ class SurveyGUI:
         self.target_var.set(config.get("target_num", ""))
         self.thread_var.set(config.get("num_threads", ""))
         self._apply_submit_interval_config(config.get("submit_interval"))
+        self._apply_answer_duration_config(config.get("answer_duration_range"))
+        self._apply_full_simulation_config(config.get("full_simulation"))
 
         paned_position = config.get("paned_position")
         if paned_position is not None:
@@ -4681,6 +5643,8 @@ class SurveyGUI:
 
         self._save_initial_config()
         self._config_changed = False
+        self._update_full_simulation_controls_state()
+        self._update_parameter_widgets_state()
 
     def _load_config_from_file(self, file_path: str, *, silent: bool = False):
         """从指定路径加载配置。"""
@@ -4704,7 +5668,7 @@ class SurveyGUI:
     def _save_config_as_dialog(self, *, show_popup: bool = True) -> bool:
         """通过对话框保存配置到用户自定义文件。"""
         configs_dir = self._get_configs_directory()
-        default_name = f"wjx_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        default_name = self._get_default_config_initial_name()
         file_path = filedialog.asksaveasfilename(
             parent=self.root,
             title="保存配置",
@@ -4750,6 +5714,7 @@ class SurveyGUI:
             "target_num": self.target_var.get(),
             "num_threads": self.thread_var.get(),
             "submit_interval": self._serialize_submit_interval(),
+            "full_simulation": self._serialize_full_simulation_config(),
             "questions": [
                 {
                     "question_type": entry.question_type,
@@ -4776,6 +5741,7 @@ class SurveyGUI:
             "target_num": self.target_var.get(),
             "num_threads": self.thread_var.get(),
             "submit_interval": self._serialize_submit_interval(),
+            "full_simulation": self._serialize_full_simulation_config(),
             "questions": [
                 {
                     "question_type": entry.question_type,
