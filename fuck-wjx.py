@@ -52,7 +52,7 @@ except ImportError:
     BeautifulSoup = None
 
 # 版本号
-__VERSION__ = "0.5"
+__VERSION__ = "0.5.1"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
@@ -596,6 +596,9 @@ matrix_prob: List[Union[List[float], int]] = []
 scale_prob: List[Union[List[float], int]] = []
 texts: List[List[str]] = []
 texts_prob: List[List[float]] = []
+single_option_fill_texts: List[Optional[List[Optional[str]]]] = []
+droplist_option_fill_texts: List[Optional[List[Optional[str]]]] = []
+multiple_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 
 target_num = 1
 fail_threshold = 1
@@ -899,26 +902,56 @@ class QuestionEntry:
     distribution_mode: str = "random"  # random, equal, custom
     custom_weights: Optional[List[float]] = None
     question_num: Optional[str] = None
+    option_fill_texts: Optional[List[Optional[str]]] = None
+    fillable_option_indices: Optional[List[int]] = None
 
     def summary(self) -> str:
+        def _mode_text(mode: Optional[str]) -> str:
+            return {
+                "random": "完全随机",
+                "equal": "平均分配",
+                "custom": "自定义配比",
+            }.get(mode or "", "平均分配")
+
         if self.question_type == "text":
-            sample = " | ".join(self.texts or [])
-            return f"答案: {sample or '默认空'}"
+            samples = " | ".join(filter(None, self.texts or []))
+            preview = samples if samples else "未设置示例内容"
+            if len(preview) > 60:
+                preview = preview[:57] + "..."
+            return f"填空题: {preview}"
+
         if self.question_type == "matrix":
-            mode_text = {"random": "完全随机", "custom": "自定义权重"}.get(self.distribution_mode, "完全随机")
-            return f"{self.rows}行 × {self.option_count}列 - {mode_text}"
+            mode_text = _mode_text(self.distribution_mode)
+            rows = max(1, self.rows)
+            columns = max(1, self.option_count)
+            return f"{rows} 行 × {columns} 列 - {mode_text}"
+
         if self.question_type == "multiple" and self.probabilities == -1:
-            return f"{self.option_count}个选项 - 完全随机选择"
+            return f"{self.option_count} 个选项 - 随机多选"
+
         if self.probabilities == -1:
-            return f"{self.option_count}个选项 - 完全随机"
-        mode_text = {"random": "完全随机", "custom": "自定义权重"}.get(self.distribution_mode, "完全随机")
+            return f"{self.option_count} 个选项 - 完全随机"
+
+        mode_text = _mode_text(self.distribution_mode)
+        fillable_hint = ""
+        if self.option_fill_texts and any(text for text in self.option_fill_texts if text):
+            fillable_hint = " | 含填空项"
+
         if self.question_type == "multiple" and self.custom_weights:
-            weights_str = ",".join(f"{int(w)}%" for w in self.custom_weights)
-            return f"{self.option_count}个选项 - 选中概率 {weights_str}"
+            weights_str = ",".join(f"{int(round(max(w, 0)))}%" for w in self.custom_weights)
+            return f"{self.option_count} 个选项 - 权重 {weights_str}{fillable_hint}"
+
         if self.distribution_mode == "custom" and self.custom_weights:
-            weights_str = ":".join(str(int(w)) for w in self.custom_weights)
-            return f"{self.option_count}个选项 - 权重 {weights_str}"
-        return f"{self.option_count}个选项 - {mode_text}"
+            def _format_ratio(value: float) -> str:
+                rounded = round(value, 1)
+                if abs(rounded - int(rounded)) < 1e-6:
+                    return str(int(rounded))
+                return f"{rounded}".rstrip("0").rstrip(".")
+
+            weights_str = ":".join(_format_ratio(max(w, 0.1)) for w in self.custom_weights)
+            return f"{self.option_count} 个选项 - 配比 {weights_str}{fillable_hint}"
+
+        return f"{self.option_count} 个选项 - {mode_text}{fillable_hint}"
 
 
 QUESTION_TYPE_LABELS = {
@@ -930,9 +963,97 @@ QUESTION_TYPE_LABELS = {
     "text": "填空题",
 }
 
+DEFAULT_FILL_TEXT = "无"  # 填空选项留空时的默认文本
+
+def _normalize_option_fill_texts(option_texts: Optional[List[Optional[str]]], option_count: int) -> Optional[List[Optional[str]]]:
+    if not option_texts:
+        return None
+    normalized_count = option_count if option_count > 0 else len(option_texts)
+    normalized: List[Optional[str]] = []
+    for idx in range(normalized_count):
+        raw = option_texts[idx] if idx < len(option_texts) else None
+        if raw is None:
+            normalized.append(None)
+            continue
+        try:
+            text_value = str(raw).strip()
+        except Exception:
+            text_value = ""
+        normalized.append(text_value or None)
+    if not any(value for value in normalized):
+        return None
+    return normalized
+
+
+def _get_fill_text_from_config(fill_entries: Optional[List[Optional[str]]], option_index: int) -> Optional[str]:
+    if not fill_entries or option_index < 0 or option_index >= len(fill_entries):
+        return None
+    value = fill_entries[option_index]
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _fill_option_additional_text(driver: WebDriver, question_number: int, option_index_zero_based: int, fill_value: Optional[str]) -> None:
+    if not fill_value:
+        return
+    text = str(fill_value).strip()
+    if not text:
+        return
+    try:
+        question_div = driver.find_element(By.CSS_SELECTOR, f"#div{question_number}")
+    except Exception:
+        return
+    candidate_inputs = []
+    try:
+        option_elements = question_div.find_elements(By.CSS_SELECTOR, 'div.ui-controlgroup > div')
+    except Exception:
+        option_elements = []
+    if option_elements and 0 <= option_index_zero_based < len(option_elements):
+        option_element = option_elements[option_index_zero_based]
+        try:
+            candidate_inputs.extend(option_element.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='search'], textarea"))
+        except Exception:
+            pass
+        try:
+            candidate_inputs.extend(option_element.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea"))
+        except Exception:
+            pass
+    if not candidate_inputs:
+        try:
+            candidate_inputs = question_div.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea")
+        except Exception:
+            candidate_inputs = []
+    if not candidate_inputs:
+        try:
+            candidate_inputs = question_div.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='search'], textarea")
+        except Exception:
+            candidate_inputs = []
+    for input_element in candidate_inputs:
+        try:
+            if not input_element.is_displayed():
+                continue
+        except Exception:
+            continue
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", input_element)
+        except Exception:
+            pass
+        try:
+            input_element.clear()
+        except Exception:
+            pass
+        try:
+            input_element.send_keys(text)
+            time.sleep(0.05)
+            return
+        except Exception:
+            continue
 
 def configure_probabilities(entries: List[QuestionEntry]):
     global single_prob, droplist_prob, multiple_prob, matrix_prob, scale_prob, texts, texts_prob
+    global single_option_fill_texts, droplist_option_fill_texts, multiple_option_fill_texts
     single_prob = []
     droplist_prob = []
     multiple_prob = []
@@ -940,17 +1061,23 @@ def configure_probabilities(entries: List[QuestionEntry]):
     scale_prob = []
     texts = []
     texts_prob = []
+    single_option_fill_texts = []
+    droplist_option_fill_texts = []
+    multiple_option_fill_texts = []
 
     for entry in entries:
         probs = entry.probabilities
         if entry.question_type == "single":
             single_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+            single_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "dropdown":
             droplist_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+            droplist_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "multiple":
             if not isinstance(probs, list):
                 raise ValueError("多选题必须提供概率列表，数值范围0-100")
             multiple_prob.append([float(value) for value in probs])
+            multiple_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "matrix":
             rows = max(1, entry.rows)
             if isinstance(probs, list):
@@ -1114,21 +1241,146 @@ def _cleanup_question_title(raw_title: str) -> str:
     return title.strip()
 
 
-def _collect_choice_option_texts(question_div) -> List[str]:
-    selectors = [".label", "li span", "li"]
+def _element_contains_text_input(element) -> bool:
+    if element is None:
+        return False
+    try:
+        candidates = element.find_all(['input', 'textarea'])
+    except Exception:
+        return False
+    for candidate in candidates:
+        try:
+            tag_name = (candidate.name or '').lower()
+        except Exception:
+            tag_name = ''
+        input_type = (candidate.get('type') or '').lower()
+        if tag_name == 'textarea':
+            return True
+        if input_type in ('', 'text', 'search', 'tel', 'number'):
+            return True
+    return False
+
+
+def _question_div_has_shared_text_input(question_div) -> bool:
+    if question_div is None:
+        return False
+    try:
+        shared_inputs = question_div.select('.ui-other input, .ui-other textarea')
+    except Exception:
+        shared_inputs = []
+    if shared_inputs:
+        return True
+    try:
+        keyword_inputs = question_div.select("input[id*='other'], input[name*='other'], textarea[id*='other'], textarea[name*='other']")
+        if keyword_inputs:
+            return True
+    except Exception:
+        pass
+    text_blob = _normalize_html_text(question_div.get_text(' ', strip=True))
+    option_fill_keywords = ["请注明", "其他", "其他内容", "填空", "填写"]
+    if any(keyword in text_blob for keyword in option_fill_keywords):
+        return True
+    return False
+
+
+def _collect_choice_option_texts(question_div) -> Tuple[List[str], List[int]]:
     texts: List[str] = []
+    fillable_indices: List[int] = []
     seen = set()
+    option_elements: List[Any] = []
+    selectors = ['.ui-controlgroup > div', 'ul > li']
     for selector in selectors:
-        elements = question_div.select(selector)
-        for element in elements:
-            text = _normalize_html_text(element.get_text(" ", strip=True))
+        try:
+            option_elements = question_div.select(selector)
+        except Exception:
+            option_elements = []
+        if option_elements:
+            break
+    if option_elements:
+        for element in option_elements:
+            label_element = None
+            try:
+                label_element = element.select_one('.label')
+            except Exception:
+                label_element = None
+            if not label_element:
+                label_element = element
+            text = _normalize_html_text(label_element.get_text(' ', strip=True))
             if not text or text in seen:
                 continue
-            seen.add(text)
+            option_index = len(texts)
             texts.append(text)
-        if texts:
-            break
-    return texts
+            seen.add(text)
+            if _element_contains_text_input(element):
+                fillable_indices.append(option_index)
+    if not texts:
+        fallback_selectors = ['.label', 'li span', 'li']
+        for selector in fallback_selectors:
+            try:
+                elements = question_div.select(selector)
+            except Exception:
+                elements = []
+            for element in elements:
+                text = _normalize_html_text(element.get_text(' ', strip=True))
+                if not text or text in seen:
+                    continue
+                texts.append(text)
+                seen.add(text)
+            if texts:
+                break
+    if not fillable_indices and texts and _question_div_has_shared_text_input(question_div):
+        fillable_indices.append(len(texts) - 1)
+    fillable_indices = sorted(set(fillable_indices))
+    return texts, fillable_indices
+
+
+def _selenium_element_contains_text_input(element) -> bool:
+    if element is None:
+        return False
+    try:
+        inputs = element.find_elements(By.CSS_SELECTOR, "input, textarea")
+    except Exception:
+        return False
+    for candidate in inputs:
+        try:
+            tag_name = (candidate.tag_name or "").lower()
+        except Exception:
+            tag_name = ""
+        input_type = ""
+        try:
+            input_type = (candidate.get_attribute("type") or "").lower()
+        except Exception:
+            input_type = ""
+        if tag_name == "textarea":
+            return True
+        if tag_name == "input" and input_type in ("", "text", "search", "tel", "number"):
+            return True
+    return False
+
+
+def _selenium_question_has_shared_text_input(question_div) -> bool:
+    if question_div is None:
+        return False
+    try:
+        shared = question_div.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea")
+        if shared:
+            return True
+    except Exception:
+        pass
+    try:
+        keyword_elements = question_div.find_elements(By.CSS_SELECTOR, "input[id*='other'], textarea[id*='other']")
+        if keyword_elements:
+            return True
+    except Exception:
+        pass
+    try:
+        text_blob = (question_div.text or "").strip()
+    except Exception:
+        text_blob = ""
+    if not text_blob:
+        return False
+    option_fill_keywords = ["请注明", "其他", "填空", "填写", "specify", "other"]
+    return any(keyword in text_blob for keyword in option_fill_keywords)
 
 
 def _collect_select_option_texts(question_div, soup, question_number: int) -> List[str]:
@@ -1191,16 +1443,19 @@ def _extract_question_metadata_from_html(soup, question_div, question_number: in
     option_texts: List[str] = []
     option_count = 0
     matrix_rows = 0
+    fillable_indices: List[int] = []
     if type_code in {"3", "4", "5", "11"}:
-        option_texts = _collect_choice_option_texts(question_div)
+        option_texts, fillable_indices = _collect_choice_option_texts(question_div)
         option_count = len(option_texts)
     elif type_code == "7":
         option_texts = _collect_select_option_texts(question_div, soup, question_number)
         option_count = len(option_texts)
+        if option_count > 0 and _question_div_has_shared_text_input(question_div):
+            fillable_indices = [option_count - 1]
     elif type_code == "6":
         matrix_rows, option_texts = _collect_matrix_option_texts(soup, question_number)
         option_count = len(option_texts)
-    return option_texts, option_count, matrix_rows
+    return option_texts, option_count, matrix_rows, fillable_indices
 
 
 def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
@@ -1224,7 +1479,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 continue
             type_code = str(question_div.get("type") or "").strip() or "0"
             title_text = _extract_question_title(question_div, question_number)
-            option_texts, option_count, matrix_rows = _extract_question_metadata_from_html(
+            option_texts, option_count, matrix_rows, fillable_indices = _extract_question_metadata_from_html(
                 soup, question_div, question_number, type_code
             )
             questions_info.append({
@@ -1235,6 +1490,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "rows": matrix_rows,
                 "page": page_index,
                 "option_texts": option_texts,
+                "fillable_options": fillable_indices,
             })
     return questions_info
 
@@ -1567,6 +1823,9 @@ def single(driver: WebDriver, current, index):
     driver.find_element(
         By.CSS_SELECTOR, f"#div{current} > div.ui-controlgroup > div:nth-child({selected_option})"
     ).click()
+    fill_entries = single_option_fill_texts[index] if index < len(single_option_fill_texts) else None
+    fill_value = _get_fill_text_from_config(fill_entries, selected_option - 1)
+    _fill_option_additional_text(driver, current, selected_option - 1, fill_value)
 
 
 # 下拉框处理函数
@@ -1587,6 +1846,9 @@ def droplist(driver: WebDriver, current, index):
     driver.find_element(
         By.XPATH, f"//*[@id='select2-q{current}-results']/li[{r + 1}]"
     ).click()
+    fill_entries = droplist_option_fill_texts[index] if index < len(droplist_option_fill_texts) else None
+    fill_value = _get_fill_text_from_config(fill_entries, r - 1)
+    _fill_option_additional_text(driver, current, r - 1, fill_value)
 
 
 def multiple(driver: WebDriver, current, index):
@@ -1601,6 +1863,7 @@ def multiple(driver: WebDriver, current, index):
     else:
         effective_limit = len(option_elements)
     selection_probabilities = multiple_prob[index] if index < len(multiple_prob) else [50.0] * len(option_elements)
+    fill_entries = multiple_option_fill_texts[index] if index < len(multiple_option_fill_texts) else None
 
     if selection_probabilities == -1 or (isinstance(selection_probabilities, list) and len(selection_probabilities) == 1 and selection_probabilities[0] == -1):
         num_to_select = random.randint(1, max(1, effective_limit))
@@ -1608,6 +1871,8 @@ def multiple(driver: WebDriver, current, index):
         for option_idx in selected_indices:
             selector = f"#div{current} > div.ui-controlgroup > div:nth-child({option_idx + 1})"
             driver.find_element(By.CSS_SELECTOR, selector).click()
+            fill_value = _get_fill_text_from_config(fill_entries, option_idx)
+            _fill_option_additional_text(driver, current, option_idx, fill_value)
         return
     
     assert len(option_elements) == len(selection_probabilities), f"第{current}题概率值和选项值不一致"
@@ -1626,6 +1891,8 @@ def multiple(driver: WebDriver, current, index):
     for option_idx in selected_indices:
         selector = f"#div{current} > div.ui-controlgroup > div:nth-child({option_idx + 1})"
         driver.find_element(By.CSS_SELECTOR, selector).click()
+        fill_value = _get_fill_text_from_config(fill_entries, option_idx)
+        _fill_option_additional_text(driver, current, option_idx, fill_value)
 
 
 def matrix(driver: WebDriver, current, index):
@@ -2211,11 +2478,14 @@ class SurveyGUI:
         except Exception:
             return False
         host = (parsed.netloc or "").lower()
-        return bool(host) and (host == "wjx.cn" or host.endswith(".wjx.cn"))
+        supported_domains = ("wjx.cn", "wjx.top")
+        return bool(host) and any(
+            host == domain or host.endswith(f".{domain}") for domain in supported_domains
+        )
 
     def _validate_wjx_url(self, url: str) -> bool:
         if not self._is_supported_wjx_url(url):
-            self._log_popup_error("链接错误", "当前仅支持 wjx.cn 的问卷链接，请检查后重试。")
+            self._log_popup_error("链接错误", "当前仅支持 wjx.cn / wjx.top 的问卷链接，请检查后重试。")
             return False
         return True
 
@@ -3579,6 +3849,8 @@ class SurveyGUI:
                     option_count=option_count,
                     distribution_mode=distribution_mode,
                     custom_weights=custom_weights,
+                    option_fill_texts=None,
+                    fillable_option_indices=None,
                 )
                 logging.info(f"[Action Log] Adding question type={q_type} options={option_count} mode={distribution_mode}")
                 self.question_entries.append(entry)
@@ -3697,11 +3969,183 @@ class SurveyGUI:
         edit_win.geometry("550x550")
         edit_win.transient(self.root)
         edit_win.grab_set()
-        
-        frame = ttk.Frame(edit_win, padding=20)
-        frame.pack(fill=tk.BOTH, expand=True)
-        
-        ttk.Label(frame, text=f"题型: {QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)}", 
+
+        scroll_container = ttk.Frame(edit_win)
+        scroll_container.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(scroll_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        frame = ttk.Frame(canvas, padding=20)
+        canvas_window = canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        def _on_frame_configure(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event=None):
+            if event and event.width > 1:
+                canvas.itemconfigure(canvas_window, width=event.width)
+
+        frame.bind("<Configure>", _on_frame_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        def _close_edit_window():
+            canvas.unbind_all("<MouseWheel>")
+            try:
+                edit_win.grab_release()
+            except Exception:
+                pass
+            edit_win.destroy()
+
+        edit_win.protocol("WM_DELETE_WINDOW", _close_edit_window)
+
+        question_identifier = entry.question_num or f"第 {index + 1} 题"
+        overview_card = tk.Frame(frame, bg="#f6f8ff", highlightbackground="#cfd8ff", highlightthickness=1, bd=0)
+        overview_card.pack(fill=tk.X, pady=(0, 15))
+        overview_inner = tk.Frame(overview_card, bg="#f6f8ff")
+        overview_inner.pack(fill=tk.X, padx=14, pady=10)
+
+        tk.Label(
+            overview_inner,
+            text=f"正在编辑：{question_identifier}",
+            font=("TkDefaultFont", 11, "bold"),
+            fg="#1a237e",
+            bg="#f6f8ff"
+        ).pack(anchor="w", fill=tk.X)
+
+        summary_line = entry.summary()
+        tk.Label(
+            overview_inner,
+            text=summary_line,
+            fg="#455a64",
+            bg="#f6f8ff",
+            wraplength=420,
+            justify="left"
+        ).pack(anchor="w", pady=(4, 2), fill=tk.X)
+
+        readable_type = QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)
+        mode_map = {
+            "random": "完全随机",
+            "equal": "平均分配",
+            "custom": "自定义配比",
+        }
+        mode_label = mode_map.get(entry.distribution_mode, "平均分配")
+        tk.Label(
+            overview_inner,
+            text=f"题型：{readable_type} | 当前策略：{mode_label}",
+            fg="#546e7a",
+            bg="#f6f8ff"
+        ).pack(anchor="w", fill=tk.X)
+
+        chip_frame = tk.Frame(overview_inner, bg="#f6f8ff")
+        chip_frame.pack(anchor="w", pady=(6, 0))
+        ttk.Label(
+            chip_frame,
+            text=f"选项数：{entry.option_count}",
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        fillable_count = len(entry.fillable_option_indices or [])
+        filled_values = len([text for text in (entry.option_fill_texts or []) if text])
+        if fillable_count:
+            tk.Label(
+                chip_frame,
+                text=f"含 {fillable_count} 个附加填空",
+                bg="#e3f2fd",
+                fg="#0d47a1",
+                font=("TkDefaultFont", 9),
+                padx=8,
+                pady=2
+            ).pack(side=tk.LEFT, padx=(0, 6))
+        if filled_values:
+            tk.Label(
+                chip_frame,
+                text=f"{filled_values} 个附加内容已设置",
+                bg="#ede7f6",
+                fg="#4527a0",
+                font=("TkDefaultFont", 9),
+                padx=8,
+                pady=2
+            ).pack(side=tk.LEFT)
+
+        helper_text = self._get_edit_dialog_hint(entry)
+        if helper_text:
+            helper_box = tk.Frame(frame, bg="#fff8e1", highlightbackground="#ffe082", highlightthickness=1)
+            helper_box.pack(fill=tk.X, pady=(0, 12))
+            tk.Label(
+                helper_box,
+                text=helper_text,
+                bg="#fff8e1",
+                fg="#864a00",
+                wraplength=460,
+                justify="left",
+                padx=12,
+                pady=8
+            ).pack(fill=tk.X)
+
+        fillable_indices = set(entry.fillable_option_indices or [])
+        existing_fill_values = entry.option_fill_texts or []
+
+        def _should_show_inline_fill(option_index: int) -> bool:
+            if fillable_indices and option_index in fillable_indices:
+                return True
+            if option_index < len(existing_fill_values) and existing_fill_values[option_index]:
+                return True
+            return False
+
+        def _attach_inline_fill_input(row_frame: ttk.Frame, option_index: int, inline_vars: List[Optional[tk.StringVar]]):
+            if not inline_vars or option_index < 0 or option_index >= len(inline_vars):
+                return
+            if not _should_show_inline_fill(option_index):
+                return
+            inline_row = ttk.Frame(row_frame)
+            inline_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(2, 4))
+            ttk.Label(inline_row, text="附加填空：").pack(side=tk.LEFT)
+            initial_text = ""
+            if option_index < len(existing_fill_values) and existing_fill_values[option_index]:
+                initial_text = existing_fill_values[option_index] or ""
+            var = tk.StringVar(value=initial_text)
+            entry_widget = ttk.Entry(inline_row, textvariable=var, width=32)
+            entry_widget.pack(side=tk.LEFT, padx=(6, 6), fill=tk.X, expand=True)
+            ttk.Label(inline_row, text="留空将自动填“无”", foreground="gray").pack(side=tk.LEFT)
+            inline_vars[option_index] = var
+
+        def _collect_inline_fill_values(inline_vars: List[Optional[tk.StringVar]], option_total: int) -> Optional[List[Optional[str]]]:
+            if not inline_vars:
+                return None
+            existing = list(existing_fill_values)
+            if len(existing) < option_total:
+                existing.extend([None] * (option_total - len(existing)))
+            collected: List[Optional[str]] = []
+            has_value = False
+            for idx in range(option_total):
+                var = inline_vars[idx] if idx < len(inline_vars) else None
+                if var is None:
+                    value = existing[idx] if idx < len(existing) else None
+                    if value:
+                        has_value = True
+                    collected.append(value)
+                    continue
+                value = var.get().strip()
+                if value:
+                    collected.append(value)
+                    has_value = True
+                elif (fillable_indices and idx in fillable_indices) or (idx < len(existing) and existing[idx]):
+                    collected.append(DEFAULT_FILL_TEXT)
+                    has_value = True
+                else:
+                    collected.append(None)
+            return collected if has_value else None
+
+        ttk.Label(frame, text=f"题型: {QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)}",
                  font=("TkDefaultFont", 10, "bold")).pack(pady=(0, 20))
         
         if entry.question_type == "text":
@@ -3770,7 +4214,7 @@ class SurveyGUI:
                 entry.probabilities = normalize_probabilities([1.0] * len(values))
                 entry.option_count = len(values)
                 self._refresh_tree()
-                edit_win.destroy()
+                _close_edit_window()
                 logging.info(f"[Action Log] Saved text answers for question #{index+1}")
             
             save_btn = ttk.Button(frame, text="保存", command=save_text)
@@ -3778,41 +4222,42 @@ class SurveyGUI:
             
         elif entry.question_type == "multiple":
             ttk.Label(frame, text=f"多选题（{entry.option_count}个选项）").pack(anchor="w", pady=5, fill=tk.X)
-            ttk.Label(frame, text="设置每个选项的选中概率（0-100%）：", 
+            ttk.Label(frame, text="设置每个选项的选中概率（0-100%）：",
                      foreground="gray").pack(anchor="w", pady=5, fill=tk.X)
-            
+
             sliders = []
             slider_frame = ttk.Frame(frame)
             slider_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-            
+
             canvas = tk.Canvas(slider_frame, height=250, highlightthickness=0)
             scrollbar = ttk.Scrollbar(slider_frame, orient="vertical", command=canvas.yview)
             scrollable_frame = ttk.Frame(canvas)
-            
+
             canvas_win = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-            
+
             def _on_scroll_config(event):
                 canvas.configure(scrollregion=canvas.bbox("all"))
             scrollable_frame.bind("<Configure>", _on_scroll_config)
-            
+
             def _on_canvas_config(event):
                 canvas.itemconfigure(canvas_win, width=event.width)
             canvas.bind("<Configure>", _on_canvas_config)
-            
+
             canvas.configure(yscrollcommand=scrollbar.set)
-            
+
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
+
             current_probs = entry.custom_weights if entry.custom_weights else [50.0] * entry.option_count
             # 获取选项文本（如果有的话）
             option_texts = entry.texts if entry.texts else []
-            
+            inline_fill_vars: List[Optional[tk.StringVar]] = [None] * entry.option_count
+
             for i in range(entry.option_count):
                 row_frame = ttk.Frame(scrollable_frame)
                 row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
                 row_frame.columnconfigure(1, weight=1)
-                
+
                 # 显示选项文本（如果有的话）- 使用两行布局
                 option_text = option_texts[i] if i < len(option_texts) and option_texts[i] else ""
                 text_label = ttk.Label(row_frame, text=f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}", 
@@ -3823,20 +4268,22 @@ class SurveyGUI:
                 var = tk.DoubleVar(value=current_probs[i] if i < len(current_probs) else 50.0)
                 slider = ttk.Scale(row_frame, from_=0, to=100, variable=var, orient=tk.HORIZONTAL)
                 slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
-                
+
                 label = ttk.Label(row_frame, text=f"{int(var.get())}%", width=6, anchor="e")
                 label.grid(row=1, column=2, sticky="e")
-                
+
                 var.trace_add("write", lambda *args, l=label, v=var: l.config(text=f"{int(v.get())}%"))
                 sliders.append(var)
-            
+                _attach_inline_fill_input(row_frame, i, inline_fill_vars)
+
             def save_multiple():
                 probs = [var.get() for var in sliders]
                 entry.custom_weights = probs
                 entry.probabilities = probs
                 entry.distribution_mode = "custom"
+                entry.option_fill_texts = _collect_inline_fill_values(inline_fill_vars, entry.option_count)
                 self._refresh_tree()
-                edit_win.destroy()
+                _close_edit_window()
                 logging.info(f"[Action Log] Saved custom weights for question #{index+1}")
             
             save_btn = ttk.Button(frame, text="保存", command=save_multiple)
@@ -3860,6 +4307,7 @@ class SurveyGUI:
 
             sliders_container = ttk.Frame(weight_frame)
             sliders_container.pack(fill=tk.BOTH, expand=True)
+            inline_fill_vars: List[Optional[tk.StringVar]] = [None] * entry.option_count if entry.question_type in ("single", "dropdown") else []
 
             for i in range(entry.option_count):
                 row_frame = ttk.Frame(sliders_container)
@@ -3883,19 +4331,10 @@ class SurveyGUI:
 
                 var.trace_add("write", lambda *args, v=var, lbl=value_label: _update_value_label(v, lbl))
                 slider_vars.append(var)
+                _attach_inline_fill_input(row_frame, i, inline_fill_vars)
 
-            def _toggle_weight_frame(*_):
-                if dist_var.get() == "custom":
-                    if not weight_frame.winfo_ismapped():
-                        weight_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-                else:
-                    if weight_frame.winfo_ismapped():
-                        weight_frame.pack_forget()
-
-            ttk.Radiobutton(frame, text="完全随机", variable=dist_var, value="random", command=_toggle_weight_frame).pack(anchor="w", fill=tk.X)
-            ttk.Radiobutton(frame, text="自定义权重（使用滑块设置）", variable=dist_var, value="custom", command=_toggle_weight_frame).pack(anchor="w", fill=tk.X)
-
-            _toggle_weight_frame()
+            ttk.Radiobutton(frame, text="完全随机", variable=dist_var, value="random").pack(anchor="w", fill=tk.X)
+            ttk.Radiobutton(frame, text="自定义权重（使用滑块设置）", variable=dist_var, value="custom").pack(anchor="w", fill=tk.X)
 
             def save_other():
                 mode = dist_var.get()
@@ -3915,13 +4354,34 @@ class SurveyGUI:
                     entry.probabilities = normalize_probabilities(weights)
 
                 entry.distribution_mode = mode
+                entry.option_fill_texts = _collect_inline_fill_values(inline_fill_vars, entry.option_count)
                 self._refresh_tree()
-                edit_win.destroy()
+                _close_edit_window()
                 logging.info(f"[Action Log] Saved distribution settings ({mode}) for question #{index+1}")
-            
             save_btn = ttk.Button(frame, text="保存", command=save_other)
             save_btn.pack(pady=20, ipadx=20, ipady=5)
 
+            def _toggle_weight_frame(*_):
+                if dist_var.get() == "custom":
+                    weight_frame.pack(fill=tk.BOTH, expand=True, pady=10, before=save_btn)
+                else:
+                    weight_frame.pack_forget()
+
+            dist_var.trace_add("write", _toggle_weight_frame)
+            _toggle_weight_frame()
+
+
+    def _get_edit_dialog_hint(self, entry: QuestionEntry) -> str:
+        """根据题型返回更口语化的编辑提示。"""
+        hints = {
+            "text": "可输入多个候选答案，执行时会在这些答案中轮换填写；建议保留能覆盖不同语气的内容。",
+            "multiple": "右侧滑块控制每个选项的命中率，百分比越高越常被勾选；可结合下方“选项填写”设置附加文本。",
+            "single": "可在“完全随机”和“自定义权重”之间切换，想突出热门选项时直接把滑块调高即可。",
+            "dropdown": "与单选题相同，若问卷含“其他”选项，可在底部“附加填空”区写入默认内容。",
+            "scale": "量表题通常代表分值，若希望答案集中在某个区间，请在自定义配比里提升对应滑块。",
+            "matrix": "矩阵题的滑块作用于每一列，值越大越倾向被选，适合模拟“偏好列”的情况。",
+        }
+        return hints.get(entry.question_type, "根据右侧控件调整答案或权重，保存后可在列表中随时再次修改。")
 
 
     def upload_qrcode(self):
@@ -4233,13 +4693,36 @@ class SurveyGUI:
                                 matrix_rows = sum(1 for row in rows if row.get_attribute("rowindex") is not None)
                                 columns = driver.find_elements(By.XPATH, f'//*[@id="drv{current_question_num}_1"]/td')
                                 option_count = max(0, len(columns) - 1)
-                                # 提取矩阵题列标题
                                 option_texts = [col.text.strip() for col in columns[1:]] if len(columns) > 1 else []
-                            except:
+                            except Exception:
                                 matrix_rows = 0
                                 option_count = 0
                                 option_texts = []
-                        
+
+                        option_fillable_indices: List[int] = []
+                        if question_type in ("3", "4", "5"):
+                            try:
+                                option_elements = driver.find_elements(By.XPATH, f'//*[@id="div{current_question_num}"]/div[2]/div')
+                            except Exception:
+                                option_elements = []
+                            if not option_elements:
+                                try:
+                                    option_elements = driver.find_elements(By.XPATH, f'//*[@id="div{current_question_num}"]//div[@class="ui-radio"]')
+                                except Exception:
+                                    option_elements = []
+                            for idx, opt_element in enumerate(option_elements):
+                                if _selenium_element_contains_text_input(opt_element):
+                                    option_fillable_indices.append(idx)
+                            if not option_fillable_indices and option_count > 0 and _selenium_question_has_shared_text_input(question_div):
+                                option_fillable_indices.append(option_count - 1)
+                        elif question_type == "7":
+                            try:
+                                inputs = question_div.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea")
+                            except Exception:
+                                inputs = []
+                            if inputs and option_count > 0:
+                                option_fillable_indices.append(option_count - 1)
+
                         questions_info.append({
                             "num": current_question_num,
                             "title": title_text,
@@ -4248,7 +4731,8 @@ class SurveyGUI:
                             "options": option_count,
                             "rows": matrix_rows,
                             "page": page_idx,
-                            "option_texts": option_texts
+                            "option_texts": option_texts,
+                            "fillable_options": option_fillable_indices
                         })
                         print(f"  ✓ 第{current_question_num}题: {type_name} - {title_text[:30]}")
                     except Exception as e:
@@ -4591,11 +5075,25 @@ class SurveyGUI:
         self._wizard_commit_log = []
         self._show_wizard_for_question(questions_info, 0)
 
+    def _get_wizard_hint_text(self, type_code: str) -> str:
+        """为不同题型提供面向用户的操作提示文本。"""
+        hints = {
+            "1": "填空题建议准备 2~5 个真实可用的答案，点击“添加答案”即可增加内容，后续执行会在这些答案中随机选择。",
+            "2": "多行填空通常用于意见反馈，可输入若干句式或话术，系统会自动随机抽取并填写。",
+            "3": "单选题可直接选择完全随机，也可以切换到自定义权重，将高频选项的滑块调高即可。",
+            "4": "多选题常需要控制命中率，拖动每个选项的百分比滑块即可直观设置被勾选的概率。",
+            "5": "量表题本质类似单选题，若某些分值更常见，可使用自定义权重突出这些分值。",
+            "6": "矩阵题按“行 × 列”处理，每列的权重决定更倾向选择哪一列，可先整体确定策略再微调滑块。",
+            "7": "下拉题与单选题一致：先选择随机/自定义，再视需要为特定选项设置额外填空内容。",
+        }
+        default = "确认题干后，根据下方输入区域逐步设置答案或权重，完成后点击“下一题”即可保存。"
+        return hints.get(type_code, default)
+
     def _show_wizard_for_question(self, questions_info, current_index):
         if current_index >= len(questions_info):
             self._refresh_tree()
             logging.info(f"[Action Log] Wizard finished with {len(self.question_entries)} configured questions")
-            self._log_popup_info("完成", 
+            self._log_popup_info("完成",
                               f"配置完成！\n\n"
                               f"已配置 {len(self.question_entries)} 道题目。\n"
                               f"可在下方题目列表中查看和编辑。")
@@ -4605,7 +5103,8 @@ class SurveyGUI:
         
         q = questions_info[current_index]
         type_code = q["type_code"]
-        
+        detected_fillable_indices = q.get('fillable_options') or []
+
         if type_code in ("8", "11"):
             self._show_wizard_for_question(questions_info, current_index + 1)
             return
@@ -4657,27 +5156,140 @@ class SurveyGUI:
         
         wizard_win.protocol("WM_DELETE_WINDOW", _cleanup_mousewheel)
         
-        progress_text = f"进度: {current_index + 1} / {len(questions_info)}"
+        progress_text = f"进度：已完成 {current_index + 1} / {len(questions_info)}"
         ttk.Label(frame, text=progress_text, foreground="gray").pack(anchor="w", fill=tk.X)
-        
-        ttk.Label(frame, text=f"第 {q['num']} 题", 
-                 font=("TkDefaultFont", 12, "bold")).pack(pady=(10, 5), anchor="w", fill=tk.X)
-        
+
+        readable_title = q.get("title") or "（该题暂无标题）"
+
+        # 顶部信息卡片，集中展示题目关键属性
+        header_card = tk.Frame(frame, bg="#f5f8ff", highlightbackground="#cddcfe", highlightthickness=1, bd=0)
+        header_card.pack(fill=tk.X, pady=(10, 12))
+        header_inner = tk.Frame(header_card, bg="#f5f8ff")
+        header_inner.pack(fill=tk.X, padx=14, pady=10)
+
+        tk.Label(
+            header_inner,
+            text=f"第 {q['num']} 题",
+            font=("TkDefaultFont", 12, "bold"),
+            fg="#1a237e",
+            bg="#f5f8ff"
+        ).pack(anchor="w", fill=tk.X)
+
         # 使用 wraplength 确保题目标题完整显示并自动换行
-        title_label = ttk.Label(frame, text=q["title"], 
-                 font=("TkDefaultFont", 10), wraplength=700)
-        title_label.pack(pady=(0, 10), anchor="w", fill=tk.X)
-        
-        # 当窗口大小变化时更新 wraplength - 使用 add="+" 避免覆盖原有的绑定
+        title_label = tk.Label(
+            header_inner,
+            text=readable_title,
+            font=("TkDefaultFont", 10),
+            wraplength=680,
+            justify="left",
+            bg="#f5f8ff"
+        )
+        title_label.pack(pady=(4, 6), anchor="w", fill=tk.X)
+
         def update_title_wraplength(event=None):
-            new_width = frame.winfo_width() - 30  # 留一点边距
-            if new_width > 100:  # 确保有效宽度
-                title_label.configure(wraplength=new_width)
-        frame.bind("<Configure>", update_title_wraplength, add="+")
-        
-        ttk.Label(frame, text=f"题型: {q['type']}", 
-                 foreground="blue").pack(pady=(0, 20), anchor="w", fill=tk.X)
-        
+            available = header_inner.winfo_width() or frame.winfo_width()
+            wrap = max(240, available - 40)
+            title_label.configure(wraplength=wrap)
+
+        header_inner.bind("<Configure>", update_title_wraplength, add="+")
+
+        meta_tokens = [f"题型：{q['type']}"]
+        option_count = q.get("options")
+        if option_count:
+            unit = "选项" if type_code != "6" else "列"
+            meta_tokens.append(f"{option_count} 个{unit}")
+        if type_code == "6" and q.get("rows"):
+            meta_tokens.append(f"{q['rows']} 行")
+        if q.get("page"):
+            meta_tokens.append(f"所属页面：第{q['page']}页")
+        meta_text = " · ".join(meta_tokens)
+        tk.Label(
+            header_inner,
+            text=meta_text,
+            fg="#455a64",
+            bg="#f5f8ff",
+            justify="left"
+        ).pack(anchor="w", fill=tk.X)
+
+        if detected_fillable_indices:
+            chip_frame = tk.Frame(header_inner, bg="#f5f8ff")
+            chip_frame.pack(anchor="w", pady=(6, 0))
+            tk.Label(
+                chip_frame,
+                text=f"已发现 {len(detected_fillable_indices)} 个选项含附加填空",
+                bg="#e3f2fd",
+                fg="#0d47a1",
+                font=("TkDefaultFont", 9),
+                padx=10,
+                pady=2
+            ).pack(side=tk.LEFT)
+
+        helper_text = self._get_wizard_hint_text(type_code)
+        if helper_text:
+            helper_box = tk.Frame(frame, bg="#fff8e1", highlightbackground="#ffe082", highlightthickness=1)
+            helper_box.pack(fill=tk.X, pady=(0, 12))
+            tk.Label(
+                helper_box,
+                text=helper_text,
+                bg="#fff8e1",
+                fg="#775800",
+                justify="left",
+                wraplength=710,
+                padx=12,
+                pady=8
+            ).pack(fill=tk.X)
+            if detected_fillable_indices:
+                tk.Label(
+                    helper_box,
+                    text="贴士：保留为空时系统会写入“无”，便于顺利提交。",
+                    bg="#fff8e1",
+                    fg="#946200",
+                    justify="left",
+                    padx=12
+                ).pack(fill=tk.X, pady=(0, 6))
+
+        option_texts_in_question = q.get('option_texts', [])
+
+        def _build_fillable_inputs() -> Tuple[List[Optional[tk.StringVar]], Callable[[ttk.Frame, int], None]]:
+            option_total = q.get('options') or 0
+            valid_indices = {idx for idx in detected_fillable_indices if isinstance(idx, int) and 0 <= idx < option_total}
+            if option_total <= 0 or not valid_indices:
+                return [], lambda *_: None
+
+            fill_vars: List[Optional[tk.StringVar]] = [None] * option_total
+
+            def attach_inline(parent_frame: ttk.Frame, opt_index: int):
+                if opt_index not in valid_indices or opt_index < 0 or opt_index >= option_total:
+                    return
+                inline_row = ttk.Frame(parent_frame)
+                inline_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(2, 4))
+                ttk.Label(inline_row, text="附加填空：").pack(side=tk.LEFT)
+                var = tk.StringVar(value='')
+                ttk.Entry(inline_row, textvariable=var, width=32).pack(side=tk.LEFT, padx=(6, 6), fill=tk.X, expand=True)
+                ttk.Label(inline_row, text='留空将自动填“无”', foreground='gray').pack(side=tk.LEFT)
+                fill_vars[opt_index] = var
+
+            return fill_vars, attach_inline
+
+        def _collect_fill_values(fill_vars: List[Optional[tk.StringVar]]) -> Optional[List[Optional[str]]]:
+            if not fill_vars:
+                return None
+            collected: List[Optional[str]] = []
+            has_value = False
+            for var in fill_vars:
+                if var is None:
+                    collected.append(None)
+                    continue
+                value = var.get().strip()
+                if value:
+                    has_value = True
+                    collected.append(value)
+                else:
+                    has_value = True
+                    collected.append(DEFAULT_FILL_TEXT)
+
+            return collected if has_value else None
+
         config_frame = ttk.Frame(frame)
         config_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
@@ -4747,29 +5359,27 @@ class SurveyGUI:
         
         elif type_code == "4":
             ttk.Label(config_frame, text=f"多选题（共 {q['options']} 个选项）").pack(anchor="w", pady=5, fill=tk.X)
-            ttk.Label(config_frame, text="拖动滑块设置每个选项的选中概率：", 
+            ttk.Label(config_frame, text="拖动滑块设置每个选项的选中概率：",
                      foreground="gray").pack(anchor="w", pady=5, fill=tk.X)
-            
+
             sliders_frame = ttk.Frame(config_frame)
             sliders_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-            
+
             sliders = []
+            fill_text_vars, attach_inline_fill = _build_fillable_inputs()
             for i in range(q['options']):
                 row_frame = ttk.Frame(sliders_frame)
                 row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
                 row_frame.columnconfigure(1, weight=1)
 
-                # 显示选项文本（如果有的话）- 使用两行布局，第一行显示完整选项文本
                 option_text = ""
                 if i < len(q.get('option_texts', [])) and q['option_texts'][i]:
                     option_text = q['option_texts'][i]
-                
-                # 第一行：选项序号和完整文本
-                text_label = ttk.Label(row_frame, text=f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}", 
+
+                text_label = ttk.Label(row_frame, text=f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}",
                                        anchor="w", wraplength=500)
                 text_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
 
-                # 第二行：滑块和百分比
                 var = tk.DoubleVar(value=50.0)
                 slider = ttk.Scale(row_frame, from_=0, to=100, variable=var, orient=tk.HORIZONTAL)
                 slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
@@ -4779,11 +5389,13 @@ class SurveyGUI:
 
                 var.trace_add("write", lambda *args, l=label, v=var: l.config(text=f"{int(v.get())}%"))
                 sliders.append(var)
-            
+
+                attach_inline_fill(row_frame, i)
+
             def save_and_next():
                 probs = [var.get() for var in sliders]
-                # 保存选项文本以便编辑时显示
                 option_texts_list = q.get('option_texts', [])
+                fill_values = _collect_fill_values(fill_text_vars)
                 entry = QuestionEntry(
                     question_type="multiple",
                     probabilities=probs,
@@ -4791,7 +5403,9 @@ class SurveyGUI:
                     rows=1,
                     option_count=q['options'],
                     distribution_mode="custom",
-                    custom_weights=probs
+                    custom_weights=probs,
+                    option_fill_texts=fill_values,
+                    fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
                 self._handle_auto_config_entry(entry, q)
                 wizard_win.destroy()
@@ -4802,67 +5416,62 @@ class SurveyGUI:
             if type_code == "6":
                 option_text = f"{q['rows']} 行 × {q['options']} 列"
             ttk.Label(config_frame, text=option_text).pack(anchor="w", pady=10, fill=tk.X)
-            
-            # 对于矩阵题，显示列标题
+
             if type_code == "6" and q.get('option_texts'):
                 ttk.Label(config_frame, text="列标题：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(5, 0), fill=tk.X)
                 options_info_text = " | ".join([f"{i+1}: {text[:20]}{'...' if len(text) > 20 else ''}" for i, text in enumerate(q['option_texts'])])
                 ttk.Label(config_frame, text=options_info_text, foreground="gray", wraplength=700).pack(anchor="w", pady=(0, 10), fill=tk.X)
-            
-            # 对于单选题、量表题、下拉题，显示选项列表
             elif q.get('option_texts'):
                 ttk.Label(config_frame, text="选项列表：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(5, 0), fill=tk.X)
                 options_list_frame = ttk.Frame(config_frame)
                 options_list_frame.pack(anchor="w", fill=tk.X, pady=(0, 10), padx=(20, 0))
-                
+
                 max_options_display = min(5, len(q['option_texts']))
                 for i in range(max_options_display):
-                    # 为选项文本添加 wraplength，防止长文本被截断
-                    option_lbl = ttk.Label(options_list_frame, text=f"  • {q['option_texts'][i]}", 
+                    option_lbl = ttk.Label(options_list_frame, text=f"  • {q['option_texts'][i]}",
                                           foreground="gray", wraplength=650)
                     option_lbl.pack(anchor="w", fill=tk.X)
-                
+
                 if len(q['option_texts']) > 5:
                     ttk.Label(options_list_frame, text=f"  ... 共 {len(q['option_texts'])} 个选项", foreground="gray").pack(anchor="w", fill=tk.X)
-            
+
             ttk.Label(config_frame, text="选择分布方式：").pack(anchor="w", pady=10, fill=tk.X)
-            
+
             dist_var = tk.StringVar(value="random")
-            
-            # 权重输入区域（初始隐藏）
+
             weight_frame = ttk.Frame(config_frame)
-            
-            ttk.Radiobutton(config_frame, text="完全随机（每次随机选择）", 
+
+            ttk.Radiobutton(config_frame, text="完全随机（每次随机选择）",
                           variable=dist_var, value="random",
                           command=lambda: weight_frame.pack_forget()).pack(anchor="w", pady=5, fill=tk.X)
-            ttk.Radiobutton(config_frame, text="自定义权重（使用滑块设置）", 
+            ttk.Radiobutton(config_frame, text="自定义权重（使用滑块设置）",
                           variable=dist_var, value="custom",
                           command=lambda: weight_frame.pack(fill=tk.BOTH, expand=True, pady=10)).pack(anchor="w", pady=5, fill=tk.X)
-            
-            # 创建滑块容器
-            ttk.Label(weight_frame, text="拖动滑块设置每个选项的权重比例：", 
+
+            ttk.Label(weight_frame, text="拖动滑块设置每个选项的权重比例：",
                      foreground="gray").pack(anchor="w", pady=(10, 5), fill=tk.X)
-            
+
             sliders_weight_frame = ttk.Frame(weight_frame)
             sliders_weight_frame.pack(fill=tk.BOTH, expand=True)
-            
+
             slider_vars = []
+            fill_text_vars: List[Optional[tk.StringVar]] = []
+            attach_inline_fill: Callable[[ttk.Frame, int], None] = lambda *_: None
+            if type_code in ("3", "7"):
+                fill_text_vars, attach_inline_fill = _build_fillable_inputs()
             for i in range(q['options']):
                 slider_frame = ttk.Frame(sliders_weight_frame)
                 slider_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
                 slider_frame.columnconfigure(1, weight=1)
 
-                # 显示选项文本（如果有的话）- 使用两行布局
                 option_text = ""
                 if i < len(q.get('option_texts', [])) and q['option_texts'][i]:
                     option_text = q['option_texts'][i]
-                
-                # 第一行：选项序号和完整文本
-                text_label = ttk.Label(slider_frame, text=f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}", 
+
+                text_label = ttk.Label(slider_frame, text=f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}",
                                        anchor="w", wraplength=500)
                 text_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
 
-                # 第二行：滑块和权重值
                 var = tk.DoubleVar(value=1.0)
                 slider = ttk.Scale(slider_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
                 slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
@@ -4875,12 +5484,14 @@ class SurveyGUI:
 
                 var.trace_add("write", lambda *args, v=var, l=value_label: update_label(v, l))
                 slider_vars.append(var)
-            
+
+                attach_inline_fill(slider_frame, i)
+
             def save_and_next():
                 mode = dist_var.get()
                 q_type_map = {"3": "single", "5": "scale", "6": "matrix", "7": "dropdown"}
                 q_type = q_type_map.get(type_code, "single")
-                
+
                 if mode == "random":
                     probs = -1
                     weights = None
@@ -4888,13 +5499,13 @@ class SurveyGUI:
                     weights = [1.0] * q['options']
                     probs = normalize_probabilities(weights)
                 else:
-                    # 从滑块获取权重
                     weights = [var.get() for var in slider_vars]
                     if all(w == 0 for w in weights):
                         self._log_popup_error("错误", "至少要有一个选项的权重大于0")
                         return
                     probs = normalize_probabilities(weights)
-                
+                fill_values = _collect_fill_values(fill_text_vars)
+
                 entry = QuestionEntry(
                     question_type=q_type,
                     probabilities=probs,
@@ -4902,7 +5513,9 @@ class SurveyGUI:
                     rows=q['rows'] if type_code == "6" else 1,
                     option_count=q['options'],
                     distribution_mode=mode,
-                    custom_weights=weights
+                    custom_weights=weights,
+                    option_fill_texts=fill_values,
+                    fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
                 self._handle_auto_config_entry(entry, q)
                 wizard_win.destroy()
@@ -5409,6 +6022,8 @@ class SurveyGUI:
                     "distribution_mode": entry.distribution_mode,
                     "custom_weights": entry.custom_weights,
                     "question_num": entry.question_num,
+                    "option_fill_texts": entry.option_fill_texts,
+                    "fillable_option_indices": entry.fillable_option_indices,
                 }
                 for entry in self.question_entries
             ],
@@ -5626,6 +6241,38 @@ class SurveyGUI:
 
         questions_data = config.get("questions") or []
         self.question_entries.clear()
+        def _load_option_fill_texts_from_config(raw_value: Any) -> Optional[List[Optional[str]]]:
+            if not isinstance(raw_value, list):
+                return None
+            normalized: List[Optional[str]] = []
+            has_value = False
+            for item in raw_value:
+                if item is None:
+                    normalized.append(None)
+                    continue
+                try:
+                    text_value = str(item).strip()
+                except Exception:
+                    text_value = ""
+                if text_value:
+                    has_value = True
+                    normalized.append(text_value)
+                else:
+                    normalized.append(None)
+            return normalized if has_value else None
+
+        def _load_fillable_indices_from_config(raw_value: Any) -> Optional[List[int]]:
+            if not isinstance(raw_value, list):
+                return None
+            parsed: List[int] = []
+            for item in raw_value:
+                try:
+                    index_value = int(item)
+                except (TypeError, ValueError):
+                    continue
+                if index_value >= 0:
+                    parsed.append(index_value)
+            return parsed if parsed else None
         if isinstance(questions_data, list):
             for q_data in questions_data:
                 entry = QuestionEntry(
@@ -5637,7 +6284,12 @@ class SurveyGUI:
                     distribution_mode=q_data.get("distribution_mode", "random"),
                     custom_weights=q_data.get("custom_weights"),
                     question_num=q_data.get("question_num"),
+                    option_fill_texts=_load_option_fill_texts_from_config(q_data.get("option_fill_texts")),
+                    fillable_option_indices=_load_fillable_indices_from_config(q_data.get("fillable_option_indices")),
                 )
+                if entry.fillable_option_indices is None and entry.option_fill_texts:
+                    derived = [idx for idx, value in enumerate(entry.option_fill_texts) if value]
+                    entry.fillable_option_indices = derived if derived else None
                 self.question_entries.append(entry)
         self._refresh_tree()
 
@@ -5658,7 +6310,20 @@ class SurveyGUI:
         config_path = self._get_config_path()
         if not os.path.exists(config_path):
             return
-        
+
+        should_load_last = True
+        try:
+            should_load_last = self._log_popup_confirm(
+                "加载上次配置",
+                "检测到上一次保存的配置。\n是否要继续加载该配置？"
+            )
+        except Exception as e:
+            print(f"询问是否加载上次配置时出错，将默认加载：{e}")
+
+        if not should_load_last:
+            print("用户选择在启动时不加载上一次保存的配置")
+            return
+
         try:
             self._load_config_from_file(config_path, silent=True)
             print(f"已加载上次配置：{len(self.question_entries)} 道题目")
@@ -5725,6 +6390,8 @@ class SurveyGUI:
                     "distribution_mode": entry.distribution_mode,
                     "custom_weights": entry.custom_weights,
                     "question_num": entry.question_num,
+                    "option_fill_texts": entry.option_fill_texts,
+                    "fillable_option_indices": entry.fillable_option_indices,
                 }
                 for entry in self.question_entries
             ],
@@ -5752,6 +6419,8 @@ class SurveyGUI:
                     "distribution_mode": entry.distribution_mode,
                     "custom_weights": entry.custom_weights,
                     "question_num": entry.question_num,
+                    "option_fill_texts": entry.option_fill_texts,
+                    "fillable_option_indices": entry.fillable_option_indices,
                 }
                 for entry in self.question_entries
             ],
