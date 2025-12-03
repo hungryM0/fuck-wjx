@@ -52,7 +52,7 @@ except ImportError:
     BeautifulSoup = None
 
 # 版本号
-__VERSION__ = "0.5.1"
+__VERSION__ = "1.0-pre1"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
@@ -73,6 +73,9 @@ SUBMIT_INITIAL_DELAY = 0.35
 SUBMIT_CLICK_SETTLE_DELAY = 0.25
 POST_SUBMIT_URL_MAX_WAIT = 0.5
 POST_SUBMIT_URL_POLL_INTERVAL = 0.1
+PROXY_LIST_FILENAME = "ips.txt"
+PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
+PROXY_HEALTH_CHECK_TIMEOUT = 5
 
 _MULTI_LIMIT_ATTRIBUTE_NAMES = (
     "max",
@@ -235,6 +238,92 @@ def _get_runtime_directory() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def _get_proxy_list_path() -> str:
+    return os.path.join(_get_runtime_directory(), PROXY_LIST_FILENAME)
+
+
+def _parse_proxy_line(line: str) -> Optional[str]:
+    if not line:
+        return None
+    cleaned = line.strip()
+    if not cleaned or cleaned.startswith("#"):
+        return None
+    if "://" in cleaned:
+        return cleaned
+    if ":" in cleaned and cleaned.count(":") == 1:
+        host, port = cleaned.split(":", 1)
+    else:
+        parts = re.split(r"[\s,]+", cleaned)
+        if len(parts) < 2:
+            return None
+        host, port = parts[0], parts[1]
+    host = host.strip()
+    port = port.strip()
+    if not host or not port:
+        return None
+    try:
+        int(port)
+    except ValueError:
+        return None
+    return f"{host}:{port}"
+
+
+def _load_proxy_ip_pool(file_path: Optional[str] = None) -> List[str]:
+    proxy_file = file_path or _get_proxy_list_path()
+    if not os.path.exists(proxy_file):
+        raise FileNotFoundError(f"未找到代理列表文件：{proxy_file}")
+    proxies: List[str] = []
+    seen: Set[str] = set()
+    with open(proxy_file, "r", encoding="utf-8") as f:
+        for line in f:
+            candidate = _parse_proxy_line(line)
+            if not candidate or candidate in seen:
+                continue
+            proxies.append(candidate)
+            seen.add(candidate)
+    if not proxies:
+        raise ValueError(f"代理列表为空，请检查：{proxy_file}")
+    return proxies
+
+
+def _proxy_is_responsive(proxy_address: str, timeout: float = PROXY_HEALTH_CHECK_TIMEOUT) -> bool:
+    """验证代理是否能在限定时间内连通，可用返回 True。"""
+    if not proxy_address:
+        return True
+    if requests is None:
+        logging.debug("requests 模块不可用，跳过代理超时验证")
+        return True
+    normalized = proxy_address.strip()
+    if not normalized:
+        return False
+    if "://" not in normalized:
+        normalized = f"http://{normalized}"
+    proxies = {"http": normalized, "https": normalized}
+    start_ts = time.monotonic()
+    try:
+        response = requests.get(
+            PROXY_HEALTH_CHECK_URL,
+            headers=DEFAULT_HTTP_HEADERS,
+            proxies=proxies,
+            timeout=timeout,
+        )
+        elapsed = time.monotonic() - start_ts
+    except requests.exceptions.Timeout:
+        logging.warning(f"代理 {proxy_address} 超过 {timeout} 秒无响应，跳过本次提交")
+        return False
+    except requests.exceptions.RequestException as exc:
+        logging.warning(f"代理 {proxy_address} 验证失败：{exc}")
+        return False
+    except Exception as exc:
+        logging.warning(f"代理 {proxy_address} 验证出现异常：{exc}")
+        return False
+    if response.status_code >= 400:
+        logging.warning(f"代理 {proxy_address} 验证返回状态码 {response.status_code}，跳过本次提交")
+        return False
+    logging.debug(f"代理 {proxy_address} 验证通过，耗时 {elapsed:.2f} 秒")
+    return True
 
 
 def _find_chrome_binary() -> Optional[str]:
@@ -467,7 +556,25 @@ def setup_browser_options(browser: str, headless: bool = False):
     return options
 
 
-def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None) -> Tuple[WebDriver, str]:
+def _apply_proxy_to_options(options: Any, proxy_address: Optional[str]) -> Optional[str]:
+    if not proxy_address:
+        return None
+    normalized = proxy_address.strip()
+    if not normalized:
+        return None
+    if "://" not in normalized:
+        normalized = f"http://{normalized}"
+    if not hasattr(options, "add_argument"):
+        return None
+    try:
+        options.add_argument(f"--proxy-server={normalized}")
+        return normalized
+    except Exception as exc:
+        logging.warning(f"设置浏览器代理失败: {exc}")
+        return None
+
+
+def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None, proxy_address: Optional[str] = None) -> Tuple[WebDriver, str]:
     candidates = prefer_browsers or list(BROWSER_PREFERENCE)
     if not candidates:
         candidates = list(BROWSER_PREFERENCE)
@@ -475,6 +582,7 @@ def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[Lis
     for browser in candidates:
         try:
             options = setup_browser_options(browser, headless=headless)
+            applied_proxy = _apply_proxy_to_options(options, proxy_address)
         except Exception as exc:
             logging.debug(f"构建 {browser} 选项失败: {exc}")
             last_exc = exc
@@ -486,6 +594,8 @@ def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[Lis
                 driver = webdriver.Chrome(options=options)  # type: ignore[arg-type]
             _disable_driver_http_retry(driver)
             logging.info(f"使用 {browser.capitalize()} WebDriver")
+            if applied_proxy:
+                logging.info(f"当前 WebDriver 将使用代理：{applied_proxy}")
             return driver, browser
         except Exception as exc:
             logging.warning(f"启动 {browser.capitalize()} WebDriver 失败: {exc}")
@@ -616,6 +726,8 @@ full_simulation_schedule: Deque[float] = deque()
 full_simulation_end_timestamp = 0.0
 FULL_SIM_DURATION_JITTER = 0.2
 FULL_SIM_MIN_DELAY_SECONDS = 0.15
+random_proxy_ip_enabled = False
+proxy_ip_pool: List[str] = []
 
 # GitHub 更新配置
 GITHUB_OWNER = "hungryM0"
@@ -2241,6 +2353,25 @@ def submit(driver: WebDriver, stop_signal: Optional[threading.Event] = None):
         pass
 
 
+def _select_proxy_for_session() -> Optional[str]:
+    if not random_proxy_ip_enabled:
+        return None
+    if not proxy_ip_pool:
+        return None
+    return random.choice(proxy_ip_pool)
+
+
+def _discard_unresponsive_proxy(proxy_address: str) -> None:
+    if not proxy_address:
+        return
+    with lock:
+        try:
+            proxy_ip_pool.remove(proxy_address)
+            logging.debug(f"已移除无响应代理：{proxy_address}")
+        except ValueError:
+            pass
+
+
 def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=None):
     global cur_num, cur_fail
     preferred_browsers = list(BROWSER_PREFERENCE)
@@ -2261,7 +2392,15 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         try:
             if stop_signal.is_set():
                 break
-            driver, active_browser = create_selenium_driver(headless=False, prefer_browsers=list(preferred_browsers) if preferred_browsers else None)
+            proxy_address = _select_proxy_for_session()
+            if proxy_address and not _proxy_is_responsive(proxy_address):
+                _discard_unresponsive_proxy(proxy_address)
+                continue
+            driver, active_browser = create_selenium_driver(
+                headless=False,
+                prefer_browsers=list(preferred_browsers) if preferred_browsers else None,
+                proxy_address=proxy_address,
+            )
             preferred_browsers = [active_browser] + [b for b in BROWSER_PREFERENCE if b != active_browser]
             if gui_instance and hasattr(gui_instance, 'active_drivers'):
                 gui_instance.active_drivers.append(driver)
@@ -2674,6 +2813,7 @@ class SurveyGUI:
         self.interval_max_seconds_var = tk.StringVar(value="0")
         self.answer_duration_min_var = tk.StringVar(value="0")
         self.answer_duration_max_var = tk.StringVar(value="0")
+        self.random_ip_enabled_var = tk.BooleanVar(value=False)
         self.full_simulation_enabled_var = tk.BooleanVar(value=False)
         self.full_sim_target_var = tk.StringVar(value="")
         self.full_sim_estimated_minutes_var = tk.StringVar(value="3")
@@ -2900,6 +3040,7 @@ class SurveyGUI:
         self.interval_max_seconds_var.trace("w", lambda *args: self._mark_config_changed())
         self.answer_duration_min_var.trace("w", lambda *args: self._mark_config_changed())
         self.answer_duration_max_var.trace("w", lambda *args: self._mark_config_changed())
+        self.random_ip_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.full_sim_target_var.trace("w", lambda *args: self._mark_config_changed())
         self.full_sim_target_var.trace_add("write", lambda *args: self._sync_full_sim_target_to_main())
         self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._mark_config_changed())
@@ -3305,6 +3446,16 @@ class SurveyGUI:
         self._settings_window_widgets.append(answer_max_entry)
         ttk.Label(answer_range_frame, text="秒").grid(row=1, column=2, sticky="w", pady=(8, 0))
         ttk.Label(answer_range_frame, text="（设为 0 表示不等待）").grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+        proxy_frame = ttk.LabelFrame(content, text="网络代理", padding=15)
+        proxy_frame.pack(fill=tk.X, pady=(15, 0))
+        proxy_toggle = ttk.Checkbutton(
+            proxy_frame,
+            text="启用随机代理 IP",
+            variable=self.random_ip_enabled_var,
+        )
+        proxy_toggle.pack(anchor="w", pady=(10, 0))
+        self._settings_window_widgets.append(proxy_toggle)
 
         button_frame = ttk.Frame(content)
         button_frame.pack(fill=tk.X, pady=(18, 0))
@@ -5671,6 +5822,16 @@ class SurveyGUI:
             if self._log_popup_confirm("提示", msg):
                 self.preview_survey()
                 return
+        random_proxy_flag = bool(self.random_ip_enabled_var.get())
+        proxy_pool: List[str] = []
+        if random_proxy_flag:
+            proxy_list_path = _get_proxy_list_path()
+            try:
+                proxy_pool = _load_proxy_ip_pool(proxy_list_path)
+            except (OSError, ValueError) as exc:
+                self._log_popup_error("代理IP错误", str(exc))
+                return
+            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（{proxy_list_path}）")
         try:
             configure_probabilities(self.question_entries)
         except ValueError as exc:
@@ -5681,13 +5842,15 @@ class SurveyGUI:
             f"[Action Log] Starting run url={url_value} target={target} threads={threads_count}"
         )
 
-        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule
+        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool
         url = url_value
         target_num = target
         num_threads = threads_count
         submit_interval_range_seconds = (interval_total_seconds, max_interval_total_seconds)
         answer_duration_range_seconds = (answer_min_seconds, answer_max_seconds)
         full_simulation_enabled = full_sim_enabled
+        random_proxy_ip_enabled = random_proxy_flag
+        proxy_ip_pool = proxy_pool if random_proxy_flag else []
         if full_sim_enabled:
             full_simulation_estimated_seconds = full_sim_est_seconds
             full_simulation_total_duration_seconds = full_sim_total_seconds
@@ -6009,6 +6172,7 @@ class SurveyGUI:
             "submit_interval": self._serialize_submit_interval(),
             "answer_duration_range": self._serialize_answer_duration_config(),
             "full_simulation": self._serialize_full_simulation_config(),
+            "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "paned_position": paned_sash_pos,
             "questions": [
                 {
@@ -6226,6 +6390,7 @@ class SurveyGUI:
         self.url_var.set(config.get("url", ""))
         self.target_var.set(config.get("target_num", ""))
         self.thread_var.set(config.get("num_threads", ""))
+        self.random_ip_enabled_var.set(bool(config.get("random_proxy_enabled")))
         self._apply_submit_interval_config(config.get("submit_interval"))
         self._apply_answer_duration_config(config.get("answer_duration_range"))
         self._apply_full_simulation_config(config.get("full_simulation"))
@@ -6380,6 +6545,7 @@ class SurveyGUI:
             "num_threads": self.thread_var.get(),
             "submit_interval": self._serialize_submit_interval(),
             "full_simulation": self._serialize_full_simulation_config(),
+            "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "questions": [
                 {
                     "question_type": entry.question_type,
@@ -6409,6 +6575,7 @@ class SurveyGUI:
             "num_threads": self.thread_var.get(),
             "submit_interval": self._serialize_submit_interval(),
             "full_simulation": self._serialize_full_simulation_config(),
+            "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "questions": [
                 {
                     "question_type": entry.question_type,
