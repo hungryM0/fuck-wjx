@@ -68,6 +68,11 @@ DEFAULT_HTTP_HEADERS = {
 }
 _HTML_SPACE_RE = re.compile(r"\s+")
 _LNGLAT_PATTERN = re.compile(r"^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$")
+_LOCATION_GEOCODE_CACHE: Dict[str, str] = {}
+_LOCATION_GEOCODE_FAILURES: Set[str] = set()
+_GAODE_GEOCODE_ENDPOINT = "https://restapi.amap.com/v3/geocode/geo"
+_GAODE_GEOCODE_KEY = "775438cfaa326e71ed2f51d0f6429f79"
+_LOCATION_GEOCODE_TIMEOUT = 8
 BROWSER_PREFERENCE = ("edge", "chrome")
 HEADLESS_WINDOW_SIZE = "1920,1080"
 SUBMIT_INITIAL_DELAY = 0.35
@@ -333,6 +338,77 @@ def _proxy_is_responsive(proxy_address: str, timeout: float = PROXY_HEALTH_CHECK
         return False
     logging.debug(f"代理 {proxy_address} 验证通过，耗时 {elapsed:.2f} 秒")
     return True
+
+
+def _geocode_location_name(place_name: str) -> Optional[str]:
+    """
+    根据地名查询经纬度，返回格式为 '经度,纬度'。
+    """
+    normalized = str(place_name or "").strip()
+    if not normalized:
+        return None
+    cache_key = normalized.lower()
+    if cache_key in _LOCATION_GEOCODE_CACHE:
+        return _LOCATION_GEOCODE_CACHE[cache_key]
+    if cache_key in _LOCATION_GEOCODE_FAILURES:
+        return None
+    if requests is None:
+        logging.debug("requests 模块不可用，无法执行地理编码")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    (
+        env_key,
+        env_key_alt,
+    ) = (os.environ.get("GAODE_WEB_KEY"), os.environ.get("GAODE_GEOCODE_KEY"))
+    api_key = env_key or env_key_alt or _GAODE_GEOCODE_KEY
+    if not api_key:
+        logging.warning("未配置高德 Web 服务 key，无法执行地理编码")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    try:
+        headers = dict(DEFAULT_HTTP_HEADERS)
+        headers.setdefault(
+            "User-Agent",
+            "Mozilla/5.0 (compatible; WJXAuto; +https://www.hungrym0.top/)",
+        )
+        params = {
+            "address": normalized,
+            "key": api_key,
+        }
+        response = requests.get(
+            _GAODE_GEOCODE_ENDPOINT,
+            params=params,
+            headers=headers,
+            timeout=_LOCATION_GEOCODE_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        logging.warning(f"地理编码失败（{normalized}）：{exc}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    if not isinstance(data, dict) or data.get("status") != "1":
+        logging.warning(f"地理编码返回异常数据：{normalized} -> {data}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    geocodes = data.get("geocodes") or []
+    if not geocodes:
+        logging.warning(f"地理编码没有返回任何结果：{normalized}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    location = ""
+    try:
+        location = str(geocodes[0].get("location") or "").strip()
+    except Exception:
+        location = ""
+    if not _LNGLAT_PATTERN.match(location):
+        logging.warning(f"地理编码结果缺失经纬度：{normalized}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    lnglat_value = location
+    _LOCATION_GEOCODE_CACHE[cache_key] = lnglat_value
+    logging.info(f"地理编码成功：{normalized} -> {lnglat_value}")
+    return lnglat_value
 
 
 def _find_chrome_binary() -> Optional[str]:
@@ -1025,6 +1101,7 @@ class QuestionEntry:
     question_num: Optional[str] = None
     option_fill_texts: Optional[List[Optional[str]]] = None
     fillable_option_indices: Optional[List[int]] = None
+    is_location: bool = False
 
     def summary(self) -> str:
         def _mode_text(mode: Optional[str]) -> str:
@@ -1039,7 +1116,8 @@ class QuestionEntry:
             preview = samples if samples else "未设置示例内容"
             if len(preview) > 60:
                 preview = preview[:57] + "..."
-            return f"填空题: {preview}"
+            label = "位置题" if self.is_location else "填空题"
+            return f"{label}: {preview}"
 
         if self.question_type == "matrix":
             mode_text = _mode_text(self.distribution_mode)
@@ -1083,6 +1161,13 @@ QUESTION_TYPE_LABELS = {
     "scale": "量表题",
     "text": "填空题",
 }
+LOCATION_QUESTION_LABEL = "位置题"
+
+
+def _get_entry_type_label(entry: QuestionEntry) -> str:
+    if getattr(entry, "is_location", False):
+        return LOCATION_QUESTION_LABEL
+    return QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)
 
 DEFAULT_FILL_TEXT = "无"  # 填空选项留空时的默认文本
 
@@ -1504,6 +1589,57 @@ def _selenium_question_has_shared_text_input(question_div) -> bool:
     return any(keyword in text_blob for keyword in option_fill_keywords)
 
 
+def _verify_text_indicates_location(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    text = str(value).strip()
+    if not text:
+        return False
+    return ("地图" in text) or ("map" in text.lower())
+
+
+def _selenium_question_is_location(question_div) -> bool:
+    if question_div is None:
+        return False
+    try:
+        local_elements = question_div.find_elements(By.CSS_SELECTOR, ".get_Local")
+        if local_elements:
+            return True
+    except Exception:
+        pass
+    try:
+        inputs = question_div.find_elements(By.CSS_SELECTOR, "input[verify], .get_Local input, input")
+    except Exception:
+        inputs = []
+    for input_element in inputs:
+        try:
+            verify_value = input_element.get_attribute("verify")
+        except Exception:
+            verify_value = None
+        if _verify_text_indicates_location(verify_value):
+            return True
+    return False
+
+
+def _soup_question_is_location(question_div) -> bool:
+    if question_div is None:
+        return False
+    try:
+        if question_div.find(class_="get_Local"):
+            return True
+    except Exception:
+        pass
+    try:
+        inputs = question_div.find_all("input")
+    except Exception:
+        inputs = []
+    for input_element in inputs:
+        verify_value = input_element.get("verify")
+        if _verify_text_indicates_location(verify_value):
+            return True
+    return False
+
+
 def _collect_select_option_texts(question_div, soup, question_number: int) -> List[str]:
     select = question_div.find("select")
     if not select and soup:
@@ -1599,6 +1735,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
             if question_number is None:
                 continue
             type_code = str(question_div.get("type") or "").strip() or "0"
+            is_location = type_code in {"1", "2"} and _soup_question_is_location(question_div)
             title_text = _extract_question_title(question_div, question_number)
             option_texts, option_count, matrix_rows, fillable_indices = _extract_question_metadata_from_html(
                 soup, question_div, question_number, type_code
@@ -1612,6 +1749,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "page": page_index,
                 "option_texts": option_texts,
                 "fillable_options": fillable_indices,
+                "is_location": is_location,
             })
     return questions_info
 
@@ -1944,6 +2082,10 @@ def _fill_text_question_input(driver: WebDriver, element, value: Optional[Any]) 
     is_readonly = bool(read_only_attr)
     verify_value_lower = verify_value.lower()
     is_location_field = ("地图" in verify_value) or ("map" in verify_value_lower)
+    if is_location_field and not lnglat_value and raw_text:
+        geocoded_value = _geocode_location_name(raw_text)
+        if geocoded_value:
+            lnglat_value = geocoded_value
 
     if not is_readonly and not is_location_field:
         try:
@@ -4229,7 +4371,7 @@ class SurveyGUI:
             cb.pack(side=tk.LEFT, padx=(0, 10))
             
             # 题型标签
-            type_label = ttk.Label(row_frame, text=QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type), 
+            type_label = ttk.Label(row_frame, text=_get_entry_type_label(entry), 
                                   width=12, anchor="w")
             type_label.pack(side=tk.LEFT, padx=(0, 10))
             
@@ -4332,7 +4474,7 @@ class SurveyGUI:
             justify="left"
         ).pack(anchor="w", pady=(4, 2), fill=tk.X)
 
-        readable_type = QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)
+        readable_type = _get_entry_type_label(entry)
         mode_map = {
             "random": "完全随机",
             "equal": "平均分配",
@@ -4444,7 +4586,7 @@ class SurveyGUI:
                     collected.append(None)
             return collected if has_value else None
 
-        ttk.Label(frame, text=f"题型: {QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)}",
+        ttk.Label(frame, text=f"题型: {_get_entry_type_label(entry)}",
                  font=("TkDefaultFont", 10, "bold")).pack(pady=(0, 20))
         
         if entry.question_type == "text":
@@ -4672,6 +4814,8 @@ class SurveyGUI:
 
     def _get_edit_dialog_hint(self, entry: QuestionEntry) -> str:
         """根据题型返回更口语化的编辑提示。"""
+        if entry.is_location:
+            return "可直接列出多个地名，格式为“地名”或“地名|经度,纬度”；未提供经纬度时，系统会自动尝试解析。"
         hints = {
             "text": "可输入多个候选答案，执行时会在这些答案中轮换填写；建议保留能覆盖不同语气的内容。",
             "multiple": "右侧滑块控制每个选项的命中率，百分比越高越常被勾选；可结合下方“选项填写”设置附加文本。",
@@ -4957,7 +5101,8 @@ class SurveyGUI:
                         if not title_text:
                             title_text = f"第{current_question_num}题"
                         
-                        type_name = self._get_question_type_name(question_type)
+                        is_location_question = question_type in ("1", "2") and _selenium_question_is_location(question_div)
+                        type_name = self._get_question_type_name(question_type, is_location=is_location_question)
                         option_count = 0
                         matrix_rows = 0
                         option_texts = []  # 存储选项文本
@@ -5031,7 +5176,8 @@ class SurveyGUI:
                             "rows": matrix_rows,
                             "page": page_idx,
                             "option_texts": option_texts,
-                            "fillable_options": option_fillable_indices
+                            "fillable_options": option_fillable_indices,
+                            "is_location": is_location_question,
                         })
                         print(f"  ✓ 第{current_question_num}题: {type_name} - {title_text[:30]}")
                     except Exception as e:
@@ -5045,7 +5191,8 @@ class SurveyGUI:
                             "options": 0,
                             "rows": 0,
                             "page": page_idx,
-                            "option_texts": []
+                            "option_texts": [],
+                            "is_location": False,
                         })
                 
                 if page_idx < len(questions_per_page):
@@ -5130,7 +5277,8 @@ class SurveyGUI:
                 logging.info("HTTP 解析未能找到任何题目，将回退到浏览器模式")
                 return None
             for question in questions_info:
-                question["type"] = self._get_question_type_name(question.get("type_code"))
+                is_location = bool(question.get("is_location"))
+                question["type"] = self._get_question_type_name(question.get("type_code"), is_location=is_location)
             return questions_info
         except Exception as exc:
             logging.debug(f"HTTP 解析问卷失败: {exc}")
@@ -5215,7 +5363,9 @@ class SurveyGUI:
     def _get_preview_button_label(self) -> str:
         return "预览 / 继续配置" if self.question_entries else "⚡ 自动配置问卷"
 
-    def _get_question_type_name(self, type_code):
+    def _get_question_type_name(self, type_code, *, is_location: bool = False):
+        if is_location:
+            return LOCATION_QUESTION_LABEL
         type_map = {
             "1": "填空题(单行)",
             "2": "填空题(多行)",
@@ -5374,8 +5524,10 @@ class SurveyGUI:
         self._wizard_commit_log = []
         self._show_wizard_for_question(questions_info, 0)
 
-    def _get_wizard_hint_text(self, type_code: str) -> str:
+    def _get_wizard_hint_text(self, type_code: str, *, is_location: bool = False) -> str:
         """为不同题型提供面向用户的操作提示文本。"""
+        if is_location:
+            return "建议准备多个真实地名，可选用“地名|经度,纬度”格式显式指定坐标；若只填地名，系统会自动尝试地理编码。"
         hints = {
             "1": "填空题建议准备 2~5 个真实可用的答案，点击“添加答案”即可增加内容，后续执行会在这些答案中随机选择。",
             "2": "多行填空通常用于意见反馈，可输入若干句式或话术，系统会自动随机抽取并填写。",
@@ -5402,6 +5554,7 @@ class SurveyGUI:
         
         q = questions_info[current_index]
         type_code = q["type_code"]
+        is_location_question = bool(q.get("is_location"))
         detected_fillable_indices = q.get('fillable_options') or []
 
         if type_code in ("8", "11"):
@@ -5523,7 +5676,7 @@ class SurveyGUI:
                 pady=2
             ).pack(side=tk.LEFT)
 
-        helper_text = self._get_wizard_hint_text(type_code)
+        helper_text = self._get_wizard_hint_text(type_code, is_location=is_location_question)
         if helper_text:
             helper_box = tk.Frame(frame, bg="#fff8e1", highlightbackground="#ffe082", highlightthickness=1)
             helper_box.pack(fill=tk.X, pady=(0, 12))
@@ -5598,7 +5751,8 @@ class SurveyGUI:
             self._show_wizard_for_question(questions_info, current_index + 1)
         
         if type_code in ("1", "2"):
-            ttk.Label(config_frame, text="填空答案列表：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5, fill=tk.X)
+            answer_header = "位置候选列表：" if is_location_question else "填空答案列表："
+            ttk.Label(config_frame, text=answer_header, font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5, fill=tk.X)
             
             answer_vars = []
             answers_inner_frame = ttk.Frame(config_frame)
@@ -5637,6 +5791,12 @@ class SurveyGUI:
             add_btn_frame = ttk.Frame(config_frame)
             add_btn_frame.pack(fill=tk.X, pady=(5, 0))
             ttk.Button(add_btn_frame, text="➕ 添加答案", command=lambda: add_answer_field()).pack(anchor="w")
+            if is_location_question:
+                ttk.Label(
+                    config_frame,
+                    text="可填写“地名”或“地名|经度,纬度”，未提供经纬度时系统会尝试自动解析。",
+                    foreground="gray"
+                ).pack(anchor="w", pady=(4, 0), fill=tk.X)
             
             def save_and_next():
                 values = [var.get().strip() for var in answer_vars if var.get().strip()]
@@ -5650,7 +5810,8 @@ class SurveyGUI:
                     rows=1,
                     option_count=len(values),
                     distribution_mode="equal",
-                    custom_weights=None
+                    custom_weights=None,
+                    is_location=bool(q.get("is_location")),
                 )
                 self._handle_auto_config_entry(entry, q)
                 wizard_win.destroy()
@@ -6335,6 +6496,7 @@ class SurveyGUI:
                     "question_num": entry.question_num,
                     "option_fill_texts": entry.option_fill_texts,
                     "fillable_option_indices": entry.fillable_option_indices,
+                    "is_location": bool(entry.is_location),
                 }
                 for entry in self.question_entries
             ],
@@ -6598,6 +6760,7 @@ class SurveyGUI:
                     question_num=q_data.get("question_num"),
                     option_fill_texts=_load_option_fill_texts_from_config(q_data.get("option_fill_texts")),
                     fillable_option_indices=_load_fillable_indices_from_config(q_data.get("fillable_option_indices")),
+                    is_location=bool(q_data.get("is_location")),
                 )
                 if entry.fillable_option_indices is None and entry.option_fill_texts:
                     derived = [idx for idx, value in enumerate(entry.option_fill_texts) if value]
@@ -6705,6 +6868,7 @@ class SurveyGUI:
                     "question_num": entry.question_num,
                     "option_fill_texts": entry.option_fill_texts,
                     "fillable_option_indices": entry.fillable_option_indices,
+                    "is_location": bool(entry.is_location),
                 }
                 for entry in self.question_entries
             ],
@@ -6735,6 +6899,7 @@ class SurveyGUI:
                     "question_num": entry.question_num,
                     "option_fill_texts": entry.option_fill_texts,
                     "fillable_option_indices": entry.fillable_option_indices,
+                    "is_location": bool(entry.is_location),
                 }
                 for entry in self.question_entries
             ],
