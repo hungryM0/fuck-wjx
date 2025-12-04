@@ -52,7 +52,7 @@ except ImportError:
     BeautifulSoup = None
 
 # 版本号
-__VERSION__ = "1.0-pre1"
+__VERSION__ = "1.0-pre2"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
@@ -73,7 +73,8 @@ SUBMIT_INITIAL_DELAY = 0.35
 SUBMIT_CLICK_SETTLE_DELAY = 0.25
 POST_SUBMIT_URL_MAX_WAIT = 0.5
 POST_SUBMIT_URL_POLL_INTERVAL = 0.1
-PROXY_LIST_FILENAME = "ips.txt"
+PROXY_LIST_URL = "https://hungrym0.top/ips.txt"
+PROXY_LIST_FETCH_TIMEOUT = 10
 PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
 
@@ -240,10 +241,6 @@ def _get_runtime_directory() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _get_proxy_list_path() -> str:
-    return os.path.join(_get_runtime_directory(), PROXY_LIST_FILENAME)
-
-
 def _parse_proxy_line(line: str) -> Optional[str]:
     if not line:
         return None
@@ -270,21 +267,32 @@ def _parse_proxy_line(line: str) -> Optional[str]:
     return f"{host}:{port}"
 
 
-def _load_proxy_ip_pool(file_path: Optional[str] = None) -> List[str]:
-    proxy_file = file_path or _get_proxy_list_path()
-    if not os.path.exists(proxy_file):
-        raise FileNotFoundError(f"未找到代理列表文件：{proxy_file}")
+def _load_proxy_ip_pool(source_url: Optional[str] = None) -> List[str]:
+    proxy_source = source_url or PROXY_LIST_URL
+    if requests is None:
+        raise RuntimeError("requests 模块不可用，无法获取在线代理列表")
+    try:
+        response = requests.get(
+            proxy_source,
+            headers=DEFAULT_HTTP_HEADERS,
+            timeout=PROXY_LIST_FETCH_TIMEOUT,
+        )
+        response.raise_for_status()
+        raw_text = response.text
+    except requests.exceptions.RequestException as exc:
+        raise OSError(f"无法下载代理列表（{proxy_source}）：{exc}") from exc
+    except Exception as exc:
+        raise OSError(f"获取代理列表时出现异常（{proxy_source}）：{exc}") from exc
     proxies: List[str] = []
     seen: Set[str] = set()
-    with open(proxy_file, "r", encoding="utf-8") as f:
-        for line in f:
-            candidate = _parse_proxy_line(line)
-            if not candidate or candidate in seen:
-                continue
-            proxies.append(candidate)
-            seen.add(candidate)
+    for line in raw_text.splitlines():
+        candidate = _parse_proxy_line(line)
+        if not candidate or candidate in seen:
+            continue
+        proxies.append(candidate)
+        seen.add(candidate)
     if not proxies:
-        raise ValueError(f"代理列表为空，请检查：{proxy_file}")
+        raise ValueError(f"代理列表为空，请检查：{proxy_source}")
     return proxies
 
 
@@ -2838,8 +2846,10 @@ class SurveyGUI:
         # 创建菜单栏
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
+        self._apply_win11_round_corners(menubar)
 
         file_menu = tk.Menu(menubar, tearoff=0)
+        self._apply_win11_round_corners(file_menu)
         menubar.add_cascade(label="文件", menu=file_menu)
         file_menu.add_command(label="载入配置", command=self._load_config_from_dialog)
         file_menu.add_command(label="保存配置", command=self._save_config_as_dialog)
@@ -2847,6 +2857,7 @@ class SurveyGUI:
         menubar.add_command(label="设置", command=self._open_settings_window)
 
         help_menu = tk.Menu(menubar, tearoff=0)
+        self._apply_win11_round_corners(help_menu)
         menubar.add_cascade(label="帮助", menu=help_menu)
         help_menu.add_command(label="检查更新", command=self.check_for_updates)
         help_menu.add_command(label="问题反馈", command=self._open_issue_feedback)
@@ -2858,7 +2869,7 @@ class SurveyGUI:
         self.main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self._paned_configure_binding = self.main_paned.bind("<Configure>", self._on_main_paned_configure)
-        
+
         # 左侧：配置区域（可滚动）
         config_container = ttk.Frame(self.main_paned)
         self.main_paned.add(config_container, weight=3)
@@ -2877,7 +2888,7 @@ class SurveyGUI:
         def _update_scrollregion():
             self.scrollable_content.update_idletasks()
             main_canvas.configure(scrollregion=main_canvas.bbox("all"))
-        
+
         self.scrollable_content.bind("<Configure>", lambda e: _update_scrollregion())
         
         # 当 Canvas 大小改变时，调整内容宽度
@@ -2931,18 +2942,31 @@ class SurveyGUI:
         h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # 创建 Text Widget
+        log_background = "#292929"
+        log_foreground = "#ffffff"
         self._log_text_widget = tk.Text(
             log_frame,
             wrap=tk.NONE,
             state="normal",
             yscrollcommand=v_scrollbar.set,
-            xscrollcommand=h_scrollbar.set
+            xscrollcommand=h_scrollbar.set,
+            bg=log_background,
+            fg=log_foreground,
+            insertbackground=log_foreground,
+            selectbackground="#333333",
+            selectforeground="#ffffff",
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=2,
+            highlightbackground="#1e1e1e",
+            highlightcolor="#3c3c3c",
+            font=("SimHei", 10)
         )
-        default_log_color = self._log_text_widget.cget("fg") or "#000000"
+        default_log_color = log_foreground
         self._log_text_widget.tag_configure("INFO", foreground=default_log_color)
-        self._log_text_widget.tag_configure("OK", foreground="#2e7d32")
-        self._log_text_widget.tag_configure("WARNING", foreground="#f5a623")
-        self._log_text_widget.tag_configure("ERROR", foreground="#d32f2f")
+        self._log_text_widget.tag_configure("OK", foreground="#1f9525")
+        self._log_text_widget.tag_configure("WARNING", foreground="#f5ba23")
+        self._log_text_widget.tag_configure("ERROR", foreground="#ff2929")
         self._log_text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._log_text_widget.bind("<Key>", self._on_log_text_keypress)
         for sequence in ("<<Paste>>", "<<Cut>>", "<<Clear>>"):
@@ -3199,6 +3223,47 @@ class SurveyGUI:
         self._update_full_simulation_controls_state()
         self._update_parameter_widgets_state()
         self.root.after(200, self._ensure_default_paned_position)
+
+    def _apply_win11_round_corners(self, *menus: tk.Misc) -> None:
+        """在 Windows 11 上为菜单窗口启用圆角。"""
+        if not sys.platform.startswith("win"):
+            return
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+        except Exception:
+            return
+
+        dwm_api = getattr(ctypes, "windll", None)
+        if not dwm_api:
+            return
+        dwm_api = getattr(dwm_api, "dwmapi", None)
+        if not dwm_api:
+            return
+
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        DWMWCP_ROUND = 2
+
+        for menu in menus:
+            if not menu:
+                continue
+            try:
+                hwnd_value = int(menu.winfo_id())
+            except Exception:
+                continue
+            if hwnd_value <= 0:
+                continue
+            preference = wintypes.DWORD(DWMWCP_ROUND)
+            try:
+                dwm_api.DwmSetWindowAttribute(
+                    wintypes.HWND(hwnd_value),
+                    ctypes.c_uint(DWMWA_WINDOW_CORNER_PREFERENCE),
+                    ctypes.byref(preference),
+                    ctypes.sizeof(preference),
+                )
+            except Exception:
+                continue
 
     def _notify_loading(self, message: str):
         if self._loading_splash:
@@ -5825,13 +5890,12 @@ class SurveyGUI:
         random_proxy_flag = bool(self.random_ip_enabled_var.get())
         proxy_pool: List[str] = []
         if random_proxy_flag:
-            proxy_list_path = _get_proxy_list_path()
             try:
-                proxy_pool = _load_proxy_ip_pool(proxy_list_path)
-            except (OSError, ValueError) as exc:
+                proxy_pool = _load_proxy_ip_pool()
+            except (OSError, ValueError, RuntimeError) as exc:
                 self._log_popup_error("代理IP错误", str(exc))
                 return
-            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（{proxy_list_path}）")
+            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（{PROXY_LIST_URL}）")
         try:
             configure_probabilities(self.question_entries)
         except ValueError as exc:
