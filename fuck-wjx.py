@@ -14,6 +14,7 @@ from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Thread
 from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set, Deque
 from urllib.parse import urlparse
@@ -27,8 +28,6 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
 try:
     from selenium.webdriver.edge.options import Options as EdgeOptions
 except ImportError:
@@ -460,31 +459,13 @@ def _find_edge_binary() -> Optional[str]:
 def handle_aliyun_captcha(
     driver: WebDriver, timeout: int = 3, stop_signal: Optional[threading.Event] = None
 ) -> bool:
-    """检测并尝试自动通过阿里云智能验证弹窗。"""
+    """检测到阿里云智能验证后立即标记为失败，避免浪费时间。"""
     popup_locator = (By.ID, "aliyunCaptcha-window-popup")
-    mask_locator = (By.ID, "aliyunCaptcha-mask")
-    clickable_locators = [
-        (By.ID, "aliyunCaptcha-checkbox-body"),
-        (By.ID, "aliyunCaptcha-checkbox-left"),
-        (By.ID, "aliyunCaptcha-checkbox-text"),
-        (By.CSS_SELECTOR, "#aliyunCaptcha-checkbox-text-box"),
-    ]
-    wait = WebDriverWait(driver, timeout, poll_frequency=0.2)
-    short_wait = WebDriverWait(driver, 1.5, poll_frequency=0.2)
 
     def _popup_visible() -> bool:
         try:
             popup = driver.find_element(*popup_locator)
             return popup.is_displayed()
-        except NoSuchElementException:
-            return False
-        except Exception:
-            return False
-
-    def _mask_visible() -> bool:
-        try:
-            mask = driver.find_element(*mask_locator)
-            return mask.is_displayed()
         except NoSuchElementException:
             return False
         except Exception:
@@ -505,67 +486,8 @@ def handle_aliyun_captcha(
     if stop_signal and stop_signal.is_set():
         return False
 
-    logging.info("检测到阿里云智能验证弹窗，尝试自动点击“开始智能验证”。")
-
-    def _click_candidate(element) -> bool:
-        clicked = False
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-        except Exception:
-            pass
-        try:
-            ActionChains(driver).move_to_element(element).pause(0.05).click(element).perform()
-            clicked = True
-        except Exception:
-            pass
-        if not clicked:
-            try:
-                element.click()
-                clicked = True
-            except Exception:
-                pass
-        if not clicked:
-            try:
-                driver.execute_script("arguments[0].click();", element)
-                clicked = True
-            except Exception:
-                pass
-        return clicked
-
-    max_attempts = 4
-    for attempt in range(max_attempts):
-        if stop_signal and stop_signal.is_set():
-            return False
-        target_element = None
-        for locator in clickable_locators:
-            try:
-                target_element = wait.until(EC.visibility_of_element_located(locator))
-                if target_element and target_element.is_enabled():
-                    break
-            except TimeoutException:
-                continue
-        if not target_element:
-            if not _popup_visible():
-                logging.info("阿里云智能验证弹窗已关闭，继续执行。")
-                return True
-            logging.warning("未能定位到可点击的阿里云验证控件。")
-            raise AliyunCaptchaBypassError("未能定位可点击的阿里云智能验证控件。")
-
-        if _click_candidate(target_element):
-            try:
-                short_wait.until(lambda _: not _popup_visible() or not _mask_visible())
-            except TimeoutException:
-                pass
-            if not _popup_visible():
-                logging.info("阿里云智能验证弹窗已关闭，继续执行。")
-                return True
-        time.sleep(0.3)
-
-    if not _popup_visible():
-        logging.info("阿里云智能验证弹窗已关闭，继续执行。")
-        return True
-    logging.warning("多次尝试点击阿里云智能验证失败，可能需要人工干预。")
-    raise AliyunCaptchaBypassError("自动处理阿里云智能验证失败。")
+    logging.warning("检测到阿里云智能验证，当前策略无法绕过，将直接跳过并标记为失败。")
+    raise AliyunCaptchaBypassError("检测到阿里云智能验证，任务已被标记为失败。")
 
 def _apply_common_browser_options(options, headless: bool = False) -> None:
     try:
@@ -2713,9 +2635,32 @@ TYPE_OPTIONS = [
     ("matrix", "矩阵题"),
     ("scale", "量表题"),
     ("text", "填空题"),
+    ("location", "位置题"),
 ]
 
 LABEL_TO_TYPE = {label: value for value, label in TYPE_OPTIONS}
+
+LOG_LIGHT_THEME = {
+    "background": "#ffffff",
+    "foreground": "#1e1e1e",
+    "insert": "#1e1e1e",
+    "select_bg": "#cfe8ff",
+    "select_fg": "#1e1e1e",
+    "highlight_bg": "#d9d9d9",
+    "highlight_color": "#a6a6a6",
+    "info_color": "#1e1e1e",
+}
+
+LOG_DARK_THEME = {
+    "background": "#292929",
+    "foreground": "#ffffff",
+    "insert": "#ffffff",
+    "select_bg": "#333333",
+    "select_fg": "#ffffff",
+    "highlight_bg": "#1e1e1e",
+    "highlight_color": "#3c3c3c",
+    "info_color": "#f0f0f0",
+}
 
 
 class SurveyGUI:
@@ -2985,12 +2930,34 @@ class SurveyGUI:
         """定期刷新日志显示"""
         if self._log_refresh_job:
             self.root.after_cancel(self._log_refresh_job)
-        
+
         if self._log_text_widget:
             self._refresh_log_viewer()
-        
+
         # 继续定期刷新
         self._log_refresh_job = self.root.after(500, self._schedule_log_refresh)
+
+    def _on_toggle_log_dark_mode(self):
+        """切换日志区域的深色背景"""
+        self._apply_log_theme(self.log_dark_mode_var.get())
+
+    def _apply_log_theme(self, use_dark: Optional[bool] = None):
+        """根据复选框状态应用日志主题"""
+        if not self._log_text_widget:
+            return
+        if use_dark is None:
+            use_dark = bool(self.log_dark_mode_var.get())
+        theme = LOG_DARK_THEME if use_dark else LOG_LIGHT_THEME
+        self._log_text_widget.configure(
+            bg=theme["background"],
+            fg=theme["foreground"],
+            insertbackground=theme["insert"],
+            selectbackground=theme["select_bg"],
+            selectforeground=theme["select_fg"],
+            highlightbackground=theme["highlight_bg"],
+            highlightcolor=theme["highlight_color"],
+        )
+        self._log_text_widget.tag_configure("INFO", foreground=theme["info_color"])
 
     def __init__(self, root: Optional[tk.Tk] = None, loading_splash: Optional[LoadingSplash] = None):
         self._shared_root = root is not None
@@ -3037,6 +3004,9 @@ class SurveyGUI:
         self._settings_window_widgets: List[tk.Widget] = []
         self._full_simulation_window: Optional[tk.Toplevel] = None
         self._full_sim_status_label: Optional[ttk.Label] = None
+        self._proxy_health_button: Optional[ttk.Button] = None
+        self._proxy_health_check_running = False
+        self._archived_notice_shown = False
         self.url_var = tk.StringVar()
         self.target_var = tk.StringVar(value="")
         self.thread_var = tk.StringVar(value="2")
@@ -3053,6 +3023,7 @@ class SurveyGUI:
         self.full_sim_estimated_seconds_var = tk.StringVar(value="0")
         self.full_sim_total_minutes_var = tk.StringVar(value="30")
         self.full_sim_total_seconds_var = tk.StringVar(value="0")
+        self.log_dark_mode_var = tk.BooleanVar(value=False)
         self._full_simulation_control_widgets: List[tk.Widget] = []
         self.preview_button: Optional[ttk.Button] = None
         self._build_ui()
@@ -3063,6 +3034,20 @@ class SurveyGUI:
         self._center_window()  # 窗口居中显示
         self._check_updates_on_startup()  # 启动时检查更新
         self._schedule_log_refresh()  # 启动日志刷新
+        self.root.after(0, self._show_archived_notice)
+
+    def _show_archived_notice(self):
+        if self._archived_notice_shown:
+            return
+        self._archived_notice_shown = True
+        notice_message = (
+            "本程序已归档，停止更新。\n\n"
+            "即将采用更强大而简洁的浏览器扩展，请在上方帮助菜单加QQ群了解详情。"
+        )
+        try:
+            messagebox.showinfo("重要通知", notice_message, parent=self.root)
+        except tk.TclError as exc:
+            logging.warning(f"无法显示归档通知: {exc}")
 
     def _build_ui(self):
         self.root.geometry("950x750")
@@ -3167,27 +3152,26 @@ class SurveyGUI:
         h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # 创建 Text Widget
-        log_background = "#292929"
-        log_foreground = "#ffffff"
+        current_log_theme = LOG_DARK_THEME if self.log_dark_mode_var.get() else LOG_LIGHT_THEME
         self._log_text_widget = tk.Text(
             log_frame,
             wrap=tk.NONE,
             state="normal",
             yscrollcommand=v_scrollbar.set,
             xscrollcommand=h_scrollbar.set,
-            bg=log_background,
-            fg=log_foreground,
-            insertbackground=log_foreground,
-            selectbackground="#333333",
-            selectforeground="#ffffff",
+            bg=current_log_theme["background"],
+            fg=current_log_theme["foreground"],
+            insertbackground=current_log_theme["insert"],
+            selectbackground=current_log_theme["select_bg"],
+            selectforeground=current_log_theme["select_fg"],
             relief=tk.FLAT,
             borderwidth=0,
             highlightthickness=2,
-            highlightbackground="#1e1e1e",
-            highlightcolor="#3c3c3c",
+            highlightbackground=current_log_theme["highlight_bg"],
+            highlightcolor=current_log_theme["highlight_color"],
             font=("SimHei", 10)
         )
-        default_log_color = log_foreground
+        default_log_color = current_log_theme["info_color"]
         self._log_text_widget.tag_configure("INFO", foreground=default_log_color)
         self._log_text_widget.tag_configure("OK", foreground="#1f9525")
         self._log_text_widget.tag_configure("WARNING", foreground="#f5ba23")
@@ -3204,7 +3188,13 @@ class SurveyGUI:
         # 日志按钮区域
         log_button_frame = ttk.Frame(log_container)
         log_button_frame.pack(fill=tk.X, padx=0, pady=(5, 0))
-        
+
+        ttk.Checkbutton(
+            log_button_frame,
+            text="启用深色背景",
+            variable=self.log_dark_mode_var,
+            command=self._on_toggle_log_dark_mode
+        ).pack(side=tk.LEFT, padx=2)
         ttk.Button(log_button_frame, text="保存日志文件", command=self._save_logs_to_file).pack(side=tk.RIGHT, padx=2)
         ttk.Button(log_button_frame, text="清空日志", command=self._clear_logs_display).pack(side=tk.RIGHT, padx=2)
 
@@ -3576,6 +3566,23 @@ class SurveyGUI:
                         widget["state"] = state
                 except Exception:
                     continue
+        self._apply_proxy_health_button_state()
+
+    def _apply_proxy_health_button_state(self):
+        button = getattr(self, "_proxy_health_button", None)
+        if not button or not button.winfo_exists():
+            return
+        running = bool(getattr(self, "_proxy_health_check_running", False))
+        state = tk.DISABLED if running or self.full_simulation_enabled_var.get() else tk.NORMAL
+        text = "验活中..." if running else "IP地址验活"
+        try:
+            button.configure(state=state, text=text)
+        except Exception:
+            try:
+                button["state"] = state
+                button["text"] = text
+            except Exception:
+                pass
 
     def _refresh_full_simulation_status_label(self):
         label = getattr(self, '_full_sim_status_label', None)
@@ -3593,11 +3600,91 @@ class SurveyGUI:
         if target_value:
             self.target_var.set(target_value)
 
+    def _on_check_random_ip_health(self):
+        if self._proxy_health_check_running:
+            return
+        if requests is None:
+            self._log_popup_error("IP地址验活失败", "requests 模块不可用，无法执行验活。")
+            return
+        self._proxy_health_check_running = True
+        self._apply_proxy_health_button_state()
+
+        def worker():
+            start_ts = time.perf_counter()
+            result: Dict[str, Any] = {
+                "error": None,
+                "total": 0,
+                "healthy": 0,
+                "examples": [],
+            }
+            try:
+                proxies = _load_proxy_ip_pool()
+                total = len(proxies)
+                result["total"] = total
+                if proxies:
+                    max_workers = min(10, max(1, os.cpu_count() or 1), total)
+                    healthy_ips: List[str] = []
+                    logging.info(f"[Action Log] 开始检测 {total} 条代理 IP（并发 {max_workers}）")
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        future_map = {executor.submit(_proxy_is_responsive, proxy): proxy for proxy in proxies}
+                        for future in as_completed(future_map):
+                            proxy = future_map[future]
+                            try:
+                                if future.result():
+                                    healthy_ips.append(proxy)
+                            except Exception as exc:
+                                logging.warning(f"代理 {proxy} 验活过程中出现异常：{exc}")
+                    result["healthy"] = len(healthy_ips)
+                    result["examples"] = healthy_ips[:5]
+                else:
+                    result["error"] = "代理列表为空。"
+            except (OSError, ValueError, RuntimeError) as exc:
+                result["error"] = str(exc)
+            except Exception as exc:
+                logging.exception("执行代理 IP 验活时出现异常")
+                result["error"] = f"代理验活失败：{exc}"
+            elapsed = time.perf_counter() - start_ts
+
+            def finish():
+                self._proxy_health_check_running = False
+                self._apply_proxy_health_button_state()
+                error_message = result.get("error")
+                if error_message:
+                    self._log_popup_error("IP地址验活失败", error_message)
+                    return
+                total = int(result.get("total") or 0)
+                healthy = int(result.get("healthy") or 0)
+                failed = max(0, total - healthy)
+                examples: List[str] = list(result.get("examples") or [])
+                message_lines = [
+                    f"共获取 {total} 条代理。",
+                    f"通过验活：{healthy} 条，失败：{failed} 条。",
+                    f"耗时：{elapsed:.1f} 秒。",
+                ]
+                if examples:
+                    message_lines.append("")
+                    message_lines.append("可用 IP 示例：")
+                    message_lines.extend(examples)
+                else:
+                    message_lines.append("")
+                    message_lines.append("未检测到可用代理，请稍后重试。")
+                logging.info(f"[Action Log] 代理 IP 验活完成：{healthy}/{total} 条可用，耗时 {elapsed:.2f} 秒")
+                self._log_popup_info("IP地址验活完成", "\n".join(message_lines))
+
+            try:
+                self.root.after(0, finish)
+            except Exception:
+                finish()
+
+        Thread(target=worker, daemon=True).start()
+
     def _on_full_simulation_toggle(self, *args):
         if self.full_simulation_enabled_var.get() and not self.full_sim_target_var.get().strip():
             current_target = self.target_var.get().strip()
             if current_target:
                 self.full_sim_target_var.set(current_target)
+        if self.full_simulation_enabled_var.get() and not self.random_ip_enabled_var.get():
+            self.random_ip_enabled_var.set(True)
         self._sync_full_sim_target_to_main()
         self._update_full_simulation_controls_state()
         self._update_parameter_widgets_state()
@@ -3658,6 +3745,7 @@ class SurveyGUI:
                 self._settings_window = None
                 self._settings_window_widgets = []
                 self._full_sim_status_label = None
+                self._proxy_health_button = None
             try:
                 window.destroy()
             except Exception:
@@ -3739,13 +3827,25 @@ class SurveyGUI:
 
         proxy_frame = ttk.LabelFrame(content, text="网络代理", padding=15)
         proxy_frame.pack(fill=tk.X, pady=(15, 0))
+        proxy_row = ttk.Frame(proxy_frame)
+        proxy_row.pack(fill=tk.X, pady=(10, 0))
         proxy_toggle = ttk.Checkbutton(
-            proxy_frame,
-            text="启用随机代理 IP",
+            proxy_row,
+            text="启用随机 IP 提交",
             variable=self.random_ip_enabled_var,
         )
-        proxy_toggle.pack(anchor="w", pady=(10, 0))
+        proxy_toggle.pack(side=tk.LEFT)
         self._settings_window_widgets.append(proxy_toggle)
+        proxy_health_button = ttk.Button(
+            proxy_row,
+            text="IP地址验活",
+            command=self._on_check_random_ip_health,
+            width=12,
+        )
+        proxy_health_button.pack(side=tk.LEFT, padx=(12, 0))
+        self._proxy_health_button = proxy_health_button
+        self._settings_window_widgets.append(proxy_health_button)
+        self._apply_proxy_health_button_state()
 
         button_frame = ttk.Frame(content)
         button_frame.pack(fill=tk.X, pady=(18, 0))
@@ -3929,6 +4029,7 @@ class SurveyGUI:
             'answer_vars': None,
             'weight_frame': None,
             'current_sliders': None,
+            'is_location': False,
         }
         
         def refresh_dynamic_content(*args):
@@ -3938,10 +4039,15 @@ class SurveyGUI:
                 child.destroy()
             
             q_type = LABEL_TO_TYPE.get(question_type_var.get(), "single")
-            
+            location_mode = q_type == "location"
+            if location_mode:
+                q_type = "text"
+            state['is_location'] = location_mode
+
             if q_type == "text":
-                # ===== 填空题 =====
-                ttk.Label(dynamic_frame, text="填空答案列表：", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5, fill=tk.X)
+                # ===== 填空/位置题 =====
+                header_text = "位置候选列表：" if location_mode else "填空答案列表："
+                ttk.Label(dynamic_frame, text=header_text, font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5, fill=tk.X)
                 
                 answer_frame = ttk.Frame(dynamic_frame)
                 answer_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -3976,11 +4082,19 @@ class SurveyGUI:
                             if isinstance(label, ttk.Label):
                                 label.config(text=f"答案{i+1}:")
                 
-                add_answer_field("默认答案")
+                default_value = "" if location_mode else "默认答案"
+                add_answer_field(default_value)
                 
                 add_btn_frame = ttk.Frame(dynamic_frame)
                 add_btn_frame.pack(fill=tk.X, pady=(5, 0))
                 ttk.Button(add_btn_frame, text="➕ 添加答案", command=lambda: add_answer_field()).pack(anchor="w")
+                if location_mode:
+                    ttk.Label(
+                        dynamic_frame,
+                        text="支持“地名”或“地名|经度,纬度”格式，未提供经纬度时系统会尝试自动解析。",
+                        foreground="gray",
+                        wraplength=540,
+                    ).pack(anchor="w", pady=(6, 0), fill=tk.X)
                 
             elif q_type == "multiple":
                 # ===== 多选题 =====
@@ -4212,7 +4326,11 @@ class SurveyGUI:
         
         def save_question():
             try:
-                q_type = LABEL_TO_TYPE.get(question_type_var.get(), "single")
+                raw_q_type = LABEL_TO_TYPE.get(question_type_var.get(), "single")
+                is_location_question = bool(state.get('is_location')) if raw_q_type in ("text", "location") else False
+                if raw_q_type == "location":
+                    is_location_question = True
+                q_type = "text" if raw_q_type == "location" else raw_q_type
                 option_count = 0
                 distribution_mode = "equal"
                 custom_weights = None
@@ -4292,6 +4410,7 @@ class SurveyGUI:
                     custom_weights=custom_weights,
                     option_fill_texts=None,
                     fillable_option_indices=None,
+                    is_location=is_location_question,
                 )
                 logging.info(f"[Action Log] Adding question type={q_type} options={option_count} mode={distribution_mode}")
                 self.question_entries.append(entry)
@@ -4412,7 +4531,6 @@ class SurveyGUI:
         edit_win.grab_set()
 
         scroll_container = ttk.Frame(edit_win)
-        scroll_container.pack(fill=tk.BOTH, expand=True)
 
         canvas = tk.Canvas(scroll_container, highlightthickness=0)
         scrollbar = ttk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
@@ -4449,6 +4567,19 @@ class SurveyGUI:
             edit_win.destroy()
 
         edit_win.protocol("WM_DELETE_WINDOW", _close_edit_window)
+
+        # 底部固定按钮，避免滚动内容较多时保存按钮溢出窗口
+        action_bar = ttk.Frame(edit_win, padding=(16, 12))
+        action_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        save_button = ttk.Button(action_bar, text="保存", width=12, command=lambda: None)
+        save_button.pack(side=tk.RIGHT, padx=(0, 6))
+        ttk.Button(action_bar, text="取消", width=10, command=_close_edit_window).pack(side=tk.RIGHT, padx=(0, 6))
+
+        def _set_save_command(handler: Callable[[], None]):
+            save_button.configure(command=handler)
+
+        scroll_container.pack(fill=tk.BOTH, expand=True)
 
         question_identifier = entry.question_num or f"第 {index + 1} 题"
         overview_card = tk.Frame(frame, bg="#f6f8ff", highlightbackground="#cfd8ff", highlightthickness=1, bd=0)
@@ -4658,8 +4789,7 @@ class SurveyGUI:
                 _close_edit_window()
                 logging.info(f"[Action Log] Saved text answers for question #{index+1}")
             
-            save_btn = ttk.Button(frame, text="保存", command=save_text)
-            save_btn.pack(pady=20, ipadx=20, ipady=5)
+            _set_save_command(save_text)
             
         elif entry.question_type == "multiple":
             ttk.Label(frame, text=f"多选题（{entry.option_count}个选项）").pack(anchor="w", pady=5, fill=tk.X)
@@ -4727,8 +4857,7 @@ class SurveyGUI:
                 _close_edit_window()
                 logging.info(f"[Action Log] Saved custom weights for question #{index+1}")
             
-            save_btn = ttk.Button(frame, text="保存", command=save_multiple)
-            save_btn.pack(pady=10, ipadx=20, ipady=5)
+            _set_save_command(save_multiple)
             
         else:
             ttk.Label(frame, text=f"选项数: {entry.option_count}").pack(anchor="w", pady=5, fill=tk.X)
@@ -4799,12 +4928,12 @@ class SurveyGUI:
                 self._refresh_tree()
                 _close_edit_window()
                 logging.info(f"[Action Log] Saved distribution settings ({mode}) for question #{index+1}")
-            save_btn = ttk.Button(frame, text="保存", command=save_other)
-            save_btn.pack(pady=20, ipadx=20, ipady=5)
+            _set_save_command(save_other)
 
             def _toggle_weight_frame(*_):
                 if dist_var.get() == "custom":
-                    weight_frame.pack(fill=tk.BOTH, expand=True, pady=10, before=save_btn)
+                    if not weight_frame.winfo_manager():
+                        weight_frame.pack(fill=tk.BOTH, expand=True, pady=10)
                 else:
                     weight_frame.pack_forget()
 
