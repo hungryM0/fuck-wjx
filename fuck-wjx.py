@@ -67,6 +67,7 @@ DEFAULT_HTTP_HEADERS = {
     "Connection": "close",
 }
 _HTML_SPACE_RE = re.compile(r"\s+")
+_LNGLAT_PATTERN = re.compile(r"^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$")
 BROWSER_PREFERENCE = ("edge", "chrome")
 HEADLESS_WINDOW_SIZE = "1920,1080"
 SUBMIT_INITIAL_DELAY = 0.35
@@ -1920,6 +1921,87 @@ def detect(driver: WebDriver) -> List[int]:
     return question_counts_per_page
 
 
+def _fill_text_question_input(driver: WebDriver, element, value: Optional[Any]) -> None:
+    """
+    Safely填充单/多行文本题，包括带地图组件的题目。
+    支持“答案|经度,纬度”格式设置地图坐标。
+    """
+    raw_text = "" if value is None else str(value)
+    lnglat_value: Optional[str] = None
+    if "|" in raw_text:
+        candidate_text, candidate_lnglat = raw_text.rsplit("|", 1)
+        if _LNGLAT_PATTERN.match(candidate_lnglat):
+            raw_text = candidate_text
+            lnglat_value = candidate_lnglat.strip()
+    try:
+        read_only_attr = element.get_attribute("readonly") or ""
+    except Exception:
+        read_only_attr = ""
+    try:
+        verify_value = element.get_attribute("verify") or ""
+    except Exception:
+        verify_value = ""
+    is_readonly = bool(read_only_attr)
+    verify_value_lower = verify_value.lower()
+    is_location_field = ("地图" in verify_value) or ("map" in verify_value_lower)
+
+    if not is_readonly and not is_location_field:
+        try:
+            element.clear()
+        except Exception:
+            pass
+        element.send_keys(raw_text)
+        if lnglat_value:
+            driver.execute_script(
+                "arguments[0].setAttribute('lnglat', arguments[1]); arguments[0].lnglat = arguments[1];",
+                element,
+                lnglat_value,
+            )
+        return
+
+    driver.execute_script(
+        """
+        const input = arguments[0];
+        const value = arguments[1];
+        const lnglat = arguments[2];
+        if (!input) {
+            return;
+        }
+        try {
+            input.value = value;
+        } catch (err) {}
+        if (lnglat) {
+            try {
+                input.setAttribute('lnglat', lnglat);
+                input.lnglat = lnglat;
+            } catch (err) {}
+        }
+        const eventOptions = { bubbles: true };
+        try {
+            input.dispatchEvent(new Event('input', eventOptions));
+        } catch (err) {}
+        try {
+            input.dispatchEvent(new Event('change', eventOptions));
+        } catch (err) {}
+        const localBox = input.closest('.get_Local');
+        if (localBox) {
+            const display = localBox.querySelector('.res_local');
+            if (display) {
+                display.textContent = value || '';
+                display.style.display = value ? '' : 'none';
+            }
+            const button = localBox.querySelector('.getLocalBtn');
+            if (button && button.classList && value) {
+                button.classList.add('selected');
+            }
+        }
+        """,
+        element,
+        raw_text,
+        lnglat_value,
+    )
+
+
 def vacant(driver: WebDriver, current, index):
     answer_candidates = texts[index] if index < len(texts) else [""]
     selection_probabilities = texts_prob[index] if index < len(texts_prob) else [1.0]
@@ -1928,7 +2010,8 @@ def vacant(driver: WebDriver, current, index):
     if len(selection_probabilities) != len(answer_candidates):
         selection_probabilities = normalize_probabilities([1.0] * len(answer_candidates))
     selected_index = numpy.random.choice(a=numpy.arange(0, len(selection_probabilities)), p=selection_probabilities)
-    driver.find_element(By.CSS_SELECTOR, f"#q{current}").send_keys(answer_candidates[selected_index])
+    input_element = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
+    _fill_text_question_input(driver, input_element, answer_candidates[selected_index])
 
 
 def single(driver: WebDriver, current, index):
