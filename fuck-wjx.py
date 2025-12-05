@@ -218,7 +218,7 @@ class PlaywrightDriver:
 
     def set_window_position(self, x: int, y: int):
         try:
-            self._page.evaluate("window.moveTo(arguments[0], arguments[1]);", x, y)
+            self._page.evaluate(f"window.moveTo({x}, {y});")
         except Exception:
             pass
 
@@ -274,7 +274,7 @@ _LOCATION_GEOCODE_FAILURES: Set[str] = set()
 _GAODE_GEOCODE_ENDPOINT = "https://restapi.amap.com/v3/geocode/geo"
 _GAODE_GEOCODE_KEY = "775438cfaa326e71ed2f51d0f6429f79"
 _LOCATION_GEOCODE_TIMEOUT = 8
-BROWSER_PREFERENCE = ("edge", "chrome")
+BROWSER_PREFERENCE = ["edge", "chrome"]
 HEADLESS_WINDOW_SIZE = "1920,1080"
 SUBMIT_INITIAL_DELAY = 0.35
 SUBMIT_CLICK_SETTLE_DELAY = 0.25
@@ -284,6 +284,7 @@ PROXY_LIST_URL = "https://hungrym0.top/ips.txt"
 PROXY_LIST_FETCH_TIMEOUT = 10
 PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
+STOP_FORCE_WAIT_SECONDS = 6
 
 _MULTI_LIMIT_ATTRIBUTE_NAMES = (
     "max",
@@ -1947,7 +1948,9 @@ def _log_multi_limit_once(driver: BrowserDriver, question_number: int, limit: Op
     _REPORTED_MULTI_LIMITS.add(cache_key)
 
 
-def try_click_start_answer_button(driver: BrowserDriver, timeout: float = 1.0) -> bool:
+def try_click_start_answer_button(
+    driver: BrowserDriver, timeout: float = 1.0, stop_signal: Optional[threading.Event] = None
+) -> bool:
     """
     快速检测开屏“开始作答”按钮，若存在立即点击；否则立即继续，无需额外等待。
     """
@@ -1961,6 +1964,8 @@ def try_click_start_answer_button(driver: BrowserDriver, timeout: float = 1.0) -
     ]
     already_reported = False
     for attempt in range(max_checks):
+        if stop_signal and stop_signal.is_set():
+            return False
         for by, value in locator_candidates:
             try:
                 elements = driver.find_elements(by, value)
@@ -1971,6 +1976,8 @@ def try_click_start_answer_button(driver: BrowserDriver, timeout: float = 1.0) -
                     displayed = element.is_displayed()
                 except Exception:
                     continue
+                if stop_signal and stop_signal.is_set():
+                    return False
                 if not displayed:
                     continue
                 text = _extract_text_from_element(element)
@@ -1989,16 +1996,26 @@ def try_click_start_answer_button(driver: BrowserDriver, timeout: float = 1.0) -
                 ):
                     try:
                         click_method()
-                        time.sleep(0.3)
+                        if stop_signal:
+                            if stop_signal.wait(0.3):
+                                return False
+                        else:
+                            time.sleep(0.3)
                         return True
                     except Exception:
                         continue
         if attempt < max_checks - 1:
-            time.sleep(poll_interval)
+            if stop_signal:
+                if stop_signal.wait(poll_interval):
+                    return False
+            else:
+                time.sleep(poll_interval)
     return False
 
 
-def dismiss_resume_dialog_if_present(driver: BrowserDriver, timeout: float = 1.0) -> bool:
+def dismiss_resume_dialog_if_present(
+    driver: BrowserDriver, timeout: float = 1.0, stop_signal: Optional[threading.Event] = None
+) -> bool:
     """
     快速检查“继续上次作答”弹窗，如有立即点击“取消”；否则不额外等待。
     """
@@ -2012,6 +2029,8 @@ def dismiss_resume_dialog_if_present(driver: BrowserDriver, timeout: float = 1.0
     ]
     clicked_once = False
     for attempt in range(max_checks):
+        if stop_signal and stop_signal.is_set():
+            return False
         for by, value in locator_candidates:
             try:
                 buttons = driver.find_elements(by, value)
@@ -2022,6 +2041,8 @@ def dismiss_resume_dialog_if_present(driver: BrowserDriver, timeout: float = 1.0
                     displayed = button.is_displayed()
                 except Exception:
                     continue
+                if stop_signal and stop_signal.is_set():
+                    return False
                 if not displayed:
                     continue
                 text = _extract_text_from_element(button)
@@ -2044,13 +2065,17 @@ def dismiss_resume_dialog_if_present(driver: BrowserDriver, timeout: float = 1.0
                     except Exception:
                         continue
         if attempt < max_checks - 1:
-            time.sleep(poll_interval)
+            if stop_signal:
+                if stop_signal.wait(poll_interval):
+                    return False
+            else:
+                time.sleep(poll_interval)
     return False
 
 
-def detect(driver: BrowserDriver) -> List[int]:
-    dismiss_resume_dialog_if_present(driver)
-    try_click_start_answer_button(driver)
+def detect(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> List[int]:
+    dismiss_resume_dialog_if_present(driver, stop_signal=stop_signal)
+    try_click_start_answer_button(driver, stop_signal=stop_signal)
     question_counts_per_page: List[int] = []
     total_pages = len(driver.find_elements(By.XPATH, '//*[@id="divQuestion"]/fieldset'))
     for page_index in range(1, total_pages + 1):
@@ -2466,7 +2491,7 @@ def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = Non
 
 def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> bool:
     """批量填写一份问卷；返回 True 代表完整提交，False 代表过程中被用户打断。"""
-    questions_per_page = detect(driver)
+    questions_per_page = detect(driver, stop_signal=stop_signal)
     total_question_count = sum(questions_per_page)
     single_question_index = 0
     vacant_question_index = 0
@@ -2542,7 +2567,11 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                         time.sleep(delay_seconds)
         if _abort_requested():
             return False
-        time.sleep(0.5)
+        if active_stop:
+            if active_stop.wait(0.5):
+                return False
+        else:
+            time.sleep(0.5)
         is_last_page = (page_index == total_pages - 1)
         if is_last_page:
             if _simulate_answer_duration_delay(active_stop):
@@ -2551,7 +2580,11 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 return False
         try:
             driver.find_element(By.CSS_SELECTOR, "#divNext").click()
-            time.sleep(0.5)
+            if active_stop:
+                if active_stop.wait(0.5):
+                    return False
+            else:
+                time.sleep(0.5)
         except:
             driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
     if _abort_requested():
@@ -3079,6 +3112,8 @@ class SurveyGUI:
         self.runner_thread: Optional[Thread] = None
         self.worker_threads: List[Thread] = []
         self.active_drivers: List[BrowserDriver] = []  # 跟踪活跃的浏览器实例
+        self.stop_requested_by_user: bool = False
+        self.stop_request_ts: Optional[float] = None
         self.running = False
         self.status_job = None
         self.update_info = None  # 存储更新信息
@@ -5085,7 +5120,7 @@ class SurveyGUI:
             if choice is None:
                 return
             if choice == "preview":
-                self._start_preview_only(url_value, preserve_existing=True)
+                self._start_preview_only(url_value, preserve_existing=True, show_preview_window=False)
                 return
             self._start_auto_config(url_value, preserve_existing=True)
             return
@@ -5140,17 +5175,22 @@ class SurveyGUI:
         value = result.get()
         return value if value else None
 
-    def _start_preview_only(self, url_value: str, preserve_existing: bool):
-        if self.question_entries and self._last_parsed_url == url_value and self._last_questions_info:
+    def _start_preview_only(self, url_value: str, preserve_existing: bool, *, show_preview_window: bool = True):
+        def _launch_after_parse(info):
+            if show_preview_window:
+                self._show_preview_window(deepcopy(info), preserve_existing=preserve_existing)
+            else:
+                logging.info(f"[Action Log] Preview-only mode: parsed {len(info)} questions, launching browser preview")
             self._safe_preview_button_config(state=tk.DISABLED, text="正在预览...")
             Thread(target=self._launch_preview_browser_session, args=(url_value,), daemon=True).start()
-            return
+
         if self._last_parsed_url == url_value and self._last_questions_info:
-            self._show_preview_window(deepcopy(self._last_questions_info), preserve_existing=preserve_existing)
+            _launch_after_parse(self._last_questions_info)
             return
         self._start_survey_parsing(
             url_value,
-            lambda info: self._show_preview_window(info, preserve_existing=preserve_existing),
+            lambda info: _launch_after_parse(info),
+            restore_button_state=False,
         )
 
     def _start_auto_config(self, url_value: str, preserve_existing: bool):
@@ -5162,7 +5202,7 @@ class SurveyGUI:
             lambda info: self._show_preview_window(info, preserve_existing=preserve_existing),
         )
 
-    def _start_survey_parsing(self, url_value: str, result_handler: Callable[[List[Dict[str, Any]]], None]):
+    def _start_survey_parsing(self, url_value: str, result_handler: Callable[[List[Dict[str, Any]]], None], restore_button_state: bool = True):
         self._last_survey_title = None
         self._safe_preview_button_config(state=tk.DISABLED, text="加载中...")
         progress_win = tk.Toplevel(self.root)
@@ -5215,12 +5255,21 @@ class SurveyGUI:
 
         preview_thread = Thread(
             target=self._parse_and_show_survey,
-            args=(url_value, progress_win, status_label, progress_bar, percentage_label, result_handler),
+            args=(url_value, progress_win, status_label, progress_bar, percentage_label, result_handler, restore_button_state),
             daemon=True,
         )
         preview_thread.start()
 
-    def _parse_and_show_survey(self, survey_url, progress_win=None, status_label=None, progress_bar=None, percentage_label=None, result_handler: Optional[Callable[[List[Dict[str, Any]]], None]] = None):
+    def _parse_and_show_survey(
+        self,
+        survey_url,
+        progress_win=None,
+        status_label=None,
+        progress_bar=None,
+        percentage_label=None,
+        result_handler: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+        restore_button_state: bool = True,
+    ):
         driver = None
         try:
             # 更新进度函数
@@ -5246,7 +5295,8 @@ class SurveyGUI:
                 handler = result_handler or (lambda data: self._show_preview_window(data))
                 info_copy = deepcopy(questions_info)
                 self.root.after(0, lambda data=info_copy: handler(data))
-                self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
+                if restore_button_state:
+                    self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
                 return
             
             update_progress(30, "HTTP 解析失败，准备启动浏览器...")
@@ -5432,7 +5482,8 @@ class SurveyGUI:
             handler = result_handler or (lambda data: self._show_preview_window(data))
             info_copy = deepcopy(questions_info)
             self.root.after(0, lambda data=info_copy: handler(data))
-            self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
+            if restore_button_state:
+                self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
             
         except Exception as e:
             error_str = str(e)
@@ -5821,11 +5872,35 @@ class SurveyGUI:
         
         canvas.bind_all("<MouseWheel>", _on_wizard_mousewheel)
         
-        def _cleanup_mousewheel():
-            canvas.unbind_all("<MouseWheel>")
-            wizard_win.destroy()
+        def _release_wizard_grab(event=None):
+            try:
+                wizard_win.grab_release()
+            except tk.TclError:
+                pass
+
+        def _restore_wizard_grab(event=None):
+            try:
+                if wizard_win.state() == "normal":
+                    wizard_win.grab_set()
+                    wizard_win.lift()
+            except tk.TclError:
+                pass
+
+        wizard_win.bind("<Unmap>", _release_wizard_grab, add="+")
+        wizard_win.bind("<Map>", _restore_wizard_grab, add="+")
+
+        def _cleanup_wizard():
+            _release_wizard_grab()
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except tk.TclError:
+                pass
+            try:
+                wizard_win.destroy()
+            except tk.TclError:
+                pass
         
-        wizard_win.protocol("WM_DELETE_WINDOW", _cleanup_mousewheel)
+        wizard_win.protocol("WM_DELETE_WINDOW", _cleanup_wizard)
         
         progress_text = f"进度：已完成 {current_index + 1} / {len(questions_info)}"
         ttk.Label(frame, text=progress_text, foreground="gray").pack(anchor="w", fill=tk.X)
@@ -5966,7 +6041,7 @@ class SurveyGUI:
         
         def skip_question():
             self._wizard_commit_log.append({"action": "skip"})
-            wizard_win.destroy()
+            _cleanup_wizard()
             self._show_wizard_for_question(questions_info, current_index + 1)
         
         if type_code in ("1", "2"):
@@ -6033,7 +6108,7 @@ class SurveyGUI:
                     is_location=bool(q.get("is_location")),
                 )
                 self._handle_auto_config_entry(entry, q)
-                wizard_win.destroy()
+                _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
         elif type_code == "4":
@@ -6087,7 +6162,7 @@ class SurveyGUI:
                     fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
                 self._handle_auto_config_entry(entry, q)
-                wizard_win.destroy()
+                _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
         else:
@@ -6197,7 +6272,7 @@ class SurveyGUI:
                     fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
                 self._handle_auto_config_entry(entry, q)
-                wizard_win.destroy()
+                _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
         # 按钮区域（固定在窗口底部）- 使用分隔线和更好的布局
@@ -6213,7 +6288,7 @@ class SurveyGUI:
         
         if current_index > 0:
             prev_btn = ttk.Button(left_btn_frame, text="← 上一题", width=10,
-                      command=lambda: self._go_back_in_wizard(wizard_win, questions_info, current_index))
+                      command=lambda: self._go_back_in_wizard(wizard_win, questions_info, current_index, _cleanup_wizard))
             prev_btn.pack(side=tk.LEFT, padx=(0, 8), pady=2)
         
         skip_btn = ttk.Button(left_btn_frame, text="跳过", width=8, command=skip_question)
@@ -6223,17 +6298,20 @@ class SurveyGUI:
         next_btn.pack(side=tk.LEFT, padx=8, pady=2)
         
         # 右侧取消按钮
-        cancel_btn = ttk.Button(btn_frame, text="取消向导", width=10, command=_cleanup_mousewheel)
+        cancel_btn = ttk.Button(btn_frame, text="取消向导", width=10, command=_cleanup_wizard)
         cancel_btn.pack(side=tk.RIGHT, padx=(8, 0), pady=2)
 
-    def _go_back_in_wizard(self, current_win, questions_info, current_index):
+    def _go_back_in_wizard(self, current_win, questions_info, current_index, destroy_cb=None):
         if self._wizard_history and self._wizard_history[-1] == current_index:
             self._wizard_history.pop()
         prev_index = 0
         if self._wizard_history:
             prev_index = self._wizard_history.pop()
         self._revert_last_wizard_action()
-        current_win.destroy()
+        if destroy_cb:
+            destroy_cb()
+        else:
+            current_win.destroy()
         self._show_wizard_for_question(questions_info, prev_index)
 
     def start_run(self):
@@ -6365,6 +6443,9 @@ class SurveyGUI:
             self._log_popup_error("配置错误", str(exc))
             return
 
+        self.stop_requested_by_user = False
+        self.stop_request_ts = None
+
         logging.info(
             f"[Action Log] Starting run url={url_value} target={target} threads={threads_count}"
         )
@@ -6415,18 +6496,37 @@ class SurveyGUI:
         print(f"正在启动 {num_threads} 个浏览器窗口...")
         threads: List[Thread] = []
         for browser_index in range(num_threads):
+            if stop_event.is_set():
+                break
             window_x = 50 + browser_index * 60
             window_y = 50
             thread = Thread(target=run, args=(window_x, window_y, stop_event, self), daemon=True)
             threads.append(thread)
+        self.worker_threads = threads
         for thread in threads:
+            if stop_event.is_set():
+                break
             thread.start()
             time.sleep(0.1)
         print("浏览器启动中，请稍候...")
-        for thread in threads:
-            thread.join()
-        self.worker_threads = threads
+        self._wait_for_worker_threads(threads)
         self.root.after(0, self._on_run_finished)
+
+    def _wait_for_worker_threads(self, threads: List[Thread]):
+        grace_deadline: Optional[float] = None
+        while True:
+            alive_threads = [t for t in threads if t.is_alive()]
+            self.worker_threads = alive_threads
+            if not alive_threads:
+                return
+            if self.stop_requested_by_user:
+                if grace_deadline is None:
+                    grace_deadline = time.time() + STOP_FORCE_WAIT_SECONDS
+                elif time.time() >= grace_deadline:
+                    logging.warning("停止等待提交线程退出超时，剩余线程将在后台自行收尾")
+                    return
+            for t in alive_threads:
+                t.join(timeout=0.2)
 
     def _schedule_status_update(self):
         status = f"已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次"
@@ -6455,6 +6555,7 @@ class SurveyGUI:
         else:
             msg = "已结束"
         self.status_var.set(f"{msg} | 已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次")
+        self.worker_threads = []
         
         # 最终更新进度条
         if cur_num >= target_num:
@@ -6469,6 +6570,8 @@ class SurveyGUI:
     def stop_run(self):
         if not self.running:
             return
+        self.stop_requested_by_user = True
+        self.stop_request_ts = time.time()
         stop_event.set()
         self.running = False
         self.stop_button.config(state=tk.DISABLED, text="停止中...")
