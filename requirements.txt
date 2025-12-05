@@ -3,5 +3,6 @@ playwright
 pyzbar
 Pillow
 requests
+pyfreeproxy
 packaging
 beautifulsoup4

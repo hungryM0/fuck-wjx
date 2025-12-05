@@ -253,7 +253,7 @@ class PlaywrightDriver:
 # 兼容原先类型标注
 BrowserDriver = PlaywrightDriver
 # 版本号
-__VERSION__ = "1.0-pre2"
+__VERSION__ = "1.0-pre3"
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
@@ -280,10 +280,20 @@ SUBMIT_INITIAL_DELAY = 0.35
 SUBMIT_CLICK_SETTLE_DELAY = 0.25
 POST_SUBMIT_URL_MAX_WAIT = 0.5
 POST_SUBMIT_URL_POLL_INTERVAL = 0.1
-PROXY_LIST_URL = "https://hungrym0.top/ips.txt"
-PROXY_LIST_FETCH_TIMEOUT = 10
+PYFREEPROXY_MAX_PAGES = 2
+PYFREEPROXY_MAX_PROXIES = 80
+PYFREEPROXY_SOURCES = [
+    "GeonodeProxiedSession",
+    "IP3366ProxiedSession",
+    "IP89ProxiedSession",
+    "KuaidailiProxiedSession",
+    "ProxylistProxiedSession",
+    "ProxydailyProxiedSession",
+]
+PYFREEPROXY_FILTER_RULE = {"protocol": ["http"]}
 PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
+PROXY_HEALTH_CHECK_MAX_DURATION = 45
 STOP_FORCE_WAIT_SECONDS = 6
 
 _MULTI_LIMIT_ATTRIBUTE_NAMES = (
@@ -449,58 +459,51 @@ def _get_runtime_directory() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _parse_proxy_line(line: str) -> Optional[str]:
-    if not line:
-        return None
-    cleaned = line.strip()
-    if not cleaned or cleaned.startswith("#"):
-        return None
-    if "://" in cleaned:
-        return cleaned
-    if ":" in cleaned and cleaned.count(":") == 1:
-        host, port = cleaned.split(":", 1)
-    else:
-        parts = re.split(r"[\s,]+", cleaned)
-        if len(parts) < 2:
-            return None
-        host, port = parts[0], parts[1]
-    host = host.strip()
-    port = port.strip()
-    if not host or not port:
-        return None
+def _load_proxy_ip_pool() -> List[str]:
     try:
-        int(port)
-    except ValueError:
-        return None
-    return f"{host}:{port}"
+        from freeproxy.freeproxy import ProxiedSessionClient  # pyfreeproxy
+    except ImportError as exc:
+        raise RuntimeError("pyfreeproxy 模块不可用，请先安装 pyfreeproxy") from exc
 
-
-def _load_proxy_ip_pool(source_url: Optional[str] = None) -> List[str]:
-    proxy_source = source_url or PROXY_LIST_URL
-    if requests is None:
-        raise RuntimeError("requests 模块不可用，无法获取在线代理列表")
     try:
-        response = requests.get(
-            proxy_source,
-            headers=DEFAULT_HTTP_HEADERS,
-            timeout=PROXY_LIST_FETCH_TIMEOUT,
+        client = ProxiedSessionClient(
+            proxy_sources=PYFREEPROXY_SOURCES,
+            init_proxied_session_cfg={
+                "max_pages": PYFREEPROXY_MAX_PAGES,
+                "disable_print": True,
+                "filter_rule": PYFREEPROXY_FILTER_RULE,
+            },
+            disable_print=True,
         )
-        response.raise_for_status()
-        raw_text = response.text
-    except requests.exceptions.RequestException as exc:
-        raise OSError(f"无法下载代理列表（{proxy_source}）：{exc}") from exc
     except Exception as exc:
-        raise OSError(f"获取代理列表时出现异常（{proxy_source}）：{exc}") from exc
+        raise OSError(f"使用 pyfreeproxy 获取代理失败：{exc}") from exc
+
     proxies: List[str] = []
     seen: Set[str] = set()
-    for line in raw_text.splitlines():
-        candidate = _parse_proxy_line(line)
-        if not candidate or candidate in seen:
-            continue
-        proxies.append(candidate)
-        seen.add(candidate)
+    total_candidates = 0
+    for session in client.proxied_sessions.values():
+        for proxy_info in getattr(session, "candidate_proxies", []):
+            total_candidates += 1
+            try:
+                proxy_url = proxy_info.proxy.strip()
+            except Exception:
+                continue
+            if not proxy_url or proxy_url in seen:
+                continue
+            protocol = (getattr(proxy_info, "protocol", "") or "").lower()
+            if protocol != "http":
+                continue
+            country_code = (getattr(proxy_info, "country_code", "") or "").lower()
+            in_cn = country_code == "cn" or bool(getattr(proxy_info, "in_chinese_mainland", False))
+            if not in_cn:
+                continue
+            proxies.append(proxy_url)
+            seen.add(proxy_url)
     if not proxies:
-        raise ValueError(f"代理列表为空，请检查：{proxy_source}")
+        raise ValueError(f"未找到符合条件的代理（仅限中国大陆 HTTP 协议）。原始候选数量：{total_candidates}")
+    random.shuffle(proxies)
+    if len(proxies) > PYFREEPROXY_MAX_PROXIES:
+        proxies = proxies[:PYFREEPROXY_MAX_PROXIES]
     return proxies
 
 
@@ -3728,11 +3731,19 @@ class SurveyGUI:
     def _on_check_random_ip_health(self):
         if self._proxy_health_check_running:
             return
+        if not self.random_ip_enabled_var.get():
+            self._log_popup_error("随机 IP 未开启", "请先勾选“随机IP填写”后再执行验活。")
+            return
         if requests is None:
             self._log_popup_error("IP地址验活失败", "requests 模块不可用，无法执行验活。")
             return
         self._proxy_health_check_running = True
         self._apply_proxy_health_button_state()
+        started_at = time.perf_counter()
+        self.root.after(
+            int(PROXY_HEALTH_CHECK_MAX_DURATION * 1000),
+            lambda: self._abort_proxy_health_if_stuck(started_at),
+        )
 
         def worker():
             start_ts = time.perf_counter()
@@ -3802,6 +3813,15 @@ class SurveyGUI:
                 finish()
 
         Thread(target=worker, daemon=True).start()
+
+    def _abort_proxy_health_if_stuck(self, started_at: float):
+        if not getattr(self, "_proxy_health_check_running", False):
+            return
+        if time.perf_counter() - started_at < PROXY_HEALTH_CHECK_MAX_DURATION:
+            return
+        self._proxy_health_check_running = False
+        self._apply_proxy_health_button_state()
+        self._log_popup_error("IP地址验活失败", "验活超时，请稍后重试或减少代理数量。")
 
     def _on_full_simulation_toggle(self, *args):
         if self.full_simulation_enabled_var.get() and not self.full_sim_target_var.get().strip():
@@ -6436,7 +6456,7 @@ class SurveyGUI:
             except (OSError, ValueError, RuntimeError) as exc:
                 self._log_popup_error("代理IP错误", str(exc))
                 return
-            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（{PROXY_LIST_URL}）")
+            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（pyfreeproxy，CN/http）")
         try:
             configure_probabilities(self.question_entries)
         except ValueError as exc:
