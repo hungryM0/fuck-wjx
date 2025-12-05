@@ -1,5 +1,5 @@
 numpy
-selenium
+playwright
 pyzbar
 Pillow
 requests

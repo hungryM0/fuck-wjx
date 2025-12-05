@@ -3,5 +3,5 @@ configs/
 logs/
 *.code-workspace
 *.ico
-_pycache__/
+__pycache__/
 desktop.ini

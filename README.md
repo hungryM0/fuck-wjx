@@ -34,7 +34,7 @@
 
 **Python 依赖**
 
-- selenium
+- playwright
 - numpy
 - pyzbar
 - Pillow
@@ -46,6 +46,8 @@
 
 ```pwsh
 pip install -r requirements.txt
+# 首次使用请安装 Playwright 内核
+playwright install chromium
 ```
 
 ---

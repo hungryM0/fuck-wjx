@@ -23,15 +23,7 @@ import webbrowser
 import numpy
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from selenium import webdriver
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from selenium.webdriver.remote.webdriver import WebDriver
-try:
-    from selenium.webdriver.edge.options import Options as EdgeOptions
-except ImportError:
-    EdgeOptions = None
+from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 from PIL import Image, ImageTk
 from pyzbar.pyzbar import decode as pyzbar_decode
 
@@ -50,6 +42,216 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+# Playwright + Selenium 兼容封装
+class NoSuchElementException(Exception):
+    pass
+
+
+class TimeoutException(Exception):
+    pass
+
+
+class By:
+    CSS_SELECTOR = "css"
+    XPATH = "xpath"
+    ID = "id"
+
+
+def _build_selector(by: str, value: str) -> str:
+    if by == By.XPATH:
+        return f"xpath={value}"
+    if by == By.ID:
+        if value.startswith("#") or value.startswith("xpath=") or value.startswith("css="):
+            return value
+        return f"#{value}"
+    return value
+
+
+class PlaywrightElement:
+    def __init__(self, handle, page: Page):
+        self._handle = handle
+        self._page = page
+
+    @property
+    def text(self) -> str:
+        try:
+            return self._handle.inner_text()
+        except Exception:
+            return ""
+
+    def get_attribute(self, name: str):
+        try:
+            return self._handle.get_attribute(name)
+        except Exception:
+            return None
+
+    def is_displayed(self) -> bool:
+        try:
+            return self._handle.bounding_box() is not None
+        except Exception:
+            return False
+
+    @property
+    def size(self) -> Dict[str, float]:
+        try:
+            box = self._handle.bounding_box()
+        except Exception:
+            box = None
+        if not box:
+            return {"width": 0, "height": 0}
+        return {"width": box.get("width") or 0, "height": box.get("height") or 0}
+
+    @property
+    def tag_name(self) -> str:
+        try:
+            value = self._handle.evaluate("el => el.tagName.toLowerCase()")
+            return value or ""
+        except Exception:
+            return ""
+
+    def click(self):
+        try:
+            self._handle.click()
+        except Exception:
+            try:
+                self._handle.scroll_into_view_if_needed()
+                self._handle.click()
+            except Exception:
+                pass
+
+    def clear(self):
+        try:
+            self._handle.fill("")
+            return
+        except Exception:
+            pass
+        try:
+            self._handle.evaluate(
+                "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); "
+                "el.dispatchEvent(new Event('change', {bubbles:true})); }"
+            )
+        except Exception:
+            pass
+
+    def send_keys(self, value: str):
+        text = "" if value is None else str(value)
+        try:
+            self._handle.fill(text)
+            return
+        except Exception:
+            pass
+        try:
+            self._handle.type(text)
+        except Exception:
+            pass
+
+    def find_element(self, by: str, value: str):
+        selector = _build_selector(by, value)
+        handle = self._handle.query_selector(selector)
+        if handle is None:
+            raise NoSuchElementException(f"Element not found: {by} {value}")
+        return PlaywrightElement(handle, self._page)
+
+    def find_elements(self, by: str, value: str):
+        selector = _build_selector(by, value)
+        handles = self._handle.query_selector_all(selector)
+        return [PlaywrightElement(h, self._page) for h in handles]
+
+
+class PlaywrightDriver:
+    def __init__(self, playwright, browser: Browser, context: BrowserContext, page: Page, browser_name: str):
+        self._playwright = playwright
+        self._browser = browser
+        self._context = context
+        self._page = page
+        self.browser_name = browser_name
+        self.session_id = f"pw-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+
+    def find_element(self, by: str, value: str):
+        handle = self._page.query_selector(_build_selector(by, value))
+        if handle is None:
+            raise NoSuchElementException(f"Element not found: {by} {value}")
+        return PlaywrightElement(handle, self._page)
+
+    def find_elements(self, by: str, value: str):
+        handles = self._page.query_selector_all(_build_selector(by, value))
+        return [PlaywrightElement(h, self._page) for h in handles]
+
+    def execute_script(self, script: str, *args):
+        processed_args = [arg._handle if isinstance(arg, PlaywrightElement) else arg for arg in args]
+        try:
+            return self._page.evaluate(f"function(){{{script}}}", *processed_args)
+        except Exception as exc:
+            logging.debug("execute_script failed: %s", exc)
+            return None
+
+    def get(self, url: str):
+        self._page.goto(url, wait_until="domcontentloaded")
+
+    @property
+    def current_url(self) -> str:
+        return self._page.url
+
+    @property
+    def page(self) -> Page:
+        return self._page
+
+    @property
+    def page_source(self) -> str:
+        try:
+            return self._page.content()
+        except Exception:
+            return ""
+
+    @property
+    def title(self) -> str:
+        try:
+            return self._page.title()
+        except Exception:
+            return ""
+
+    def set_window_size(self, width: int, height: int):
+        try:
+            self._page.set_viewport_size({"width": width, "height": height})
+        except Exception:
+            pass
+
+    def set_window_position(self, x: int, y: int):
+        try:
+            self._page.evaluate("window.moveTo(arguments[0], arguments[1]);", x, y)
+        except Exception:
+            pass
+
+    def maximize_window(self):
+        try:
+            self._page.set_viewport_size({"width": 1280, "height": 900})
+        except Exception:
+            pass
+
+    def execute_cdp_cmd(self, *_args, **_kwargs):
+        return None
+
+    def quit(self):
+        try:
+            self._page.close()
+        except Exception:
+            pass
+        try:
+            self._context.close()
+        except Exception:
+            pass
+        try:
+            self._browser.close()
+        except Exception:
+            pass
+        try:
+            self._playwright.stop()
+        except Exception:
+            pass
+
+
+# 兼容原先类型标注
+BrowserDriver = PlaywrightDriver
 # 版本号
 __VERSION__ = "1.0-pre2"
 
@@ -410,54 +612,66 @@ def _geocode_location_name(place_name: str) -> Optional[str]:
     return lnglat_value
 
 
-def _find_chrome_binary() -> Optional[str]:
-    """查找 Chrome 或 Chromium 的可执行文件路径"""
-    # 常见的 Chrome/Chromium 安装路径
-    possible_paths = [
-        # Windows 常见路径
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
-        # Chromium
-        r"C:\Program Files\Chromium\Application\chrome.exe",
-        r"C:\Program Files (x86)\Chromium\Application\chrome.exe",
-        # 便携版可能在程序同目录
-        os.path.join(_get_runtime_directory(), "chrome.exe"),
-        os.path.join(_get_runtime_directory(), "chromium", "chrome.exe"),
-        os.path.join(_get_runtime_directory(), "chrome", "chrome.exe"),
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            logging.info(f"找到 Chrome 浏览器: {path}")
-            return path
-    
-    # 如果都找不到，返回 None，让 Selenium Manager 自动处理
-    logging.debug("未找到本地 Chrome 浏览器，将使用 Selenium Manager 自动检测")
-    return None
-
-def _find_edge_binary() -> Optional[str]:
-    """尝试定位 Microsoft Edge 可执行文件"""
-    possible_paths = [
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        os.path.expanduser(r"~\AppData\Local\Microsoft\Edge\Application\msedge.exe"),
-        os.path.join(_get_runtime_directory(), "msedge.exe"),
-        os.path.join(_get_runtime_directory(), "edge", "msedge.exe"),
-    ]
-    for path in possible_paths:
-        if os.path.exists(path):
-            logging.info(f"找到了 Edge 浏览器: {path}")
-            return path
-    logging.debug("未找到 Edge 浏览器，可交由 Selenium Manager 自动处理")
-    return None
+def _normalize_proxy_address(proxy_address: Optional[str]) -> Optional[str]:
+    if not proxy_address:
+        return None
+    normalized = proxy_address.strip()
+    if not normalized:
+        return None
+    if "://" not in normalized:
+        normalized = f"http://{normalized}"
+    return normalized
 
 
-
+def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None, proxy_address: Optional[str] = None) -> Tuple[BrowserDriver, str]:
+    candidates = prefer_browsers or list(BROWSER_PREFERENCE)
+    if not candidates:
+        candidates = list(BROWSER_PREFERENCE)
+    if "chromium" not in candidates:
+        candidates.append("chromium")
+    normalized_proxy = _normalize_proxy_address(proxy_address)
+    last_exc: Optional[Exception] = None
+    for browser in candidates:
+        try:
+            pw = sync_playwright().start()
+        except Exception as exc:
+            last_exc = exc
+            continue
+        try:
+            launch_args: Dict[str, Any] = {"headless": headless}
+            if browser == "edge":
+                launch_args["channel"] = "msedge"
+            elif browser == "chrome":
+                launch_args["channel"] = "chrome"
+            browser_instance = pw.chromium.launch(**launch_args)
+            context_args: Dict[str, Any] = {}
+            if normalized_proxy:
+                context_args["proxy"] = {"server": normalized_proxy}
+            if headless and HEADLESS_WINDOW_SIZE:
+                try:
+                    width, height = [int(x) for x in HEADLESS_WINDOW_SIZE.split(",")]
+                    context_args["viewport"] = {"width": width, "height": height}
+                except Exception:
+                    pass
+            context = browser_instance.new_context(**context_args)
+            page = context.new_page()
+            driver = PlaywrightDriver(pw, browser_instance, context, page, browser)
+            logging.info(f"使用 {browser} Playwright 浏览器")
+            if normalized_proxy:
+                logging.info(f"当前浏览器将使用代理：{normalized_proxy}")
+            return driver, browser
+        except Exception as exc:
+            last_exc = exc
+            logging.warning(f"启动 {browser} 浏览器失败: {exc}")
+            try:
+                pw.stop()
+            except Exception:
+                pass
+    raise RuntimeError(f"无法启动任何浏览器: {last_exc}")
 
 
 def handle_aliyun_captcha(
-    driver: WebDriver, timeout: int = 3, stop_signal: Optional[threading.Event] = None
+    driver: BrowserDriver, timeout: int = 3, stop_signal: Optional[threading.Event] = None
 ) -> bool:
     """检测到阿里云智能验证后立即标记为失败，避免浪费时间。"""
     popup_locator = (By.ID, "aliyunCaptcha-window-popup")
@@ -488,126 +702,6 @@ def handle_aliyun_captcha(
 
     logging.warning("检测到阿里云智能验证，当前策略无法绕过，将直接跳过并标记为失败。")
     raise AliyunCaptchaBypassError("检测到阿里云智能验证，任务已被标记为失败。")
-
-def _apply_common_browser_options(options, headless: bool = False) -> None:
-    try:
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
-    except Exception:
-        pass
-    if hasattr(options, "add_argument"):
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        if headless:
-            options.add_argument("--headless=new")
-            options.add_argument(f"--window-size={HEADLESS_WINDOW_SIZE}")
-            options.add_argument("--disable-software-rasterizer")
-
-def _disable_driver_http_retry(driver: WebDriver) -> None:
-    """
-    Selenium 4.10+ 默认会对 WebDriver 的 HTTP 请求做指数退避重试。
-    如果驱动意外挂掉，重试将导致“幽灵”进程堆积，所以下面尝试清零重试次数。
-    """
-    try:
-        executor = getattr(driver, 'command_executor', None)
-        if executor is None:
-            return
-        http_client = getattr(executor, '_conn', None)
-        if http_client is None:
-            return
-        session = getattr(http_client, 'session', None)
-        if session is None:
-            return
-        adapters = getattr(session, 'adapters', None)
-        if not adapters:
-            return
-        for adapter in adapters.values():
-            retries = getattr(adapter, 'max_retries', None)
-            if retries is None:
-                continue
-            try:
-                retries.total = 0
-                retries.connect = 0
-                retries.read = 0
-                retries.redirect = 0
-                retries.status = 0
-                retries.respect_retry_after_header = False
-            except Exception:
-                try:
-                    adapter.max_retries = 0  # type: ignore[assignment]
-                except Exception:
-                    pass
-    except Exception as exc:
-        logging.debug('Failed to disable driver HTTP retry: %s', exc)
-
-def setup_browser_options(browser: str, headless: bool = False):
-    browser_key = (browser or "").lower()
-    if browser_key not in ("chrome", "edge"):
-        raise ValueError(f"不支持的浏览器类型: {browser}")
-    if browser_key == "edge":
-        if EdgeOptions is None:
-            raise RuntimeError("当前环境未提供 EdgeOptions，请确认 selenium 版本 >= 4.6")
-        options = EdgeOptions()
-        binary = _find_edge_binary()
-    else:
-        options = webdriver.ChromeOptions()
-        binary = _find_chrome_binary()
-    if binary:
-        try:
-            options.binary_location = binary
-        except Exception:
-            pass
-    _apply_common_browser_options(options, headless=headless)
-    return options
-
-
-def _apply_proxy_to_options(options: Any, proxy_address: Optional[str]) -> Optional[str]:
-    if not proxy_address:
-        return None
-    normalized = proxy_address.strip()
-    if not normalized:
-        return None
-    if "://" not in normalized:
-        normalized = f"http://{normalized}"
-    if not hasattr(options, "add_argument"):
-        return None
-    try:
-        options.add_argument(f"--proxy-server={normalized}")
-        return normalized
-    except Exception as exc:
-        logging.warning(f"设置浏览器代理失败: {exc}")
-        return None
-
-
-def create_selenium_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None, proxy_address: Optional[str] = None) -> Tuple[WebDriver, str]:
-    candidates = prefer_browsers or list(BROWSER_PREFERENCE)
-    if not candidates:
-        candidates = list(BROWSER_PREFERENCE)
-    last_exc: Optional[Exception] = None
-    for browser in candidates:
-        try:
-            options = setup_browser_options(browser, headless=headless)
-            applied_proxy = _apply_proxy_to_options(options, proxy_address)
-        except Exception as exc:
-            logging.debug(f"构建 {browser} 选项失败: {exc}")
-            last_exc = exc
-            continue
-        try:
-            if browser == "edge":
-                driver = webdriver.Edge(options=options)  # type: ignore[arg-type]
-            else:
-                driver = webdriver.Chrome(options=options)  # type: ignore[arg-type]
-            _disable_driver_http_retry(driver)
-            logging.info(f"使用 {browser.capitalize()} WebDriver")
-            if applied_proxy:
-                logging.info(f"当前 WebDriver 将使用代理：{applied_proxy}")
-            return driver, browser
-        except Exception as exc:
-            logging.warning(f"启动 {browser.capitalize()} WebDriver 失败: {exc}")
-            last_exc = exc
-    raise RuntimeError(f"无法启动任何浏览器驱动: {last_exc}")
 
 
 
@@ -1123,7 +1217,7 @@ def _get_fill_text_from_config(fill_entries: Optional[List[Optional[str]]], opti
     return text or None
 
 
-def _fill_option_additional_text(driver: WebDriver, question_number: int, option_index_zero_based: int, fill_value: Optional[str]) -> None:
+def _fill_option_additional_text(driver: BrowserDriver, question_number: int, option_index_zero_based: int, fill_value: Optional[str]) -> None:
     if not fill_value:
         return
     text = str(fill_value).strip()
@@ -1462,7 +1556,7 @@ def _collect_choice_option_texts(question_div) -> Tuple[List[str], List[int]]:
     return texts, fillable_indices
 
 
-def _selenium_element_contains_text_input(element) -> bool:
+def _driver_element_contains_text_input(element) -> bool:
     if element is None:
         return False
     try:
@@ -1486,7 +1580,7 @@ def _selenium_element_contains_text_input(element) -> bool:
     return False
 
 
-def _selenium_question_has_shared_text_input(question_div) -> bool:
+def _driver_question_has_shared_text_input(question_div) -> bool:
     if question_div is None:
         return False
     try:
@@ -1520,7 +1614,7 @@ def _verify_text_indicates_location(value: Optional[str]) -> bool:
     return ("地图" in text) or ("map" in text.lower())
 
 
-def _selenium_question_is_location(question_div) -> bool:
+def _driver_question_is_location(question_div) -> bool:
     if question_div is None:
         return False
     try:
@@ -1799,14 +1893,14 @@ def _extract_multi_limit_from_text(text: Optional[str]) -> Optional[int]:
     return None
 
 
-def _get_driver_session_key(driver: WebDriver) -> str:
+def _get_driver_session_key(driver: BrowserDriver) -> str:
     session_id = getattr(driver, "session_id", None)
     if session_id:
         return str(session_id)
     return f"id-{id(driver)}"
 
 
-def detect_multiple_choice_limit(driver: WebDriver, question_number: int) -> Optional[int]:
+def detect_multiple_choice_limit(driver: BrowserDriver, question_number: int) -> Optional[int]:
     cache_key = (_get_driver_session_key(driver), question_number)
     if cache_key in _DETECTED_MULTI_LIMITS:
         return _DETECTED_MULTI_LIMITS[cache_key]
@@ -1843,7 +1937,7 @@ def detect_multiple_choice_limit(driver: WebDriver, question_number: int) -> Opt
     return limit
 
 
-def _log_multi_limit_once(driver: WebDriver, question_number: int, limit: Optional[int]) -> None:
+def _log_multi_limit_once(driver: BrowserDriver, question_number: int, limit: Optional[int]) -> None:
     if not limit:
         return
     cache_key = (_get_driver_session_key(driver), question_number)
@@ -1853,7 +1947,7 @@ def _log_multi_limit_once(driver: WebDriver, question_number: int, limit: Option
     _REPORTED_MULTI_LIMITS.add(cache_key)
 
 
-def try_click_start_answer_button(driver: WebDriver, timeout: float = 1.0) -> bool:
+def try_click_start_answer_button(driver: BrowserDriver, timeout: float = 1.0) -> bool:
     """
     快速检测开屏“开始作答”按钮，若存在立即点击；否则立即继续，无需额外等待。
     """
@@ -1889,29 +1983,22 @@ def try_click_start_answer_button(driver: WebDriver, timeout: float = 1.0) -> bo
                     driver.execute_script("arguments[0].scrollIntoView({block:'center', inline:'center'});", element)
                 except Exception:
                     pass
-                clicked = False
-                try:
-                    element.click()
-                    clicked = True
-                except Exception:
+                for click_method in (
+                    lambda: element.click(),
+                    lambda: driver.execute_script("arguments[0].click();", element),
+                ):
                     try:
-                        driver.execute_script("arguments[0].click();", element)
-                        clicked = True
+                        click_method()
+                        time.sleep(0.3)
+                        return True
                     except Exception:
-                        try:
-                            ActionChains(driver).move_to_element(element).click().perform()
-                            clicked = True
-                        except Exception:
-                            clicked = False
-                if clicked:
-                    time.sleep(0.3)
-                    return True
+                        continue
         if attempt < max_checks - 1:
             time.sleep(poll_interval)
     return False
 
 
-def dismiss_resume_dialog_if_present(driver: WebDriver, timeout: float = 1.0) -> bool:
+def dismiss_resume_dialog_if_present(driver: BrowserDriver, timeout: float = 1.0) -> bool:
     """
     快速检查“继续上次作答”弹窗，如有立即点击“取消”；否则不额外等待。
     """
@@ -1947,25 +2034,21 @@ def dismiss_resume_dialog_if_present(driver: WebDriver, timeout: float = 1.0) ->
                     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
                 except Exception:
                     pass
-                try:
-                    button.click()
-                    return True
-                except Exception:
+                for click_method in (
+                    lambda: button.click(),
+                    lambda: driver.execute_script("arguments[0].click();", button),
+                ):
                     try:
-                        driver.execute_script("arguments[0].click();", button)
+                        click_method()
                         return True
                     except Exception:
-                        try:
-                            ActionChains(driver).move_to_element(button).click().perform()
-                            return True
-                        except Exception:
-                            continue
+                        continue
         if attempt < max_checks - 1:
             time.sleep(poll_interval)
     return False
 
 
-def detect(driver: WebDriver) -> List[int]:
+def detect(driver: BrowserDriver) -> List[int]:
     dismiss_resume_dialog_if_present(driver)
     try_click_start_answer_button(driver)
     question_counts_per_page: List[int] = []
@@ -1981,7 +2064,7 @@ def detect(driver: WebDriver) -> List[int]:
     return question_counts_per_page
 
 
-def _fill_text_question_input(driver: WebDriver, element, value: Optional[Any]) -> None:
+def _fill_text_question_input(driver: BrowserDriver, element, value: Optional[Any]) -> None:
     """
     Safely填充单/多行文本题，包括带地图组件的题目。
     支持“答案|经度,纬度”格式设置地图坐标。
@@ -2066,7 +2149,7 @@ def _fill_text_question_input(driver: WebDriver, element, value: Optional[Any]) 
     )
 
 
-def vacant(driver: WebDriver, current, index):
+def vacant(driver: BrowserDriver, current, index):
     answer_candidates = texts[index] if index < len(texts) else [""]
     selection_probabilities = texts_prob[index] if index < len(texts_prob) else [1.0]
     if not answer_candidates:
@@ -2078,7 +2161,7 @@ def vacant(driver: WebDriver, current, index):
     _fill_text_question_input(driver, input_element, answer_candidates[selected_index])
 
 
-def single(driver: WebDriver, current, index):
+def single(driver: BrowserDriver, current, index):
     options_xpath = f'//*[@id="div{current}"]/div[2]/div'
     option_elements = driver.find_elements(By.XPATH, options_xpath)
     probabilities = single_prob[index] if index < len(single_prob) else -1
@@ -2096,7 +2179,7 @@ def single(driver: WebDriver, current, index):
 
 
 # 下拉框处理函数
-def droplist(driver: WebDriver, current, index):
+def droplist(driver: BrowserDriver, current, index):
     # 先点击“请选择”
     driver.find_element(By.CSS_SELECTOR, f"#select2-q{current}-container").click()
     time.sleep(0.5)
@@ -2118,7 +2201,7 @@ def droplist(driver: WebDriver, current, index):
     _fill_option_additional_text(driver, current, r - 1, fill_value)
 
 
-def multiple(driver: WebDriver, current, index):
+def multiple(driver: BrowserDriver, current, index):
     options_xpath = f'//*[@id="div{current}"]/div[2]/div'
     option_elements = driver.find_elements(By.XPATH, options_xpath)
     if not option_elements:
@@ -2162,7 +2245,7 @@ def multiple(driver: WebDriver, current, index):
         _fill_option_additional_text(driver, current, option_idx, fill_value)
 
 
-def matrix(driver: WebDriver, current, index):
+def matrix(driver: BrowserDriver, current, index):
     rows_xpath = f'//*[@id="divRefTab{current}"]/tbody/tr'
     row_elements = driver.find_elements(By.XPATH, rows_xpath)
     matrix_row_count = sum(1 for row in row_elements if row.get_attribute("rowindex") is not None)
@@ -2185,7 +2268,7 @@ def matrix(driver: WebDriver, current, index):
     return index
 
 
-def reorder(driver: WebDriver, current):
+def reorder(driver: BrowserDriver, current):
     items_xpath = f'//*[@id="div{current}"]/ul/li'
     order_items = driver.find_elements(By.XPATH, items_xpath)
     for position in range(1, len(order_items) + 1):
@@ -2196,7 +2279,7 @@ def reorder(driver: WebDriver, current):
         time.sleep(0.4)
 
 
-def scale(driver: WebDriver, current, index):
+def scale(driver: BrowserDriver, current, index):
     scale_items_xpath = f'//*[@id="div{current}"]/div[2]/div/ul/li'
     scale_options = driver.find_elements(By.XPATH, scale_items_xpath)
     probabilities = scale_prob[index] if index < len(scale_prob) else -1
@@ -2209,7 +2292,7 @@ def scale(driver: WebDriver, current, index):
     scale_options[selected_index].click()
 
 
-def _set_slider_input_value(driver: WebDriver, current: int, value: int):
+def _set_slider_input_value(driver: BrowserDriver, current: int, value: int):
     try:
         slider_input = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
     except NoSuchElementException:
@@ -2226,11 +2309,12 @@ def _set_slider_input_value(driver: WebDriver, current: int, value: int):
         pass
 
 
-def _click_slider_track(driver: WebDriver, container, ratio: float) -> bool:
+def _click_slider_track(driver: BrowserDriver, container, ratio: float) -> bool:
     xpath_candidates = [
         ".//div[contains(@class,'wjx-slider') or contains(@class,'slider-track') or contains(@class,'range-slider') or contains(@class,'ui-slider') or contains(@class,'scale-slider') or contains(@class,'slider-container')]",
         ".//div[@role='slider']",
     ]
+    page = getattr(driver, "page", None)
     for xpath in xpath_candidates:
         tracks = container.find_elements(By.XPATH, xpath)
         for track in tracks:
@@ -2241,15 +2325,24 @@ def _click_slider_track(driver: WebDriver, container, ratio: float) -> bool:
             offset_x = int(width * ratio)
             offset_x = max(5, min(offset_x, width - 5))
             offset_y = max(1, height // 2)
-            try:
-                ActionChains(driver).move_to_element_with_offset(track, offset_x, offset_y).click().perform()
-                return True
-            except Exception:
-                continue
+            handle = getattr(track, "_handle", None)
+            if page and handle:
+                try:
+                    box = handle.bounding_box()
+                except Exception:
+                    box = None
+                if box:
+                    target_x = box["x"] + offset_x
+                    target_y = box["y"] + offset_y
+                    try:
+                        page.mouse.click(target_x, target_y)
+                        return True
+                    except Exception:
+                        continue
     return False
 
 
-def slider_question(driver: WebDriver, current: int, score: int):
+def slider_question(driver: BrowserDriver, current: int, score: int):
     ratio = max(0.0, min(score / 100.0, 1.0))
     try:
         container = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
@@ -2371,7 +2464,7 @@ def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = Non
     return False
 
 
-def brush(driver: WebDriver, stop_signal: Optional[threading.Event] = None) -> bool:
+def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> bool:
     """批量填写一份问卷；返回 True 代表完整提交，False 代表过程中被用户打断。"""
     questions_per_page = detect(driver)
     total_question_count = sum(questions_per_page)
@@ -2465,7 +2558,7 @@ def brush(driver: WebDriver, stop_signal: Optional[threading.Event] = None) -> b
         return False
     submit(driver, stop_signal=active_stop)
     return True
-def submit(driver: WebDriver, stop_signal: Optional[threading.Event] = None):
+def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None):
     def _click_submit_buttons():
         try:
             driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
@@ -2501,9 +2594,24 @@ def submit(driver: WebDriver, stop_signal: Optional[threading.Event] = None):
         slider_handle = driver.find_element(By.XPATH, '//*[@id="nc_1_n1z"]')
         if str(slider_text_element.text).startswith("请按住滑块"):
             slider_width = slider_text_element.size.get("width") or 0
-            ActionChains(driver).drag_and_drop_by_offset(
-                slider_handle, int(slider_width), 0
-            ).perform()
+            handle = getattr(slider_handle, "_handle", None)
+            page = getattr(driver, "page", None)
+            if handle and page:
+                try:
+                    box = handle.bounding_box()
+                except Exception:
+                    box = None
+                if box:
+                    start_x = box["x"] + (box.get("width") or 0) / 2
+                    start_y = box["y"] + (box.get("height") or 0) / 2
+                    delta_x = slider_width if slider_width > 0 else 100
+                    try:
+                        page.mouse.move(start_x, start_y)
+                        page.mouse.down()
+                        page.mouse.move(start_x + delta_x, start_y, steps=15)
+                        page.mouse.up()
+                    except Exception:
+                        pass
     except:
         pass
 
@@ -2551,7 +2659,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             if proxy_address and not _proxy_is_responsive(proxy_address):
                 _discard_unresponsive_proxy(proxy_address)
                 continue
-            driver, active_browser = create_selenium_driver(
+            driver, active_browser = create_playwright_driver(
                 headless=False,
                 prefer_browsers=list(preferred_browsers) if preferred_browsers else None,
                 proxy_address=proxy_address,
@@ -2561,10 +2669,6 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 gui_instance.active_drivers.append(driver)
             driver.set_window_size(550, 650)
             driver.set_window_position(x=window_x_pos, y=window_y_pos)
-            driver.execute_cdp_cmd(
-                "Page.addScriptToEvaluateOnNewDocument",
-                {"source": 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'},
-            )
             if stop_signal.is_set():
                 break
             driver.get(url)
@@ -2974,7 +3078,7 @@ class SurveyGUI:
         self.question_entries: List[QuestionEntry] = []
         self.runner_thread: Optional[Thread] = None
         self.worker_threads: List[Thread] = []
-        self.active_drivers: List[WebDriver] = []  # 跟踪活跃的浏览器实例
+        self.active_drivers: List[BrowserDriver] = []  # 跟踪活跃的浏览器实例
         self.running = False
         self.status_job = None
         self.update_info = None  # 存储更新信息
@@ -3034,20 +3138,6 @@ class SurveyGUI:
         self._center_window()  # 窗口居中显示
         self._check_updates_on_startup()  # 启动时检查更新
         self._schedule_log_refresh()  # 启动日志刷新
-        self.root.after(0, self._show_archived_notice)
-
-    def _show_archived_notice(self):
-        if self._archived_notice_shown:
-            return
-        self._archived_notice_shown = True
-        notice_message = (
-            "本程序已归档，停止更新。\n\n"
-            "即将采用更强大而简洁的浏览器扩展，请在上方帮助菜单加QQ群了解详情。"
-        )
-        try:
-            messagebox.showinfo("重要通知", notice_message, parent=self.root)
-        except tk.TclError as exc:
-            logging.warning(f"无法显示归档通知: {exc}")
 
     def _build_ui(self):
         self.root.geometry("950x750")
@@ -5162,8 +5252,8 @@ class SurveyGUI:
             update_progress(30, "HTTP 解析失败，准备启动浏览器...")
             
             print(f"正在加载问卷: {survey_url}")
-            driver, browser_name = create_selenium_driver(headless=True)
-            logging.info(f"Fallback 到 {browser_name.capitalize()} WebDriver 解析问卷")
+            driver, browser_name = create_playwright_driver(headless=True)
+            logging.info(f"Fallback 到 {browser_name.capitalize()} BrowserDriver 解析问卷")
             
             update_progress(45, "正在打开问卷页面...")
             
@@ -5230,7 +5320,7 @@ class SurveyGUI:
                         if not title_text:
                             title_text = f"第{current_question_num}题"
                         
-                        is_location_question = question_type in ("1", "2") and _selenium_question_is_location(question_div)
+                        is_location_question = question_type in ("1", "2") and _driver_question_is_location(question_div)
                         type_name = self._get_question_type_name(question_type, is_location=is_location_question)
                         option_count = 0
                         matrix_rows = 0
@@ -5284,9 +5374,9 @@ class SurveyGUI:
                                 except Exception:
                                     option_elements = []
                             for idx, opt_element in enumerate(option_elements):
-                                if _selenium_element_contains_text_input(opt_element):
+                                if _driver_element_contains_text_input(opt_element):
                                     option_fillable_indices.append(idx)
-                            if not option_fillable_indices and option_count > 0 and _selenium_question_has_shared_text_input(question_div):
+                            if not option_fillable_indices and option_count > 0 and _driver_question_has_shared_text_input(question_div):
                                 option_fillable_indices.append(option_count - 1)
                         elif question_type == "7":
                             try:
@@ -5353,13 +5443,13 @@ class SurveyGUI:
                         "未找到可用浏览器 (Edge/Chrome)\n\n"
                         "请确认系统已安装 Microsoft Edge 或 Google Chrome"
                     )
-                elif "webdriver" in error_lower or "driver" in error_lower:
+                elif "BrowserDriver" in error_lower or "driver" in error_lower:
                     error_msg = (
                         f"浏览器驱动初始化失败: {error_str}\n\n"
                         "建议:\n"
                         "1. Edge/Chrome 是否已安装并可独立启动\n"
-                        "2. Selenium 版本需 >= 4.6 以启用 Selenium Manager\n"
-                        "3. 检查安全软件是否拦截 WebDriver"
+                        "2. 运行一次 `playwright install chromium` 确保内置浏览器可用\n"
+                        "3. 检查安全软件是否拦截浏览器自动化进程"
                     )
                 else:
                     error_msg = f"浏览器启动失败: {error_str}\n\n请检查 Edge/Chrome 是否能够手动打开问卷"
@@ -5432,7 +5522,7 @@ class SurveyGUI:
             return
 
         try:
-            driver, browser_name = create_selenium_driver(headless=False)
+            driver, browser_name = create_playwright_driver(headless=False)
             driver.maximize_window()
             driver.get(url)
 
@@ -5457,7 +5547,7 @@ class SurveyGUI:
         finally:
             self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
 
-    def _fill_preview_answers(self, driver: WebDriver, questions_info: List[Dict[str, Any]]) -> None:
+    def _fill_preview_answers(self, driver: BrowserDriver, questions_info: List[Dict[str, Any]]) -> None:
         vacancy_idx = single_idx = droplist_idx = multiple_idx = matrix_idx = scale_idx = 0
         for q in questions_info:
             q_type = q.get("type_code")
@@ -7266,3 +7356,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
