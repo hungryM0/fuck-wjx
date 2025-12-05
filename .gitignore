@@ -3,3 +3,5 @@ configs/
 logs/
 *.code-workspace
 *.ico
+_pycache__/
+desktop.ini
