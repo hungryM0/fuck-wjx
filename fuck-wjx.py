@@ -167,6 +167,12 @@ class PlaywrightDriver:
         self._page = page
         self.browser_name = browser_name
         self.session_id = f"pw-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+        try:
+            proc = getattr(browser, "process", None)
+            self.browser_pid = int(proc.pid) if proc and getattr(proc, "pid", None) else None
+        except Exception:
+            self.browser_pid = None
+        self.browser_pids: Set[int] = set()
 
     def find_element(self, by: str, value: str):
         handle = self._page.query_selector(_build_selector(by, value))
@@ -337,7 +343,7 @@ PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
 PROXY_HEALTH_CHECK_MAX_DURATION = 45
-STOP_FORCE_WAIT_SECONDS = 6
+STOP_FORCE_WAIT_SECONDS = 3
 
 _MULTI_LIMIT_ATTRIBUTE_NAMES = (
     "max",
@@ -764,6 +770,57 @@ def _kill_playwright_browser_processes():
         logging.info(f"共终止 {killed_count} 个 Playwright 浏览器进程")
 
 
+def _list_browser_pids() -> Set[int]:
+    """
+    列出现有 Edge/Chrome/Chromium 进程 PID，便于精确清理。
+    """
+    try:
+        import psutil
+    except ImportError:
+        return set()
+    names = {"msedge.exe", "chrome.exe", "chromium.exe"}
+    pids: Set[int] = set()
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            proc_name = (proc.info.get("name") or "").lower()
+            if proc_name in names:
+                pids.add(int(proc.info["pid"]))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        except Exception:
+            continue
+    return pids
+
+
+def _kill_processes_by_pid(pids: Set[int]) -> int:
+    """
+    按 PID 精确终止一批进程，返回成功杀掉的数量。
+    用于只清理当前会话启动的浏览器，避免全盘扫描导致卡顿。
+    """
+    try:
+        import psutil
+    except ImportError:
+        logging.warning("psutil 未安装，无法按 PID 精确清理浏览器进程")
+        return 0
+
+    killed = 0
+    for pid in set(pids or []):
+        if not pid or pid <= 0:
+            continue
+        try:
+            proc = psutil.Process(pid)
+            proc.kill()
+            killed += 1
+            logging.info(f"已终止浏览器进程 PID={pid}")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        except Exception as exc:
+            logging.debug(f"按 PID 清理浏览器失败 pid={pid}: {exc}", exc_info=True)
+    if killed > 0:
+        logging.info(f"按 PID 共终止 {killed} 个浏览器进程")
+    return killed
+
+
 def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None, proxy_address: Optional[str] = None, user_agent: Optional[str] = None, window_position: Optional[Tuple[int, int]] = None) -> Tuple[BrowserDriver, str]:
     candidates = prefer_browsers or list(BROWSER_PREFERENCE)
     if not candidates:
@@ -772,6 +829,7 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
         candidates.append("chromium")
     normalized_proxy = _normalize_proxy_address(proxy_address)
     last_exc: Optional[Exception] = None
+    baseline_pids = _list_browser_pids()
     for browser in candidates:
         try:
             pw = sync_playwright().start()
@@ -802,6 +860,13 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
             context = browser_instance.new_context(**context_args)
             page = context.new_page()
             driver = PlaywrightDriver(pw, browser_instance, context, page, browser)
+            try:
+                new_pids = _list_browser_pids() - baseline_pids
+                driver.browser_pids = new_pids
+                if new_pids:
+                    logging.debug(f"[Action Log] 浏览器 PID 捕获: {new_pids}")
+            except Exception:
+                driver.browser_pids = set()
             logging.info(f"使用 {browser} Playwright 浏览器")
             if normalized_proxy:
                 logging.info(f"当前浏览器将使用代理：{normalized_proxy}")
@@ -3347,12 +3412,35 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
     def _register_driver(instance: BrowserDriver) -> None:
         if gui_instance and hasattr(gui_instance, 'active_drivers'):
             gui_instance.active_drivers.append(instance)
+            try:
+                pids = set()
+                pid_single = getattr(instance, "browser_pid", None)
+                if pid_single:
+                    pids.add(int(pid_single))
+                pid_set = getattr(instance, "browser_pids", None)
+                if pid_set:
+                    pids.update(int(p) for p in pid_set)
+                gui_instance._launched_browser_pids.update(pids)
+            except Exception:
+                pass
 
     def _unregister_driver(instance: BrowserDriver) -> None:
         if gui_instance and hasattr(gui_instance, 'active_drivers'):
             try:
                 gui_instance.active_drivers.remove(instance)
             except ValueError:
+                pass
+            try:
+                pids = set()
+                pid_single = getattr(instance, "browser_pid", None)
+                if pid_single:
+                    pids.add(int(pid_single))
+                pid_set = getattr(instance, "browser_pids", None)
+                if pid_set:
+                    pids.update(int(p) for p in pid_set)
+                for pid in pids:
+                    gui_instance._launched_browser_pids.discard(int(pid))
+            except Exception:
                 pass
 
     def _dispose_driver() -> None:
@@ -3825,6 +3913,7 @@ class SurveyGUI:
         self.runner_thread: Optional[Thread] = None
         self.worker_threads: List[Thread] = []
         self.active_drivers: List[BrowserDriver] = []  # 跟踪活跃的浏览器实例
+        self._launched_browser_pids: Set[int] = set()  # 跟踪本次会话启动的浏览器 PID
         self._stop_cleanup_thread_running = False  # 避免重复触发停止清理
         self.stop_requested_by_user: bool = False
         self.stop_request_ts: Optional[float] = None
@@ -7490,20 +7579,33 @@ class SurveyGUI:
                 self.progress_bar['value'] = progress
                 self.progress_label.config(text=f"{progress}%")
 
-    def _async_stop_cleanup(self, drivers_snapshot: List[BrowserDriver]):
-        """在后台线程中执行重度停止清理，避免阻塞 UI。"""
+    def _async_stop_cleanup(self, drivers_snapshot: List[BrowserDriver], worker_threads_snapshot: List[Thread], browser_pids_snapshot: Set[int]):
+        """在后台线程中执行分阶段停止，先温和关闭，再必要时强杀，避免主线程卡顿。"""
+        deadline = time.time() + STOP_FORCE_WAIT_SECONDS
+        logging.info(f"[Stop] 后台清理启动: drivers={len(drivers_snapshot)} threads={len(worker_threads_snapshot)} pids={len(browser_pids_snapshot)}")
         try:
             for driver in drivers_snapshot:
                 try:
                     driver.quit()
                 except Exception:
                     logging.debug("停止时关闭浏览器实例失败", exc_info=True)
-            try:
-                _kill_playwright_browser_processes()
-            except Exception as e:
-                logging.warning(f"强制清理浏览器进程时出错: {e}")
+            killed = _kill_processes_by_pid(browser_pids_snapshot)
+            # 等待工作线程自行退出，超时后精准清理我们启动的浏览器进程
+            while time.time() < deadline:
+                alive = [t for t in worker_threads_snapshot if t.is_alive()]
+                if not alive:
+                    break
+                time.sleep(0.1)
+            alive_threads = [t for t in worker_threads_snapshot if t.is_alive()]
+            # 如果线程还活着或按 PID 没杀掉进程，兜底再扫一次 Playwright 进程
+            if alive_threads or killed == 0:
+                try:
+                    _kill_playwright_browser_processes()
+                except Exception as e:
+                    logging.warning(f"强制清理浏览器进程时出错: {e}")
         finally:
             self._stop_cleanup_thread_running = False
+            logging.info("[Stop] 后台清理结束")
 
     def stop_run(self):
         if not self.running:
@@ -7526,10 +7628,17 @@ class SurveyGUI:
 
         # 在后台线程里关闭浏览器并清理 Playwright 进程，避免阻塞主线程
         drivers_snapshot = list(self.active_drivers)
+        worker_threads_snapshot = list(self.worker_threads)
+        browser_pids_snapshot = set(self._launched_browser_pids)
         self.active_drivers.clear()
+        self._launched_browser_pids.clear()
         if not self._stop_cleanup_thread_running:
             self._stop_cleanup_thread_running = True
-            Thread(target=self._async_stop_cleanup, args=(drivers_snapshot,), daemon=True).start()
+            Thread(
+                target=self._async_stop_cleanup,
+                args=(drivers_snapshot, worker_threads_snapshot, browser_pids_snapshot),
+                daemon=True,
+            ).start()
         
         logging.info("收到停止请求，等待当前提交线程完成")
         print("已暂停新的问卷提交，等待现有流程退出")
