@@ -343,7 +343,7 @@ PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
 PROXY_HEALTH_CHECK_MAX_DURATION = 45
-STOP_FORCE_WAIT_SECONDS = 3
+STOP_FORCE_WAIT_SECONDS = 1.5
 
 _MULTI_LIMIT_ATTRIBUTE_NAMES = (
     "max",
@@ -804,7 +804,7 @@ def _kill_processes_by_pid(pids: Set[int]) -> int:
         return 0
 
     killed = 0
-    for pid in set(pids or []):
+    for pid in list(set(pids or []))[:6]:
         if not pid or pid <= 0:
             continue
         try:
@@ -829,8 +829,8 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
         candidates.append("chromium")
     normalized_proxy = _normalize_proxy_address(proxy_address)
     last_exc: Optional[Exception] = None
-    baseline_pids = _list_browser_pids()
     for browser in candidates:
+        pre_launch_pids = _list_browser_pids()
         try:
             pw = sync_playwright().start()
         except Exception as exc:
@@ -860,13 +860,24 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
             context = browser_instance.new_context(**context_args)
             page = context.new_page()
             driver = PlaywrightDriver(pw, browser_instance, context, page, browser)
-            try:
-                new_pids = _list_browser_pids() - baseline_pids
-                driver.browser_pids = new_pids
-                if new_pids:
-                    logging.debug(f"[Action Log] 浏览器 PID 捕获: {new_pids}")
-            except Exception:
-                driver.browser_pids = set()
+            # 捕获主进程 PID，尽量只杀主进程，减小停止时的系统抖动
+            collected_pids: Set[int] = set()
+            main_pid = getattr(driver, "browser_pid", None)
+            if main_pid:
+                collected_pids.add(int(main_pid))
+            else:
+                # 如果未能拿到主 PID，再退而求其次记录新增的少量浏览器进程
+                try:
+                    time.sleep(0.05)
+                    after = _list_browser_pids()
+                    diff = list(after - pre_launch_pids)[:3]
+                    collected_pids.update(diff)
+                    if not collected_pids:
+                        logging.warning("[Action Log] 未捕获浏览器主 PID，回退到差集依然为空")
+                except Exception:
+                    pass
+            driver.browser_pids = collected_pids
+            logging.debug(f"[Action Log] 捕获浏览器 PID: {sorted(collected_pids) if collected_pids else '无'}")
             logging.info(f"使用 {browser} Playwright 浏览器")
             if normalized_proxy:
                 logging.info(f"当前浏览器将使用代理：{normalized_proxy}")
@@ -2428,10 +2439,9 @@ def try_click_start_answer_button(
                     except Exception:
                         continue
         if attempt < max_checks - 1:
-            if stop_signal:
-                if stop_signal.wait(poll_interval):
-                    return False
-            else:
+            if stop_signal and stop_signal.wait(poll_interval):
+                return False
+            if not stop_signal:
                 time.sleep(poll_interval)
     return False
 
@@ -3055,6 +3065,17 @@ def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = Non
     return False
 
 
+def _sleep_with_stop(stop_signal: Optional[threading.Event], seconds: float) -> bool:
+    """带停止信号的睡眠，返回 True 表示被中断。"""
+    if seconds <= 0:
+        return False
+    if stop_signal:
+        interrupted = stop_signal.wait(seconds)
+        return bool(interrupted and stop_signal.is_set())
+    time.sleep(seconds)
+    return False
+
+
 def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> bool:
     """批量填写一份问卷；返回 True 代表完整提交，False 代表过程中被用户打断。"""
     questions_per_page = detect(driver, stop_signal=stop_signal)
@@ -3236,7 +3257,8 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
         """处理验证失败后的刷新流程：刷新页面 -> 点击'是'继续作答 -> 点击提交 -> 重新进行智能验证"""
         logging.info("验证失败，正在刷新页面...")
         driver.refresh()
-        time.sleep(1.5)  # 等待页面刷新完成
+        if _sleep_with_stop(stop_signal, 1.5):
+            return  # 等待页面刷新完成
         
         # 点击"是"继续上次作答
         script_click_continue = r"""
@@ -3270,13 +3292,16 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
                 result = driver.execute_script(script_click_continue)
                 if result:
                     logging.info("已点击'是'继续上次作答")
-                    time.sleep(0.5)
+                    if _sleep_with_stop(stop_signal, 0.5):
+                        return
                     break
             except Exception:
                 pass
-            time.sleep(0.2)
+            if _sleep_with_stop(stop_signal, 0.2):
+                return
         
-        time.sleep(0.5)
+        if _sleep_with_stop(stop_signal, 0.5):
+            return
         # 点击提交按钮，会触发新的智能验证
         _click_submit_buttons()
         # 点击安全校验确认弹窗（如果有）
@@ -3285,11 +3310,12 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
                 return
             if _click_security_confirm_dialog():
                 break
-            time.sleep(0.3)
+            if _sleep_with_stop(stop_signal, 0.3):
+                return
         _click_security_confirm_dialog()
 
-    if pre_submit_delay > 0:
-        time.sleep(pre_submit_delay)
+    if pre_submit_delay > 0 and _sleep_with_stop(stop_signal, pre_submit_delay):
+        return
     _click_submit_buttons()
     # 检查并处理"需要安全校验"的确认弹窗，多次尝试
     for _ in range(5):  # 尝试5次，共约1.5秒
@@ -3297,7 +3323,8 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
             return
         if _click_security_confirm_dialog():
             break  # 成功点击就退出
-        time.sleep(0.3)
+        if _sleep_with_stop(stop_signal, 0.3):
+            return
     if stop_signal and stop_signal.is_set():
         return
     
@@ -3330,7 +3357,8 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
         if stop_signal and stop_signal.is_set():
             return
         if settle_delay > 0:
-            time.sleep(settle_delay)
+            if _sleep_with_stop(stop_signal, settle_delay):
+                return
         _click_submit_buttons()
         # 阿里云验证通过后，等待提交完成（URL 变化或超时）
         captcha_submit_timeout = 3.0  # 最多等待 3 秒让提交完成
@@ -3721,6 +3749,49 @@ class SurveyGUI:
         logging.info(f"[Popup Confirm] {title} | {message}")
         return messagebox.askyesno(title, message, **kwargs)
 
+    def _dump_threads_to_file(self, tag: str = "stop") -> Optional[str]:
+        """
+        导出当前所有线程的堆栈，便于排查停止后卡顿。
+        返回写入的文件路径。
+        """
+        try:
+            import sys
+            import traceback
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            logs_dir = os.path.join(_get_runtime_directory(), LOG_DIR_NAME)
+            os.makedirs(logs_dir, exist_ok=True)
+            file_path = os.path.join(logs_dir, f"thread_dump_{tag}_{ts}.txt")
+            frames = sys._current_frames()
+            lines = []
+            for tid, frame in frames.items():
+                thr = next((t for t in threading.enumerate() if t.ident == tid), None)
+                name = thr.name if thr else "Unknown"
+                lines.append(f"### Thread {name} (id={tid}) ###")
+                lines.extend(traceback.format_stack(frame))
+                lines.append("")
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            logging.info(f"[Debug] 线程堆栈已导出：{file_path}")
+            return file_path
+        except Exception as exc:
+            logging.debug(f"导出线程堆栈失败: {exc}", exc_info=True)
+            return None
+
+    def _exit_app(self):
+        """结束应用，优先销毁 Tk，再强制退出以避免残留卡顿。"""
+        try:
+            self._closing = True
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+        try:
+            os._exit(0)
+        except Exception:
+            pass
+
     def _is_supported_wjx_url(self, url: str) -> bool:
         if not url:
             return False
@@ -3915,6 +3986,9 @@ class SurveyGUI:
         self.active_drivers: List[BrowserDriver] = []  # 跟踪活跃的浏览器实例
         self._launched_browser_pids: Set[int] = set()  # 跟踪本次会话启动的浏览器 PID
         self._stop_cleanup_thread_running = False  # 避免重复触发停止清理
+        # 是否在点击停止后自动退出；可用环境变量 AUTO_EXIT_ON_STOP 控制，默认关闭
+        _auto_exit_env = str(os.getenv("AUTO_EXIT_ON_STOP", "")).strip().lower()
+        self._auto_exit_on_stop = _auto_exit_env in ("1", "true", "yes", "on")
         self.stop_requested_by_user: bool = False
         self.stop_request_ts: Optional[float] = None
         self.running = False
@@ -7423,6 +7497,10 @@ class SurveyGUI:
     def _finish_start_run(self, ctx: Dict[str, Any], proxy_pool: List[str]):
         if getattr(self, "_closing", False):
             return
+        # 启动前重置已记录的浏览器 PID，避免上一轮遗留
+        self._launched_browser_pids.clear()
+        if not self._log_refresh_job:
+            self._schedule_log_refresh()
         random_proxy_flag = bool(ctx.get("random_proxy_flag"))
         random_ua_flag = bool(ctx.get("random_ua_flag"))
         random_ua_keys_list = ctx.get("random_ua_keys_list", [])
@@ -7589,16 +7667,18 @@ class SurveyGUI:
                     driver.quit()
                 except Exception:
                     logging.debug("停止时关闭浏览器实例失败", exc_info=True)
-            killed = _kill_processes_by_pid(browser_pids_snapshot)
-            # 等待工作线程自行退出，超时后精准清理我们启动的浏览器进程
+            # 先等待线程退出，再按需清理进程，避免过早强杀导致抖动
             while time.time() < deadline:
                 alive = [t for t in worker_threads_snapshot if t.is_alive()]
                 if not alive:
                     break
                 time.sleep(0.1)
             alive_threads = [t for t in worker_threads_snapshot if t.is_alive()]
+            killed = 0
+            if alive_threads or browser_pids_snapshot:
+                killed = _kill_processes_by_pid(browser_pids_snapshot)
             # 如果线程还活着或按 PID 没杀掉进程，兜底再扫一次 Playwright 进程
-            if alive_threads or killed == 0:
+            if alive_threads or (browser_pids_snapshot and killed == 0):
                 try:
                     _kill_playwright_browser_processes()
                 except Exception as e:
@@ -7622,6 +7702,15 @@ class SurveyGUI:
             except Exception:
                 pass
             self.status_job = None
+        # 停止日志刷新，避免停止阶段 UI 额外负担
+        if self._log_refresh_job:
+            try:
+                self.root.after_cancel(self._log_refresh_job)
+            except Exception:
+                pass
+            self._log_refresh_job = None
+        # 导出线程堆栈，便于定位卡顿原因
+        self._dump_threads_to_file("stop")
 
         # 取消可能在跑的代理验活，避免额外线程干扰停止流程
         self._stop_proxy_health_if_running()
@@ -7639,6 +7728,9 @@ class SurveyGUI:
                 args=(drivers_snapshot, worker_threads_snapshot, browser_pids_snapshot),
                 daemon=True,
             ).start()
+        if self._auto_exit_on_stop:
+            # 清理线程启动后快速退出，规避 Tk 主线程后续卡顿
+            self.root.after(150, self._exit_app)
         
         logging.info("收到停止请求，等待当前提交线程完成")
         print("已暂停新的问卷提交，等待现有流程退出")
@@ -7663,7 +7755,7 @@ class SurveyGUI:
                     self.root.after_cancel(self._log_refresh_job)
                 except Exception:
                     pass
-            self.root.destroy()
+            self._exit_app()
             return
         
         # 检查是否有问卷链接或题目配置
