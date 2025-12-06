@@ -124,6 +124,11 @@ QUESTION_TYPE_LABELS = {
     "slider": "量表题",
     "order": "排序题",
     "score": "评分题",
+    "single": "单选题",
+    "multiple": "多选题",
+    "matrix": "矩阵题",
+    "scale": "量表题",
+    "text": "填空题",
 }
 LOCATION_QUESTION_LABEL = "位置题"
 DEFAULT_FILL_TEXT = "无"  # 填空选项留空时的默认文本

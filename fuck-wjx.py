@@ -1174,6 +1174,7 @@ random_proxy_ip_enabled = False
 proxy_ip_pool: List[str] = []
 random_user_agent_enabled = False
 user_agent_pool_keys: List[str] = []
+last_submit_had_captcha = False
 
 # 极速模式：全真模拟/随机IP关闭且时间间隔为0时自动启用
 def _is_fast_mode() -> bool:
@@ -2856,6 +2857,9 @@ def _full_simulation_active() -> bool:
     return bool(full_simulation_enabled and full_simulation_estimated_seconds > 0)
 
 
+FULL_SIM_MIN_QUESTION_SECONDS = 3.0
+
+
 def _reset_full_simulation_runtime_state() -> None:
     global full_simulation_schedule, full_simulation_end_timestamp
     try:
@@ -2912,19 +2916,22 @@ def _wait_for_next_full_simulation_slot(stop_signal: threading.Event) -> bool:
     return True
 
 
-def _calculate_full_simulation_run_target() -> float:
-    base = max(5.0, float(full_simulation_estimated_seconds))
+def _calculate_full_simulation_run_target(question_count: int) -> float:
+    per_question_cfg = 0.0
+    if full_simulation_estimated_seconds > 0 and question_count > 0:
+        per_question_cfg = float(full_simulation_estimated_seconds) / max(1, question_count)
+    per_question_target = max(FULL_SIM_MIN_QUESTION_SECONDS, per_question_cfg)
+    base = max(5.0, per_question_target * max(1, question_count))
     jitter = max(0.05, min(0.5, FULL_SIM_DURATION_JITTER))
-    lower = max(2.0, base * (1 - jitter))
-    upper = max(lower + 0.5, base * (1 + jitter))
-    return random.uniform(lower, upper)
+    upper = max(base + per_question_target * 0.5, base * (1 + jitter))
+    return random.uniform(base, upper)
 
 
 def _build_per_question_delay_plan(question_count: int, target_seconds: float) -> List[float]:
     if question_count <= 0 or target_seconds <= 0:
         return []
     avg_delay = target_seconds / max(1, question_count)
-    min_delay = max(FULL_SIM_MIN_DELAY_SECONDS, avg_delay * 0.6)
+    min_delay = max(FULL_SIM_MIN_DELAY_SECONDS, avg_delay * 0.8, FULL_SIM_MIN_QUESTION_SECONDS)
     max_possible_min = target_seconds / max(1, question_count)
     if min_delay > max_possible_min:
         min_delay = max(FULL_SIM_MIN_DELAY_SECONDS * 0.2, max_possible_min)
@@ -2963,6 +2970,21 @@ def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = Non
     return False
 
 
+def _human_scroll_after_question(driver: BrowserDriver) -> None:
+    distance = random.uniform(120, 260)
+    page = getattr(driver, "page", None)
+    if page:
+        try:
+            page.mouse.wheel(0, distance)
+            return
+        except Exception:
+            pass
+    try:
+        driver.execute_script("window.scrollBy(0, arguments[0]);", distance)
+    except Exception:
+        pass
+
+
 def _sleep_with_stop(stop_signal: Optional[threading.Event], seconds: float) -> bool:
     """带停止信号的睡眠，返回 True 表示被中断。"""
     if seconds <= 0:
@@ -2989,11 +3011,11 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     active_stop = stop_signal or stop_event
     question_delay_plan: Optional[List[float]] = None
     if _full_simulation_active() and total_question_count > 0:
-        target_seconds = _calculate_full_simulation_run_target()
+        target_seconds = _calculate_full_simulation_run_target(total_question_count)
         question_delay_plan = _build_per_question_delay_plan(total_question_count, target_seconds)
         planned_total = sum(question_delay_plan)
         logging.info(
-            "[Action Log] ȫ��ģ�⣺���μƻ���ʱԼ %.1f �룬�� %d ��",
+            "[Action Log] 全真模拟：本次计划总耗时约 %.1f 秒，共 %d 题",
             planned_total,
             total_question_count,
         )
@@ -3010,6 +3032,9 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
             if _abort_requested():
                 return False
             current_question_number += 1
+            if _full_simulation_active():
+                if _sleep_with_stop(active_stop, random.uniform(0.8, 1.5)):
+                    return False
             question_type = driver.find_element(
                 By.CSS_SELECTOR, f"#div{current_question_number}"
             ).get_attribute("type")
@@ -3038,19 +3063,20 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 reorder(driver, current_question_number)
             else:
                 print(f"第{current_question_number}题为不支持类型")
+        if _full_simulation_active():
+            _human_scroll_after_question(driver)
         if (
             question_delay_plan
             and current_question_number < total_question_count
         ):
             plan_index = min(current_question_number - 1, len(question_delay_plan) - 1)
-            if plan_index >= 0:
-                delay_seconds = question_delay_plan[plan_index]
-                if delay_seconds > 0.01:
-                    if active_stop:
-                        if active_stop.wait(delay_seconds):
-                            return False
-                    else:
-                        time.sleep(delay_seconds)
+            delay_seconds = question_delay_plan[plan_index] if plan_index >= 0 else 0.0
+            if delay_seconds > 0.01:
+                if active_stop:
+                    if active_stop.wait(delay_seconds):
+                        return False
+                else:
+                    time.sleep(delay_seconds)
         if _abort_requested():
             return False
         buffer_delay = 0.0 if fast_mode else 0.5
@@ -3085,6 +3111,9 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
     fast_mode = _is_fast_mode()
     settle_delay = 0 if fast_mode else SUBMIT_CLICK_SETTLE_DELAY
     pre_submit_delay = 0 if fast_mode else SUBMIT_INITIAL_DELAY
+
+    global last_submit_had_captcha
+    last_submit_had_captcha = False
 
     def _click_submit_buttons():
         try:
@@ -3252,6 +3281,7 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
         captcha_bypassed = False
 
     if captcha_bypassed:
+        last_submit_had_captcha = True
         if stop_signal and stop_signal.is_set():
             return
         if settle_delay > 0:
@@ -3389,7 +3419,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         if _full_simulation_active():
             if not _wait_for_next_full_simulation_slot(stop_signal):
                 break
-            logging.info("[Action Log] ȫ��ģ��ʱ����������༭����������...")
+            logging.info("[Action Log] 全真模拟时段管控中，等待编辑区释放...")
         if stop_signal.is_set():
             break
         if driver is None:
@@ -3434,7 +3464,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             finished = brush(driver, stop_signal=stop_signal)
             if stop_signal.is_set() or not finished:
                 break
-            max_wait = 0.2 if fast_mode else POST_SUBMIT_URL_MAX_WAIT
+            need_watch_submit = bool(last_submit_had_captcha)
+            max_wait = 0.1 if not need_watch_submit else (0.2 if fast_mode else POST_SUBMIT_URL_MAX_WAIT)
             poll_interval = 0.05 if fast_mode else POST_SUBMIT_URL_POLL_INTERVAL
             wait_deadline = time.time() + max_wait
             while time.time() < wait_deadline:
@@ -3915,7 +3946,9 @@ class SurveyGUI:
         self._wizard_commit_log: List[Dict[str, Any]] = []
         self._last_parsed_url: Optional[str] = None
         self._last_questions_info: Optional[List[Dict[str, Any]]] = None
+        self._suspend_full_sim_autofill = False
         self._last_survey_title: Optional[str] = None
+        self._threads_value_before_full_sim: Optional[str] = None
         self._main_parameter_widgets: List[tk.Widget] = []
         self._settings_window_widgets: List[tk.Widget] = []
         self._random_ua_option_widgets: List[tk.Widget] = []
@@ -4175,7 +4208,7 @@ class SurveyGUI:
         settings_grid.columnconfigure(1, weight=1)
         
         ttk.Label(settings_grid, text="目标份数：").grid(row=0, column=0, sticky="w", padx=5)
-        self.target_var.trace("w", lambda *args: self._mark_config_changed())
+        self.target_var.trace_add("write", lambda *args: self._on_main_target_changed())
         target_entry = ttk.Entry(settings_grid, textvariable=self.target_var, width=10)
         target_entry.grid(row=0, column=1, sticky="w", padx=5)
         self._main_parameter_widgets.append(target_entry)
@@ -4208,8 +4241,7 @@ class SurveyGUI:
         ):
             _ua_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.random_ip_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
-        self.full_sim_target_var.trace("w", lambda *args: self._mark_config_changed())
-        self.full_sim_target_var.trace_add("write", lambda *args: self._sync_full_sim_target_to_main())
+        self.full_sim_target_var.trace_add("write", lambda *args: self._on_full_sim_target_changed())
         self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._mark_config_changed())
         self.full_sim_estimated_seconds_var.trace("w", lambda *args: self._mark_config_changed())
         self.full_sim_total_minutes_var.trace("w", lambda *args: self._mark_config_changed())
@@ -4481,17 +4513,30 @@ class SurveyGUI:
         self._full_simulation_control_widgets = cleaned
 
     def _update_parameter_widgets_state(self):
-        state = tk.DISABLED if self.full_simulation_enabled_var.get() else tk.NORMAL
+        locking = bool(self.full_simulation_enabled_var.get())
+        if locking and not self.random_ua_enabled_var.get():
+            self.random_ua_enabled_var.set(True)
+        state = tk.DISABLED if locking else tk.NORMAL
         targets = [w for w in getattr(self, '_main_parameter_widgets', []) if w is not None]
         targets += [w for w in getattr(self, '_settings_window_widgets', []) if w is not None]
+        allowed_when_locked = []
+        if locking:
+            allowed_when_locked.extend(
+                [getattr(self, "_random_ip_toggle_widget", None)]
+            )
+            allowed_when_locked.extend(getattr(self, "_random_ua_option_widgets", []))
+            allowed_when_locked = [w for w in allowed_when_locked if w is not None]
         for widget in targets:
+            desired_state = state
+            if locking and widget in allowed_when_locked:
+                desired_state = tk.NORMAL
             try:
                 if widget.winfo_exists():
-                    widget.configure(state=state)
+                    widget.configure(state=desired_state)
             except Exception:
                 try:
                     if widget.winfo_exists():
-                        widget["state"] = state
+                        widget["state"] = desired_state
                 except Exception:
                     continue
         self._apply_proxy_health_button_state()
@@ -4502,7 +4547,7 @@ class SurveyGUI:
         if not button or not button.winfo_exists():
             return
         running = bool(getattr(self, "_proxy_health_check_running", False))
-        state = tk.DISABLED if running or self.full_simulation_enabled_var.get() else tk.NORMAL
+        state = tk.DISABLED if running else tk.NORMAL
         text = "验活中..." if running else "IP地址验活"
         try:
             button.configure(state=state, text=text)
@@ -4515,10 +4560,7 @@ class SurveyGUI:
 
     def _apply_random_ua_widgets_state(self):
         option_widgets = getattr(self, "_random_ua_option_widgets", [])
-        if self.full_simulation_enabled_var.get():
-            state = tk.DISABLED
-        else:
-            state = tk.NORMAL if self.random_ua_enabled_var.get() else tk.DISABLED
+        state = tk.NORMAL if self.random_ua_enabled_var.get() else tk.DISABLED
         cleaned: List[tk.Widget] = []
         for widget in option_widgets:
             if widget is None:
@@ -4549,12 +4591,90 @@ class SurveyGUI:
         color = "#2e7d32" if enabled else "#616161"
         label.config(text=f"当前状态：{status_text}", foreground=color)
 
+    def _update_full_sim_time_section_visibility(self):
+        frame = getattr(self, "_full_sim_timing_frame", None)
+        if not frame or not frame.winfo_exists():
+            return
+        has_target = bool(str(self.full_sim_target_var.get()).strip())
+        try:
+            managed = frame.winfo_manager()
+        except Exception:
+            managed = ""
+        if has_target:
+            if not managed:
+                frame.pack(fill=tk.X, pady=(4, 0))
+        else:
+            if managed:
+                frame.pack_forget()
+
     def _sync_full_sim_target_to_main(self):
         if not self.full_simulation_enabled_var.get():
             return
         target_value = self.full_sim_target_var.get().strip()
         if target_value:
             self.target_var.set(target_value)
+
+    def _get_full_simulation_question_count(self) -> int:
+        count = len(self.question_entries)
+        if count <= 0 and self._last_questions_info:
+            try:
+                count = len(self._last_questions_info)
+            except Exception:
+                count = 0
+        return max(0, count)
+
+    @staticmethod
+    def _parse_positive_int(value: Any) -> int:
+        try:
+            parsed = int(str(value).strip())
+        except Exception:
+            return 0
+        return parsed if parsed > 0 else 0
+
+    def _set_full_sim_duration(self, minutes_var: tk.StringVar, seconds_var: tk.StringVar, total_seconds: int) -> bool:
+        try:
+            total = max(0, int(total_seconds))
+        except Exception:
+            total = 0
+        minutes = total // 60
+        seconds = total % 60
+        try:
+            current_minutes = int(str(minutes_var.get()).strip() or "0")
+        except Exception:
+            current_minutes = 0
+        try:
+            current_seconds = int(str(seconds_var.get()).strip() or "0")
+        except Exception:
+            current_seconds = 0
+        if current_minutes * 60 + current_seconds == total:
+            return False
+        minutes_var.set(str(minutes))
+        seconds_var.set(str(seconds))
+        return True
+
+    def _auto_update_full_simulation_times(self):
+        if getattr(self, "_suspend_full_sim_autofill", False):
+            return
+        question_count = self._get_full_simulation_question_count()
+        if question_count <= 0:
+            return
+        per_question_seconds = 3
+        estimated_seconds = question_count * per_question_seconds
+        self._set_full_sim_duration(self.full_sim_estimated_minutes_var, self.full_sim_estimated_seconds_var, estimated_seconds)
+        target_value = self._parse_positive_int(self.full_sim_target_var.get()) or self._parse_positive_int(self.target_var.get())
+        if target_value > 0:
+            total_seconds = estimated_seconds * target_value
+            self._set_full_sim_duration(self.full_sim_total_minutes_var, self.full_sim_total_seconds_var, total_seconds)
+        self._update_full_sim_time_section_visibility()
+
+    def _on_full_sim_target_changed(self, *_):
+        self._mark_config_changed()
+        self._sync_full_sim_target_to_main()
+        self._auto_update_full_simulation_times()
+
+    def _on_main_target_changed(self, *_):
+        self._mark_config_changed()
+        self._auto_update_full_simulation_times()
 
     def _on_check_random_ip_health(self):
         if self._proxy_health_check_running:
@@ -4677,8 +4797,15 @@ class SurveyGUI:
             current_target = self.target_var.get().strip()
             if current_target:
                 self.full_sim_target_var.set(current_target)
-        if self.full_simulation_enabled_var.get() and not self.random_ip_enabled_var.get():
-            self.random_ip_enabled_var.set(True)
+        if self.full_simulation_enabled_var.get():
+            if self._threads_value_before_full_sim is None:
+                self._threads_value_before_full_sim = self.thread_var.get().strip() or "1"
+            if self.thread_var.get().strip() != "1":
+                self.thread_var.set("1")
+        else:
+            if self._threads_value_before_full_sim is not None:
+                self.thread_var.set(self._threads_value_before_full_sim or "1")
+            self._threads_value_before_full_sim = None
         self._sync_full_sim_target_to_main()
         self._update_full_simulation_controls_state()
         self._update_parameter_widgets_state()
@@ -4733,6 +4860,8 @@ class SurveyGUI:
         self._settings_window = window
         self._settings_window_widgets = []
         self._random_ua_option_widgets = []
+        self._random_ua_toggle_widget = None
+        self._random_ip_toggle_widget = None
         self._full_sim_status_label = None
 
         def _on_close():
@@ -4740,6 +4869,8 @@ class SurveyGUI:
                 self._settings_window = None
                 self._settings_window_widgets = []
                 self._random_ua_option_widgets = []
+                self._random_ua_toggle_widget = None
+                self._random_ip_toggle_widget = None
                 self._full_sim_status_label = None
                 self._proxy_health_button = None
             try:
@@ -4832,6 +4963,7 @@ class SurveyGUI:
             command=self._on_random_ua_toggle,
         )
         ua_toggle.pack(anchor="w")
+        self._random_ua_toggle_widget = ua_toggle
         self._settings_window_widgets.append(ua_toggle)
 
         ua_options_frame = ttk.Frame(proxy_frame)
@@ -4869,6 +5001,7 @@ class SurveyGUI:
             variable=self.random_ip_enabled_var,
         )
         proxy_toggle.pack(side=tk.LEFT)
+        self._random_ip_toggle_widget = proxy_toggle
         self._settings_window_widgets.append(proxy_toggle)
         proxy_health_button = ttk.Button(
             proxy_row,
@@ -4953,6 +5086,7 @@ class SurveyGUI:
 
         timing_frame = ttk.LabelFrame(container, text="时间参数", padding=12)
         timing_frame.pack(fill=tk.X, pady=(4, 0))
+        self._full_sim_timing_frame = timing_frame
 
         ttk.Label(timing_frame, text="预计单次作答").grid(row=0, column=0, sticky="w")
         est_min_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_estimated_minutes_var, width=6)
@@ -4991,6 +5125,7 @@ class SurveyGUI:
         ]
         self._update_full_simulation_controls_state()
         self._refresh_full_simulation_status_label()
+        self._update_full_sim_time_section_visibility()
         self._update_parameter_widgets_state()
 
         window.update_idletasks()
@@ -5547,6 +5682,7 @@ class SurveyGUI:
         self._update_select_all_state()
 
         self._safe_preview_button_config(text=self._get_preview_button_label())
+        self._auto_update_full_simulation_times()
 
     def _update_select_all_state(self):
         """根据单个复选框状态更新全选复选框"""
@@ -6473,6 +6609,7 @@ class SurveyGUI:
         """缓存解析结果以便预览和配置向导复用"""
         self._last_parsed_url = url
         self._last_questions_info = deepcopy(questions_info)
+        self._auto_update_full_simulation_times()
 
     def _launch_preview_browser_session(self, url: str):
         driver = None
@@ -7349,6 +7486,9 @@ class SurveyGUI:
         random_proxy_flag = bool(self.random_ip_enabled_var.get())
         random_ua_flag = bool(self.random_ua_enabled_var.get())
         random_ua_keys_list = self._get_selected_random_ua_keys() if random_ua_flag else []
+        if random_ua_flag and not random_ua_keys_list:
+            self._log_popup_error("参数错误", "启用随机 UA 时至少选择一个终端类型")
+            return
         ctx = {
             "url_value": url_value,
             "target": target,
@@ -8105,83 +8245,106 @@ class SurveyGUI:
         if not isinstance(config, dict):
             raise ValueError("配置文件格式不正确")
 
-        self.url_var.set(config.get("url", ""))
-        self.target_var.set(config.get("target_num", ""))
-        self.thread_var.set(config.get("num_threads", ""))
-        self._apply_random_ua_config(config.get("random_user_agent"))
-        self.random_ip_enabled_var.set(bool(config.get("random_proxy_enabled")))
-        self._apply_submit_interval_config(config.get("submit_interval"))
-        self._apply_answer_duration_config(config.get("answer_duration_range"))
-        self._apply_full_simulation_config(config.get("full_simulation"))
+        self._suspend_full_sim_autofill = True
+        try:
+            self.url_var.set(config.get("url", ""))
+            self.target_var.set(config.get("target_num", ""))
+            self.thread_var.set(config.get("num_threads", ""))
+            self._apply_random_ua_config(config.get("random_user_agent"))
+            self.random_ip_enabled_var.set(bool(config.get("random_proxy_enabled")))
+            self._apply_submit_interval_config(config.get("submit_interval"))
+            self._apply_answer_duration_config(config.get("answer_duration_range"))
+            self._apply_full_simulation_config(config.get("full_simulation"))
 
-        paned_position = config.get("paned_position")
-        if paned_position is not None:
-            try:
-                desired_position = int(paned_position)
-            except (TypeError, ValueError):
-                desired_position = None
-            if desired_position is not None:
-                self._restore_saved_paned_position(desired_position)
-
-        questions_data = config.get("questions") or []
-        self.question_entries.clear()
-        def _load_option_fill_texts_from_config(raw_value: Any) -> Optional[List[Optional[str]]]:
-            if not isinstance(raw_value, list):
-                return None
-            normalized: List[Optional[str]] = []
-            has_value = False
-            for item in raw_value:
-                if item is None:
-                    normalized.append(None)
-                    continue
+            paned_position = config.get("paned_position")
+            if paned_position is not None:
                 try:
-                    text_value = str(item).strip()
-                except Exception:
-                    text_value = ""
-                if text_value:
-                    has_value = True
-                    normalized.append(text_value)
-                else:
-                    normalized.append(None)
-            return normalized if has_value else None
-
-        def _load_fillable_indices_from_config(raw_value: Any) -> Optional[List[int]]:
-            if not isinstance(raw_value, list):
-                return None
-            parsed: List[int] = []
-            for item in raw_value:
-                try:
-                    index_value = int(item)
+                    desired_position = int(paned_position)
                 except (TypeError, ValueError):
-                    continue
-                if index_value >= 0:
-                    parsed.append(index_value)
-            return parsed if parsed else None
-        if isinstance(questions_data, list):
-            for q_data in questions_data:
-                entry = QuestionEntry(
-                    question_type=q_data.get("question_type", "single"),
-                    probabilities=q_data.get("probabilities", -1),
-                    texts=q_data.get("texts"),
-                    rows=q_data.get("rows", 1),
-                    option_count=q_data.get("option_count", 0),
-                    distribution_mode=q_data.get("distribution_mode", "random"),
-                    custom_weights=q_data.get("custom_weights"),
-                    question_num=q_data.get("question_num"),
-                    option_fill_texts=_load_option_fill_texts_from_config(q_data.get("option_fill_texts")),
-                    fillable_option_indices=_load_fillable_indices_from_config(q_data.get("fillable_option_indices")),
-                    is_location=bool(q_data.get("is_location")),
-                )
-                if entry.fillable_option_indices is None and entry.option_fill_texts:
-                    derived = [idx for idx, value in enumerate(entry.option_fill_texts) if value]
-                    entry.fillable_option_indices = derived if derived else None
-                self.question_entries.append(entry)
-        self._refresh_tree()
+                    desired_position = None
+                if desired_position is not None:
+                    self._restore_saved_paned_position(desired_position)
+
+            questions_data = config.get("questions") or []
+            self.question_entries.clear()
+            def _load_option_fill_texts_from_config(raw_value: Any) -> Optional[List[Optional[str]]]:
+                if not isinstance(raw_value, list):
+                    return None
+                normalized: List[Optional[str]] = []
+                has_value = False
+                for item in raw_value:
+                    if item is None:
+                        normalized.append(None)
+                        continue
+                    try:
+                        text_value = str(item).strip()
+                    except Exception:
+                        text_value = ""
+                    if text_value:
+                        has_value = True
+                        normalized.append(text_value)
+                    else:
+                        normalized.append(None)
+                return normalized if has_value else None
+
+            def _load_fillable_indices_from_config(raw_value: Any) -> Optional[List[int]]:
+                if not isinstance(raw_value, list):
+                    return None
+                parsed: List[int] = []
+                for item in raw_value:
+                    try:
+                        index_value = int(item)
+                    except (TypeError, ValueError):
+                        continue
+                    if index_value >= 0:
+                        parsed.append(index_value)
+                return parsed if parsed else None
+            if isinstance(questions_data, list):
+                for q_data in questions_data:
+                    entry = QuestionEntry(
+                        question_type=q_data.get("question_type", "single"),
+                        probabilities=q_data.get("probabilities", -1),
+                        texts=q_data.get("texts"),
+                        rows=q_data.get("rows", 1),
+                        option_count=q_data.get("option_count", 0),
+                        distribution_mode=q_data.get("distribution_mode", "random"),
+                        custom_weights=q_data.get("custom_weights"),
+                        question_num=q_data.get("question_num"),
+                        option_fill_texts=_load_option_fill_texts_from_config(q_data.get("option_fill_texts")),
+                        fillable_option_indices=_load_fillable_indices_from_config(q_data.get("fillable_option_indices")),
+                        is_location=bool(q_data.get("is_location")),
+                    )
+                    if entry.fillable_option_indices is None and entry.option_fill_texts:
+                        derived = [idx for idx, value in enumerate(entry.option_fill_texts) if value]
+                        entry.fillable_option_indices = derived if derived else None
+                    self.question_entries.append(entry)
+            self._refresh_tree()
+        finally:
+            self._suspend_full_sim_autofill = False
 
         self._save_initial_config()
         self._config_changed = False
         self._update_full_simulation_controls_state()
         self._update_parameter_widgets_state()
+
+        def _duration_total_seconds(min_var: tk.StringVar, sec_var: tk.StringVar) -> int:
+            try:
+                minutes = int(str(min_var.get()).strip() or "0")
+            except Exception:
+                minutes = 0
+            try:
+                seconds = int(str(sec_var.get()).strip() or "0")
+            except Exception:
+                seconds = 0
+            return max(0, minutes) * 60 + max(0, seconds)
+
+        if (
+            _duration_total_seconds(self.full_sim_estimated_minutes_var, self.full_sim_estimated_seconds_var) == 0
+            or _duration_total_seconds(self.full_sim_total_minutes_var, self.full_sim_total_seconds_var) == 0
+        ):
+            self._auto_update_full_simulation_times()
+        else:
+            self._update_full_sim_time_section_visibility()
 
     def _load_config_from_file(self, file_path: str, *, silent: bool = False):
         """从指定路径加载配置。"""
@@ -8518,8 +8681,8 @@ class SurveyGUI:
             f"fuck-wjx（问卷星速填）\n\n"
             f"当前版本 v{__VERSION__}\n\n"
             f"GitHub项目地址: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n"
-            f"有问题可在 GitHub 提交 issue 或发送电子邮件至 help@hungrym0.top\n\n"
-            f"官方网站: https://www.hungrym0.top/fuck-wjx\n"
+            f"有问题可在 GitHub 提交 issue 或发送电子邮件至 hungrym0@qq.com\n\n"
+            f"官方网站: https://www.hungrym0.top/fuck-wjx.html\n"
             f"©2025 HUNGRY_M0 版权所有  MIT Lisence"
         )
         logging.info("[Action Log] Displaying About dialog")
