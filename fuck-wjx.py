@@ -3825,6 +3825,7 @@ class SurveyGUI:
         self.runner_thread: Optional[Thread] = None
         self.worker_threads: List[Thread] = []
         self.active_drivers: List[BrowserDriver] = []  # 跟踪活跃的浏览器实例
+        self._stop_cleanup_thread_running = False  # 避免重复触发停止清理
         self.stop_requested_by_user: bool = False
         self.stop_request_ts: Optional[float] = None
         self.running = False
@@ -7489,6 +7490,21 @@ class SurveyGUI:
                 self.progress_bar['value'] = progress
                 self.progress_label.config(text=f"{progress}%")
 
+    def _async_stop_cleanup(self, drivers_snapshot: List[BrowserDriver]):
+        """在后台线程中执行重度停止清理，避免阻塞 UI。"""
+        try:
+            for driver in drivers_snapshot:
+                try:
+                    driver.quit()
+                except Exception:
+                    logging.debug("停止时关闭浏览器实例失败", exc_info=True)
+            try:
+                _kill_playwright_browser_processes()
+            except Exception as e:
+                logging.warning(f"强制清理浏览器进程时出错: {e}")
+        finally:
+            self._stop_cleanup_thread_running = False
+
     def stop_run(self):
         if not self.running:
             return
@@ -7505,19 +7521,15 @@ class SurveyGUI:
                 pass
             self.status_job = None
 
-        # 先尝试正常关闭
-        for driver in self.active_drivers:
-            try:
-                driver.quit()
-            except:
-                pass
+        # 取消可能在跑的代理验活，避免额外线程干扰停止流程
+        self._stop_proxy_health_if_running()
+
+        # 在后台线程里关闭浏览器并清理 Playwright 进程，避免阻塞主线程
+        drivers_snapshot = list(self.active_drivers)
         self.active_drivers.clear()
-        
-        # 强制终止所有 Playwright 启动的浏览器进程（避免卡顿）
-        try:
-            _kill_playwright_browser_processes()
-        except Exception as e:
-            logging.warning(f"强制清理浏览器进程时出错: {e}")
+        if not self._stop_cleanup_thread_running:
+            self._stop_cleanup_thread_running = True
+            Thread(target=self._async_stop_cleanup, args=(drivers_snapshot,), daemon=True).start()
         
         logging.info("收到停止请求，等待当前提交线程完成")
         print("已暂停新的问卷提交，等待现有流程退出")
