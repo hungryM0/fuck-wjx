@@ -43,6 +43,52 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+# 导入版本号及相关常量
+from version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, GITHUB_API_URL, ISSUE_FEEDBACK_URL
+# 导入配置常量
+from config import (
+    USER_AGENT_PRESETS,
+    DEFAULT_RANDOM_UA_KEYS,
+    DEFAULT_USER_AGENT,
+    DEFAULT_HTTP_HEADERS,
+    LOG_FORMAT,
+    LOG_BUFFER_CAPACITY,
+    LOG_DIR_NAME,
+    QQ_GROUP_QR_RELATIVE_PATH,
+    PANED_MIN_LEFT_WIDTH,
+    PANED_MIN_RIGHT_WIDTH,
+    BROWSER_PREFERENCE,
+    HEADLESS_WINDOW_SIZE,
+    SUBMIT_INITIAL_DELAY,
+    SUBMIT_CLICK_SETTLE_DELAY,
+    POST_SUBMIT_URL_MAX_WAIT,
+    POST_SUBMIT_URL_POLL_INTERVAL,
+    PROXY_LIST_FILENAME,
+    PROXY_MAX_PROXIES,
+    PROXY_HEALTH_CHECK_URL,
+    PROXY_HEALTH_CHECK_TIMEOUT,
+    PROXY_HEALTH_CHECK_MAX_DURATION,
+    STOP_FORCE_WAIT_SECONDS,
+    _GAODE_GEOCODE_ENDPOINT,
+    _GAODE_GEOCODE_KEY,
+    _LOCATION_GEOCODE_TIMEOUT,
+    FULL_SIM_DURATION_JITTER,
+    FULL_SIM_MIN_DELAY_SECONDS,
+    QUESTION_TYPE_LABELS,
+    LOCATION_QUESTION_LABEL,
+    DEFAULT_FILL_TEXT,
+    _HTML_SPACE_RE,
+    _LNGLAT_PATTERN,
+    _INVALID_FILENAME_CHARS_RE,
+    _MULTI_LIMIT_ATTRIBUTE_NAMES,
+    _MULTI_LIMIT_VALUE_KEYS,
+    _MULTI_LIMIT_VALUE_KEYSET,
+    _SELECTION_KEYWORDS_CN,
+    _SELECTION_KEYWORDS_EN,
+    _CHINESE_MULTI_LIMIT_PATTERNS,
+    _ENGLISH_MULTI_LIMIT_PATTERNS,
+)
+
 # Playwright + Selenium 兼容封装
 class NoSuchElementException(Exception):
     pass
@@ -266,133 +312,10 @@ class PlaywrightDriver:
 
 # 兼容原先类型标注
 BrowserDriver = PlaywrightDriver
-# 版本号
-__VERSION__ = "1.0-pre3"
 
-USER_AGENT_PRESETS: Dict[str, Dict[str, str]] = {
-    "pc_web": {
-        "label": "电脑网页端",
-        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    },
-    "wechat_android": {
-        "label": "安卓微信端",
-        "ua": "Mozilla/5.0 (Linux; Android 13; Pixel 6 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/108.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.43.2460(0x28002B3B) Process/appbrand0 WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64",
-    },
-    "wechat_ios": {
-        "label": "苹果微信端",
-        "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.43(0x18002b2f) NetType/WIFI Language/zh_CN",
-    },
-    "wechat_ipad": {
-        "label": "iPad微信端",
-        "ua": "Mozilla/5.0 (iPad; CPU OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.43(0x18002b2f) NetType/WIFI Language/zh_CN",
-    },
-    "ipad_web": {
-        "label": "iPad网页端",
-        "ua": "Mozilla/5.0 (iPad; CPU OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
-    },
-    "wechat_android_tablet": {
-        "label": "安卓平板微信端",
-        "ua": "Mozilla/5.0 (Linux; Android 13; SM-X906C Build/TP1A.220624.014; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/108.0.0.0 Safari/537.36 MicroMessenger/8.0.43.2460(0x28002B3B) Process/appbrand0 WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64",
-    },
-    "android_tablet_web": {
-        "label": "安卓平板网页端",
-        "ua": "Mozilla/5.0 (Linux; Android 13; SM-X906C) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    },
-    "wechat_mac": {
-        "label": "Mac微信WebView",
-        "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36 MicroMessenger/8.0.43 NetType/WIFI WindowsWechat Language/zh_CN",
-    },
-    "wechat_windows": {
-        "label": "Windows微信WebView",
-        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36 MicroMessenger/3.9.8.25 NetType/WIFI WindowsWechat/WMPF WindowsWechat(0x63090819) XWEB/9129 Flue",
-    },
-    "mac_web": {
-        "label": "Mac网页端",
-        "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    },
-}
-DEFAULT_RANDOM_UA_KEYS = list(USER_AGENT_PRESETS.keys())
-DEFAULT_USER_AGENT = USER_AGENT_PRESETS["pc_web"]["ua"]
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
-LOG_BUFFER_CAPACITY = 2000
-LOG_DIR_NAME = "logs"
-QQ_GROUP_QR_RELATIVE_PATH = os.path.join("assets", "QQ_group.jpg")
-PANED_MIN_LEFT_WIDTH = 360
-PANED_MIN_RIGHT_WIDTH = 280
-DEFAULT_HTTP_HEADERS = {
-    "User-Agent": DEFAULT_USER_AGENT,
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Connection": "close",
-}
-_HTML_SPACE_RE = re.compile(r"\s+")
-_LNGLAT_PATTERN = re.compile(r"^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$")
+# 以下字典/集合需要运行时初始化
 _LOCATION_GEOCODE_CACHE: Dict[str, str] = {}
 _LOCATION_GEOCODE_FAILURES: Set[str] = set()
-_GAODE_GEOCODE_ENDPOINT = "https://restapi.amap.com/v3/geocode/geo"
-_GAODE_GEOCODE_KEY = "775438cfaa326e71ed2f51d0f6429f79"
-_LOCATION_GEOCODE_TIMEOUT = 8
-BROWSER_PREFERENCE = ["edge", "chrome"]
-HEADLESS_WINDOW_SIZE = "1920,1080"
-SUBMIT_INITIAL_DELAY = 0.35
-SUBMIT_CLICK_SETTLE_DELAY = 0.25
-POST_SUBMIT_URL_MAX_WAIT = 0.5
-POST_SUBMIT_URL_POLL_INTERVAL = 0.1
-PROXY_LIST_FILENAME = "ips.txt"
-PROXY_MAX_PROXIES = 80
-PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
-PROXY_HEALTH_CHECK_TIMEOUT = 5
-PROXY_HEALTH_CHECK_MAX_DURATION = 45
-STOP_FORCE_WAIT_SECONDS = 1.5
-
-_MULTI_LIMIT_ATTRIBUTE_NAMES = (
-    "max",
-    "maxvalue",
-    "maxValue",
-    "maxcount",
-    "maxCount",
-    "maxchoice",
-    "maxChoice",
-    "maxselect",
-    "maxSelect",
-    "selectmax",
-    "selectMax",
-    "maxsel",
-    "maxSel",
-    "maxnum",
-    "maxNum",
-    "maxlimit",
-    "maxLimit",
-    "data-max",
-    "data-maxvalue",
-    "data-maxcount",
-    "data-maxchoice",
-    "data-maxselect",
-    "data-selectmax",
-)
-_MULTI_LIMIT_VALUE_KEYS = (
-    "max",
-    "maxvalue",
-    "maxcount",
-    "maxchoice",
-    "maxselect",
-    "selectmax",
-    "maxnum",
-    "maxlimit",
-)
-_MULTI_LIMIT_VALUE_KEYSET = {name.lower() for name in _MULTI_LIMIT_VALUE_KEYS}
-_SELECTION_KEYWORDS_CN = ("选", "選", "选择", "多选", "复选")
-_SELECTION_KEYWORDS_EN = ("option", "options", "choice", "choices", "select", "choose")
-_CHINESE_MULTI_LIMIT_PATTERNS = (
-    re.compile(r"最多(?:只能|可|可以)?(?:选|选择)?[^\d]{0,3}(\d+)", re.IGNORECASE),
-    re.compile(r"(?:至多|不超过|不超過|限选)[^\d]{0,3}(\d+)", re.IGNORECASE),
-    re.compile(r"(?:选|选择)[^\d]{0,3}(\d+)[^\d]{0,3}(?:项以内|项以下|项之内)?", re.IGNORECASE),
-)
-_ENGLISH_MULTI_LIMIT_PATTERNS = (
-    re.compile(r"(?:select|choose)\s+(?:up to|no more than|at most|a maximum of)\s*(\d+)", re.IGNORECASE),
-    re.compile(r"(?:up to|no more than|at most|maximum of)\s*(\d+)\s*(?:options?|choices?|items)", re.IGNORECASE),
-    re.compile(r"(?:maximum|max)\s*(?:of\s*)?(\d+)\s*(?:options?|choices?)", re.IGNORECASE),
-)
 _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
 _REPORTED_MULTI_LIMITS: Set[Tuple[str, int]] = set()
 
@@ -460,8 +383,6 @@ class LoadingSplash:
         x = (screen_width - self.width) // 2
         y = (screen_height - self.height) // 2
         self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
-PANED_MIN_LEFT_WIDTH = 360
-PANED_MIN_RIGHT_WIDTH = 280
 
 ORIGINAL_STDOUT = sys.stdout
 ORIGINAL_STDERR = sys.stderr
@@ -1249,8 +1170,6 @@ full_simulation_estimated_seconds = 0
 full_simulation_total_duration_seconds = 0
 full_simulation_schedule: Deque[float] = deque()
 full_simulation_end_timestamp = 0.0
-FULL_SIM_DURATION_JITTER = 0.2
-FULL_SIM_MIN_DELAY_SECONDS = 0.15
 random_proxy_ip_enabled = False
 proxy_ip_pool: List[str] = []
 random_user_agent_enabled = False
@@ -1264,12 +1183,6 @@ def _is_fast_mode() -> bool:
         and submit_interval_range_seconds == (0, 0)
         and answer_duration_range_seconds == (0, 0)
     )
-
-# GitHub 更新配置
-GITHUB_OWNER = "hungryM0"
-GITHUB_REPO = "fuck-wjx"
-GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
-ISSUE_FEEDBACK_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/issues/new"
 
 # 可选：设置 GitHub Token 以避免 API 速率限制
 # 优先从环境变量读取，如果没有则尝试从配置文件读取
@@ -1604,23 +1517,11 @@ class QuestionEntry:
         return f"{self.option_count} 个选项 - {mode_text}{fillable_hint}"
 
 
-QUESTION_TYPE_LABELS = {
-    "single": "单选题",
-    "multiple": "多选题",
-    "dropdown": "下拉题",
-    "matrix": "矩阵题",
-    "scale": "量表题",
-    "text": "填空题",
-}
-LOCATION_QUESTION_LABEL = "位置题"
-
-
 def _get_entry_type_label(entry: QuestionEntry) -> str:
     if getattr(entry, "is_location", False):
         return LOCATION_QUESTION_LABEL
     return QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)
 
-DEFAULT_FILL_TEXT = "无"  # 填空选项留空时的默认文本
 
 def _normalize_option_fill_texts(option_texts: Optional[List[Optional[str]]], option_count: int) -> Optional[List[Optional[str]]]:
     if not option_texts:
@@ -1807,9 +1708,6 @@ def _normalize_html_text(value: Optional[str]) -> str:
     if not value:
         return ""
     return _HTML_SPACE_RE.sub(" ", value).strip()
-
-
-_INVALID_FILENAME_CHARS_RE = re.compile(r'[\\/:*?"<>|]+')
 
 
 def _sanitize_filename(value: str, max_length: int = 80) -> str:
