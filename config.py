@@ -102,6 +102,7 @@ PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "https://www.baidu.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
 PROXY_HEALTH_CHECK_MAX_DURATION = 45
+PROXY_REMOTE_URL = "https://hungrym0.top/ips.txt"
 
 # ==================== 地理位置配置 ====================
 _GAODE_GEOCODE_ENDPOINT = "https://restapi.amap.com/v3/geocode/geo"

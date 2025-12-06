@@ -65,6 +65,7 @@ from config import (
     POST_SUBMIT_URL_POLL_INTERVAL,
     PROXY_LIST_FILENAME,
     PROXY_MAX_PROXIES,
+    PROXY_REMOTE_URL,
     PROXY_HEALTH_CHECK_URL,
     PROXY_HEALTH_CHECK_TIMEOUT,
     PROXY_HEALTH_CHECK_MAX_DURATION,
@@ -456,13 +457,15 @@ def _parse_proxy_line(line: str) -> Optional[str]:
 
 
 def _load_proxy_ip_pool() -> List[str]:
-    proxy_file = os.path.join(_get_runtime_directory(), PROXY_LIST_FILENAME)
-    if not os.path.exists(proxy_file):
-        raise FileNotFoundError(f"未找到代理列表文件：{proxy_file}")
+    if requests is None:
+        raise RuntimeError("requests 模块不可用，无法从远程获取代理列表")
+    proxy_url = PROXY_REMOTE_URL
     try:
-        raw_text = Path(proxy_file).read_text(encoding="utf-8")
+        response = requests.get(proxy_url, headers=DEFAULT_HTTP_HEADERS, timeout=12)
+        response.raise_for_status()
+        raw_text = response.text
     except Exception as exc:
-        raise OSError(f"读取代理列表失败：{exc}") from exc
+        raise OSError(f"获取远程代理列表失败：{exc}") from exc
 
     proxies: List[str] = []
     seen: Set[str] = set()
@@ -480,7 +483,7 @@ def _load_proxy_ip_pool() -> List[str]:
         seen.add(candidate)
         proxies.append(candidate)
     if not proxies:
-        raise ValueError(f"代理列表为空，请检查：{proxy_file}")
+        raise ValueError(f"代理列表为空，请检查远程地址：{proxy_url}")
     random.shuffle(proxies)
     if len(proxies) > PROXY_MAX_PROXIES:
         proxies = proxies[:PROXY_MAX_PROXIES]
@@ -3957,6 +3960,8 @@ class SurveyGUI:
         self._proxy_health_button: Optional[ttk.Button] = None
         self._proxy_health_check_running = False
         self._archived_notice_shown = False
+        self._random_ip_disclaimer_ack = False
+        self._suspend_random_ip_notice = False
         self.url_var = tk.StringVar()
         self.target_var = tk.StringVar(value="")
         self.thread_var = tk.StringVar(value="2")
@@ -4582,6 +4587,31 @@ class SurveyGUI:
         self._apply_random_ua_widgets_state()
         self._mark_config_changed()
 
+    def _confirm_random_ip_usage(self) -> bool:
+        notice = (
+            "启用随机IP提交前请确认：\n\n"
+            "1) 代理来源于网络，具有被攻击的安全风险，确认启用视为已知悉风险并自愿承担一切后果；\n"
+            "2) 禁止用于污染他人数据，否则可能被封禁或承担法律责任。\n\n"
+            "是否确认已知悉并继续启用随机IP提交？"
+        )
+        if self._log_popup_confirm("随机IP使用声明", notice, icon="warning"):
+            self._random_ip_disclaimer_ack = True
+            return True
+        return False
+
+    def _on_random_ip_toggle(self):
+        if getattr(self, "_suspend_random_ip_notice", False):
+            return
+        if not self.random_ip_enabled_var.get():
+            return
+        if self._confirm_random_ip_usage():
+            return
+        self._suspend_random_ip_notice = True
+        try:
+            self.random_ip_enabled_var.set(False)
+        finally:
+            self._suspend_random_ip_notice = False
+
     def _refresh_full_simulation_status_label(self):
         label = getattr(self, '_full_sim_status_label', None)
         if not label or not label.winfo_exists():
@@ -4999,6 +5029,7 @@ class SurveyGUI:
             proxy_row,
             text="启用随机 IP 提交",
             variable=self.random_ip_enabled_var,
+            command=self._on_random_ip_toggle,
         )
         proxy_toggle.pack(side=tk.LEFT)
         self._random_ip_toggle_widget = proxy_toggle
@@ -7489,6 +7520,15 @@ class SurveyGUI:
         if random_ua_flag and not random_ua_keys_list:
             self._log_popup_error("参数错误", "启用随机 UA 时至少选择一个终端类型")
             return
+        if random_proxy_flag and not self._random_ip_disclaimer_ack:
+            if not self._confirm_random_ip_usage():
+                self._suspend_random_ip_notice = True
+                try:
+                    self.random_ip_enabled_var.set(False)
+                finally:
+                    self._suspend_random_ip_notice = False
+                self._log_popup_info("已取消随机IP提交", "未同意免责声明，已禁用随机IP提交。")
+                return
         ctx = {
             "url_value": url_value,
             "target": target,
@@ -7543,7 +7583,7 @@ class SurveyGUI:
         random_ua_flag = bool(ctx.get("random_ua_flag"))
         random_ua_keys_list = ctx.get("random_ua_keys_list", [])
         if random_proxy_flag:
-            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（{PROXY_LIST_FILENAME}）")
+            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（{PROXY_REMOTE_URL}）")
         try:
             configure_probabilities(self.question_entries)
         except ValueError as exc:
@@ -7747,8 +7787,6 @@ class SurveyGUI:
             except Exception:
                 pass
             self._log_refresh_job = None
-        # 导出线程堆栈，便于定位卡顿原因
-        self._dump_threads_to_file("stop")
 
         # 取消可能在跑的代理验活，避免额外线程干扰停止流程
         self._stop_proxy_health_if_running()
