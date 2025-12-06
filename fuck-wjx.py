@@ -2561,27 +2561,170 @@ def single(driver: BrowserDriver, current, index):
     _fill_option_additional_text(driver, current, selected_option - 1, fill_value)
 
 
+def _normalize_droplist_probs(prob_config: Union[List[float], int, None], option_count: int) -> List[float]:
+    if option_count <= 0:
+        return []
+    if isinstance(prob_config, list) and len(prob_config) == option_count:
+        try:
+            return normalize_probabilities(list(prob_config))
+        except Exception:
+            pass
+    if prob_config == -1 or prob_config is None:
+        try:
+            return normalize_probabilities([1.0] * option_count)
+        except Exception:
+            return [1.0 / option_count] * option_count
+    try:
+        base = list(prob_config) if isinstance(prob_config, list) else [1.0] * option_count
+        if len(base) != option_count:
+            base = [1.0] * option_count
+        return normalize_probabilities(base)
+    except Exception:
+        return [1.0 / option_count] * option_count
+
+
+def _extract_select_options(driver: BrowserDriver, question_number: int):
+    try:
+        select_element = driver.find_element(By.CSS_SELECTOR, f"#q{question_number}")
+    except Exception:
+        return None, []
+    try:
+        option_elements = select_element.find_elements(By.CSS_SELECTOR, "option")
+    except Exception:
+        option_elements = []
+    valid_options: List[Tuple[str, str]] = []
+    for idx, opt in enumerate(option_elements):
+        try:
+            value = (opt.get_attribute("value") or "").strip()
+        except Exception:
+            value = ""
+        try:
+            text = (opt.text or "").strip()
+        except Exception:
+            text = ""
+        if idx == 0 and ((value == "") or (value == "0") or ("请选择" in text)):
+            continue
+        if not text and not value:
+            continue
+        valid_options.append((value, text or value))
+    return select_element, valid_options
+
+
+def _select_dropdown_option_via_js(
+    driver: BrowserDriver, select_element, option_value: str, display_text: str
+) -> bool:
+    try:
+        applied = driver.execute_script(
+            """
+const select = arguments[0];
+const optionValue = arguments[1];
+const displayText = arguments[2];
+if (!select) { return false; }
+const opts = Array.from(select.options || []);
+const target = opts.find(o => (o.value || '') == optionValue);
+if (!target) { return false; }
+target.selected = true;
+select.value = target.value;
+try { select.setAttribute('value', target.value); } catch (e) {}
+['input','change'].forEach(name => {
+    try { select.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+});
+const span = document.getElementById(`select2-${select.id}-container`);
+if (span) {
+    span.textContent = displayText || target.textContent || target.innerText || '';
+    span.title = span.textContent;
+}
+return true;
+            """,
+            select_element,
+            option_value or "",
+            display_text or "",
+        )
+    except Exception:
+        applied = False
+    return bool(applied)
+
+
+def _fill_droplist_via_click(
+    driver: BrowserDriver,
+    current: int,
+    prob_config: Union[List[float], int, None],
+    fill_entries: Optional[List[Optional[str]]],
+) -> None:
+    container_selectors = [
+        f"#select2-q{current}-container",
+        f"#div{current} .select2-selection__rendered",
+        f"#div{current} .select2-selection--single",
+        f"#div{current} .ui-select",
+    ]
+    clicked = False
+    for selector in container_selectors:
+        try:
+            element = driver.find_element(By.CSS_SELECTOR, selector)
+            element.click()
+            clicked = True
+            break
+        except Exception:
+            continue
+    if not clicked:
+        return
+    time.sleep(0.1)
+    options: List[Any] = []
+    for _ in range(5):
+        options = driver.find_elements(By.XPATH, f"//*[@id='select2-q{current}-results']/li")
+        if not options:
+            options = driver.find_elements(By.CSS_SELECTOR, ".select2-results__options li")
+        visible_options: List[Any] = []
+        for opt in options:
+            try:
+                if hasattr(opt, "is_displayed") and not opt.is_displayed():
+                    continue
+            except Exception:
+                continue
+            visible_options.append(opt)
+        options = visible_options
+        if options:
+            break
+        time.sleep(0.15)
+    if not options:
+        return
+    filtered_options: List[Tuple[int, Any, str]] = []
+    for idx, opt in enumerate(options):
+        try:
+            text = (opt.text or "").strip()
+        except Exception:
+            text = ""
+        if idx == 0 and (text == "" or "请选择" in text):
+            continue
+        filtered_options.append((idx, opt, text))
+    option_count = len(filtered_options)
+    if option_count <= 0:
+        return
+    probabilities = _normalize_droplist_probs(prob_config, option_count)
+    selected_idx = numpy.random.choice(a=numpy.arange(0, len(probabilities)), p=probabilities)
+    _, selected_option, _ = filtered_options[selected_idx]
+    try:
+        selected_option.click()
+    except Exception:
+        return
+    fill_value = _get_fill_text_from_config(fill_entries, selected_idx)
+    _fill_option_additional_text(driver, current, selected_idx, fill_value)
+
+
 # 下拉框处理函数
 def droplist(driver: BrowserDriver, current, index):
-    # 先点击“请选择”
-    driver.find_element(By.CSS_SELECTOR, f"#select2-q{current}-container").click()
-    time.sleep(0.5)
-    # 选项数量
-    options = driver.find_elements(
-        By.XPATH, f"//*[@id='select2-q{current}-results']/li"
-    )
-    if len(options) <= 1:
-        return
-    p = droplist_prob[index] if index < len(droplist_prob) else -1
-    if p == -1:
-        p = normalize_probabilities([1.0] * (len(options) - 1))
-    r = numpy.random.choice(a=numpy.arange(1, len(options)), p=p)
-    driver.find_element(
-        By.XPATH, f"//*[@id='select2-q{current}-results']/li[{r + 1}]"
-    ).click()
+    prob_config = droplist_prob[index] if index < len(droplist_prob) else -1
     fill_entries = droplist_option_fill_texts[index] if index < len(droplist_option_fill_texts) else None
-    fill_value = _get_fill_text_from_config(fill_entries, r - 1)
-    _fill_option_additional_text(driver, current, r - 1, fill_value)
+    select_element, select_options = _extract_select_options(driver, current)
+    if select_options:
+        probabilities = _normalize_droplist_probs(prob_config, len(select_options))
+        selected_idx = numpy.random.choice(a=numpy.arange(0, len(probabilities)), p=probabilities)
+        selected_value, selected_text = select_options[selected_idx]
+        if _select_dropdown_option_via_js(driver, select_element, selected_value, selected_text):
+            fill_value = _get_fill_text_from_config(fill_entries, selected_idx)
+            _fill_option_additional_text(driver, current, selected_idx, fill_value)
+            return
+    _fill_droplist_via_click(driver, current, prob_config, fill_entries)
 
 
 def multiple(driver: BrowserDriver, current, index):
