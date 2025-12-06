@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
@@ -228,6 +229,13 @@ class PlaywrightDriver:
         except Exception:
             pass
 
+    def refresh(self):
+        """刷新当前页面"""
+        try:
+            self._page.reload(wait_until="domcontentloaded")
+        except Exception:
+            pass
+
     def execute_cdp_cmd(self, *_args, **_kwargs):
         return None
 
@@ -255,6 +263,22 @@ BrowserDriver = PlaywrightDriver
 # 版本号
 __VERSION__ = "1.0-pre3"
 
+USER_AGENT_PRESETS: Dict[str, Dict[str, str]] = {
+    "pc_web": {
+        "label": "电脑网页端",
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    },
+    "wechat_android": {
+        "label": "安卓微信端",
+        "ua": "Mozilla/5.0 (Linux; Android 13; Pixel 6 Build/TQ3A.230901.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/108.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.43.2460(0x28002B3B) Process/appbrand0 WeChat/arm64 Weixin NetType/WIFI Language/zh_CN ABI/arm64",
+    },
+    "wechat_ios": {
+        "label": "苹果微信端",
+        "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.43(0x18002b2f) NetType/WIFI Language/zh_CN",
+    },
+}
+DEFAULT_RANDOM_UA_KEYS = list(USER_AGENT_PRESETS.keys())
+DEFAULT_USER_AGENT = USER_AGENT_PRESETS["pc_web"]["ua"]
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
 LOG_DIR_NAME = "logs"
@@ -262,7 +286,7 @@ QQ_GROUP_QR_RELATIVE_PATH = os.path.join("assets", "QQ_group.jpg")
 PANED_MIN_LEFT_WIDTH = 360
 PANED_MIN_RIGHT_WIDTH = 280
 DEFAULT_HTTP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "User-Agent": DEFAULT_USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Connection": "close",
@@ -508,8 +532,10 @@ def _load_proxy_ip_pool() -> List[str]:
     return proxies
 
 
-def _proxy_is_responsive(proxy_address: str, timeout: float = PROXY_HEALTH_CHECK_TIMEOUT) -> bool:
+def _proxy_is_responsive(proxy_address: str, timeout: float = PROXY_HEALTH_CHECK_TIMEOUT, stop_signal: Optional[threading.Event] = None) -> bool:
     """验证代理是否能在限定时间内连通，可用返回 True。"""
+    if stop_signal and stop_signal.is_set():
+        return False
     if not proxy_address:
         return True
     if requests is None:
@@ -521,17 +547,19 @@ def _proxy_is_responsive(proxy_address: str, timeout: float = PROXY_HEALTH_CHECK
     if "://" not in normalized:
         normalized = f"http://{normalized}"
     proxies = {"http": normalized, "https": normalized}
+    # 减少超时时间到 2 秒，以便更快地响应停止信号
+    effective_timeout = min(timeout, 2.0)
     start_ts = time.monotonic()
     try:
         response = requests.get(
             PROXY_HEALTH_CHECK_URL,
             headers=DEFAULT_HTTP_HEADERS,
             proxies=proxies,
-            timeout=timeout,
+            timeout=effective_timeout,
         )
         elapsed = time.monotonic() - start_ts
     except requests.exceptions.Timeout:
-        logging.warning(f"代理 {proxy_address} 超过 {timeout} 秒无响应，跳过本次提交")
+        logging.warning(f"代理 {proxy_address} 超过 {effective_timeout} 秒无响应，跳过本次提交")
         return False
     except requests.exceptions.RequestException as exc:
         logging.warning(f"代理 {proxy_address} 验证失败：{exc}")
@@ -628,7 +656,87 @@ def _normalize_proxy_address(proxy_address: Optional[str]) -> Optional[str]:
     return normalized
 
 
-def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None, proxy_address: Optional[str] = None) -> Tuple[BrowserDriver, str]:
+def _filter_valid_user_agent_keys(selected_keys: List[str]) -> List[str]:
+    """过滤并保留合法的 UA key"""
+    return [key for key in (selected_keys or []) if key in USER_AGENT_PRESETS]
+
+
+def _select_user_agent_from_keys(selected_keys: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    """从给定 key 列表中随机挑选 UA，返回 (ua, label)"""
+    pool = _filter_valid_user_agent_keys(selected_keys)
+    if not pool:
+        return None, None
+    key = random.choice(pool)
+    preset = USER_AGENT_PRESETS.get(key) or {}
+    return preset.get("ua"), preset.get("label")
+
+
+def _kill_playwright_browser_processes():
+    """
+    强制终止由 Playwright 启动的浏览器进程。
+    通过检查命令行参数来识别 Playwright 启动的进程，避免误杀用户手动打开的浏览器。
+    """
+    try:
+        import psutil
+    except ImportError:
+        logging.warning("psutil 未安装，无法快速清理浏览器进程")
+        return
+    
+    killed_count = 0
+    
+    # Playwright 启动的浏览器进程通常包含这些特征命令行参数
+    playwright_indicators = [
+        '--enable-automation',
+        '--test-type',
+        '--remote-debugging-port',
+        '--user-data-dir=',  # Playwright 会创建临时用户数据目录
+        'playwright',
+    ]
+    
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                proc_info = proc.info
+                proc_name = proc_info.get('name', '').lower()
+                
+                # 只检查浏览器进程
+                if proc_name not in ['msedge.exe', 'chrome.exe', 'chromium.exe']:
+                    continue
+                
+                cmdline = proc_info.get('cmdline')
+                if not cmdline:
+                    continue
+                
+                # 将命令行参数转为字符串便于检查
+                cmdline_str = ' '.join(cmdline).lower()
+                
+                # 检查是否包含 Playwright 特征
+                is_playwright_process = False
+                for indicator in playwright_indicators:
+                    if indicator.lower() in cmdline_str:
+                        is_playwright_process = True
+                        break
+                
+                # 如果确认是 Playwright 进程，则终止
+                if is_playwright_process:
+                    try:
+                        proc.kill()
+                        killed_count += 1
+                        logging.info(f"已终止 Playwright 浏览器进程: PID={proc_info['pid']}, Name={proc_name}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                        
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+                
+    except Exception as e:
+        logging.warning(f"清理浏览器进程时出错: {e}")
+    
+    if killed_count > 0:
+        logging.info(f"共终止 {killed_count} 个 Playwright 浏览器进程")
+
+
+def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[List[str]] = None, proxy_address: Optional[str] = None, user_agent: Optional[str] = None) -> Tuple[BrowserDriver, str]:
     candidates = prefer_browsers or list(BROWSER_PREFERENCE)
     if not candidates:
         candidates = list(BROWSER_PREFERENCE)
@@ -652,6 +760,8 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
             context_args: Dict[str, Any] = {}
             if normalized_proxy:
                 context_args["proxy"] = {"server": normalized_proxy}
+            if user_agent:
+                context_args["user_agent"] = user_agent
             if headless and HEADLESS_WINDOW_SIZE:
                 try:
                     width, height = [int(x) for x in HEADLESS_WINDOW_SIZE.split(",")]
@@ -678,35 +788,237 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
 def handle_aliyun_captcha(
     driver: BrowserDriver, timeout: int = 3, stop_signal: Optional[threading.Event] = None
 ) -> bool:
-    """检测到阿里云智能验证后立即标记为失败，避免浪费时间。"""
+    """检测到阿里云智能验证后尝试点击确认按钮，若成功返回 True，未出现返回 False。"""
     popup_locator = (By.ID, "aliyunCaptcha-window-popup")
+    checkbox_locator = (By.ID, "aliyunCaptcha-checkbox-icon")
+    checkbox_left_locator = (By.ID, "aliyunCaptcha-checkbox-left")
+    checkbox_text_locator = (By.ID, "aliyunCaptcha-checkbox-text")
+    page = getattr(driver, "page", None)
 
-    def _popup_visible() -> bool:
+    def _probe_with_js(script: str) -> bool:
+        """确保 JS 片段以 return 返回布尔值，避免 evaluate 丢失返回。"""
+        js = script.strip()
+        if not js.lstrip().startswith("return"):
+            js = "return (" + js + ")"
         try:
-            popup = driver.find_element(*popup_locator)
-            return popup.is_displayed()
-        except NoSuchElementException:
-            return False
+            return bool(driver.execute_script(js))
         except Exception:
             return False
 
-    def _wait_for_popup() -> bool:
-        end_time = time.time() + timeout
+    def _ack_security_dialog() -> None:
+        """点击可能出现的“安全认证/确定”按钮以触发阿里云弹窗。"""
+        script = r"""
+            (() => {
+                const candidates = ['button', 'a', '.layui-layer-btn0', '.sm-dialog .btn', '.dialog-footer button'];
+                const docList = [document, ...Array.from(document.querySelectorAll('iframe')).map(f => {
+                    try { return f.contentDocument || f.contentWindow?.document; } catch (e) { return null; }
+                }).filter(Boolean)];
+                const matchText = (txt) => /^(确\s*定|确\s*认|继续|我知道了|开始验证)$/i.test((txt || '').trim());
+                for (const doc of docList) {
+                    for (const sel of candidates) {
+                        const nodes = doc.querySelectorAll(sel);
+                        for (const node of nodes) {
+                            const text = (node.innerText || node.textContent || '').trim();
+                            if (matchText(text)) { try { node.click(); return true; } catch (e) {} }
+                        }
+                    }
+                }
+                return false;
+            })();
+        """
+        _probe_with_js(script)
+
+    def _challenge_visible() -> bool:
+        script = r"""
+            (() => {
+                const ids = [
+                    'aliyunCaptcha-window-popup',
+                    'aliyunCaptcha-checkbox',
+                    'aliyunCaptcha-checkbox-icon',
+                    'aliyunCaptcha-checkbox-left',
+                    'aliyunCaptcha-checkbox-text',
+                    'aliyunCaptcha-loading'
+                ];
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const checkDoc = (doc) => {
+                    for (const id of ids) {
+                        const el = doc.getElementById(id);
+                        if (visible(el)) return true;
+                    }
+                    return false;
+                };
+                if (checkDoc(document)) return true;
+                const frames = Array.from(document.querySelectorAll('iframe'));
+                for (const frame of frames) {
+                    try {
+                        const doc = frame.contentDocument || frame.contentWindow?.document;
+                        if (doc && checkDoc(doc)) return true;
+                    } catch (e) {}
+                }
+                return false;
+            })();
+        """
+        return _probe_with_js(script)
+
+    def _wait_for_challenge() -> bool:
+        end_time = time.time() + max(timeout, 3)
         while time.time() < end_time:
             if stop_signal and stop_signal.is_set():
                 return False
-            if _popup_visible():
+            _ack_security_dialog()
+            if _challenge_visible():
                 return True
             time.sleep(0.15)
-        return _popup_visible()
+        return _challenge_visible()
 
-    if not _wait_for_popup():
+    # 先用简单的元素存在性检测作为补充
+    def _element_exists() -> bool:
+        for locator in (checkbox_locator, checkbox_left_locator, checkbox_text_locator, popup_locator):
+            try:
+                el = driver.find_element(*locator)
+                if el and el.is_displayed():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    challenge_detected = _wait_for_challenge() or _element_exists()
+    if not challenge_detected:
+        logging.debug("未检测到阿里云智能验证弹窗")
         return False
     if stop_signal and stop_signal.is_set():
         return False
 
-    logging.warning("检测到阿里云智能验证，当前策略无法绕过，将直接跳过并标记为失败。")
-    raise AliyunCaptchaBypassError("检测到阿里云智能验证，任务已被标记为失败。")
+    logging.info("检测到阿里云智能验证，尝试通过点击按钮绕过。")
+    checkbox = None
+    try:
+        checkbox = driver.find_element(*checkbox_locator)
+    except NoSuchElementException:
+        logging.debug("常规方式未找到阿里云验证按钮，尝试使用 JS 兜底。")
+    except Exception as exc:
+        logging.debug("获取阿里云验证按钮失败，尝试使用 JS 兜底: %s", exc)
+
+    # 兜底尝试获取父级或文字区域点击
+    if checkbox is None:
+        for locator in (checkbox_left_locator, checkbox_text_locator):
+            try:
+                checkbox = driver.find_element(*locator)
+                break
+            except Exception:
+                continue
+
+    def _click_checkbox_via_js() -> bool:
+        script = r"""
+            (() => {
+                const ids = [
+                    'aliyunCaptcha-checkbox',
+                    'aliyunCaptcha-checkbox-icon',
+                    'aliyunCaptcha-checkbox-left',
+                    'aliyunCaptcha-checkbox-text'
+                ];
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const clickDoc = (doc) => {
+                    for (const id of ids) {
+                        const el = doc.getElementById(id);
+                        if (visible(el)) { try { el.click(); return true; } catch (e) {} }
+                    }
+                    // 也尝试点击任何包含"智能验证"或"开始验证"文字的元素
+                    const allClickable = doc.querySelectorAll('span, div, button, a');
+                    for (const el of allClickable) {
+                        const txt = (el.innerText || el.textContent || '').trim();
+                        if (txt.includes('智能验证') || txt.includes('开始验证') || txt === '点击开始智能验证') {
+                            if (visible(el)) { try { el.click(); return true; } catch (e) {} }
+                        }
+                    }
+                    return false;
+                };
+                if (clickDoc(document)) return true;
+                const frames = Array.from(document.querySelectorAll('iframe'));
+                for (const frame of frames) {
+                    try {
+                        const doc = frame.contentDocument || frame.contentWindow?.document;
+                        if (doc && clickDoc(doc)) return true;
+                    } catch (e) {}
+                }
+                return false;
+            })();
+        """
+        return _probe_with_js(script)
+
+    def _human_like_click(target) -> bool:
+        """模拟人类微停顿和微偏移点击，降低“机器点击”特征。"""
+        if not target:
+            return False
+        local_page = page
+        for attempt in range(2):
+            if stop_signal and stop_signal.is_set():
+                return False
+            time.sleep(random.uniform(0.35, 0.9))
+            try:
+                if local_page:
+                    try:
+                        box = target._handle.bounding_box()  # type: ignore[attr-defined]
+                    except Exception:
+                        box = None
+                    if box:
+                        cx = box.get("x", 0) + (box.get("width", 0) * random.uniform(0.35, 0.65))
+                        cy = box.get("y", 0) + (box.get("height", 0) * random.uniform(0.35, 0.65))
+                        local_page.mouse.move(cx, cy, steps=5)
+                        local_page.mouse.click(cx, cy, delay=random.randint(70, 160))
+                    else:
+                        target.click()
+                else:
+                    target.click()
+            except Exception as exc:
+                logging.debug("第 %d 次点击阿里云按钮失败: %s", attempt + 1, exc)
+            else:
+                if not _challenge_visible():
+                    return True
+        return False
+
+    clicked = _human_like_click(checkbox) or _click_checkbox_via_js()
+    if not clicked or _challenge_visible():
+        logging.warning("点击阿里云验证按钮后弹窗仍存在，视为无法绕过。")
+        raise AliyunCaptchaBypassError("点击阿里云智能验证按钮后弹窗未关闭。")
+
+    # 检测是否出现"验证失败，请刷新重试"
+    time.sleep(0.5)  # 等待验证结果
+    
+    def _check_captcha_failed() -> bool:
+        """检测是否出现验证失败提示"""
+        script = r"""
+            (() => {
+                const texts = ['验证失败', '请刷新重试', '请刷新'];
+                const allElements = document.querySelectorAll('*');
+                for (const el of allElements) {
+                    const txt = (el.innerText || el.textContent || '').trim();
+                    for (const t of texts) {
+                        if (txt.includes(t)) return true;
+                    }
+                }
+                return false;
+            })();
+        """
+        return _probe_with_js(script)
+    
+    if _check_captcha_failed():
+        logging.warning("检测到阿里云验证失败，需要刷新重试")
+        raise AliyunCaptchaBypassError("阿里云验证失败，需要刷新重试")
+
+    logging.info("阿里云点击验证已处理，准备继续提交。")
+    return True
 
 
 
@@ -834,6 +1146,17 @@ FULL_SIM_DURATION_JITTER = 0.2
 FULL_SIM_MIN_DELAY_SECONDS = 0.15
 random_proxy_ip_enabled = False
 proxy_ip_pool: List[str] = []
+random_user_agent_enabled = False
+user_agent_pool_keys: List[str] = []
+
+# 极速模式：全真模拟/随机IP关闭且时间间隔为0时自动启用
+def _is_fast_mode() -> bool:
+    return (
+        not full_simulation_enabled
+        and not random_proxy_ip_enabled
+        and submit_interval_range_seconds == (0, 0)
+        and answer_duration_range_seconds == (0, 0)
+    )
 
 # GitHub 更新配置
 GITHUB_OWNER = "hungryM0"
@@ -2497,6 +2820,7 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     """批量填写一份问卷；返回 True 代表完整提交，False 代表过程中被用户打断。"""
     questions_per_page = detect(driver, stop_signal=stop_signal)
     total_question_count = sum(questions_per_page)
+    fast_mode = _is_fast_mode()
     single_question_index = 0
     vacant_question_index = 0
     droplist_question_index = 0
@@ -2571,11 +2895,13 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                         time.sleep(delay_seconds)
         if _abort_requested():
             return False
-        if active_stop:
-            if active_stop.wait(0.5):
-                return False
-        else:
-            time.sleep(0.5)
+        buffer_delay = 0.0 if fast_mode else 0.5
+        if buffer_delay > 0:
+            if active_stop:
+                if active_stop.wait(buffer_delay):
+                    return False
+            else:
+                time.sleep(buffer_delay)
         is_last_page = (page_index == total_pages - 1)
         if is_last_page:
             if _simulate_answer_duration_delay(active_stop):
@@ -2584,11 +2910,13 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 return False
         try:
             driver.find_element(By.CSS_SELECTOR, "#divNext").click()
-            if active_stop:
-                if active_stop.wait(0.5):
-                    return False
-            else:
-                time.sleep(0.5)
+            click_delay = 0.0 if fast_mode else 0.5
+            if click_delay > 0:
+                if active_stop:
+                    if active_stop.wait(click_delay):
+                        return False
+                else:
+                    time.sleep(click_delay)
         except:
             driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
     if _abort_requested():
@@ -2596,36 +2924,164 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     submit(driver, stop_signal=active_stop)
     return True
 def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None):
+    fast_mode = _is_fast_mode()
+    settle_delay = 0 if fast_mode else SUBMIT_CLICK_SETTLE_DELAY
+    pre_submit_delay = 0 if fast_mode else SUBMIT_INITIAL_DELAY
+
     def _click_submit_buttons():
         try:
             driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
-            if SUBMIT_CLICK_SETTLE_DELAY > 0:
-                time.sleep(SUBMIT_CLICK_SETTLE_DELAY)
+            if settle_delay > 0:
+                time.sleep(settle_delay)
         except:
             pass
         try:
             driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]').click()
-            if SUBMIT_CLICK_SETTLE_DELAY > 0:
-                time.sleep(SUBMIT_CLICK_SETTLE_DELAY)
+            if settle_delay > 0:
+                time.sleep(settle_delay)
         except:
             pass
 
-    if SUBMIT_INITIAL_DELAY > 0:
-        time.sleep(SUBMIT_INITIAL_DELAY)
+    def _click_security_confirm_dialog():
+        """点击"需要安全校验，请重新提交！"弹窗的确认按钮。"""
+        script = r"""
+            (() => {
+                // 查找 layui 弹窗中的确认按钮
+                const selectors = [
+                    '.layui-layer-btn0',
+                    '.layui-layer-btn a',
+                    '.layui-layer-dialog .layui-layer-btn0',
+                    '.layui-layer .layui-layer-btn a'
+                ];
+                const matchText = (txt) => /^(确\s*定|确\s*认|OK|好的?)$/i.test((txt || '').trim());
+                for (const sel of selectors) {
+                    const nodes = document.querySelectorAll(sel);
+                    for (const node of nodes) {
+                        const text = (node.innerText || node.textContent || '').trim();
+                        if (matchText(text)) {
+                            try { node.click(); return true; } catch (e) {}
+                        }
+                    }
+                }
+                return false;
+            })();
+        """
+        try:
+            result = driver.execute_script(script)
+            if result:
+                logging.debug("已点击安全校验确认弹窗")
+                time.sleep(0.3)
+            return result
+        except Exception:
+            return False
+
+    def _handle_captcha_failure_refresh():
+        """处理验证失败后的刷新流程：刷新页面 -> 点击'是'继续作答 -> 点击提交"""
+        logging.info("验证失败，正在刷新页面...")
+        driver.refresh()
+        time.sleep(1.5)  # 等待页面刷新完成
+        
+        # 点击"是"继续上次作答
+        script_click_continue = r"""
+            (() => {
+                const selectors = [
+                    '.layui-layer-btn0',
+                    '.layui-layer-btn a',
+                    '.layui-layer-dialog .layui-layer-btn0',
+                    '.layui-layer .layui-layer-btn a',
+                    'button',
+                    'a.layui-layer-btn0'
+                ];
+                const matchText = (txt) => /^(是|确\s*定|确\s*认|继续|OK)$/i.test((txt || '').trim());
+                for (const sel of selectors) {
+                    const nodes = document.querySelectorAll(sel);
+                    for (const node of nodes) {
+                        const text = (node.innerText || node.textContent || '').trim();
+                        if (matchText(text)) {
+                            try { node.click(); return true; } catch (e) {}
+                        }
+                    }
+                }
+                return false;
+            })();
+        """
+        # 等待并点击"是"按钮
+        for _ in range(10):  # 最多尝试 10 次，共 2 秒
+            if stop_signal and stop_signal.is_set():
+                return
+            try:
+                result = driver.execute_script(script_click_continue)
+                if result:
+                    logging.info("已点击'是'继续上次作答")
+                    time.sleep(0.5)
+                    break
+            except Exception:
+                pass
+            time.sleep(0.2)
+        
+        time.sleep(0.5)
+        # 点击提交按钮
+        _click_submit_buttons()
+        _click_security_confirm_dialog()
+
+    if pre_submit_delay > 0:
+        time.sleep(pre_submit_delay)
     _click_submit_buttons()
+    # 检查并处理"需要安全校验"的确认弹窗
+    _click_security_confirm_dialog()
     if stop_signal and stop_signal.is_set():
         return
-    try:
-        captcha_bypassed = handle_aliyun_captcha(driver, timeout=3, stop_signal=stop_signal)
-    except AliyunCaptchaBypassError as exc:
-        logging.error("阿里云智能验证无法绕过，本次提交将被标记为失败: %s", exc)
-        raise
+    
+    # 最多重试 3 次验证
+    max_captcha_retries = 3
+    for retry_count in range(max_captcha_retries):
+        if stop_signal and stop_signal.is_set():
+            return
+        try:
+            captcha_bypassed = handle_aliyun_captcha(driver, timeout=3, stop_signal=stop_signal)
+            if captcha_bypassed:
+                break  # 验证成功，跳出循环
+        except AliyunCaptchaBypassError as exc:
+            if "验证失败" in str(exc) or "刷新重试" in str(exc):
+                if retry_count < max_captcha_retries - 1:
+                    logging.warning(f"阿里云验证失败，正在进行第 {retry_count + 2} 次尝试...")
+                    _handle_captcha_failure_refresh()
+                    continue
+                else:
+                    logging.error("阿里云验证多次失败，本次提交将被标记为失败")
+                    raise
+            else:
+                logging.error("阿里云智能验证无法绕过，本次提交将被标记为失败: %s", exc)
+                raise
+    else:
+        # 没有验证弹窗出现，正常继续
+        captcha_bypassed = False
+
     if captcha_bypassed:
         if stop_signal and stop_signal.is_set():
             return
-        if SUBMIT_CLICK_SETTLE_DELAY > 0:
-            time.sleep(SUBMIT_CLICK_SETTLE_DELAY)
+        if settle_delay > 0:
+            time.sleep(settle_delay)
         _click_submit_buttons()
+        # 阿里云验证通过后，等待提交完成（URL 变化或超时）
+        captcha_submit_timeout = 3.0  # 最多等待 3 秒让提交完成
+        captcha_poll_interval = 0.1
+        initial_url = driver.current_url
+        wait_deadline = time.time() + captcha_submit_timeout
+        logging.debug("阿里云验证后等待提交完成，初始 URL: %s", initial_url)
+        while time.time() < wait_deadline:
+            if stop_signal and stop_signal.is_set():
+                return
+            try:
+                current_url = driver.current_url
+                if current_url != initial_url:
+                    logging.info("阿里云验证后提交成功，URL 已变化")
+                    break
+            except Exception:
+                pass
+            time.sleep(captcha_poll_interval)
+        else:
+            logging.debug("阿里云验证后等待超时，URL 未变化")
     try:
         slider_text_element = driver.find_element(By.XPATH, '//*[@id="nc_1__scale_text"]/span')
         slider_handle = driver.find_element(By.XPATH, '//*[@id="nc_1_n1z"]')
@@ -2661,6 +3117,12 @@ def _select_proxy_for_session() -> Optional[str]:
     return random.choice(proxy_ip_pool)
 
 
+def _select_user_agent_for_session() -> Tuple[Optional[str], Optional[str]]:
+    if not random_user_agent_enabled:
+        return None, None
+    return _select_user_agent_from_keys(user_agent_pool_keys)
+
+
 def _discard_unresponsive_proxy(proxy_address: str) -> None:
     if not proxy_address:
         return
@@ -2674,11 +3136,35 @@ def _discard_unresponsive_proxy(proxy_address: str) -> None:
 
 def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=None):
     global cur_num, cur_fail
+    fast_mode = _is_fast_mode()
     preferred_browsers = list(BROWSER_PREFERENCE)
+    driver: Optional[BrowserDriver] = None
+
+    def _register_driver(instance: BrowserDriver) -> None:
+        if gui_instance and hasattr(gui_instance, 'active_drivers'):
+            gui_instance.active_drivers.append(instance)
+
+    def _unregister_driver(instance: BrowserDriver) -> None:
+        if gui_instance and hasattr(gui_instance, 'active_drivers'):
+            try:
+                gui_instance.active_drivers.remove(instance)
+            except ValueError:
+                pass
+
+    def _dispose_driver() -> None:
+        nonlocal driver
+        if not driver:
+            return
+        _unregister_driver(driver)
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        driver = None
+
     while True:
         if stop_signal.is_set():
             break
-        # 使用锁并响应停止/完成等动态地触发提交
         with lock:
             if stop_signal.is_set() or (target_num > 0 and cur_num >= target_num):
                 break
@@ -2688,24 +3174,37 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             logging.info("[Action Log] ȫ��ģ��ʱ����������༭����������...")
         if stop_signal.is_set():
             break
-        driver = None
-        try:
-            if stop_signal.is_set():
-                break
+        if driver is None:
             proxy_address = _select_proxy_for_session()
-            if proxy_address and not _proxy_is_responsive(proxy_address):
+            if proxy_address and not _proxy_is_responsive(proxy_address, stop_signal=stop_signal):
                 _discard_unresponsive_proxy(proxy_address)
+                if stop_signal.is_set():
+                    break
                 continue
-            driver, active_browser = create_playwright_driver(
-                headless=False,
-                prefer_browsers=list(preferred_browsers) if preferred_browsers else None,
-                proxy_address=proxy_address,
-            )
+            ua_value, ua_label = _select_user_agent_for_session()
+            if ua_label:
+                logging.info(f"使用随机 UA：{ua_label}")
+            try:
+                driver, active_browser = create_playwright_driver(
+                    headless=False,
+                    prefer_browsers=list(preferred_browsers) if preferred_browsers else None,
+                    proxy_address=proxy_address,
+                    user_agent=ua_value,
+                )
+            except Exception as exc:
+                if stop_signal.is_set():
+                    break
+                logging.warning(f"启动浏览器失败：{exc}")
+                if stop_signal.wait(1.0):
+                    break
+                continue
             preferred_browsers = [active_browser] + [b for b in BROWSER_PREFERENCE if b != active_browser]
-            if gui_instance and hasattr(gui_instance, 'active_drivers'):
-                gui_instance.active_drivers.append(driver)
+            _register_driver(driver)
             driver.set_window_size(550, 650)
             driver.set_window_position(x=window_x_pos, y=window_y_pos)
+
+        driver_had_error = False
+        try:
             if stop_signal.is_set():
                 break
             driver.get(url)
@@ -2717,13 +3216,15 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             finished = brush(driver, stop_signal=stop_signal)
             if stop_signal.is_set() or not finished:
                 break
-            wait_deadline = time.time() + POST_SUBMIT_URL_MAX_WAIT
+            max_wait = 0.2 if fast_mode else POST_SUBMIT_URL_MAX_WAIT
+            poll_interval = 0.05 if fast_mode else POST_SUBMIT_URL_POLL_INTERVAL
+            wait_deadline = time.time() + max_wait
             while time.time() < wait_deadline:
                 if stop_signal.is_set():
                     break
                 if driver.current_url != initial_url:
                     break
-                time.sleep(POST_SUBMIT_URL_POLL_INTERVAL)
+                time.sleep(poll_interval)
             final_url = driver.current_url
             if stop_signal.is_set():
                 break
@@ -2740,6 +3241,9 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         stop_signal.set()
                         break
         except Exception:
+            driver_had_error = True
+            if stop_signal.is_set():
+                break
             traceback.print_exc()
             with lock:
                 cur_fail += 1
@@ -2749,13 +3253,9 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 stop_signal.set()
                 break
         finally:
-            if driver:
-                try:
-                    if gui_instance and hasattr(gui_instance, 'active_drivers') and driver in gui_instance.active_drivers:
-                        gui_instance.active_drivers.remove(driver)
-                    driver.quit()
-                except Exception:
-                    pass
+            if driver_had_error:
+                _dispose_driver()
+
         if stop_signal.is_set():
             break
         if not _full_simulation_active():
@@ -2764,6 +3264,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 wait_seconds = min_wait if max_wait == min_wait else random.uniform(min_wait, max_wait)
                 if stop_signal.wait(wait_seconds):
                     break
+
+    _dispose_driver()
 
 
 
@@ -3147,6 +3649,7 @@ class SurveyGUI:
         self._last_survey_title: Optional[str] = None
         self._main_parameter_widgets: List[tk.Widget] = []
         self._settings_window_widgets: List[tk.Widget] = []
+        self._random_ua_option_widgets: List[tk.Widget] = []
         self._full_simulation_window: Optional[tk.Toplevel] = None
         self._full_sim_status_label: Optional[ttk.Label] = None
         self._proxy_health_button: Optional[ttk.Button] = None
@@ -3161,6 +3664,10 @@ class SurveyGUI:
         self.interval_max_seconds_var = tk.StringVar(value="0")
         self.answer_duration_min_var = tk.StringVar(value="0")
         self.answer_duration_max_var = tk.StringVar(value="0")
+        self.random_ua_enabled_var = tk.BooleanVar(value=False)
+        self.random_ua_pc_web_var = tk.BooleanVar(value=True)
+        self.random_ua_android_wechat_var = tk.BooleanVar(value=True)
+        self.random_ua_ios_wechat_var = tk.BooleanVar(value=True)
         self.random_ip_enabled_var = tk.BooleanVar(value=False)
         self.full_simulation_enabled_var = tk.BooleanVar(value=False)
         self.full_sim_target_var = tk.StringVar(value="")
@@ -3410,6 +3917,13 @@ class SurveyGUI:
         self.interval_max_seconds_var.trace("w", lambda *args: self._mark_config_changed())
         self.answer_duration_min_var.trace("w", lambda *args: self._mark_config_changed())
         self.answer_duration_max_var.trace("w", lambda *args: self._mark_config_changed())
+        self.random_ua_enabled_var.trace_add("write", lambda *args: self._on_random_ua_toggle())
+        for _ua_var in (
+            self.random_ua_pc_web_var,
+            self.random_ua_android_wechat_var,
+            self.random_ua_ios_wechat_var,
+        ):
+            _ua_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.random_ip_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.full_sim_target_var.trace("w", lambda *args: self._mark_config_changed())
         self.full_sim_target_var.trace_add("write", lambda *args: self._sync_full_sim_target_to_main())
@@ -3698,6 +4212,7 @@ class SurveyGUI:
                 except Exception:
                     continue
         self._apply_proxy_health_button_state()
+        self._apply_random_ua_widgets_state()
 
     def _apply_proxy_health_button_state(self):
         button = getattr(self, "_proxy_health_button", None)
@@ -3714,6 +4229,33 @@ class SurveyGUI:
                 button["text"] = text
             except Exception:
                 pass
+
+    def _apply_random_ua_widgets_state(self):
+        option_widgets = getattr(self, "_random_ua_option_widgets", [])
+        if self.full_simulation_enabled_var.get():
+            state = tk.DISABLED
+        else:
+            state = tk.NORMAL if self.random_ua_enabled_var.get() else tk.DISABLED
+        cleaned: List[tk.Widget] = []
+        for widget in option_widgets:
+            if widget is None:
+                continue
+            try:
+                if widget.winfo_exists():
+                    widget.configure(state=state)
+                    cleaned.append(widget)
+            except Exception:
+                try:
+                    if widget.winfo_exists():
+                        widget["state"] = state
+                        cleaned.append(widget)
+                except Exception:
+                    continue
+        self._random_ua_option_widgets = cleaned
+
+    def _on_random_ua_toggle(self):
+        self._apply_random_ua_widgets_state()
+        self._mark_config_changed()
 
     def _refresh_full_simulation_status_label(self):
         label = getattr(self, '_full_sim_status_label', None)
@@ -3907,12 +4449,14 @@ class SurveyGUI:
         window.transient(self.root)
         self._settings_window = window
         self._settings_window_widgets = []
+        self._random_ua_option_widgets = []
         self._full_sim_status_label = None
 
         def _on_close():
             if self._settings_window is window:
                 self._settings_window = None
                 self._settings_window_widgets = []
+                self._random_ua_option_widgets = []
                 self._full_sim_status_label = None
                 self._proxy_health_button = None
             try:
@@ -3996,6 +4540,34 @@ class SurveyGUI:
 
         proxy_frame = ttk.LabelFrame(content, text="网络代理", padding=15)
         proxy_frame.pack(fill=tk.X, pady=(15, 0))
+        ua_toggle_row = ttk.Frame(proxy_frame)
+        ua_toggle_row.pack(fill=tk.X, pady=(0, 6))
+        ua_toggle = ttk.Checkbutton(
+            ua_toggle_row,
+            text="启用随机 UA",
+            variable=self.random_ua_enabled_var,
+            command=self._on_random_ua_toggle,
+        )
+        ua_toggle.pack(anchor="w")
+        self._settings_window_widgets.append(ua_toggle)
+
+        ua_options_frame = ttk.Frame(proxy_frame)
+        ua_options_frame.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(ua_options_frame, text="随机范围：").grid(row=0, column=0, sticky="nw", padx=(0, 8))
+        ua_options_inner = ttk.Frame(ua_options_frame)
+        ua_options_inner.grid(row=0, column=1, sticky="w")
+        ua_option_widgets: List[tk.Widget] = []
+        for idx, (text_value, var) in enumerate([
+            ("电脑网页端", self.random_ua_pc_web_var),
+            ("安卓微信端", self.random_ua_android_wechat_var),
+            ("苹果微信端", self.random_ua_ios_wechat_var),
+        ]):
+            cb = ttk.Checkbutton(ua_options_inner, text=text_value, variable=var)
+            cb.grid(row=0, column=idx, padx=(0, 10), sticky="w")
+            ua_option_widgets.append(cb)
+        self._random_ua_option_widgets.extend(ua_option_widgets)
+        self._settings_window_widgets.extend(ua_option_widgets)
+
         proxy_row = ttk.Frame(proxy_frame)
         proxy_row.pack(fill=tk.X, pady=(10, 0))
         proxy_toggle = ttk.Checkbutton(
@@ -5346,7 +5918,10 @@ class SurveyGUI:
             update_progress(30, "HTTP 解析失败，准备启动浏览器...")
             
             print(f"正在加载问卷: {survey_url}")
-            driver, browser_name = create_playwright_driver(headless=True)
+            ua_value, ua_label = self._pick_random_user_agent()
+            driver, browser_name = create_playwright_driver(headless=True, user_agent=ua_value)
+            if ua_label:
+                logging.info(f"[Action Log] 解析使用随机 UA：{ua_label}")
             logging.info(f"Fallback 到 {browser_name.capitalize()} BrowserDriver 解析问卷")
             
             update_progress(45, "正在打开问卷页面...")
@@ -5579,6 +6154,9 @@ class SurveyGUI:
             if progress_callback:
                 progress_callback(10, "正在获取问卷页面...")
             headers = dict(DEFAULT_HTTP_HEADERS)
+            ua_value, _ = self._pick_random_user_agent()
+            if ua_value:
+                headers["User-Agent"] = ua_value
             headers["Referer"] = survey_url
             response = requests.get(survey_url, headers=headers, timeout=15)
             response.raise_for_status()
@@ -5617,7 +6195,10 @@ class SurveyGUI:
             return
 
         try:
-            driver, browser_name = create_playwright_driver(headless=False)
+            ua_value, ua_label = self._pick_random_user_agent()
+            driver, browser_name = create_playwright_driver(headless=False, user_agent=ua_value)
+            if ua_label:
+                logging.info(f"[Action Log] 预览使用随机 UA：{ua_label}")
             driver.maximize_window()
             driver.get(url)
 
@@ -6547,7 +7128,7 @@ class SurveyGUI:
             f"[Action Log] Starting run url={url_value} target={target} threads={threads_count}"
         )
 
-        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool
+        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool, random_user_agent_enabled, user_agent_pool_keys
         url = url_value
         target_num = target
         num_threads = threads_count
@@ -6556,6 +7137,8 @@ class SurveyGUI:
         full_simulation_enabled = full_sim_enabled
         random_proxy_ip_enabled = random_proxy_flag
         proxy_ip_pool = proxy_pool if random_proxy_flag else []
+        random_user_agent_enabled = random_ua_enabled
+        user_agent_pool_keys = random_ua_keys if random_ua_enabled else []
         if full_sim_enabled:
             full_simulation_estimated_seconds = full_sim_est_seconds
             full_simulation_total_duration_seconds = full_sim_total_seconds
@@ -6594,6 +7177,7 @@ class SurveyGUI:
 
     def _launch_threads(self):
         print(f"正在启动 {num_threads} 个浏览器窗口...")
+        launch_gap = 0.0 if _is_fast_mode() else 0.1
         threads: List[Thread] = []
         for browser_index in range(num_threads):
             if stop_event.is_set():
@@ -6607,7 +7191,8 @@ class SurveyGUI:
             if stop_event.is_set():
                 break
             thread.start()
-            time.sleep(0.1)
+            if launch_gap > 0:
+                time.sleep(launch_gap)
         print("浏览器启动中，请稍候...")
         self._wait_for_worker_threads(threads)
         self.root.after(0, self._on_run_finished)
@@ -6675,7 +7260,7 @@ class SurveyGUI:
         stop_event.set()
         self.running = False
         self.stop_button.config(state=tk.DISABLED, text="停止中...")
-        self.status_var.set("已发送停止请求，正在等待当前任务结束...")
+        self.status_var.set("已发送停止请求，正在清理浏览器进程...")
         if self.status_job:
             try:
                 self.root.after_cancel(self.status_job)
@@ -6683,12 +7268,20 @@ class SurveyGUI:
                 pass
             self.status_job = None
 
+        # 先尝试正常关闭
         for driver in self.active_drivers:
             try:
                 driver.quit()
             except:
                 pass
         self.active_drivers.clear()
+        
+        # 强制终止所有 Playwright 启动的浏览器进程（避免卡顿）
+        try:
+            _kill_playwright_browser_processes()
+        except Exception as e:
+            logging.warning(f"强制清理浏览器进程时出错: {e}")
+        
         logging.info("收到停止请求，等待当前提交线程完成")
         print("已暂停新的问卷提交，等待现有流程退出")
 
@@ -6904,6 +7497,7 @@ class SurveyGUI:
             "submit_interval": self._serialize_submit_interval(),
             "answer_duration_range": self._serialize_answer_duration_config(),
             "full_simulation": self._serialize_full_simulation_config(),
+            "random_user_agent": self._serialize_random_ua_config(),
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "paned_position": paned_sash_pos,
             "questions": [
@@ -6986,6 +7580,22 @@ class SurveyGUI:
         if max_seconds < min_seconds:
             max_seconds = min_seconds
         return {"min_seconds": min_seconds, "max_seconds": max_seconds}
+
+    def _get_random_ua_option_vars(self) -> List[Tuple[str, tk.BooleanVar]]:
+        return [
+            ("pc_web", self.random_ua_pc_web_var),
+            ("wechat_android", self.random_ua_android_wechat_var),
+            ("wechat_ios", self.random_ua_ios_wechat_var),
+        ]
+
+    def _get_selected_random_ua_keys(self) -> List[str]:
+        return [key for key, var in self._get_random_ua_option_vars() if var.get()]
+
+    def _serialize_random_ua_config(self) -> Dict[str, Any]:
+        return {
+            "enabled": bool(self.random_ua_enabled_var.get()),
+            "selected": _filter_valid_user_agent_keys(self._get_selected_random_ua_keys()),
+        }
 
     def _serialize_full_simulation_config(self) -> Dict[str, Any]:
         def _normalize(value: Any, *, cap_seconds: bool = False) -> int:
@@ -7075,6 +7685,26 @@ class SurveyGUI:
         self.answer_duration_min_var.set(_format_value(config.get("min_seconds")))
         self.answer_duration_max_var.set(_format_value(config.get("max_seconds")))
 
+    def _apply_random_ua_config(self, config: Optional[Dict[str, Any]]):
+        enabled = False
+        selected_keys = list(DEFAULT_RANDOM_UA_KEYS)
+        if isinstance(config, dict):
+            enabled = bool(config.get("enabled"))
+            selected_keys = _filter_valid_user_agent_keys(
+                config.get("selected") or config.get("options") or list(DEFAULT_RANDOM_UA_KEYS)
+            )
+            if not selected_keys:
+                selected_keys = list(DEFAULT_RANDOM_UA_KEYS)
+        self.random_ua_enabled_var.set(enabled)
+        for key, var in self._get_random_ua_option_vars():
+            var.set(key in selected_keys)
+        self._apply_random_ua_widgets_state()
+
+    def _pick_random_user_agent(self) -> Tuple[Optional[str], Optional[str]]:
+        if not self.random_ua_enabled_var.get():
+            return None, None
+        return _select_user_agent_from_keys(self._get_selected_random_ua_keys())
+
     def _apply_full_simulation_config(self, config: Optional[Dict[str, Any]]):
         if not isinstance(config, dict):
             config = {}
@@ -7123,6 +7753,7 @@ class SurveyGUI:
         self.url_var.set(config.get("url", ""))
         self.target_var.set(config.get("target_num", ""))
         self.thread_var.set(config.get("num_threads", ""))
+        self._apply_random_ua_config(config.get("random_user_agent"))
         self.random_ip_enabled_var.set(bool(config.get("random_proxy_enabled")))
         self._apply_submit_interval_config(config.get("submit_interval"))
         self._apply_answer_duration_config(config.get("answer_duration_range"))
@@ -7278,7 +7909,9 @@ class SurveyGUI:
             "target_num": self.target_var.get(),
             "num_threads": self.thread_var.get(),
             "submit_interval": self._serialize_submit_interval(),
+            "answer_duration_range": self._serialize_answer_duration_config(),
             "full_simulation": self._serialize_full_simulation_config(),
+            "random_user_agent": self._serialize_random_ua_config(),
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "questions": [
                 {
@@ -7309,7 +7942,9 @@ class SurveyGUI:
             "target_num": self.target_var.get(),
             "num_threads": self.thread_var.get(),
             "submit_interval": self._serialize_submit_interval(),
+            "answer_duration_range": self._serialize_answer_duration_config(),
             "full_simulation": self._serialize_full_simulation_config(),
+            "random_user_agent": self._serialize_random_ua_config(),
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "questions": [
                 {

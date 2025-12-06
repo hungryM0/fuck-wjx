@@ -5,3 +5,4 @@ Pillow
 requests
 packaging
 beautifulsoup4
+psutil
