@@ -3959,6 +3959,107 @@ class SurveyGUI:
             logging.error(f"打开 QQ 群二维码原图失败: {exc}")
             self._log_popup_error("打开失败", f"无法打开原图：\n{image_path}\n\n错误: {exc}")
 
+    def _open_contact_dialog(self):
+        """打开联系对话框，允许用户发送消息"""
+        window = tk.Toplevel(self.root)
+        window.title("联系我们")
+        window.geometry("500x450")
+        window.resizable(True, True)
+        window.transient(self.root)
+
+        container = ttk.Frame(window, padding=15)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(container, text="请输入您的消息：", font=("", 10)).pack(anchor=tk.W, pady=(0, 5))
+
+        # 创建文本框
+        text_frame = ttk.Frame(container)
+        text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("", 10))
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_widget.yview)
+
+        # 按钮框架
+        button_frame = ttk.Frame(container)
+        button_frame.pack(fill=tk.X)
+
+        def send_message():
+            """发送消息到API"""
+            message = text_widget.get("1.0", tk.END).strip()
+            if not message:
+                messagebox.showwarning("提示", "请输入消息内容", parent=window)
+                return
+
+            if not requests:
+                messagebox.showerror("错误", "requests 模块未安装，无法发送消息", parent=window)
+                return
+
+            # 禁用发送按钮，防止重复点击
+            send_btn.config(state=tk.DISABLED)
+            status_label.config(text="正在发送...")
+
+            def send_request():
+                try:
+                    if requests is None:
+                        def update_ui_no_requests():
+                            status_label.config(text="")
+                            send_btn.config(state=tk.NORMAL)
+                            messagebox.showerror("错误", "requests 模块未安装", parent=window)
+                        window.after(0, update_ui_no_requests)
+                        return
+                    
+                    api_url = "https://bot.hungrym0.top"
+                    payload = {
+                        "message": message,
+                        "timestamp": datetime.now().isoformat(),
+                        "version": __VERSION__
+                    }
+                    response = requests.post(
+                        api_url,
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=10
+                    )
+                    
+                    def update_ui_success():
+                        status_label.config(text="")
+                        send_btn.config(state=tk.NORMAL)
+                        if response.status_code == 200:
+                            messagebox.showinfo("成功", "消息已成功发送！", parent=window)
+                            window.destroy()
+                        else:
+                            messagebox.showerror("错误", f"发送失败，服务器返回: {response.status_code}", parent=window)
+                    
+                    window.after(0, update_ui_success)
+                    
+                except Exception as exc:
+                    def update_ui_error():
+                        status_label.config(text="")
+                        send_btn.config(state=tk.NORMAL)
+                        logging.error(f"发送联系消息失败: {exc}")
+                        messagebox.showerror("错误", f"发送失败：\n{str(exc)}", parent=window)
+                    
+                    window.after(0, update_ui_error)
+
+            # 在后台线程发送请求
+            thread = threading.Thread(target=send_request, daemon=True)
+            thread.start()
+
+        send_btn = ttk.Button(button_frame, text="发送", command=send_message)
+        send_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Button(button_frame, text="取消", command=window.destroy).pack(side=tk.LEFT)
+
+        status_label = ttk.Label(button_frame, text="", foreground="blue")
+        status_label.pack(side=tk.LEFT, padx=(12, 0))
+
+        self._center_child_window(window)
+        text_widget.focus_set()
+
     def _on_root_focus(self, event=None):
         pass
 
@@ -4131,6 +4232,8 @@ class SurveyGUI:
         help_menu.add_command(label="加入QQ群", command=self._open_qq_group_dialog)
         help_menu.add_separator()
         help_menu.add_command(label="关于", command=self.show_about)
+
+        menubar.add_command(label="联系", command=self._open_contact_dialog)
 
         # 创建主容器，使用 PanedWindow 分左右两部分
         self.main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
