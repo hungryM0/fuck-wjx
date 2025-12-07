@@ -1599,7 +1599,7 @@ def _fill_option_additional_text(driver: BrowserDriver, question_number: int, op
         except Exception:
             continue
         try:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", input_element)
+            _smooth_scroll_to_element(driver, input_element, 'center')
         except Exception:
             pass
         try:
@@ -2323,7 +2323,7 @@ def try_click_start_answer_button(
                     print("检测到“开始作答”按钮，尝试自动点击...")
                     already_reported = True
                 try:
-                    driver.execute_script("arguments[0].scrollIntoView({block:'center', inline:'center'});", element)
+                    _smooth_scroll_to_element(driver, element, 'center')
                 except Exception:
                     pass
                 for click_method in (
@@ -2387,7 +2387,7 @@ def dismiss_resume_dialog_if_present(
                     print("检测到“继续上次作答”弹窗，自动点击取消以开始新作答...")
                     clicked_once = True
                 try:
-                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
+                    _smooth_scroll_to_element(driver, button, 'center')
                 except Exception:
                     pass
                 for click_method in (
@@ -2973,6 +2973,74 @@ def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = Non
     return False
 
 
+def _smooth_scroll_to_element(driver: BrowserDriver, element, block: str = 'center') -> None:
+    """
+    平滑滚动到指定元素位置，模拟人类滚动行为。
+    仅在启用全真模拟时使用平滑滚动，否则使用瞬间滚动。
+    """
+    if not _full_simulation_active():
+        # 未启用全真模拟时使用瞬间滚动
+        try:
+            driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}', behavior:'auto'}});", element)
+        except Exception:
+            pass
+        return
+    
+    # 启用全真模拟时使用平滑滚动
+    try:
+        # 获取元素位置和当前滚动位置
+        element_y = driver.execute_script("return arguments[0].getBoundingClientRect().top + window.pageYOffset;", element)
+        current_scroll = driver.execute_script("return window.pageYOffset;")
+        viewport_height = driver.execute_script("return window.innerHeight;")
+        
+        # 确保值不为None
+        if element_y is None or current_scroll is None or viewport_height is None:
+            driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}'}});", element)
+            return
+        
+        # 计算目标滚动位置（居中）
+        if block == 'center':
+            target_scroll = element_y - viewport_height / 2
+        elif block == 'start':
+            target_scroll = element_y - 100
+        else:  # 'end' or other
+            target_scroll = element_y - viewport_height + 100
+        
+        distance = target_scroll - current_scroll
+        
+        # 如果距离很小，直接跳转
+        if abs(distance) < 30:
+            driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}', behavior:'auto'}});", element)
+            return
+        
+        # 分步平滑滚动 - 快速但仍有平滑感
+        steps = max(10, min(25, int(abs(distance) / 80)))  # 减少步数
+        
+        # 更短的延迟
+        base_delay = random.uniform(0.015, 0.025)
+        
+        for i in range(steps):
+            # 使用缓动函数让滚动更自然（先快后慢）
+            progress = (i + 1) / steps
+            # 使用更温和的缓动曲线
+            ease_progress = progress - (1 - progress) * progress * 0.5
+            current_step_scroll = current_scroll + distance * ease_progress
+            
+            driver.execute_script("window.scrollTo(0, arguments[0]);", current_step_scroll)
+            time.sleep(base_delay)
+        
+        # 最后确保精确到达目标位置
+        time.sleep(0.02)  # 极短停顿
+        driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}', behavior:'auto'}});", element)
+        
+    except Exception:
+        # 出错时回退到普通滚动
+        try:
+            driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}'}});", element)
+        except Exception:
+            pass
+
+
 def _human_scroll_after_question(driver: BrowserDriver) -> None:
     distance = random.uniform(120, 260)
     page = getattr(driver, "page", None)
@@ -3292,8 +3360,12 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
                 return
         _click_submit_buttons()
         # 阿里云验证通过后，等待提交完成（URL 变化或超时）
-        captcha_submit_timeout = 3.0  # 最多等待 3 秒让提交完成
-        captcha_poll_interval = 0.1
+        if full_simulation_enabled:
+            captcha_submit_timeout = 2.2  # 全真模拟略放宽，避免二次验证
+            captcha_poll_interval = 0.07
+        else:
+            captcha_submit_timeout = 3.0
+            captcha_poll_interval = 0.1
         initial_url = driver.current_url
         wait_deadline = time.time() + captcha_submit_timeout
         logging.debug("阿里云验证后等待提交完成，初始 URL: %s", initial_url)
@@ -3468,8 +3540,13 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             if stop_signal.is_set() or not finished:
                 break
             need_watch_submit = bool(last_submit_had_captcha)
-            max_wait = 0.1 if not need_watch_submit else (0.2 if fast_mode else POST_SUBMIT_URL_MAX_WAIT)
-            poll_interval = 0.05 if fast_mode else POST_SUBMIT_URL_POLL_INTERVAL
+            if full_simulation_enabled:
+                # 稍微放慢提交完成检测，降低触发阿里云验证概率
+                max_wait = 0.12 if not need_watch_submit else (0.25 if fast_mode else min(0.4, POST_SUBMIT_URL_MAX_WAIT))
+                poll_interval = 0.05 if fast_mode else POST_SUBMIT_URL_POLL_INTERVAL
+            else:
+                max_wait = 0.1 if not need_watch_submit else (0.2 if fast_mode else POST_SUBMIT_URL_MAX_WAIT)
+                poll_interval = 0.05 if fast_mode else POST_SUBMIT_URL_POLL_INTERVAL
             wait_deadline = time.time() + max_wait
             while time.time() < wait_deadline:
                 if stop_signal.is_set():
@@ -3484,16 +3561,44 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 with lock:
                     if target_num <= 0 or cur_num < target_num:
                         cur_num += 1
-                        print(
-                            f"已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))} "
+                        logging.info(
+                            f"[OK] 已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
                         if target_num > 0 and cur_num >= target_num:
                             stop_signal.set()
                     else:
                         stop_signal.set()
                         break
-                # 成功提交后关闭浏览器，以便下次使用新的UA和代理
-                if random_user_agent_enabled or proxy_ip_pool:
+                # 成功提交后关闭浏览器，全真模拟直接换新实例，避免停留完成页
+                if full_simulation_enabled or random_user_agent_enabled or proxy_ip_pool:
+                    if full_simulation_enabled:
+                        # 快速检测是否到达完成页，无需长时间等待广告
+                        detected = False
+                        try:
+                            # 检测完成页面的特定元素
+                            divdsc = driver.find_element("id", "divdsc")
+                            if divdsc and divdsc.is_displayed():
+                                text = divdsc.text or ""
+                                if "答卷已经提交" in text or "感谢您的参与" in text:
+                                    detected = True
+                        except Exception:
+                            pass
+                        
+                        if not detected:
+                            # 备用检测：检查页面文本
+                            try:
+                                page_text = driver.execute_script("return document.body.innerText || '';") or ""
+                                if "答卷已经提交" in page_text or "感谢您的参与" in page_text:
+                                    detected = True
+                            except Exception:
+                                pass
+                        
+                        if detected:
+                            # 确认已到达完成页，等待2秒后关闭
+                            time.sleep(2.0)
+                        else:
+                            # 未检测到完成标识，使用原有等待时间
+                            time.sleep(0.3)
                     _dispose_driver()
         except Exception:
             driver_had_error = True
@@ -3972,16 +4077,16 @@ class SurveyGUI:
         self.answer_duration_min_var = tk.StringVar(value="0")
         self.answer_duration_max_var = tk.StringVar(value="0")
         self.random_ua_enabled_var = tk.BooleanVar(value=False)
-        self.random_ua_pc_web_var = tk.BooleanVar(value=True)
+        self.random_ua_pc_web_var = tk.BooleanVar(value=False)
         self.random_ua_android_wechat_var = tk.BooleanVar(value=True)
         self.random_ua_ios_wechat_var = tk.BooleanVar(value=True)
-        self.random_ua_ipad_wechat_var = tk.BooleanVar(value=True)
-        self.random_ua_ipad_web_var = tk.BooleanVar(value=True)
-        self.random_ua_android_tablet_wechat_var = tk.BooleanVar(value=True)
-        self.random_ua_android_tablet_web_var = tk.BooleanVar(value=True)
-        self.random_ua_mac_wechat_var = tk.BooleanVar(value=True)
-        self.random_ua_windows_wechat_var = tk.BooleanVar(value=True)
-        self.random_ua_mac_web_var = tk.BooleanVar(value=True)
+        self.random_ua_ipad_wechat_var = tk.BooleanVar(value=False)
+        self.random_ua_ipad_web_var = tk.BooleanVar(value=False)
+        self.random_ua_android_tablet_wechat_var = tk.BooleanVar(value=False)
+        self.random_ua_android_tablet_web_var = tk.BooleanVar(value=False)
+        self.random_ua_mac_wechat_var = tk.BooleanVar(value=False)
+        self.random_ua_windows_wechat_var = tk.BooleanVar(value=False)
+        self.random_ua_mac_web_var = tk.BooleanVar(value=False)
         self.random_ip_enabled_var = tk.BooleanVar(value=False)
         self.full_simulation_enabled_var = tk.BooleanVar(value=False)
         self.full_sim_target_var = tk.StringVar(value="")
@@ -4189,23 +4294,8 @@ class SurveyGUI:
         )
         self.preview_button.pack(side=tk.LEFT, padx=5)
 
-        auto_hint_frame = ttk.Frame(step2_frame)
-        auto_hint_frame.pack(fill=tk.X, pady=(0, 10))
-        auto_hint_box = tk.Frame(auto_hint_frame, bg="#edf7ec", bd=1, relief="solid")
-        auto_hint_box.pack(fill=tk.X, expand=True, padx=4, pady=2)
-        self._auto_hint_label = ttk.Label(
-            auto_hint_box,
-            text="  💡通过配置向导可快速预设答案并保持原始题型结构",
-            foreground="#1b5e20",
-            font=("Segoe UI", 9),
-            wraplength=520,
-            justify="left"
-        )
-        self._auto_hint_label.pack(anchor="w", padx=8, pady=6)
-        auto_hint_frame.bind("<Configure>", lambda e: self._auto_hint_label.configure(wraplength=max(180, e.width - 30)))
-
         # 执行设置区域（放在配置题目下方）
-        step3_frame = ttk.LabelFrame(self.scrollable_content, text="⚙️ 执行设置", padding=10)
+        step3_frame = ttk.LabelFrame(self.scrollable_content, text="💣 执行设置", padding=10)
         step3_frame.pack(fill=tk.X, padx=10, pady=5)
 
         settings_grid = ttk.Frame(step3_frame)
@@ -4281,6 +4371,21 @@ class SurveyGUI:
         )
         thread_inc_button.grid(row=0, column=2, padx=(2, 0))
         self._main_parameter_widgets.extend([thread_dec_button, thread_entry, thread_inc_button])
+
+        thread_hint_frame = ttk.Frame(step3_frame)
+        thread_hint_frame.pack(fill=tk.X, padx=4, pady=(6, 4))
+        thread_hint_box = tk.Frame(thread_hint_frame, bg="#fff8e1", bd=1, relief="solid")
+        thread_hint_box.pack(fill=tk.X, expand=True)
+        self._thread_hint_label = ttk.Label(
+            thread_hint_box,
+            text="  💡建议在“设置”中开启全真模拟，降低触发人机验证的概率",
+            foreground="#6d4c00",
+            font=("Segoe UI", 9),
+            wraplength=520,
+            justify="left"
+        )
+        self._thread_hint_label.pack(anchor="w", padx=8, pady=6)
+        thread_hint_frame.bind("<Configure>", lambda e: self._thread_hint_label.configure(wraplength=max(180, e.width - 30)))
 
         
         # 高级选项：手动配置（始终显示）
@@ -4618,7 +4723,7 @@ class SurveyGUI:
             return
         enabled = bool(self.full_simulation_enabled_var.get())
         status_text = "已开启" if enabled else "未开启"
-        color = "#2e7d32" if enabled else "#616161"
+        color = "#2e7d32" if enabled else "#E4A207"
         label.config(text=f"当前状态：{status_text}", foreground=color)
 
     def _update_full_sim_time_section_visibility(self):
@@ -4921,68 +5026,12 @@ class SurveyGUI:
             command=self._open_full_simulation_window,
             style="Accent.TButton"
         ).pack(side=tk.LEFT)
-        status_label = ttk.Label(header_frame, text="当前状态：未开启", foreground="#616161")
+        status_label = ttk.Label(header_frame, text="当前状态：未开启", foreground="#FF8C00")
         status_label.pack(side=tk.LEFT, padx=(12, 0))
         self._full_sim_status_label = status_label
         self._refresh_full_simulation_status_label()
 
-        interval_frame = ttk.LabelFrame(content, text="提交间隔", padding=15)
-        interval_frame.pack(fill=tk.X)
-        ttk.Label(
-            interval_frame,
-            text="设置每次自动提交后的等待范围，可模拟更加自然的提交节奏；设置为 0 表示不延迟。",
-            wraplength=320,
-            justify="left",
-        ).pack(anchor="w")
-
-        input_frame = ttk.Frame(interval_frame)
-        input_frame.pack(anchor="w", pady=(12, 0))
-        ttk.Label(input_frame, text="最短等待").grid(row=0, column=0, sticky="w")
-        interval_min_entry = ttk.Entry(input_frame, textvariable=self.interval_minutes_var, width=6)
-        interval_min_entry.grid(row=0, column=1, padx=(6, 0))
-        self._settings_window_widgets.append(interval_min_entry)
-        ttk.Label(input_frame, text="分").grid(row=0, column=2, padx=(4, 6))
-        interval_sec_entry = ttk.Entry(input_frame, textvariable=self.interval_seconds_var, width=6)
-        interval_sec_entry.grid(row=0, column=3)
-        self._settings_window_widgets.append(interval_sec_entry)
-        ttk.Label(input_frame, text="秒").grid(row=0, column=4, padx=(4, 10))
-
-        ttk.Label(input_frame, text="最长等待").grid(row=1, column=0, sticky="w", pady=(10, 0))
-        interval_max_min_entry = ttk.Entry(input_frame, textvariable=self.interval_max_minutes_var, width=6)
-        interval_max_min_entry.grid(row=1, column=1, padx=(6, 0), pady=(10, 0))
-        self._settings_window_widgets.append(interval_max_min_entry)
-        ttk.Label(input_frame, text="分").grid(row=1, column=2, padx=(4, 6), pady=(10, 0))
-        interval_max_sec_entry = ttk.Entry(input_frame, textvariable=self.interval_max_seconds_var, width=6)
-        interval_max_sec_entry.grid(row=1, column=3, pady=(10, 0))
-        self._settings_window_widgets.append(interval_max_sec_entry)
-        ttk.Label(input_frame, text="秒").grid(row=1, column=4, padx=(4, 10), pady=(10, 0))
-
-        ttk.Label(input_frame, text="最长等待会被自动取不小于最短等待的数值。").grid(row=2, column=0, columnspan=5, sticky="w", pady=(12, 0))
-
-        answer_frame = ttk.LabelFrame(content, text="作答时长", padding=15)
-        answer_frame.pack(fill=tk.X, pady=(15, 0))
-        ttk.Label(
-            answer_frame,
-            text="每份问卷在提交前会停留一段时间以模拟真人作答，具体秒数会在设定范围内随机选择。",
-            wraplength=320,
-            justify="left",
-        ).pack(anchor="w")
-
-        answer_range_frame = ttk.Frame(answer_frame)
-        answer_range_frame.pack(anchor="w", pady=(12, 0))
-        ttk.Label(answer_range_frame, text="最短停留").grid(row=0, column=0, sticky="w")
-        answer_min_entry = ttk.Entry(answer_range_frame, textvariable=self.answer_duration_min_var, width=8)
-        answer_min_entry.grid(row=0, column=1, padx=(4, 6))
-        self._settings_window_widgets.append(answer_min_entry)
-        ttk.Label(answer_range_frame, text="秒").grid(row=0, column=2, sticky="w")
-        ttk.Label(answer_range_frame, text="最长停留").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        answer_max_entry = ttk.Entry(answer_range_frame, textvariable=self.answer_duration_max_var, width=8)
-        answer_max_entry.grid(row=1, column=1, padx=(4, 6), pady=(8, 0))
-        self._settings_window_widgets.append(answer_max_entry)
-        ttk.Label(answer_range_frame, text="秒").grid(row=1, column=2, sticky="w", pady=(8, 0))
-        ttk.Label(answer_range_frame, text="（设为 0 表示不等待）").grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
-
-        proxy_frame = ttk.LabelFrame(content, text="网络代理", padding=15)
+        proxy_frame = ttk.LabelFrame(content, text="高级设置", padding=15)
         proxy_frame.pack(fill=tk.X, pady=(15, 0))
         ua_toggle_row = ttk.Frame(proxy_frame)
         ua_toggle_row.pack(fill=tk.X, pady=(0, 6))
@@ -8752,6 +8801,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
