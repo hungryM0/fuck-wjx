@@ -3971,12 +3971,12 @@ class SurveyGUI:
         container.pack(fill=tk.BOTH, expand=True)
 
         # 邮箱输入框
-        ttk.Label(container, text="您的邮箱（选填，如果希望收到回复的话）：", font=("", 10)).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Label(container, text="您的邮箱（选填，如果希望收到回复的话）：", font=("SimHei", 10)).pack(anchor=tk.W, pady=(0, 5))
         email_var = tk.StringVar()
-        email_entry = ttk.Entry(container, textvariable=email_var, font=("", 10))
+        email_entry = ttk.Entry(container, textvariable=email_var, font=("SimHei", 10))
         email_entry.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Label(container, text="请输入您的消息：", font=("", 10)).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Label(container, text="请输入您的消息：", font=("SimHei", 10)).pack(anchor=tk.W, pady=(0, 5))
 
         # 创建文本框
         text_frame = ttk.Frame(container)
@@ -3985,7 +3985,7 @@ class SurveyGUI:
         scrollbar = ttk.Scrollbar(text_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("", 10), height=8)
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("SimHei", 10), height=8)
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=text_widget.yview)
 
@@ -4001,6 +4001,13 @@ class SurveyGUI:
             if not message_content:
                 messagebox.showwarning("提示", "请输入消息内容", parent=window)
                 return
+            
+            # 验证邮箱格式（如果填写了邮箱）
+            if email:
+                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                if not re.match(email_pattern, email):
+                    messagebox.showwarning("提示", "邮箱格式不正确，请输入有效的邮箱地址", parent=window)
+                    return
 
             if not requests:
                 messagebox.showerror("错误", "requests 模块未安装，无法发送消息", parent=window)
