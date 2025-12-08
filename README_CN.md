@@ -26,7 +26,7 @@
 
 ---
 
-**如果你只是一个想刷问卷的小白**
+**如果你只是一个想刷问卷的无辜大学生（？）**
 
 ✅可直接在本项目的 [Release](https://github.com/hungryM0/fuck-wjx/releases/latest) 中下载发行版exe程序，双击运行，开箱即用，无需任何额外复杂繁琐的环境部署！
 
