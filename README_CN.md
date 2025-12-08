@@ -1,6 +1,6 @@
 # fuck-wjx (问卷星速填)
 
-[English](./README_EN.md) | 简体中文
+[English](./README.md) | 简体中文
 
 参考了   https://github.com/Zemelee/wjx   的仓库,请不要忘记给这位佬给出一个star⭐
 
