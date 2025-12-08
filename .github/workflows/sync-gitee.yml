@@ -1,11 +1,18 @@
-- name: Sync to Gitee
+name: Sync to Gitee
+on: push: branches: - main workflow_dispatch:
+jobs: sync: runs-on: ubuntu-latest
+steps:
+  - name: Checkout GitHub Repo
+    uses: actions/checkout@v3
+
+  - name: Set Git Config
     run: |
       git config --global user.name "hungryM0"
       git config --global user.email "hungryM0@qq.com"
-      git clone https://oauth2:${Gitee}@gitee.com/hungryM0/fuck-wjx.git gitee-repo
-      cd gitee-repo
-      git remote add github-origin https://github.com/hungryM0/fuck-wjx.git
-      git pull github-origin main
-      git push origin main
+
+  - name: Push to Gitee
     env:
       GITEE_TOKEN: ${{ secrets.Gitee }}
+    run: |
+      git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/hungryM0/fuck-wjx.git
+      git push -f gitee main
