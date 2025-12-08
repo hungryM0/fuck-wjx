@@ -1,6 +1,8 @@
 # fuck-wjx (问卷星速填)
 
-参考了   https://github.com/Zemelee/wjx   的仓库，请不要忘记给这位佬给出一个star⭐
+[English](./README_EN.md) | 简体中文
+
+参考了   https://github.com/Zemelee/wjx   的仓库,请不要忘记给这位佬给出一个star⭐
 
 本项目纯粹就是瞎搞了一些新功能，提供了图形界面用于配置题目分布、权重、填空答案等，用于自动填写问卷星问卷并批量提交（苦逼大学生们有救了哈哈）
 

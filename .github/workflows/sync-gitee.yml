@@ -24,7 +24,7 @@ jobs:
       
       - name: Push to Gitee
         env:
-          GITEE_TOKEN: ${{ secrets.Gitee }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/hungryM0/fuck-wjx.git
           git push -f gitee main
