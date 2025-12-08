@@ -4172,7 +4172,6 @@ class SurveyGUI:
         """打开联系对话框，允许用户发送消息"""
         window = tk.Toplevel(self.root)
         window.title("联系开发者")
-        window.geometry("500x350")
         window.resizable(True, True)
         window.transient(self.root)
 
@@ -4212,7 +4211,7 @@ class SurveyGUI:
 
         # 按钮框架
         button_frame = ttk.Frame(container)
-        button_frame.pack(fill=tk.X)
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(8, 0))
 
         def send_message():
             """发送消息到API"""
@@ -4299,13 +4298,14 @@ class SurveyGUI:
             thread.start()
 
         send_btn = ttk.Button(button_frame, text="发送", command=send_message)
-        send_btn.pack(side=tk.LEFT, padx=(0, 8))
+        send_btn.pack(side=tk.RIGHT, padx=(0, 8))
 
-        ttk.Button(button_frame, text="取消", command=window.destroy).pack(side=tk.LEFT)
+        ttk.Button(button_frame, text="取消", command=window.destroy).pack(side=tk.RIGHT, padx=(0, 8))
 
         status_label = ttk.Label(button_frame, text="", foreground="blue")
         status_label.pack(side=tk.LEFT, padx=(12, 0))
 
+        self._apply_window_scaling(window, base_width=520, base_height=440, min_height=380)
         self._center_child_window(window)
         text_widget.focus_set()
 
@@ -8338,6 +8338,56 @@ class SurveyGUI:
             except Exception:
                 pass
         self.root.destroy()
+
+    def _get_display_scale(self) -> float:
+        """获取显示缩放比例。"""
+        try:
+            # 尝试通过 tkinter 获取 DPI 缩放比例
+            dpi = self.root.winfo_fpixels('1i')
+            return dpi / 96.0  # 96 DPI 是标准值
+        except Exception:
+            return 1.0  # 出错时返回默认值
+
+    def _apply_window_scaling(
+        self,
+        window: Union[tk.Tk, tk.Toplevel],
+        *,
+        base_width: Optional[int] = None,
+        base_height: Optional[int] = None,
+        min_width: Optional[int] = None,
+        min_height: Optional[int] = None,
+    ) -> None:
+        """根据 DPI 缩放窗口尺寸并限制最大值，避免控件溢出。"""
+        try:
+            window.update_idletasks()
+            scale = getattr(self, "_ui_scale", self._get_display_scale())
+            req_w = window.winfo_reqwidth()
+            req_h = window.winfo_reqheight()
+            target_w = req_w
+            target_h = req_h
+            if base_width:
+                target_w = max(target_w, int(base_width * scale))
+            if base_height:
+                target_h = max(target_h, int(base_height * scale))
+            if min_width:
+                target_w = max(target_w, int(min_width * scale))
+            if min_height:
+                target_h = max(target_h, int(min_height * scale))
+
+            screen_w = window.winfo_screenwidth()
+            screen_h = window.winfo_screenheight()
+            max_w = max(320, int(screen_w * 0.95))
+            max_h = max(240, int(screen_h * 0.95))
+            target_w = min(target_w, max_w)
+            target_h = min(target_h, max_h)
+
+            window.geometry(f"{target_w}x{target_h}")
+            try:
+                window.minsize(min(target_w, max_w), min(target_h, max_h))
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _center_child_window(self, window: tk.Toplevel):
         """使指定窗口居中显示。"""
