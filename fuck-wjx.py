@@ -3058,6 +3058,27 @@ def _human_scroll_after_question(driver: BrowserDriver) -> None:
 
 def _click_next_page_button(driver: BrowserDriver) -> bool:
     """尝试点击“下一页”按钮，兼容多种问卷模板。"""
+    # 先尝试解除可能的隐藏/禁用状态
+    try:
+        driver.execute_script(
+            """
+            const candidates = [
+                '#divNext', '#ctlNext', '#btnNext', '#next',
+                '.next', '.next-btn', '.next-button', '.btn-next',
+                'a.button.mainBgColor'
+            ];
+            for (const sel of candidates) {
+                document.querySelectorAll(sel).forEach(el => {
+                    el.style.display = 'block';
+                    el.style.visibility = 'visible';
+                    el.removeAttribute('disabled');
+                    el.classList.remove('hide');
+                });
+            }
+            """
+        )
+    except Exception:
+        pass
     locator_candidates = [
         (By.CSS_SELECTOR, "#divNext"),
         (By.XPATH, '//*[@id="ctlNext"]'),
@@ -3067,6 +3088,10 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
         (By.CSS_SELECTOR, "a.button.mainBgColor"),
         (By.XPATH, "//a[contains(normalize-space(.),'下一页')]"),
         (By.XPATH, "//button[contains(normalize-space(.),'下一页')]"),
+        (By.CSS_SELECTOR, "#btnNext"),
+        (By.CSS_SELECTOR, "[id*='next']"),
+        (By.CSS_SELECTOR, "[class*='next']"),
+        (By.XPATH, "//a[contains(@onclick,'next_page') or contains(@onclick,'nextPage')]"),
     ]
     for by, value in locator_candidates:
         try:
@@ -3102,10 +3127,16 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
             const selectors = [
                 '#divNext',
                 '#ctlNext',
+                '#btnNext',
+                '#next',
                 'a.button.mainBgColor',
                 'a[href=\"javascript:;\"][onclick*=\"show_next_page\"]',
                 'a[href=\"javascript:;\" i]',
                 'a[role=\"button\"]',
+                '.next',
+                '.next-btn',
+                '.next-button',
+                '.btn-next',
                 'button'
             ];
             const textMatch = el => {
@@ -8650,7 +8681,7 @@ class SurveyGUI:
         except Exception as e:
             print(f"保存配置失败: {e}")
 
-    def _apply_config_data(self, config: Dict[str, Any]):
+    def _apply_config_data(self, config: Dict[str, Any], *, restore_paned_position: bool = True):
         """将配置数据应用到界面。"""
         if not isinstance(config, dict):
             raise ValueError("配置文件格式不正确")
@@ -8666,14 +8697,15 @@ class SurveyGUI:
             self._apply_answer_duration_config(config.get("answer_duration_range"))
             self._apply_full_simulation_config(config.get("full_simulation"))
 
-            paned_position = config.get("paned_position")
-            if paned_position is not None:
-                try:
-                    desired_position = int(paned_position)
-                except (TypeError, ValueError):
-                    desired_position = None
-                if desired_position is not None:
-                    self._restore_saved_paned_position(desired_position)
+            if restore_paned_position:
+                paned_position = config.get("paned_position")
+                if paned_position is not None:
+                    try:
+                        desired_position = int(paned_position)
+                    except (TypeError, ValueError):
+                        desired_position = None
+                    if desired_position is not None:
+                        self._restore_saved_paned_position(desired_position)
 
             questions_data = config.get("questions") or []
             self.question_entries.clear()
@@ -8756,11 +8788,11 @@ class SurveyGUI:
         else:
             self._update_full_sim_time_section_visibility()
 
-    def _load_config_from_file(self, file_path: str, *, silent: bool = False):
+    def _load_config_from_file(self, file_path: str, *, silent: bool = False, restore_paned_position: bool = True):
         """从指定路径加载配置。"""
         with open(file_path, "r", encoding="utf-8") as f:
             config = json.load(f)
-        self._apply_config_data(config)
+        self._apply_config_data(config, restore_paned_position=restore_paned_position)
         if not silent:
             print(f"已加载配置：{os.path.basename(file_path)}")
 
@@ -8783,7 +8815,7 @@ class SurveyGUI:
             return
 
         try:
-            self._load_config_from_file(config_path, silent=True)
+            self._load_config_from_file(config_path, silent=True, restore_paned_position=True)
             print(f"已加载上次配置：{len(self.question_entries)} 道题目")
         except Exception as e:
             print(f"加载配置失败: {e}")
@@ -8824,7 +8856,7 @@ class SurveyGUI:
         if not file_path:
             return
         try:
-            self._load_config_from_file(file_path)
+            self._load_config_from_file(file_path, restore_paned_position=False)
             self._log_popup_info("加载配置", f"已加载配置:\n{file_path}")
         except Exception as exc:
             logging.error(f"加载配置失败: {exc}")
