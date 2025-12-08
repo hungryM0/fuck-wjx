@@ -3056,6 +3056,179 @@ def _human_scroll_after_question(driver: BrowserDriver) -> None:
         pass
 
 
+def _click_next_page_button(driver: BrowserDriver) -> bool:
+    """尝试点击“下一页”按钮，兼容多种问卷模板。"""
+    locator_candidates = [
+        (By.CSS_SELECTOR, "#divNext"),
+        (By.XPATH, '//*[@id="ctlNext"]'),
+        (By.CSS_SELECTOR, "a.button.mainBgColor[onclick*='show_next_page']"),
+        (By.XPATH, "//a[contains(@class,'button') and contains(@class,'mainBgColor') and contains(@onclick,'show_next_page')]"),
+        (By.XPATH, "//a[contains(@class,'button') and contains(@class,'mainBgColor') and contains(normalize-space(text()),'下一页')]"),
+        (By.CSS_SELECTOR, "a.button.mainBgColor"),
+        (By.XPATH, "//a[contains(normalize-space(.),'下一页')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'下一页')]"),
+    ]
+    for by, value in locator_candidates:
+        try:
+            elements = driver.find_elements(by, value)
+        except Exception:
+            continue
+        for element in elements:
+            try:
+                if not element.is_displayed():
+                    continue
+            except Exception:
+                continue
+            text = _extract_text_from_element(element)
+            if text and all(keyword not in text for keyword in ("下一页", "下一步", "下一题", "下一")):
+                continue
+            try:
+                _smooth_scroll_to_element(driver, element, 'center')
+            except Exception:
+                pass
+            for click_method in (
+                lambda: element.click(),
+                lambda: driver.execute_script("arguments[0].click();", element),
+            ):
+                try:
+                    click_method()
+                    return True
+                except Exception:
+                    continue
+    # 最后尝试 JS 执行：直接找常见选择器、触发点击或调用内置翻页函数
+    try:
+        executed = driver.execute_script(
+            """
+            const selectors = [
+                '#divNext',
+                '#ctlNext',
+                'a.button.mainBgColor',
+                'a[href=\"javascript:;\"][onclick*=\"show_next_page\"]',
+                'a[href=\"javascript:;\" i]',
+                'a[role=\"button\"]',
+                'button'
+            ];
+            const textMatch = el => {
+                const t = (el.innerText || el.textContent || '').trim();
+                return /下一页|下一步|下一题/.test(t);
+            };
+            for (const sel of selectors) {
+                const elList = Array.from(document.querySelectorAll(sel));
+                for (const el of elList) {
+                    if (!textMatch(el)) continue;
+                    try { el.scrollIntoView({block:'center'}); } catch(_) {}
+                    try { el.click(); return true; } catch(_) {}
+                    try {
+                        el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, composed:true}));
+                        return true;
+                    } catch(_) {}
+                }
+            }
+            if (typeof show_next_page === 'function') { show_next_page(); return true; }
+            if (typeof next_page === 'function') { next_page(); return true; }
+            if (typeof nextPage === 'function') { nextPage(); return true; }
+            return false;
+            """
+        )
+        if executed:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _click_submit_button(driver: BrowserDriver) -> bool:
+    """尝试点击“提交”按钮，兼容多种问卷模板。"""
+    locator_candidates = [
+        (By.CSS_SELECTOR, "#submit_button"),
+        (By.CSS_SELECTOR, "#divSubmit"),
+        (By.CSS_SELECTOR, "#ctlNext"),
+        (By.CSS_SELECTOR, "#SM_BTN_1"),
+        (By.XPATH, "//a[contains(@onclick,'submit') or contains(@onclick,'Submit')]"),
+        (By.XPATH, "//button[contains(@onclick,'submit') or contains(@onclick,'Submit')]"),
+        (By.XPATH, "//a[contains(normalize-space(.),'提交')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'提交')]"),
+        (By.XPATH, "//a[contains(normalize-space(.),'完成')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'完成')]"),
+        (By.XPATH, "//a[contains(normalize-space(.),'交卷')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'交卷')]"),
+    ]
+    for by, value in locator_candidates:
+        try:
+            elements = driver.find_elements(by, value)
+        except Exception:
+            continue
+        for element in elements:
+            try:
+                if not element.is_displayed():
+                    continue
+            except Exception:
+                continue
+            text = _extract_text_from_element(element)
+            if text and all(k not in text for k in ("提交", "完成", "交卷", "确认", "确定")):
+                # 如果文本里没这些关键字，尝试依赖 onclick 的元素照样点击
+                if not element.get_attribute("onclick"):
+                    continue
+            try:
+                _smooth_scroll_to_element(driver, element, 'center')
+            except Exception:
+                pass
+            for click_method in (
+                lambda: element.click(),
+                lambda: driver.execute_script("arguments[0].click();", element),
+            ):
+                try:
+                    click_method()
+                    return True
+                except Exception:
+                    continue
+    # JS 兜底：通过选择器和文本匹配点击，或调用全局提交函数
+    try:
+        executed = driver.execute_script(
+            """
+            const selectors = [
+                '#submit_button',
+                '#divSubmit',
+                '#ctlNext',
+                '#SM_BTN_1',
+                'a.button.mainBgColor',
+                'a.button',
+                'button[type=\"submit\"]',
+                'button',
+                'a[href=\"javascript:;\" i]'
+            ];
+            const matchText = el => {
+                const t = (el.innerText || el.textContent || '').trim();
+                return /(提交|完成|交卷|确认提交)/.test(t);
+            };
+            for (const sel of selectors) {
+                const elList = Array.from(document.querySelectorAll(sel));
+                for (const el of elList) {
+                    if (!matchText(el)) continue;
+                    try { el.scrollIntoView({block:'center'}); } catch(_) {}
+                    try { el.click(); return true; } catch(_) {}
+                    try {
+                        el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, composed:true}));
+                        return true;
+                    } catch(_) {}
+                }
+            }
+            const fnNames = ['submit_survey','submitSurvey','wjxwpr_submit','doSubmit','submit','Submit','save','Save'];
+            for (const name of fnNames) {
+                if (typeof window[name] === 'function') {
+                    try { window[name](); return true; } catch(_) {}
+                }
+            }
+            return false;
+            """
+        )
+        if executed:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _sleep_with_stop(stop_signal: Optional[threading.Event], seconds: float) -> bool:
     """带停止信号的睡眠，返回 True 表示被中断。"""
     if seconds <= 0:
@@ -3163,17 +3336,16 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 return False
             if _abort_requested():
                 return False
-        try:
-            driver.find_element(By.CSS_SELECTOR, "#divNext").click()
-            click_delay = 0.0 if fast_mode else 0.5
-            if click_delay > 0:
-                if active_stop:
-                    if active_stop.wait(click_delay):
-                        return False
-                else:
-                    time.sleep(click_delay)
-        except:
-            driver.find_element(By.XPATH, '//*[@id="ctlNext"]').click()
+        clicked = _click_next_page_button(driver)
+        if not clicked:
+            raise NoSuchElementException("Next page button not found")
+        click_delay = 0.0 if fast_mode else 0.5
+        if click_delay > 0:
+            if active_stop:
+                if active_stop.wait(click_delay):
+                    return False
+            else:
+                time.sleep(click_delay)
     if _abort_requested():
         return False
     submit(driver, stop_signal=active_stop)
@@ -3187,18 +3359,24 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
     last_submit_had_captcha = False
 
     def _click_submit_buttons():
+        clicked = False
         try:
             driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
+            clicked = True
             if settle_delay > 0:
                 time.sleep(settle_delay)
-        except:
+        except Exception:
             pass
         try:
             driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]').click()
+            clicked = True
             if settle_delay > 0:
                 time.sleep(settle_delay)
-        except:
+        except Exception:
             pass
+        if not clicked:
+            clicked = _click_submit_button(driver)
+        return clicked
 
     def _click_security_confirm_dialog():
         """点击"需要安全校验，请重新提交！"弹窗的确认按钮。"""
@@ -3971,12 +4149,24 @@ class SurveyGUI:
         container.pack(fill=tk.BOTH, expand=True)
 
         # 邮箱输入框
-        ttk.Label(container, text="您的邮箱（选填，如果希望收到回复的话）：", font=("SimHei", 10)).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Label(container, text="您的邮箱（选填，如果希望收到回复的话）：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
         email_var = tk.StringVar()
-        email_entry = ttk.Entry(container, textvariable=email_var, font=("SimHei", 10))
+        email_entry = ttk.Entry(container, textvariable=email_var, font=("Microsoft YaHei", 10))
         email_entry.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Label(container, text="请输入您的消息：", font=("SimHei", 10)).pack(anchor=tk.W, pady=(0, 5))
+        # 消息类型下拉框
+        ttk.Label(container, text="消息类型：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
+        message_type_var = tk.StringVar(value="报错反馈")
+        message_type_combo = ttk.Combobox(
+            container, 
+            textvariable=message_type_var, 
+            values=["报错反馈", "新功能建议", "纯聊天"],
+            state="readonly",
+            font=("Microsoft YaHei", 10)
+        )
+        message_type_combo.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(container, text="请输入您的消息：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
 
         # 创建文本框
         text_frame = ttk.Frame(container)
@@ -3985,7 +4175,7 @@ class SurveyGUI:
         scrollbar = ttk.Scrollbar(text_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("SimHei", 10), height=8)
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("Microsoft YaHei", 10), height=8)
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=text_widget.yview)
 
@@ -3997,6 +4187,7 @@ class SurveyGUI:
             """发送消息到API"""
             message_content = text_widget.get("1.0", tk.END).strip()
             email = email_var.get().strip()
+            message_type = message_type_var.get()
             
             if not message_content:
                 messagebox.showwarning("提示", "请输入消息内容", parent=window)
@@ -4020,6 +4211,7 @@ class SurveyGUI:
                 version = "unknown"
             
             full_message = f"来源：fuck-wjx v{version}\n"
+            full_message += f"类型：{message_type}\n"
             if email:
                 full_message += f"联系邮箱：{email}\n"
             full_message += f"消息：{message_content}"
@@ -4787,7 +4979,7 @@ class SurveyGUI:
             return
         running = bool(getattr(self, "_proxy_health_check_running", False))
         state = tk.DISABLED if running else tk.NORMAL
-        text = "验活中..." if running else "IP地址验活"
+        text = "验活中..." if running else "检测 IP 池可用性"
         try:
             button.configure(state=state, text=text)
         except Exception:
@@ -5181,7 +5373,7 @@ class SurveyGUI:
         ua_options_inner.grid(row=0, column=1, sticky="w")
         ua_option_widgets: List[tk.Widget] = []
         ua_options_list = [
-            ("电脑网页端", self.random_ua_pc_web_var),
+            ("Windows网页端", self.random_ua_pc_web_var),
             ("安卓微信端", self.random_ua_android_wechat_var),
             ("苹果微信端", self.random_ua_ios_wechat_var),
             ("iPad微信端", self.random_ua_ipad_wechat_var),
@@ -5214,9 +5406,9 @@ class SurveyGUI:
         self._settings_window_widgets.append(proxy_toggle)
         proxy_health_button = ttk.Button(
             proxy_row,
-            text="IP地址验活",
+            text="检测 IP 池可用性",
             command=self._on_check_random_ip_health,
-            width=12,
+            width=15,
         )
         proxy_health_button.pack(side=tk.LEFT, padx=(12, 0))
         self._proxy_health_button = proxy_health_button
@@ -6723,10 +6915,12 @@ class SurveyGUI:
                 
                 if page_idx < len(questions_per_page):
                     try:
-                        next_button = driver.find_element(By.CSS_SELECTOR, "#divNext")
-                        next_button.click()
-                        time.sleep(1.5)
-                        print(f"已翻页到第{page_idx + 1}页")
+                        clicked = _click_next_page_button(driver)
+                        if clicked:
+                            time.sleep(1.5)
+                            print(f"已翻页到第{page_idx + 1}页")
+                        else:
+                            print("翻页失败: 未找到“下一页”按钮")
                     except Exception as e:
                         print(f"翻页失败: {e}")
             
