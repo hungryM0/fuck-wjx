@@ -102,7 +102,7 @@ PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "https://bilibili.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
 PROXY_HEALTH_CHECK_MAX_DURATION = 45
-PROXY_REMOTE_URL = "https://hungrym0.top/ips.txt"
+PROXY_REMOTE_URL = "https://service.ipzan.com/core-extract?num=1&no=20251209063007602516&minute=1&format=json&protocol=1&pool=quality&mode=auth&secret=reuoen35jvep3go"
 
 # ==================== 地理位置配置 ====================
 _GAODE_GEOCODE_ENDPOINT = "https://restapi.amap.com/v3/geocode/geo"

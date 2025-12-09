@@ -463,18 +463,63 @@ def _load_proxy_ip_pool() -> List[str]:
     try:
         response = requests.get(proxy_url, headers=DEFAULT_HTTP_HEADERS, timeout=12)
         response.raise_for_status()
-        raw_text = response.text
     except Exception as exc:
         raise OSError(f"获取远程代理列表失败：{exc}") from exc
 
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise ValueError(f"远程代理接口返回格式错误（期望 JSON）：{exc}") from exc
+
+    proxy_items: List[Dict[str, Any]] = []
+    if isinstance(payload, dict):
+        error_code = payload.get("code")
+        status_code = payload.get("status")
+        if isinstance(error_code, str) and error_code.isdigit():
+            error_code = int(error_code)
+        if isinstance(status_code, str) and status_code.isdigit():
+            status_code = int(status_code)
+        if not isinstance(error_code, int):
+            raise ValueError("远程代理接口缺少 code 字段或格式不正确")
+        if error_code != 0:
+            message = payload.get("message") or payload.get("msg") or "未知错误"
+            status_hint = f"，status={status_code}" if status_code is not None else ""
+            raise ValueError(f"远程代理接口返回错误：{message}（code={error_code}{status_hint}）")
+        data_section = payload.get("data")
+        if isinstance(data_section, dict):
+            proxy_items = data_section.get("list") or []
+        if not proxy_items:
+            proxy_items = payload.get("list") or payload.get("proxies") or []
+    if not isinstance(proxy_items, list):
+        proxy_items = []
+
     proxies: List[str] = []
     seen: Set[str] = set()
-    for line in raw_text.splitlines():
-        candidate = _parse_proxy_line(line)
-        if not candidate:
+    for item in proxy_items:
+        if not isinstance(item, dict):
             continue
-        if "://" not in candidate:
-            candidate = f"http://{candidate}"
+        host = str(item.get("ip") or item.get("host") or "").strip()
+        port = str(item.get("port") or "").strip()
+        if not host or not port:
+            continue
+        try:
+            int(port)
+        except ValueError:
+            continue
+        expired = item.get("expired")
+        if isinstance(expired, str) and expired.isdigit():
+            try:
+                expired = int(expired)
+            except Exception:
+                expired = None
+        if isinstance(expired, (int, float)):
+            now_ms = int(time.time() * 1000)
+            if expired <= now_ms:
+                continue
+        username = str(item.get("account") or item.get("username") or "").strip()
+        password = str(item.get("password") or item.get("pwd") or "").strip()
+        auth_prefix = f"{username}:{password}@" if username and password else ""
+        candidate = f"http://{auth_prefix}{host}:{port}"
         scheme = candidate.split("://", 1)[0].lower()
         if scheme not in ("http", "https"):
             continue
@@ -487,6 +532,27 @@ def _load_proxy_ip_pool() -> List[str]:
     random.shuffle(proxies)
     if len(proxies) > PROXY_MAX_PROXIES:
         proxies = proxies[:PROXY_MAX_PROXIES]
+    return proxies
+
+
+def _fetch_new_proxy_batch(expected_count: int = 1) -> List[str]:
+    try:
+        expected = int(expected_count)
+    except Exception:
+        expected = 1
+    expected = max(1, expected)
+    proxies: List[str] = []
+    # 多尝试几次，尽量拿到足够数量的 IP
+    attempts = max(2, expected)
+    for _ in range(attempts):
+        batch = _load_proxy_ip_pool()
+        for proxy in batch:
+            if proxy not in proxies:
+                proxies.append(proxy)
+                if len(proxies) >= expected:
+                    break
+        if len(proxies) >= expected:
+            break
     return proxies
 
 
@@ -771,8 +837,24 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
                 launch_args["args"] = [f"--window-position={x},{y}"]
             browser_instance = pw.chromium.launch(**launch_args)
             context_args: Dict[str, Any] = {}
+            proxy_for_logging = normalized_proxy
             if normalized_proxy:
-                context_args["proxy"] = {"server": normalized_proxy}
+                proxy_settings: Dict[str, Any] = {"server": normalized_proxy}
+                try:
+                    parsed = urlparse(normalized_proxy)
+                    if parsed.scheme and parsed.hostname:
+                        server = f"{parsed.scheme}://{parsed.hostname}"
+                        if parsed.port:
+                            server += f":{parsed.port}"
+                        proxy_settings["server"] = server
+                        proxy_for_logging = server
+                    if parsed.username:
+                        proxy_settings["username"] = parsed.username
+                    if parsed.password:
+                        proxy_settings["password"] = parsed.password
+                except Exception:
+                    proxy_for_logging = normalized_proxy
+                context_args["proxy"] = proxy_settings
             if user_agent:
                 context_args["user_agent"] = user_agent
             if headless and HEADLESS_WINDOW_SIZE:
@@ -804,7 +886,7 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
             logging.debug(f"[Action Log] 捕获浏览器 PID: {sorted(collected_pids) if collected_pids else '无'}")
             logging.info(f"使用 {browser} Playwright 浏览器")
             if normalized_proxy:
-                logging.info(f"当前浏览器将使用代理：{normalized_proxy}")
+                logging.info(f"当前浏览器将使用代理：{proxy_for_logging}")
             return driver, browser
         except Exception as exc:
             last_exc = exc
@@ -3621,9 +3703,27 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
 def _select_proxy_for_session() -> Optional[str]:
     if not random_proxy_ip_enabled:
         return None
-    if not proxy_ip_pool:
+    candidate: Optional[str] = None
+    with lock:
+        if proxy_ip_pool:
+            candidate = proxy_ip_pool.pop(0)
+    if candidate:
+        return candidate
+    try:
+        fetched = _fetch_new_proxy_batch(expected_count=1)
+    except Exception as exc:
+        logging.warning(f"获取随机代理失败：{exc}")
         return None
-    return random.choice(proxy_ip_pool)
+    if not fetched:
+        return None
+    # 将多余的缓存起来，避免并发重复调用
+    extra = fetched[1:]
+    if extra:
+        with lock:
+            for proxy in extra:
+                if proxy not in proxy_ip_pool:
+                    proxy_ip_pool.append(proxy)
+    return fetched[0]
 
 
 def _select_user_agent_for_session() -> Tuple[Optional[str], Optional[str]]:
@@ -4724,20 +4824,28 @@ class SurveyGUI:
         thread_inc_button.grid(row=0, column=2, padx=(2, 0))
         self._main_parameter_widgets.extend([thread_dec_button, thread_entry, thread_inc_button])
 
-        thread_hint_frame = ttk.Frame(step3_frame)
-        thread_hint_frame.pack(fill=tk.X, padx=4, pady=(6, 4))
-        thread_hint_box = tk.Frame(thread_hint_frame, bg="#fff8e1", bd=1, relief="solid")
-        thread_hint_box.pack(fill=tk.X, expand=True)
-        self._thread_hint_label = ttk.Label(
-            thread_hint_box,
-            text="  💡建议在“设置”中开启全真模拟，降低触发人机验证的概率",
-            foreground="#6d4c00",
-            font=("Segoe UI", 9),
-            wraplength=520,
-            justify="left"
+        proxy_control_frame = ttk.Frame(step3_frame)
+        proxy_control_frame.pack(fill=tk.X, padx=4, pady=(6, 4))
+        random_ip_toggle = ttk.Checkbutton(
+            proxy_control_frame,
+            text="启用随机 IP 提交",
+            variable=self.random_ip_enabled_var,
+            command=self._on_random_ip_toggle,
         )
-        self._thread_hint_label.pack(anchor="w", padx=8, pady=6)
-        thread_hint_frame.bind("<Configure>", lambda e: self._thread_hint_label.configure(wraplength=max(180, e.width - 30)))
+        random_ip_toggle.pack(side=tk.LEFT, padx=(0, 10))
+        self._random_ip_toggle_widget = random_ip_toggle
+        self._main_parameter_widgets.append(random_ip_toggle)
+
+        proxy_health_button = ttk.Button(
+            proxy_control_frame,
+            text="检测 IP 池可用性",
+            command=self._on_check_random_ip_health,
+            width=15,
+        )
+        proxy_health_button.pack(side=tk.LEFT, padx=(0, 8))
+        self._proxy_health_button = proxy_health_button
+        self._main_parameter_widgets.append(proxy_health_button)
+        self._apply_proxy_health_button_state()
 
         
         # 高级选项：手动配置（始终显示）
@@ -5348,7 +5456,6 @@ class SurveyGUI:
         self._settings_window_widgets = []
         self._random_ua_option_widgets = []
         self._random_ua_toggle_widget = None
-        self._random_ip_toggle_widget = None
         self._full_sim_status_label = None
 
         def _on_close():
@@ -5357,9 +5464,7 @@ class SurveyGUI:
                 self._settings_window_widgets = []
                 self._random_ua_option_widgets = []
                 self._random_ua_toggle_widget = None
-                self._random_ip_toggle_widget = None
                 self._full_sim_status_label = None
-                self._proxy_health_button = None
             try:
                 window.destroy()
             except Exception:
@@ -5423,28 +5528,6 @@ class SurveyGUI:
             ua_option_widgets.append(cb)
         self._random_ua_option_widgets.extend(ua_option_widgets)
         self._settings_window_widgets.extend(ua_option_widgets)
-
-        proxy_row = ttk.Frame(proxy_frame)
-        proxy_row.pack(fill=tk.X, pady=(10, 0))
-        proxy_toggle = ttk.Checkbutton(
-            proxy_row,
-            text="启用随机 IP 提交",
-            variable=self.random_ip_enabled_var,
-            command=self._on_random_ip_toggle,
-        )
-        proxy_toggle.pack(side=tk.LEFT)
-        self._random_ip_toggle_widget = proxy_toggle
-        self._settings_window_widgets.append(proxy_toggle)
-        proxy_health_button = ttk.Button(
-            proxy_row,
-            text="检测 IP 池可用性",
-            command=self._on_check_random_ip_health,
-            width=15,
-        )
-        proxy_health_button.pack(side=tk.LEFT, padx=(12, 0))
-        self._proxy_health_button = proxy_health_button
-        self._settings_window_widgets.append(proxy_health_button)
-        self._apply_proxy_health_button_state()
 
         button_frame = ttk.Frame(content)
         button_frame.pack(fill=tk.X, pady=(18, 0))
@@ -7959,7 +8042,12 @@ class SurveyGUI:
         if getattr(self, "_closing", False):
             return
         try:
-            proxy_pool = _load_proxy_ip_pool()
+            try:
+                need_count = int(ctx.get("threads_count") or 1)
+            except Exception:
+                need_count = 1
+            need_count = max(1, need_count)
+            proxy_pool = _fetch_new_proxy_batch(expected_count=need_count)
         except (OSError, ValueError, RuntimeError) as exc:
             self.root.after(0, lambda: self._on_proxy_load_failed(str(exc)))
             return
@@ -7986,7 +8074,7 @@ class SurveyGUI:
         random_ua_flag = bool(ctx.get("random_ua_flag"))
         random_ua_keys_list = ctx.get("random_ua_keys_list", [])
         if random_proxy_flag:
-            logging.info(f"[Action Log] 启用随机代理 IP，共 {len(proxy_pool)} 条（{PROXY_REMOTE_URL}）")
+            logging.info(f"[Action Log] 启用随机代理 IP（每个浏览器独立分配），已预取 {len(proxy_pool)} 条（{PROXY_REMOTE_URL}）")
         try:
             configure_probabilities(self.question_entries)
         except ValueError as exc:
@@ -8138,9 +8226,51 @@ class SurveyGUI:
                 self.progress_bar['value'] = progress
                 self.progress_label.config(text=f"{progress}%")
 
-    def _async_stop_cleanup(self, drivers_snapshot: List[BrowserDriver], worker_threads_snapshot: List[Thread], browser_pids_snapshot: Set[int]):
+    def _start_stop_cleanup_with_grace(
+        self,
+        drivers_snapshot: List[BrowserDriver],
+        worker_threads_snapshot: List[Thread],
+        browser_pids_snapshot: Set[int],
+    ):
+        """手动停止时先给线程一次“达标式”软退出机会，减少卡顿，再视情况强制清理。"""
+
+        def _runner():
+            # 先模仿达到目标份数时的收尾，等待线程自行退出
+            soft_wait_seconds = max(3.0, STOP_FORCE_WAIT_SECONDS * 2)
+            deadline = time.time() + soft_wait_seconds
+            try:
+                while time.time() < deadline:
+                    alive_threads = [t for t in worker_threads_snapshot if t.is_alive()]
+                    if not alive_threads:
+                        if not browser_pids_snapshot:
+                            logging.info("[Stop] 线程已自然退出，无需强制清理")
+                            self._stop_cleanup_thread_running = False
+                            return
+                        break
+                    time.sleep(0.12)
+            except Exception:
+                logging.debug("停止预等待阶段异常，继续执行强制清理", exc_info=True)
+
+            # 若仍有线程或可能残留的浏览器进程，再进入原有的强制清理流程
+            self._async_stop_cleanup(
+                drivers_snapshot,
+                worker_threads_snapshot,
+                browser_pids_snapshot,
+                wait_for_threads=False,
+            )
+
+        Thread(target=_runner, daemon=True).start()
+
+    def _async_stop_cleanup(
+        self,
+        drivers_snapshot: List[BrowserDriver],
+        worker_threads_snapshot: List[Thread],
+        browser_pids_snapshot: Set[int],
+        *,
+        wait_for_threads: bool = True,
+    ):
         """在后台线程中执行分阶段停止，先温和关闭，再必要时强杀，避免主线程卡顿。"""
-        deadline = time.time() + STOP_FORCE_WAIT_SECONDS
+        deadline = time.time() + (STOP_FORCE_WAIT_SECONDS if wait_for_threads else 0)
         logging.info(f"[Stop] 后台清理启动: drivers={len(drivers_snapshot)} threads={len(worker_threads_snapshot)} pids={len(browser_pids_snapshot)}")
         try:
             for driver in drivers_snapshot:
@@ -8149,11 +8279,12 @@ class SurveyGUI:
                 except Exception:
                     logging.debug("停止时关闭浏览器实例失败", exc_info=True)
             # 先等待线程退出，再按需清理进程，避免过早强杀导致抖动
-            while time.time() < deadline:
-                alive = [t for t in worker_threads_snapshot if t.is_alive()]
-                if not alive:
-                    break
-                time.sleep(0.1)
+            if wait_for_threads:
+                while time.time() < deadline:
+                    alive = [t for t in worker_threads_snapshot if t.is_alive()]
+                    if not alive:
+                        break
+                    time.sleep(0.1)
             alive_threads = [t for t in worker_threads_snapshot if t.is_alive()]
             killed = 0
             if alive_threads or browser_pids_snapshot:
@@ -8202,11 +8333,7 @@ class SurveyGUI:
         self._launched_browser_pids.clear()
         if not self._stop_cleanup_thread_running:
             self._stop_cleanup_thread_running = True
-            Thread(
-                target=self._async_stop_cleanup,
-                args=(drivers_snapshot, worker_threads_snapshot, browser_pids_snapshot),
-                daemon=True,
-            ).start()
+            self._start_stop_cleanup_with_grace(drivers_snapshot, worker_threads_snapshot, browser_pids_snapshot)
         if self._auto_exit_on_stop:
             # 清理线程启动后快速退出，规避 Tk 主线程后续卡顿
             self.root.after(150, self._exit_app)
