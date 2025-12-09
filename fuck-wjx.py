@@ -4285,7 +4285,7 @@ class SurveyGUI:
         email_entry.pack(fill=tk.X, pady=(0, 10))
 
         # 消息类型下拉框
-        ttk.Label(container, text="消息类型：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Label(container, text="消息类型（可选）：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
         message_type_var = tk.StringVar(value="报错反馈")
         message_type_combo = ttk.Combobox(
             container, 
@@ -4494,7 +4494,7 @@ class SurveyGUI:
         self._default_paned_position_applied = False
         self._paned_configure_binding: Optional[str] = None
         self._qq_group_window: Optional[tk.Toplevel] = None
-        self._proxy_health_cancel_event = threading.Event()
+
         self._closing = False
         self._qq_group_photo: Optional[ImageTk.PhotoImage] = None
         self._qq_group_image_path: Optional[str] = None
@@ -4512,8 +4512,7 @@ class SurveyGUI:
         self._random_ua_option_widgets: List[tk.Widget] = []
         self._full_simulation_window: Optional[tk.Toplevel] = None
         self._full_sim_status_label: Optional[ttk.Label] = None
-        self._proxy_health_button: Optional[ttk.Button] = None
-        self._proxy_health_check_running = False
+
         self._archived_notice_shown = False
         self._random_ip_disclaimer_ack = False
         self._suspend_random_ip_notice = False
@@ -4836,16 +4835,7 @@ class SurveyGUI:
         self._random_ip_toggle_widget = random_ip_toggle
         self._main_parameter_widgets.append(random_ip_toggle)
 
-        proxy_health_button = ttk.Button(
-            proxy_control_frame,
-            text="检测 IP 池可用性",
-            command=self._on_check_random_ip_health,
-            width=15,
-        )
-        proxy_health_button.pack(side=tk.LEFT, padx=(0, 8))
-        self._proxy_health_button = proxy_health_button
-        self._main_parameter_widgets.append(proxy_health_button)
-        self._apply_proxy_health_button_state()
+
 
         
         # 高级选项：手动配置（始终显示）
@@ -5109,24 +5099,7 @@ class SurveyGUI:
                         widget["state"] = desired_state
                 except Exception:
                     continue
-        self._apply_proxy_health_button_state()
         self._apply_random_ua_widgets_state()
-
-    def _apply_proxy_health_button_state(self):
-        button = getattr(self, "_proxy_health_button", None)
-        if not button or not button.winfo_exists():
-            return
-        running = bool(getattr(self, "_proxy_health_check_running", False))
-        state = tk.DISABLED if running else tk.NORMAL
-        text = "验活中..." if running else "检测 IP 池可用性"
-        try:
-            button.configure(state=state, text=text)
-        except Exception:
-            try:
-                button["state"] = state
-                button["text"] = text
-            except Exception:
-                pass
 
     def _apply_random_ua_widgets_state(self):
         option_widgets = getattr(self, "_random_ua_option_widgets", [])
@@ -5270,122 +5243,6 @@ class SurveyGUI:
     def _on_main_target_changed(self, *_):
         self._mark_config_changed()
         self._auto_update_full_simulation_times()
-
-    def _on_check_random_ip_health(self):
-        if self._proxy_health_check_running:
-            return
-        if not self.random_ip_enabled_var.get():
-            self._log_popup_error("随机 IP 未开启", "请先勾选“随机IP填写”后再执行验活。")
-            return
-        if requests is None:
-            self._log_popup_error("IP地址验活失败", "requests 模块不可用，无法执行验活。")
-            return
-        self._proxy_health_check_running = True
-        self._apply_proxy_health_button_state()
-        cancel_evt = getattr(self, "_proxy_health_cancel_event", None)
-        if cancel_evt:
-            cancel_evt.clear()
-        started_at = time.perf_counter()
-        self.root.after(
-            int(PROXY_HEALTH_CHECK_MAX_DURATION * 1000),
-            lambda: self._abort_proxy_health_if_stuck(started_at),
-        )
-
-        def worker():
-            start_ts = time.perf_counter()
-            result: Dict[str, Any] = {
-                "error": None,
-                "total": 0,
-                "healthy": 0,
-                "examples": [],
-            }
-            try:
-                if cancel_evt and cancel_evt.is_set():
-                    return
-                proxies = _load_proxy_ip_pool()
-                if cancel_evt and cancel_evt.is_set():
-                    return
-                total = len(proxies)
-                result["total"] = total
-                if proxies:
-                    max_workers = min(10, max(1, os.cpu_count() or 1), total)
-                    healthy_ips: List[str] = []
-                    logging.info(f"[Action Log] 开始检测 {total} 条代理 IP（并发 {max_workers}）")
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        future_map = {executor.submit(_proxy_is_responsive, proxy): proxy for proxy in proxies}
-                        for future in as_completed(future_map):
-                            if cancel_evt and cancel_evt.is_set():
-                                break
-                            proxy = future_map[future]
-                            try:
-                                if future.result():
-                                    healthy_ips.append(proxy)
-                            except Exception as exc:
-                                logging.warning(f"代理 {proxy} 验活过程中出现异常：{exc}")
-                    result["healthy"] = len(healthy_ips)
-                    result["examples"] = healthy_ips[:5]
-                else:
-                    result["error"] = "代理列表为空。"
-            except (OSError, ValueError, RuntimeError) as exc:
-                result["error"] = str(exc)
-            except Exception as exc:
-                logging.exception("执行代理 IP 验活时出现异常")
-                result["error"] = f"代理验活失败：{exc}"
-            elapsed = time.perf_counter() - start_ts
-
-            def finish():
-                if cancel_evt and cancel_evt.is_set():
-                    self._proxy_health_check_running = False
-                    self._apply_proxy_health_button_state()
-                    return
-                self._proxy_health_check_running = False
-                self._apply_proxy_health_button_state()
-                error_message = result.get("error")
-                if error_message:
-                    self._log_popup_error("IP地址验活失败", error_message)
-                    return
-                total = int(result.get("total") or 0)
-                healthy = int(result.get("healthy") or 0)
-                failed = max(0, total - healthy)
-                examples: List[str] = list(result.get("examples") or [])
-                message_lines = [
-                    f"共获取 {total} 条代理。",
-                    f"通过验活：{healthy} 条，失败：{failed} 条。",
-                    f"耗时：{elapsed:.1f} 秒。",
-                ]
-                if examples:
-                    message_lines.append("")
-                    message_lines.append("可用 IP 示例：")
-                    message_lines.extend(examples)
-                else:
-                    message_lines.append("")
-                    message_lines.append("未检测到可用代理，请稍后重试。")
-                logging.info(f"[Action Log] 代理 IP 验活完成：{healthy}/{total} 条可用，耗时 {elapsed:.2f} 秒")
-                self._log_popup_info("IP地址验活完成", "\n".join(message_lines))
-
-            try:
-                self.root.after(0, finish)
-            except Exception:
-                finish()
-
-        Thread(target=worker, daemon=True).start()
-
-    def _abort_proxy_health_if_stuck(self, started_at: float):
-        if not getattr(self, "_proxy_health_check_running", False):
-            return
-        if time.perf_counter() - started_at < PROXY_HEALTH_CHECK_MAX_DURATION:
-            return
-        self._proxy_health_check_running = False
-        self._apply_proxy_health_button_state()
-        self._log_popup_error("IP地址验活失败", "验活超时，请稍后重试或减少代理数量。")
-
-    def _stop_proxy_health_if_running(self):
-        if getattr(self, "_proxy_health_check_running", False):
-            self._proxy_health_check_running = False
-            self._apply_proxy_health_button_state()
-        cancel_evt = getattr(self, "_proxy_health_cancel_event", None)
-        if cancel_evt:
-            cancel_evt.set()
 
     def _on_full_simulation_toggle(self, *args):
         if self.full_simulation_enabled_var.get() and not self.full_sim_target_var.get().strip():
@@ -8322,9 +8179,6 @@ class SurveyGUI:
                 pass
             self._log_refresh_job = None
 
-        # 取消可能在跑的代理验活，避免额外线程干扰停止流程
-        self._stop_proxy_health_if_running()
-
         # 在后台线程里关闭浏览器并清理 Playwright 进程，避免阻塞主线程
         drivers_snapshot = list(self.active_drivers)
         worker_threads_snapshot = list(self.worker_threads)
@@ -8343,7 +8197,6 @@ class SurveyGUI:
 
     def on_close(self):
         self._closing = True
-        self._stop_proxy_health_if_running()
         # 停止日志刷新
         if self._log_refresh_job:
             try:
