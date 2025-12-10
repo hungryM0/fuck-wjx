@@ -9,3 +9,4 @@ desktop.ini
 ips.txt
 build/
 dist/
+registry_manager.py

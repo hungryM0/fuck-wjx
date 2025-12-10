@@ -45,6 +45,8 @@ except ImportError:
 
 # 导入版本号及相关常量
 from version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, GITHUB_API_URL, ISSUE_FEEDBACK_URL
+# 导入注册表管理器
+from registry_manager import RegistryManager
 # 导入配置常量
 from config import (
     USER_AGENT_PRESETS,
@@ -89,73 +91,6 @@ from config import (
     _CHINESE_MULTI_LIMIT_PATTERNS,
     _ENGLISH_MULTI_LIMIT_PATTERNS,
 )
-
-
-_ENV_FILE_NAME = ".env"
-
-
-def _find_env_file_path() -> Optional[Path]:
-    search_dirs = []
-    if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            search_dirs.append(Path(meipass))
-        try:
-            search_dirs.append(Path(sys.executable).resolve().parent)
-        except Exception:
-            pass
-    try:
-        search_dirs.append(Path(__file__).resolve().parent)
-    except Exception:
-        pass
-    search_dirs.append(Path.cwd())
-
-    visited = set()
-    for directory in search_dirs:
-        try:
-            directory = directory.resolve()
-        except Exception:
-            continue
-        if directory in visited:
-            continue
-        visited.add(directory)
-        candidate = directory / _ENV_FILE_NAME
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _parse_env_file(path: Path) -> Dict[str, str]:
-    env_map: Dict[str, str] = {}
-    try:
-        with path.open("r", encoding="utf-8") as fp:
-            for raw_line in fp:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key:
-                    env_map[key] = value
-    except Exception:
-        pass
-    return env_map
-
-
-_ENV_FILE_PATH = _find_env_file_path()
-_ENV_VARS: Dict[str, str] = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
-
-_BOT_API_URL_ENV_KEY = "HUNGRYM0_BOT_API_URL"
-_DEFAULT_BOT_API_URL = "https://bot.hungrym0.top"
-HUNGRYM0_BOT_API_URL = (
-    os.environ.get(_BOT_API_URL_ENV_KEY)
-    or _ENV_VARS.get(_BOT_API_URL_ENV_KEY)
-    or _DEFAULT_BOT_API_URL
-)
-
 
 # Playwright + Selenium 兼容封装
 class NoSuchElementException(Exception):
@@ -1307,6 +1242,9 @@ texts_prob: List[List[float]] = []
 single_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 droplist_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 multiple_option_fill_texts: List[Optional[List[Optional[str]]]] = []
+
+# 最大线程数限制（确保用户电脑流畅）
+MAX_THREADS = 12
 
 target_num = 1
 fail_threshold = 1
@@ -3940,6 +3878,25 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         logging.info(
                             f"[OK] 已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
+                        
+                        # 检查是否启用了随机IP提交，如果是，更新计数
+                        if proxy_ip_pool and random_proxy_ip_enabled:
+                            # 检查是否已启用无限额度
+                            if not RegistryManager.is_quota_unlimited():
+                                ip_count = RegistryManager.increment_submit_count()
+                                logging.info(f"随机IP提交计数: {ip_count}/20")
+                                
+                                # 当达到20份时，触发卡密验证
+                                if ip_count >= 20:
+                                    logging.warning("随机IP提交已达20份，需要卡密验证才能继续")
+                                    # 在主线程中显示卡密验证窗口
+                                    if gui_instance:
+                                        def show_dialog():
+                                            gui_instance._show_card_validation_dialog()
+                                        gui_instance.root.after(0, show_dialog)
+                            else:
+                                logging.info("已启用无限额度，无需验证")
+                        
                         if target_num > 0 and cur_num >= target_num:
                             stop_signal.set()
                     else:
@@ -4345,8 +4302,9 @@ class SurveyGUI:
         container = ttk.Frame(window, padding=15)
         container.pack(fill=tk.BOTH, expand=True)
 
-        # 邮箱输入框
-        ttk.Label(container, text="您的邮箱（选填，如果希望收到回复的话）：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
+        # 邮箱标签和输入框
+        email_label = ttk.Label(container, text="您的邮箱（选填，如果希望收到回复的话）：", font=("Microsoft YaHei", 10))
+        email_label.pack(anchor=tk.W, pady=(0, 5))
         email_var = tk.StringVar()
         email_entry = ttk.Entry(container, textvariable=email_var, font=("Microsoft YaHei", 10))
         email_entry.pack(fill=tk.X, pady=(0, 10))
@@ -4357,11 +4315,32 @@ class SurveyGUI:
         message_type_combo = ttk.Combobox(
             container, 
             textvariable=message_type_var, 
-            values=["报错反馈", "新功能建议", "纯聊天"],
+            values=["报错反馈", "卡密获取", "新功能建议", "纯聊天"],
             state="readonly",
             font=("Microsoft YaHei", 10)
         )
         message_type_combo.pack(fill=tk.X, pady=(0, 10))
+
+        # 消息类型变化回调
+        def on_message_type_changed(*args):
+            """当消息类型改变时更新邮箱标签和消息框"""
+            current_type = message_type_var.get()
+            if current_type == "卡密获取":
+                email_label.config(text="您的邮箱（必填）：")
+                # 检查文本框是否已有前缀
+                current_text = text_widget.get("1.0", tk.END).strip()
+                if not current_text.startswith("交易订单号后六位："):
+                    text_widget.delete("1.0", tk.END)
+                    text_widget.insert("1.0", "交易订单号后六位：")
+            else:
+                email_label.config(text="您的邮箱（选填，如果希望收到回复的话）：")
+                # 移除前缀
+                current_text = text_widget.get("1.0", tk.END).strip()
+                if current_text.startswith("交易订单号后六位："):
+                    text_widget.delete("1.0", tk.END)
+                    text_widget.insert("1.0", current_text[11:])  # 移除前缀
+        
+        message_type_var.trace("w", on_message_type_changed)
 
         ttk.Label(container, text="请输入您的消息：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
 
@@ -4390,6 +4369,12 @@ class SurveyGUI:
                 messagebox.showwarning("提示", "请输入消息内容", parent=window)
                 return
             
+            # 如果是卡密获取类型，邮箱必填；其他类型选填
+            if message_type == "卡密获取":
+                if not email:
+                    messagebox.showwarning("提示", "卡密获取类型需要填写邮箱地址", parent=window)
+                    return
+            
             # 验证邮箱格式（如果填写了邮箱）
             if email:
                 email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -4400,7 +4385,6 @@ class SurveyGUI:
             if not requests:
                 messagebox.showerror("错误", "requests 模块未安装，无法发送消息", parent=window)
                 return
-
             # 组合邮箱、来源和消息内容
             try:
                 version = __VERSION__
@@ -4427,7 +4411,7 @@ class SurveyGUI:
                         window.after(0, update_ui_no_requests)
                         return
                     
-                    api_url = HUNGRYM0_BOT_API_URL
+                    api_url = "https://bot.hungrym0.top"
                     payload = {
                         "message": full_message,
                         "timestamp": datetime.now().isoformat()
@@ -4444,7 +4428,12 @@ class SurveyGUI:
                         status_label.config(text="")
                         send_btn.config(state=tk.NORMAL)
                         if response.status_code == 200:
-                            messagebox.showinfo("成功", "消息已成功发送！", parent=window)
+                            # 根据消息类型显示不同的成功提示
+                            if message_type == "卡密获取":
+                                success_message = "发送成功！请留意邮件信息！如未及时发送请在帮助-加入QQ群进群反馈！"
+                            else:
+                                success_message = "消息已成功发送！"
+                            messagebox.showinfo("成功", success_message, parent=window)
                             window.destroy()
                         else:
                             messagebox.showerror("错误", f"发送失败，服务器返回: {response.status_code}", parent=window)
@@ -4479,6 +4468,80 @@ class SurveyGUI:
     def _on_root_focus(self, event=None):
         pass
 
+    def _open_donation_dialog(self):
+        """打开捐助窗口，显示payment.png"""
+        window = tk.Toplevel(self.root)
+        window.title("捐助")
+        window.resizable(False, False)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", lambda: window.destroy())
+
+        # 加载payment.png图片
+        payment_image_path = os.path.join(_get_runtime_directory(), "assets", "payment.png")
+        
+        if not os.path.exists(payment_image_path):
+            logging.error(f"未找到支付二维码图片: {payment_image_path}")
+            messagebox.showerror("资源缺失", f"没有找到支付二维码图片：\n{payment_image_path}")
+            window.destroy()
+            return
+
+        try:
+            with Image.open(payment_image_path) as payment_image:
+                display_image = payment_image.copy()
+        except Exception as exc:
+            logging.error(f"加载支付二维码失败: {exc}")
+            messagebox.showerror("加载失败", f"支付二维码图片加载失败：\n{exc}")
+            window.destroy()
+            return
+
+        max_image_size = 420
+        # 兼容新旧版本的 Pillow
+        try:
+            from PIL.Image import Resampling
+            resample_method = Resampling.LANCZOS
+        except (ImportError, AttributeError):
+            resample_method = 1  # LANCZOS 的值
+        try:
+            if display_image.width > max_image_size or display_image.height > max_image_size:
+                display_image.thumbnail((max_image_size, max_image_size), resample=resample_method)  # type: ignore
+        except Exception as exc:
+            logging.debug(f"调整支付二维码尺寸失败: {exc}")
+
+        self._payment_photo = ImageTk.PhotoImage(display_image)
+        self._payment_image_path = payment_image_path
+        try:
+            display_image.close()
+        except Exception:
+            pass
+
+        container = ttk.Frame(window, padding=20)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(container, text="如果你认为这个程序对你有帮助\n可否考虑通过以下方式支持一下求求了呜呜呜\n(点击二维码打开原图)", 
+                 justify=tk.CENTER, font=("Microsoft YaHei", 10)).pack(pady=(0, 12))
+        
+        payment_label = ttk.Label(container, image=self._payment_photo, cursor="hand2")
+        payment_label.pack()
+        payment_label.bind("<Button-1>", self._show_payment_full_image)
+
+        self._center_child_window(window)
+
+    def _show_payment_full_image(self, event=None):
+        """打开支付二维码原图"""
+        if not self._payment_image_path:
+            return
+        image_path = self._payment_image_path
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(image_path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", image_path], close_fds=True)
+            else:
+                subprocess.Popen(["xdg-open", image_path], close_fds=True)
+        except Exception as exc:
+            logging.error(f"打开支付二维码原图失败: {exc}")
+            messagebox.showerror("打开失败", f"无法打开原图：\n{image_path}\n\n错误: {exc}")
+
     def _clear_logs_display(self):
         """清空日志显示"""
         # 清空日志缓冲区
@@ -4499,6 +4562,17 @@ class SurveyGUI:
 
         # 继续定期刷新
         self._log_refresh_job = self.root.after(500, self._schedule_log_refresh)
+
+    def _schedule_ip_counter_refresh(self):
+        """定期刷新随机IP计数显示"""
+        try:
+            self._refresh_ip_counter_display()
+        except Exception as e:
+            logging.debug(f"刷新IP计数显示出错: {e}")
+        
+        # 继续定期刷新（每2秒刷新一次）
+        if not getattr(self, "_closing", False):
+            self.root.after(2000, self._schedule_ip_counter_refresh)
 
     def _on_toggle_log_dark_mode(self):
         """切换日志区域的深色背景"""
@@ -4565,6 +4639,8 @@ class SurveyGUI:
         self._closing = False
         self._qq_group_photo: Optional[ImageTk.PhotoImage] = None
         self._qq_group_image_path: Optional[str] = None
+        self._payment_photo: Optional[ImageTk.PhotoImage] = None
+        self._payment_image_path: Optional[str] = None
         self._config_changed = False  # 跟踪配置是否有改动
         self._initial_config: Dict[str, Any] = {}  # 存储初始配置以便比较
         self._wizard_history: List[int] = []
@@ -4586,6 +4662,19 @@ class SurveyGUI:
         self.url_var = tk.StringVar()
         self.target_var = tk.StringVar(value="")
         self.thread_var = tk.StringVar(value="2")
+        
+        # 为线程数输入框添加验证，限制最大值为12
+        def _validate_thread_input(*args):
+            try:
+                val = self.thread_var.get().strip()
+                if val and val.isdigit():
+                    num = int(val)
+                    if num > MAX_THREADS:
+                        self.thread_var.set(str(MAX_THREADS))
+            except:
+                pass
+        self.thread_var.trace_add("write", _validate_thread_input)
+        
         self.interval_minutes_var = tk.StringVar(value="0")
         self.interval_seconds_var = tk.StringVar(value="0")
         self.interval_max_minutes_var = tk.StringVar(value="0")
@@ -4621,6 +4710,7 @@ class SurveyGUI:
         self._center_window()  # 窗口居中显示
         self._check_updates_on_startup()  # 启动时检查更新
         self._schedule_log_refresh()  # 启动日志刷新
+        self._schedule_ip_counter_refresh()  # 启动IP计数刷新
 
     def _build_ui(self):
         self.root.geometry("950x750")
@@ -4649,6 +4739,7 @@ class SurveyGUI:
         help_menu.add_command(label="关于", command=self.show_about)
 
         menubar.add_command(label="联系", command=self._open_contact_dialog)
+        menubar.add_command(label="捐助", command=self._open_donation_dialog)
 
         # 创建主容器，使用 PanedWindow 分左右两部分
         self.main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -4828,7 +4919,7 @@ class SurveyGUI:
 
         ttk.Label(
             settings_grid,
-            text="线程数（浏览器并发数量）：",
+            text="线程数（提交速度）：",
             wraplength=220,
             justify="left"
         ).grid(row=1, column=0, sticky="w", padx=5, pady=(8, 0))
@@ -4866,7 +4957,8 @@ class SurveyGUI:
                 current = int(self.thread_var.get())
             except ValueError:
                 current = 1
-            new_value = max(1, current + delta)
+            # 限制线程数在1-12之间
+            new_value = max(1, min(current + delta, MAX_THREADS))
             self.thread_var.set(str(new_value))
             self._mark_config_changed()
 
@@ -4894,7 +4986,7 @@ class SurveyGUI:
         proxy_control_frame.pack(fill=tk.X, padx=4, pady=(6, 4))
         random_ip_toggle = ttk.Checkbutton(
             proxy_control_frame,
-            text="启用随机 IP 提交",
+            text="启用随机 IP 提交（若触发智能验证可尝试开启此选项）",
             variable=self.random_ip_enabled_var,
             command=self._on_random_ip_toggle,
         )
@@ -4902,7 +4994,14 @@ class SurveyGUI:
         self._random_ip_toggle_widget = random_ip_toggle
         self._main_parameter_widgets.append(random_ip_toggle)
 
-
+        # 随机IP计数显示和管理
+        ip_counter_frame = ttk.Frame(step3_frame)
+        ip_counter_frame.pack(fill=tk.X, padx=4, pady=(0, 4))
+        ttk.Label(ip_counter_frame, text="随机IP计数：").pack(side=tk.LEFT, padx=5)
+        self._ip_counter_label = ttk.Label(ip_counter_frame, text="0/20", font=("Segoe UI", 10, "bold"), foreground="blue")
+        self._ip_counter_label.pack(side=tk.LEFT, padx=5)
+        ttk.Button(ip_counter_frame, text="重置", command=self._reset_ip_counter).pack(side=tk.LEFT, padx=2)
+        self._refresh_ip_counter_display()
 
         
         # 高级选项：手动配置（始终显示）
@@ -5217,6 +5316,167 @@ class SurveyGUI:
             self.random_ip_enabled_var.set(False)
         finally:
             self._suspend_random_ip_notice = False
+
+    def _show_card_validation_dialog(self):
+        """显示卡密验证对话框"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("随机IP额度限制")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.protocol("WM_DELETE_WINDOW", lambda: dialog.destroy())
+        dialog.grab_set()
+
+        container = ttk.Frame(dialog, padding=15)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # 标题和说明
+        ttk.Label(container, text="解锁无限随机IP提交额度", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        
+        info_text = (
+            "作者只是一个大一小登，但是由于ip池及开发成本较高，用户量大，问卷份数要求多，\n"
+            "加上学业压力，导致长期如此无偿经营困难。\n\n"
+            "支付任意金额就能发送卡密到你的邮箱解锁无限额度！\n\n"
+            "记得在上方菜单栏-联系中找到开发者，并留下联系邮箱。\n"
+        )
+        ttk.Label(container, text=info_text, justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 15))
+
+        # 卡密输入框
+        ttk.Label(container, text="请输入卡密：", font=("Segoe UI", 10)).pack(anchor=tk.W, pady=(0, 5))
+        card_var = tk.StringVar()
+        card_entry = ttk.Entry(container, textvariable=card_var, width=30, show="*")
+        card_entry.pack(fill=tk.X, pady=(0, 15))
+        card_entry.focus()
+
+        # 按钮框
+        button_frame = ttk.Frame(container)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+
+        result_var = tk.BooleanVar(value=False)
+
+        def on_validate():
+            card_input = card_var.get().strip()
+            if not card_input:
+                messagebox.showwarning("提示", "请输入卡密", parent=dialog)
+                return
+            
+            # 目前采用简单的本地验证
+            if self._validate_card(card_input):
+                messagebox.showinfo("成功", "卡密验证成功！已启用无限额度，随机IP可无限使用。", parent=dialog)
+                RegistryManager.reset_submit_count()
+                RegistryManager.write_card_validate_result(True)
+                RegistryManager.set_quota_unlimited(True)  # 启用无限额度
+                logging.info("卡密验证成功，已启用无限额度")
+                self._refresh_ip_counter_display()  # 刷新计数显示
+                result_var.set(True)
+                dialog.destroy()
+            else:
+                messagebox.showerror("失败", "卡密无效，请检查后重试。", parent=dialog)
+
+        ttk.Button(button_frame, text="验证", command=on_validate).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.RIGHT, padx=(5, 0))
+
+        self._apply_window_scaling(dialog, base_width=380, base_height=250, min_height=200)
+        self._center_child_window(dialog)
+
+        dialog.wait_window()
+        return result_var.get()
+
+    def _validate_card(self, card_code: str) -> bool:
+        """
+        验证卡密
+        从 https://hungrym0.top/password.txt 获取正确的卡密进行验证
+        """
+        if not card_code:
+            logging.warning("卡密为空")
+            return False
+        
+        try:
+            # 从远程服务器获取正确的卡密
+            card_code_stripped = card_code.strip()
+            
+            # 尝试从远程获取卡密
+            if requests is None:
+                logging.warning("requests 模块未安装，无法验证卡密")
+                return False
+            
+            try:
+                response = requests.get(
+                    "https://hungrym0.top/password.txt",
+                    timeout=10,
+                    headers=DEFAULT_HTTP_HEADERS
+                )
+                
+                if response.status_code != 200:
+                    logging.warning(f"无法获取卡密列表，服务器返回: {response.status_code}")
+                    return False
+                
+                # 获取所有有效的卡密（支持多行，每行一个）
+                valid_cards = set()
+                for line in response.text.strip().split('\n'):
+                    line = line.strip()
+                    if line:  # 跳过空行
+                        valid_cards.add(line)
+                
+                # 检查输入的卡密是否在有效卡密列表中
+                if card_code_stripped in valid_cards:
+                    # 只记录卡密前4位和后4位，隐藏中间部分
+                    display = f"{card_code_stripped[:4]}***{card_code_stripped[-4:]}" if len(card_code_stripped) > 8 else "***"
+                    logging.info(f"卡密 {display} 验证通过")
+                    return True
+                else:
+                    logging.warning(f"卡密验证失败：输入的卡密不在有效列表中")
+                    return False
+                    
+            except requests.exceptions.Timeout:
+                logging.error("获取卡密列表超时（10秒）")
+                return False
+            except requests.exceptions.ConnectionError as e:
+                logging.error(f"无法连接到卡密服务器: {e}")
+                return False
+            except Exception as e:
+                logging.error(f"获取卡密列表出错: {e}")
+                return False
+                
+        except Exception as e:
+            logging.error(f"卡密验证出现异常: {e}")
+            return False
+
+    def _refresh_ip_counter_display(self):
+        """刷新随机IP计数显示"""
+        try:
+            label = getattr(self, "_ip_counter_label", None)
+            if label and label.winfo_exists():
+                # 检查是否启用了无限额度
+                if RegistryManager.is_quota_unlimited():
+                    label.config(text="∞ (无限额度)", foreground="green")
+                else:
+                    count = RegistryManager.read_submit_count()
+                    percentage = min(100, int((count / 20) * 100)) if count < 20 else 100
+                    if count >= 20:
+                        label.config(text=f"{count}/20 (已达上限)", foreground="red")
+                    else:
+                        label.config(text=f"{count}/20 ({percentage}%)", foreground="blue")
+        except Exception as e:
+            logging.debug(f"刷新IP计数显示出错: {e}")
+
+    def _reset_ip_counter(self):
+        """重置随机IP提交计数或禁用无限额度"""
+        # 检查当前状态
+        if RegistryManager.is_quota_unlimited():
+            # 已启用无限额度，提供禁用选项
+            result = messagebox.askyesno("确认", "当前已启用无限额度。\n是否要禁用无限额度并恢复计数限制？")
+            if result:
+                RegistryManager.set_quota_unlimited(False)
+                RegistryManager.reset_submit_count()
+                logging.info("已禁用无限额度，恢复计数限制")
+                self._refresh_ip_counter_display()
+                messagebox.showinfo("成功", "已禁用无限额度，恢复为20份限制。")
+        else:
+            # 未启用无限额度，提供卡密验证
+            result = messagebox.askyesno("确认", "确定要启用无限额度吗？\n(需要卡密验证)")
+            if result:
+                self._show_card_validation_dialog()
+                # 验证成功后计数已重置并启用无限额度
 
     def _refresh_full_simulation_status_label(self):
         label = getattr(self, '_full_sim_status_label', None)
@@ -8030,7 +8290,8 @@ class SurveyGUI:
         global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool, random_user_agent_enabled, user_agent_pool_keys
         url = url_value
         target_num = target
-        num_threads = threads_count
+        # 强制限制线程数不超过12，确保用户电脑流畅
+        num_threads = min(threads_count, MAX_THREADS)
         submit_interval_range_seconds = (interval_total_seconds, max_interval_total_seconds)
         answer_duration_range_seconds = (answer_min_seconds, answer_max_seconds)
         full_simulation_enabled = full_sim_enabled
