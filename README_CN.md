@@ -144,6 +144,12 @@ python fuck-wjx.py
 
 ---
 
+**捐助**
+
+<img width="400" height="300" alt="payment" src="https://github.com/user-attachments/assets/62b6518f-97bb-4010-971a-3b89efb8359d" />
+
+---
+
 **如何贡献**
 
 欢迎提交 issue 或 PR：
