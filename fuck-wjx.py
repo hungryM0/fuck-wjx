@@ -90,6 +90,73 @@ from config import (
     _ENGLISH_MULTI_LIMIT_PATTERNS,
 )
 
+
+_ENV_FILE_NAME = ".env"
+
+
+def _find_env_file_path() -> Optional[Path]:
+    search_dirs = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            search_dirs.append(Path(meipass))
+        try:
+            search_dirs.append(Path(sys.executable).resolve().parent)
+        except Exception:
+            pass
+    try:
+        search_dirs.append(Path(__file__).resolve().parent)
+    except Exception:
+        pass
+    search_dirs.append(Path.cwd())
+
+    visited = set()
+    for directory in search_dirs:
+        try:
+            directory = directory.resolve()
+        except Exception:
+            continue
+        if directory in visited:
+            continue
+        visited.add(directory)
+        candidate = directory / _ENV_FILE_NAME
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _parse_env_file(path: Path) -> Dict[str, str]:
+    env_map: Dict[str, str] = {}
+    try:
+        with path.open("r", encoding="utf-8") as fp:
+            for raw_line in fp:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key:
+                    env_map[key] = value
+    except Exception:
+        pass
+    return env_map
+
+
+_ENV_FILE_PATH = _find_env_file_path()
+_ENV_VARS: Dict[str, str] = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
+
+_BOT_API_URL_ENV_KEY = "HUNGRYM0_BOT_API_URL"
+_DEFAULT_BOT_API_URL = "https://bot.hungrym0.top"
+HUNGRYM0_BOT_API_URL = (
+    os.environ.get(_BOT_API_URL_ENV_KEY)
+    or _ENV_VARS.get(_BOT_API_URL_ENV_KEY)
+    or _DEFAULT_BOT_API_URL
+)
+
+
 # Playwright + Selenium 兼容封装
 class NoSuchElementException(Exception):
     pass
@@ -4360,7 +4427,7 @@ class SurveyGUI:
                         window.after(0, update_ui_no_requests)
                         return
                     
-                    api_url = "https://bot.hungrym0.top"
+                    api_url = HUNGRYM0_BOT_API_URL
                     payload = {
                         "message": full_message,
                         "timestamp": datetime.now().isoformat()
@@ -5129,7 +5196,8 @@ class SurveyGUI:
         notice = (
             "启用随机IP提交前请确认：\n\n"
             "1) 代理来源于网络，具有被攻击的安全风险，确认启用视为已知悉风险并自愿承担一切后果；\n"
-            "2) 禁止用于污染他人数据，否则可能被封禁或承担法律责任。\n\n"
+            "2) 禁止用于污染他人数据，否则可能被封禁或承担法律责任。\n"
+            "3) 随机IP维护成本高昂，如需大量使用需要付费。\n\n"
             "是否确认已知悉并继续启用随机IP提交？"
         )
         if self._log_popup_confirm("随机IP使用声明", notice, icon="warning"):

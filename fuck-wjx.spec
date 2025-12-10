@@ -9,7 +9,7 @@ a = Analysis(
     ['fuck-wjx.py'],
     pathex=[],
     binaries=binaries,
-    datas=[('assets', 'assets')],
+    datas=[('assets', 'assets'), ('.env', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

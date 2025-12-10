@@ -7,6 +7,72 @@
 
 import os
 import re
+import sys
+from pathlib import Path
+from typing import Dict, Optional
+
+_ENV_FILE_NAME = ".env"
+
+
+def _find_env_file() -> Optional[Path]:
+    candidates = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass))
+        try:
+            candidates.append(Path(sys.executable).resolve().parent)
+        except Exception:
+            pass
+    try:
+        candidates.append(Path(__file__).resolve().parent)
+    except Exception:
+        pass
+    candidates.append(Path.cwd())
+
+    seen = set()
+    for directory in candidates:
+        try:
+            resolved = directory.resolve()
+        except Exception:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        candidate = resolved / _ENV_FILE_NAME
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _parse_env_file(path: Path) -> Dict[str, str]:
+    env_map: Dict[str, str] = {}
+    try:
+        with path.open("r", encoding="utf-8") as fp:
+            for raw_line in fp:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                    value = value[1:-1]
+                if key:
+                    env_map[key] = value
+    except Exception:
+        pass
+    return env_map
+
+
+_ENV_FILE_PATH = _find_env_file()
+_ENV_VARS = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
+
+
+def _resolve_env_value(key: str, default: str) -> str:
+    return os.environ.get(key) or _ENV_VARS.get(key) or default
 
 # ==================== UI 界面配置 ====================
 # 左右面板最小宽度
@@ -102,7 +168,9 @@ PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "https://bilibili.com/"
 PROXY_HEALTH_CHECK_TIMEOUT = 5
 PROXY_HEALTH_CHECK_MAX_DURATION = 45
-PROXY_REMOTE_URL = "https://service.ipzan.com/core-extract?num=1&no=20251209063007602516&minute=1&format=json&protocol=1&pool=quality&mode=auth&secret=reuoen35jvep3go"
+_PROXY_REMOTE_URL_DEFAULT = "https://service.ipzan.com/core-extract?num=1&no=20251209063007602516&minute=1&format=json&protocol=1&pool=quality&mode=auth&secret=reuoen35jvep3go"
+_RANDOM_IP_API_ENV_KEY = "RANDOM_IP_API_URL"
+PROXY_REMOTE_URL = _resolve_env_value(_RANDOM_IP_API_ENV_KEY, _PROXY_REMOTE_URL_DEFAULT)
 
 # ==================== 地理位置配置 ====================
 _GAODE_GEOCODE_ENDPOINT = "https://restapi.amap.com/v3/geocode/geo"

@@ -1,5 +1,6 @@
 push.bat
 configs/
+.env
 logs/
 *.code-workspace
 *.ico
