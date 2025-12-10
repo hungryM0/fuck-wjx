@@ -1281,6 +1281,8 @@ proxy_ip_pool: List[str] = []
 random_user_agent_enabled = False
 user_agent_pool_keys: List[str] = []
 last_submit_had_captcha = False
+# 标记是否已经因达到20份限制而弹出过对话框
+_quota_limit_dialog_shown = False
 
 # 极速模式：全真模拟/随机IP关闭且时间间隔为0时自动启用
 def _is_fast_mode() -> bool:
@@ -3902,14 +3904,26 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                                 ip_count = RegistryManager.increment_submit_count()
                                 logging.info(f"随机IP提交计数: {ip_count}/20")
                                 
-                                # 当达到20份时，触发卡密验证
+                                # 当达到20份时，停止任务并显示验证窗口
                                 if ip_count >= 20:
-                                    logging.warning("随机IP提交已达20份，需要卡密验证才能继续")
-                                    # 在主线程中显示卡密验证窗口
+                                    logging.warning("随机IP提交已达20份，停止任务并弹出卡密验证窗口")
+                                    stop_signal.set()  # 立即停止任务
+                                    
+                                    # 取消勾选随机IP并显示验证窗口
                                     if gui_instance:
-                                        def show_dialog():
-                                            gui_instance._show_card_validation_dialog()
-                                        gui_instance.root.after(0, show_dialog)
+                                        def uncheck_and_show():
+                                            global _quota_limit_dialog_shown
+                                            if not _quota_limit_dialog_shown:
+                                                _quota_limit_dialog_shown = True
+                                                # 取消勾选随机IP复选框
+                                                gui_instance._suspend_random_ip_notice = True
+                                                try:
+                                                    gui_instance.random_ip_enabled_var.set(False)
+                                                finally:
+                                                    gui_instance._suspend_random_ip_notice = False
+                                                # 显示卡密验证窗口
+                                                gui_instance._show_card_validation_dialog()
+                                        gui_instance.root.after(0, uncheck_and_show)
                             else:
                                 logging.info("已启用无限额度，无需验证")
                         
@@ -5325,6 +5339,23 @@ class SurveyGUI:
             return
         if not self.random_ip_enabled_var.get():
             return
+        
+        # 检查是否已达到计数限制且未启用无限额度
+        if not RegistryManager.is_quota_unlimited():
+            count = RegistryManager.read_submit_count()
+            if count >= 20:
+                messagebox.showwarning(
+                    "提示",
+                    "随机IP已达20份限制，请通过卡密验证解锁无限额度后再启用。",
+                    parent=self.root
+                )
+                self._suspend_random_ip_notice = True
+                try:
+                    self.random_ip_enabled_var.set(False)
+                finally:
+                    self._suspend_random_ip_notice = False
+                return
+        
         if self._confirm_random_ip_usage():
             return
         self._suspend_random_ip_notice = True
@@ -5386,6 +5417,9 @@ class SurveyGUI:
                 RegistryManager.set_quota_unlimited(True)  # 启用无限额度
                 logging.info("卡密验证成功，已启用无限额度")
                 self._refresh_ip_counter_display()  # 刷新计数显示
+                # 重置对话框标记，允许下次达到限制时再次弹出
+                global _quota_limit_dialog_shown
+                _quota_limit_dialog_shown = False
                 result_var.set(True)
                 dialog.destroy()
             else:
@@ -8338,6 +8372,10 @@ class SurveyGUI:
         cur_fail = 0
         stop_event = threading.Event()
         
+        # 重置对话框标记，允许新的任务达到限制时弹出对话框
+        global _quota_limit_dialog_shown
+        _quota_limit_dialog_shown = False
+        
         # 重置进度条
         self.progress_value = 0
         self.total_submissions = target
@@ -9070,7 +9108,18 @@ class SurveyGUI:
             self.target_var.set(config.get("target_num", ""))
             self.thread_var.set(config.get("num_threads", ""))
             self._apply_random_ua_config(config.get("random_user_agent"))
-            self.random_ip_enabled_var.set(bool(config.get("random_proxy_enabled")))
+            
+            # 加载随机IP配置时需要检查计数限制
+            random_proxy_enabled_in_config = bool(config.get("random_proxy_enabled"))
+            if random_proxy_enabled_in_config:
+                # 检查是否已达到计数限制且未启用无限额度
+                if not RegistryManager.is_quota_unlimited():
+                    count = RegistryManager.read_submit_count()
+                    if count >= 20:
+                        logging.warning(f"配置中启用了随机IP，但已达到20份限制，已禁用此选项")
+                        random_proxy_enabled_in_config = False
+            
+            self.random_ip_enabled_var.set(random_proxy_enabled_in_config)
             self._apply_submit_interval_config(config.get("submit_interval"))
             self._apply_answer_duration_config(config.get("answer_duration_range"))
             self._apply_full_simulation_config(config.get("full_simulation"))
