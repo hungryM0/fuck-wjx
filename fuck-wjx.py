@@ -3896,7 +3896,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         )
                         
                         # 检查是否启用了随机IP提交，如果是，更新计数
-                        if proxy_ip_pool and random_proxy_ip_enabled:
+                        if random_proxy_ip_enabled:
                             # 检查是否已启用无限额度
                             if not RegistryManager.is_quota_unlimited():
                                 ip_count = RegistryManager.increment_submit_count()

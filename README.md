@@ -14,7 +14,7 @@ This project is a fun extension with new features, providing a GUI for configuri
 
 - 💻 User-friendly GUI interface - zero barriers, no coding required, just know how to read
 - ⭐ Local QR code decoding: upload a survey QR code image to automatically extract the link
-- 😄 Permanently free and unlimited - no need to beg friends or groups
+- 😄 Free and unlimited - no need to beg friends or groups
 - 🧑‍🤝‍🧑 Auto-parse question content and preset answers through configuration wizard, adjust option probabilities and ratios
 - 🚀 Reduced waiting time after submission, faster survey filling
 - 🌐 Simulates browser UA to bypass WeChat-only submission restrictions
