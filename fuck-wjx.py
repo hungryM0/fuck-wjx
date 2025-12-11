@@ -4322,8 +4322,12 @@ class SurveyGUI:
             logging.error(f"打开 QQ 群二维码原图失败: {exc}")
             self._log_popup_error("打开失败", f"无法打开原图：\n{image_path}\n\n错误: {exc}")
 
-    def _open_contact_dialog(self):
-        """打开联系对话框，允许用户发送消息"""
+    def _open_contact_dialog(self, default_type: str = "报错反馈"):
+        """打开联系对话框，允许用户发送消息
+        
+        Args:
+            default_type: 默认的消息类型，可选值："报错反馈"、"卡密获取"、"新功能建议"、"纯聊天"
+        """
         window = tk.Toplevel(self.root)
         window.title("联系开发者")
         window.resizable(True, True)
@@ -4341,16 +4345,19 @@ class SurveyGUI:
 
         # 消息类型下拉框
         ttk.Label(container, text="消息类型（可选）：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
-        message_type_var = tk.StringVar(value="报错反馈")
+        message_type_var = tk.StringVar(value=default_type)
         
         # 定义基础选项和完整选项
         base_options = ["报错反馈", "卡密获取", "新功能建议", "纯聊天"]
         full_options = ["报错反馈", "卡密获取", "新功能建议", "白嫖卡密（？）", "纯聊天"]
         
+        # 根据默认类型决定初始选项列表
+        initial_values = full_options if default_type in ["卡密获取", "白嫖卡密（？）"] else base_options
+        
         message_type_combo = ttk.Combobox(
             container, 
             textvariable=message_type_var, 
-            values=base_options,  # 初始不显示白嫖卡密选项
+            values=initial_values,
             state="readonly",
             font=("Microsoft YaHei", 10)
         )
@@ -4405,6 +4412,14 @@ class SurveyGUI:
         text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("Microsoft YaHei", 10), height=8)
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=text_widget.yview)
+        
+        # 根据默认类型初始化界面状态
+        if default_type == "卡密获取":
+            email_label.config(text="您的邮箱（必填）：")
+            text_widget.insert("1.0", "交易订单号后六位：")
+        elif default_type == "白嫖卡密（？）":
+            email_label.config(text="您的邮箱（必填）：")
+            message_prompt_label.config(text="请输入白嫖话术：")
 
         # 按钮框架
         button_frame = ttk.Frame(container)
@@ -5051,7 +5066,8 @@ class SurveyGUI:
         ttk.Label(ip_counter_frame, text="随机IP计数：").pack(side=tk.LEFT, padx=5)
         self._ip_counter_label = ttk.Label(ip_counter_frame, text="0/20", font=("Segoe UI", 10, "bold"), foreground="blue")
         self._ip_counter_label.pack(side=tk.LEFT, padx=5)
-        ttk.Button(ip_counter_frame, text="重置", command=self._reset_ip_counter).pack(side=tk.LEFT, padx=2)
+        self._ip_reset_button = ttk.Button(ip_counter_frame, text="解锁无限IP", command=self._reset_ip_counter)
+        self._ip_reset_button.pack(side=tk.LEFT, padx=2)
         self._refresh_ip_counter_display()
 
         
@@ -5439,6 +5455,24 @@ class SurveyGUI:
         # 禁用编辑
         text_widget.config(state=tk.DISABLED)
 
+        # 按钮行：感谢文字 + 捐助按钮 + 联系按钮
+        thanks_button_frame = ttk.Frame(container)
+        thanks_button_frame.pack(fill=tk.X, pady=(10, 15))
+        
+        ttk.Button(
+            thanks_button_frame,
+            text="💰 捐助",
+            command=lambda: [dialog.destroy(), self._open_donation_dialog()],
+            width=10
+        ).pack(side=tk.RIGHT, padx=(5, 0))
+        
+        ttk.Button(
+            thanks_button_frame,
+            text="📧 联系",
+            command=lambda: [dialog.destroy(), self._open_contact_dialog(default_type="卡密获取")],
+            width=10
+        ).pack(side=tk.RIGHT, padx=(5, 0))
+
         # 卡密输入框
         ttk.Label(container, text="请输入卡密：", font=("Segoe UI", 10)).pack(anchor=tk.W, pady=(0, 5))
         card_var = tk.StringVar()
@@ -5547,10 +5581,14 @@ class SurveyGUI:
         """刷新随机IP计数显示"""
         try:
             label = getattr(self, "_ip_counter_label", None)
+            button = getattr(self, "_ip_reset_button", None)
             if label and label.winfo_exists():
                 # 检查是否启用了无限额度
-                if RegistryManager.is_quota_unlimited():
+                is_unlimited = RegistryManager.is_quota_unlimited()
+                if is_unlimited:
                     label.config(text="∞ (无限额度)", foreground="green")
+                    if button and button.winfo_exists():
+                        button.config(text="恢复限制")
                 else:
                     count = RegistryManager.read_submit_count()
                     percentage = min(100, int((count / 20) * 100)) if count < 20 else 100
@@ -5558,6 +5596,8 @@ class SurveyGUI:
                         label.config(text=f"{count}/20 (已达上限)", foreground="red")
                     else:
                         label.config(text=f"{count}/20 ({percentage}%)", foreground="blue")
+                    if button and button.winfo_exists():
+                        button.config(text="解锁无限IP")
         except Exception as e:
             logging.debug(f"刷新IP计数显示出错: {e}")
 
