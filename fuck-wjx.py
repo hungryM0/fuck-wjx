@@ -4550,7 +4550,7 @@ class SurveyGUI:
             full_message = f"来源：fuck-wjx v{version}\n"
             full_message += f"类型：{message_type}\n"
             if email:
-                full_message += f"联系邮箱：{email}\n"
+                full_message += f"联系邮箱： {email}\n"
             full_message += f"消息：{message_content}"
 
             # 禁用发送按钮，防止重复点击
@@ -4848,7 +4848,7 @@ class SurveyGUI:
         self.random_ua_mac_wechat_var = tk.BooleanVar(value=False)
         self.random_ua_windows_wechat_var = tk.BooleanVar(value=False)
         self.random_ua_mac_web_var = tk.BooleanVar(value=False)
-        self.wechat_login_bypass_enabled_var = tk.BooleanVar(value=True)
+        self.wechat_login_bypass_enabled_var = tk.BooleanVar(value=False)
         self.random_ip_enabled_var = tk.BooleanVar(value=False)
         self.full_simulation_enabled_var = tk.BooleanVar(value=False)
         self.full_sim_target_var = tk.StringVar(value="")
@@ -5148,8 +5148,16 @@ class SurveyGUI:
             proxy_control_frame,
             text="破解仅微信可作答（目前仍在开发中）",
             variable=self.wechat_login_bypass_enabled_var,
-        )
+            )
         wechat_bypass_toggle.pack(side=tk.LEFT, anchor="w")
+        # 默认不启用，且锁定为不可操作（灰显）
+        try:
+            wechat_bypass_toggle.configure(state=tk.DISABLED)
+        except Exception:
+            try:
+                wechat_bypass_toggle.state(['disabled'])
+            except Exception:
+                pass
 
         # 随机 IP 开关单独一行，放在微信弹窗开关下方
         random_ip_frame = ttk.Frame(step3_frame)
@@ -5419,18 +5427,22 @@ class SurveyGUI:
         targets += [w for w in getattr(self, '_settings_window_widgets', []) if w is not None]
         allowed_when_locked = []
         if locking:
+            # 不在锁定时允许启用微信弹窗绕过选项，始终保持锁定状态
             allowed_when_locked.extend(
                 [
-                    getattr(self, "_wechat_login_bypass_toggle_widget", None),
                     getattr(self, "_random_ip_toggle_widget", None),
                 ]
             )
             allowed_when_locked.extend(getattr(self, "_random_ua_option_widgets", []))
             allowed_when_locked = [w for w in allowed_when_locked if w is not None]
+        # 强制微信绕过选项始终禁用
+        wechat_widget = getattr(self, "_wechat_login_bypass_toggle_widget", None)
         for widget in targets:
             desired_state = state
             if locking and widget in allowed_when_locked:
                 desired_state = tk.NORMAL
+            if widget is wechat_widget:
+                desired_state = tk.DISABLED
             try:
                 if widget.winfo_exists():
                     widget.configure(state=desired_state)
@@ -9467,7 +9479,7 @@ class SurveyGUI:
                         random_proxy_enabled_in_config = False
 
             self.random_ip_enabled_var.set(random_proxy_enabled_in_config)
-            self.wechat_login_bypass_enabled_var.set(bool(config.get("wechat_login_bypass_enabled", True)))
+            self.wechat_login_bypass_enabled_var.set(bool(config.get("wechat_login_bypass_enabled", False)))
             self._apply_submit_interval_config(config.get("submit_interval"))
             self._apply_answer_duration_config(config.get("answer_duration_range"))
             self._apply_full_simulation_config(config.get("full_simulation"))
