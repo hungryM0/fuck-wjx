@@ -2173,6 +2173,45 @@ def _extract_question_metadata_from_html(soup, question_div, question_number: in
     return option_texts, option_count, matrix_rows, fillable_indices
 
 
+def _extract_jump_rules_from_html(question_div, question_number: int, option_texts: List[str]) -> Tuple[bool, List[Dict[str, Any]]]:
+    """
+    从静态 HTML 中提取跳题逻辑。
+    返回 (是否声明有跳题, 跳转规则列表)，其中规则形如：
+    {"option_index": 1, "jumpto": 4, "option_text": "选项2"}。
+    """
+    has_jump_attr = str(question_div.get("hasjump") or "").strip() == "1"
+    jump_rules: List[Dict[str, Any]] = []
+    option_idx = 0
+    inputs = question_div.find_all("input")
+    for input_el in inputs:
+        input_type = (input_el.get("type") or "").lower()
+        if input_type not in ("radio", "checkbox"):
+            continue
+        jumpto_raw = input_el.get("jumpto") or input_el.get("data-jumpto")
+        if not jumpto_raw:
+            option_idx += 1
+            continue
+        text_value = str(jumpto_raw).strip()
+        jumpto_num: Optional[int] = None
+        if text_value.isdigit():
+            jumpto_num = int(text_value)
+        else:
+            match = re.search(r"(\d+)", text_value)
+            if match:
+                try:
+                    jumpto_num = int(match.group(1))
+                except Exception:
+                    jumpto_num = None
+        if jumpto_num:
+            jump_rules.append({
+                "option_index": option_idx,
+                "jumpto": jumpto_num,
+                "option_text": option_texts[option_idx] if option_idx < len(option_texts) else None,
+            })
+        option_idx += 1
+    return has_jump_attr or bool(jump_rules), jump_rules
+
+
 def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
     if not BeautifulSoup:
         raise RuntimeError("BeautifulSoup is required for HTML parsing")
@@ -2198,6 +2237,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
             option_texts, option_count, matrix_rows, fillable_indices = _extract_question_metadata_from_html(
                 soup, question_div, question_number, type_code
             )
+            has_jump, jump_rules = _extract_jump_rules_from_html(question_div, question_number, option_texts)
             questions_info.append({
                 "num": question_number,
                 "title": title_text,
@@ -2208,6 +2248,8 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "option_texts": option_texts,
                 "fillable_options": fillable_indices,
                 "is_location": is_location,
+                "has_jump": has_jump,
+                "jump_rules": jump_rules,
             })
     return questions_info
 
@@ -4374,17 +4416,17 @@ class SurveyGUI:
                 message_type_combo['values'] = full_options
                 # 检查文本框是否已有前缀
                 current_text = text_widget.get("1.0", tk.END).strip()
-                if not current_text.startswith("交易订单号后六位："):
+                if not current_text.startswith("捐(施)助(舍)的金额：￥"):
                     text_widget.delete("1.0", tk.END)
-                    text_widget.insert("1.0", "交易订单号后六位：")
+                    text_widget.insert("1.0", "捐(施)助(舍)的金额：￥")
             elif current_type == "白嫖卡密（？）":
                 email_label.config(text="您的邮箱（必填）：")
-                message_prompt_label.config(text="请输入白嫖话术：")
+                message_prompt_label.config(text="请输入 白嫖话术：")
                 # 保持完整选项（因为当前就是白嫖卡密）
                 message_type_combo['values'] = full_options
                 # 移除卡密获取的前缀
                 current_text = text_widget.get("1.0", tk.END).strip()
-                if current_text.startswith("交易订单号后六位："):
+                if current_text.startswith("捐(施)助(舍)的金额：￥"):
                     text_widget.delete("1.0", tk.END)
             else:
                 email_label.config(text="您的邮箱（选填，如果希望收到回复的话）：")
@@ -4393,7 +4435,7 @@ class SurveyGUI:
                 message_type_combo['values'] = base_options
                 # 移除前缀
                 current_text = text_widget.get("1.0", tk.END).strip()
-                if current_text.startswith("交易订单号后六位："):
+                if current_text.startswith("捐(施)助(舍)的金额：￥"):
                     text_widget.delete("1.0", tk.END)
                     text_widget.insert("1.0", current_text[11:])  # 移除前缀
         
@@ -4416,7 +4458,7 @@ class SurveyGUI:
         # 根据默认类型初始化界面状态
         if default_type == "卡密获取":
             email_label.config(text="您的邮箱（必填）：")
-            text_widget.insert("1.0", "交易订单号后六位：")
+            text_widget.insert("1.0", "捐(施)助(舍)的金额：￥")
         elif default_type == "白嫖卡密（？）":
             email_label.config(text="您的邮箱（必填）：")
             message_prompt_label.config(text="请输入白嫖话术：")
@@ -4438,7 +4480,7 @@ class SurveyGUI:
             # 如果是卡密获取或白嫖卡密类型，邮箱必填；其他类型选填
             if message_type in ["卡密获取", "白嫖卡密（？）"]:
                 if not email:
-                    messagebox.showwarning("提示", f"{message_type}类型需要填写邮箱地址", parent=window)
+                    messagebox.showwarning("提示", f"{message_type}必须填写邮箱地址", parent=window)
                     return
             
             # 验证邮箱格式（如果填写了邮箱）
@@ -7326,6 +7368,45 @@ class SurveyGUI:
                             if inputs and option_count > 0:
                                 option_fillable_indices.append(option_count - 1)
 
+                        has_jump_attr = False
+                        try:
+                            has_jump_attr = str(question_div.get_attribute("hasjump") or "").strip() == "1"
+                        except Exception:
+                            has_jump_attr = False
+                        jump_rules: List[Dict[str, Any]] = []
+                        try:
+                            input_elements = question_div.find_elements(
+                                By.CSS_SELECTOR,
+                                "input[type='radio'], input[type='checkbox']"
+                            )
+                        except Exception:
+                            input_elements = []
+                        for idx, input_el in enumerate(input_elements):
+                            try:
+                                jumpto_raw = input_el.get_attribute("jumpto") or input_el.get_attribute("data-jumpto")
+                            except Exception:
+                                jumpto_raw = None
+                            if not jumpto_raw:
+                                continue
+                            raw_text = str(jumpto_raw).strip()
+                            jumpto_num: Optional[int] = None
+                            if raw_text.isdigit():
+                                jumpto_num = int(raw_text)
+                            else:
+                                match = re.search(r"(\d+)", raw_text)
+                                if match:
+                                    try:
+                                        jumpto_num = int(match.group(1))
+                                    except Exception:
+                                        jumpto_num = None
+                            if jumpto_num:
+                                jump_rules.append({
+                                    "option_index": idx,
+                                    "jumpto": jumpto_num,
+                                    "option_text": option_texts[idx] if idx < len(option_texts) else None,
+                                })
+                        has_jump = has_jump_attr or bool(jump_rules)
+
                         questions_info.append({
                             "num": current_question_num,
                             "title": title_text,
@@ -7337,6 +7418,8 @@ class SurveyGUI:
                             "option_texts": option_texts,
                             "fillable_options": option_fillable_indices,
                             "is_location": is_location_question,
+                            "has_jump": has_jump,
+                            "jump_rules": jump_rules,
                         })
                         print(f"  ✓ 第{current_question_num}题: {type_name} - {title_text[:30]}")
                     except Exception as e:
@@ -7685,12 +7768,56 @@ class SurveyGUI:
         elif action_type == "skip":
             pass
 
+    def _annotate_jump_impacts_for_questions(self, questions_info: List[Dict[str, Any]]) -> None:
+        """
+        根据每题的跳题规则，为中间被跳过的题打上“skipped_by”标记，方便在向导界面提示。
+        例如：第2题某选项 jumpto=4，则第3题会记录为被 2→4 这一跳路径覆盖。
+        """
+        if not questions_info:
+            return
+        num_to_index: Dict[int, int] = {}
+        for idx, q in enumerate(questions_info):
+            num = _safe_positive_int(q.get("num"))
+            if num is None:
+                continue
+            num_to_index[num] = idx
+            q["skipped_by"] = []
+        for q in questions_info:
+            jump_rules = q.get("jump_rules") or []
+            if not jump_rules:
+                continue
+            src_num = _safe_positive_int(q.get("num"))
+            if src_num is None:
+                continue
+            for rule in jump_rules:
+                target = rule.get("jumpto")
+                tgt_num = _safe_positive_int(target)
+                if tgt_num is None:
+                    continue
+                if tgt_num <= src_num:
+                    continue
+                for skipped_num in range(src_num + 1, tgt_num):
+                    idx = num_to_index.get(skipped_num)
+                    if idx is None:
+                        continue
+                    impact = {
+                        "from": src_num,
+                        "to": tgt_num,
+                        "option_index": rule.get("option_index"),
+                        "option_text": rule.get("option_text"),
+                    }
+                    questions_info[idx].setdefault("skipped_by", []).append(impact)
+
     def _start_config_wizard(self, questions_info, preview_win, preserve_existing: bool = False):
         preview_win.destroy()
         if not preserve_existing:
             self.question_entries.clear()
         self._wizard_history = []
         self._wizard_commit_log = []
+        try:
+            self._annotate_jump_impacts_for_questions(questions_info)
+        except Exception as exc:
+            logging.debug("annotate jump impacts failed: %s", exc)
         self._show_wizard_for_question(questions_info, 0)
 
     def _get_wizard_hint_text(self, type_code: str, *, is_location: bool = False) -> str:
@@ -7725,6 +7852,9 @@ class SurveyGUI:
         type_code = q["type_code"]
         is_location_question = bool(q.get("is_location"))
         detected_fillable_indices = q.get('fillable_options') or []
+        jump_rules = q.get("jump_rules") or []
+        has_jump_logic = bool(q.get("has_jump") or jump_rules)
+        skipped_by_info = q.get("skipped_by") or []
 
         if type_code in ("8", "11"):
             self._show_wizard_for_question(questions_info, current_index + 1)
@@ -7855,6 +7985,64 @@ class SurveyGUI:
             bg="#f5f8ff",
             justify="left"
         ).pack(anchor="w", fill=tk.X)
+
+        jump_summary_text = ""
+        if jump_rules:
+            summary_parts: List[str] = []
+            for rule in jump_rules:
+                opt_idx = rule.get("option_index")
+                target = rule.get("jumpto")
+                opt_label = rule.get("option_text") or (f"选项{opt_idx + 1}" if opt_idx is not None else "某选项")
+                if target:
+                    summary_parts.append(f"{opt_label} → 第{target}题")
+            if summary_parts:
+                jump_summary_text = "；".join(summary_parts[:4])
+                if len(summary_parts) > 4:
+                    jump_summary_text += f" 等 {len(summary_parts)} 条"
+
+        skipped_summary_text = ""
+        if skipped_by_info:
+            skipped_parts: List[str] = []
+            for info in skipped_by_info:
+                src_num = info.get("from")
+                dst_num = info.get("to")
+                opt_idx = info.get("option_index")
+                opt_text = info.get("option_text")
+                opt_label = opt_text or (f"选项{opt_idx + 1}" if opt_idx is not None else "某选项")
+                if src_num and dst_num:
+                    skipped_parts.append(f"第{src_num}题 {opt_label} → 第{dst_num}题")
+            if skipped_parts:
+                skipped_summary_text = "；".join(skipped_parts[:3])
+                if len(skipped_parts) > 3:
+                    skipped_summary_text += f" 等 {len(skipped_parts)} 条"
+
+        if has_jump_logic and jump_summary_text:
+            jump_alert = tk.Frame(frame, bg="#ffebee", highlightbackground="#ef5350", highlightthickness=1)
+            jump_alert.pack(fill=tk.X, pady=(6, 4))
+            tk.Label(
+                jump_alert,
+                text=f"⚠ 跳题逻辑：{jump_summary_text}（选择对应选项时，将直接跳过中间题目）",
+                bg="#ffebee",
+                fg="#b71c1c",
+                justify="left",
+                wraplength=710,
+                padx=12,
+                pady=6
+            ).pack(fill=tk.X)
+
+        if skipped_summary_text:
+            skip_alert = tk.Frame(frame, bg="#e3f2fd", highlightbackground="#64b5f6", highlightthickness=1)
+            skip_alert.pack(fill=tk.X, pady=(0, 8))
+            tk.Label(
+                skip_alert,
+                text=f"ℹ 本题在以下路径中会被跳过：{skipped_summary_text}。如果只按这些路径刷卷，本题的配置可以简化。",
+                bg="#e3f2fd",
+                fg="#0d47a1",
+                justify="left",
+                wraplength=710,
+                padx=12,
+                pady=6
+            ).pack(fill=tk.X)
 
         if detected_fillable_indices:
             chip_frame = tk.Frame(header_inner, bg="#f5f8ff")
@@ -9672,7 +9860,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
