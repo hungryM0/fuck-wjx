@@ -4342,10 +4342,15 @@ class SurveyGUI:
         # 消息类型下拉框
         ttk.Label(container, text="消息类型（可选）：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
         message_type_var = tk.StringVar(value="报错反馈")
+        
+        # 定义基础选项和完整选项
+        base_options = ["报错反馈", "卡密获取", "新功能建议", "纯聊天"]
+        full_options = ["报错反馈", "卡密获取", "新功能建议", "白嫖卡密（？）", "纯聊天"]
+        
         message_type_combo = ttk.Combobox(
             container, 
             textvariable=message_type_var, 
-            values=["报错反馈", "卡密获取", "新功能建议", "纯聊天"],
+            values=base_options,  # 初始不显示白嫖卡密选项
             state="readonly",
             font=("Microsoft YaHei", 10)
         )
@@ -4357,13 +4362,28 @@ class SurveyGUI:
             current_type = message_type_var.get()
             if current_type == "卡密获取":
                 email_label.config(text="您的邮箱（必填）：")
+                message_prompt_label.config(text="请输入您的消息：")
+                # 添加白嫖卡密选项
+                message_type_combo['values'] = full_options
                 # 检查文本框是否已有前缀
                 current_text = text_widget.get("1.0", tk.END).strip()
                 if not current_text.startswith("交易订单号后六位："):
                     text_widget.delete("1.0", tk.END)
                     text_widget.insert("1.0", "交易订单号后六位：")
+            elif current_type == "白嫖卡密（？）":
+                email_label.config(text="您的邮箱（必填）：")
+                message_prompt_label.config(text="请输入白嫖话术：")
+                # 保持完整选项（因为当前就是白嫖卡密）
+                message_type_combo['values'] = full_options
+                # 移除卡密获取的前缀
+                current_text = text_widget.get("1.0", tk.END).strip()
+                if current_text.startswith("交易订单号后六位："):
+                    text_widget.delete("1.0", tk.END)
             else:
                 email_label.config(text="您的邮箱（选填，如果希望收到回复的话）：")
+                message_prompt_label.config(text="请输入您的消息：")
+                # 移除白嫖卡密选项
+                message_type_combo['values'] = base_options
                 # 移除前缀
                 current_text = text_widget.get("1.0", tk.END).strip()
                 if current_text.startswith("交易订单号后六位："):
@@ -4372,7 +4392,8 @@ class SurveyGUI:
         
         message_type_var.trace("w", on_message_type_changed)
 
-        ttk.Label(container, text="请输入您的消息：", font=("Microsoft YaHei", 10)).pack(anchor=tk.W, pady=(0, 5))
+        message_prompt_label = ttk.Label(container, text="请输入您的消息：", font=("Microsoft YaHei", 10))
+        message_prompt_label.pack(anchor=tk.W, pady=(0, 5))
 
         # 创建文本框
         text_frame = ttk.Frame(container)
@@ -4399,10 +4420,10 @@ class SurveyGUI:
                 messagebox.showwarning("提示", "请输入消息内容", parent=window)
                 return
             
-            # 如果是卡密获取类型，邮箱必填；其他类型选填
-            if message_type == "卡密获取":
+            # 如果是卡密获取或白嫖卡密类型，邮箱必填；其他类型选填
+            if message_type in ["卡密获取", "白嫖卡密（？）"]:
                 if not email:
-                    messagebox.showwarning("提示", "卡密获取类型需要填写邮箱地址", parent=window)
+                    messagebox.showwarning("提示", f"{message_type}类型需要填写邮箱地址", parent=window)
                     return
             
             # 验证邮箱格式（如果填写了邮箱）
@@ -5379,16 +5400,44 @@ class SurveyGUI:
         # 标题和说明
         ttk.Label(container, text="解锁无限随机IP提交额度", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
         
-        info_text = (
-            "作者只是一个大一小登，但是由于ip池及开发成本较高，用户量大，问卷份数要求多，\n"
-            "加上学业压力，导致长期如此无偿经营困难……\n\n"
-            "1.在菜单栏-捐助中赞助任意金额（看着给，多少都行）\n"
-            "2.在上方菜单栏-联系中找到开发者，并留下联系邮箱、交易订单号\n"
-            "3.开发者验证后会发送卡密到你的邮箱，输入卡密后即可解锁无限随机IP提交额度\n"
-            "4.你也可以通过自己的口才白嫖卡密（误）\n\n"
-            "感谢您的支持与理解！🙏"
-        )
-        ttk.Label(container, text=info_text, justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 15))
+        # 使用 Text 组件来支持富文本格式（不同颜色）
+        # 获取系统默认背景色
+        style = ttk.Style()
+        bg_color = style.lookup('TFrame', 'background')
+        if not bg_color:
+            bg_color = self.root.cget('background')
+        
+        text_widget = tk.Text(container, wrap=tk.WORD, height=10, font=("Microsoft YaHei", 10), 
+                             relief=tk.FLAT, borderwidth=0, background=bg_color, cursor="arrow")
+        text_widget.pack(anchor=tk.W, pady=(0, 15), fill=tk.X)
+        
+        # 插入文本内容
+        text_widget.insert("1.0", "作者只是一个大一小登，但是由于ip池及开发成本较高，用户量大，问卷份数要求多，\n")
+        text_widget.insert(tk.END, "加上学业压力，导致长期如此无偿经营困难……\n\n")
+        text_widget.insert(tk.END, "1.在菜单栏-捐助中赞助")
+        
+        # "任意金额"用蓝色
+        blue_start = text_widget.index(tk.END + "-1c")
+        text_widget.insert(tk.END, "任意金额")
+        blue_end = text_widget.index(tk.END + "-1c")
+        text_widget.tag_add("blue", blue_start, blue_end)
+        text_widget.tag_config("blue", foreground="#0066CC")
+        
+        text_widget.insert(tk.END, "（多少都行♥）\n")
+        text_widget.insert(tk.END, "2.在上方菜单栏-联系中找到开发者，并留下联系邮箱、交易订单号\n")
+        text_widget.insert(tk.END, "3.开发者验证后会发送卡密到你的邮箱，输入卡密后即可解锁无限随机IP提交额度\n")
+        
+        # 第4点用灰色
+        gray_start = text_widget.index(tk.END + "-1c")
+        text_widget.insert(tk.END, "4.你也可以通过自己的口才白嫖卡密（误）")
+        gray_end = text_widget.index(tk.END + "-1c")
+        text_widget.tag_add("gray", gray_start, gray_end)
+        text_widget.tag_config("gray", foreground="#C3BABA")
+        
+        text_widget.insert(tk.END, "\n\n感谢您的支持与理解！🙏")
+        
+        # 禁用编辑
+        text_widget.config(state=tk.DISABLED)
 
         # 卡密输入框
         ttk.Label(container, text="请输入卡密：", font=("Segoe UI", 10)).pack(anchor=tk.W, pady=(0, 5))

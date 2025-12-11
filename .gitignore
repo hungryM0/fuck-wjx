@@ -9,4 +9,5 @@ desktop.ini
 ips.txt
 build/
 dist/
+app/
 registry_manager.py
