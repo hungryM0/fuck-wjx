@@ -244,6 +244,13 @@ def log_popup_error(title: str, message: str, **kwargs: Any):
     return messagebox.showerror(title, message, **kwargs)
 
 
+def log_popup_warning(title: str, message: str, **kwargs: Any):
+    logging.warning(f"[Popup Warning] {title} | {message}")
+    from tkinter import messagebox
+
+    return messagebox.showwarning(title, message, **kwargs)
+
+
 def log_popup_confirm(title: str, message: str, **kwargs: Any) -> bool:
     logging.info(f"[Popup Confirm] {title} | {message}")
     from tkinter import messagebox

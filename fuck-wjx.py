@@ -44,6 +44,7 @@ from log_utils import (
     dump_threads_to_file,
     log_popup_info,
     log_popup_error,
+    log_popup_warning,
     log_popup_confirm,
 )
 
@@ -54,6 +55,9 @@ from updater import (
     check_for_updates as _check_for_updates_impl,
     perform_update as _perform_update_impl,
 )
+
+from full_simulation_mode import FULL_SIM_STATE as _FULL_SIM_STATE
+import full_simulation_ui
 
 import numpy
 import tkinter as tk
@@ -982,6 +986,13 @@ def _is_fast_mode() -> bool:
         and submit_interval_range_seconds == (0, 0)
         and answer_duration_range_seconds == (0, 0)
     )
+
+
+def _sync_full_sim_state_from_globals() -> None:
+    """确保全真模拟全局变量与模块状态保持一致（主要在 GUI/运行线程之间传递配置时使用）。"""
+    _FULL_SIM_STATE.enabled = bool(full_simulation_enabled)
+    _FULL_SIM_STATE.estimated_seconds = int(full_simulation_estimated_seconds or 0)
+    _FULL_SIM_STATE.total_duration_seconds = int(full_simulation_total_duration_seconds or 0)
 
 def normalize_probabilities(values: List[float]) -> List[float]:
     if not values:
@@ -2966,96 +2977,35 @@ def slider_question(driver: BrowserDriver, current: int, score: int):
 
 
 def _full_simulation_active() -> bool:
-    return bool(full_simulation_enabled and full_simulation_estimated_seconds > 0)
-
-
-FULL_SIM_MIN_QUESTION_SECONDS = 3.0
+    _sync_full_sim_state_from_globals()
+    return bool(_FULL_SIM_STATE.active())
 
 
 def _reset_full_simulation_runtime_state() -> None:
     global full_simulation_schedule, full_simulation_end_timestamp
-    try:
-        full_simulation_schedule.clear()
-    except Exception:
-        full_simulation_schedule = deque()
-    full_simulation_end_timestamp = 0.0
+    _FULL_SIM_STATE.reset_runtime()
+    full_simulation_schedule = _FULL_SIM_STATE.schedule
+    full_simulation_end_timestamp = _FULL_SIM_STATE.end_timestamp
 
 
 def _prepare_full_simulation_schedule(run_count: int, total_duration_seconds: int) -> Deque[float]:
-    global full_simulation_end_timestamp
-    schedule: Deque[float] = deque()
-    if run_count <= 0:
-        full_simulation_end_timestamp = 0.0
-        return schedule
-    now = time.time()
-    total_span = max(0, total_duration_seconds)
-    if total_span <= 0:
-        for idx in range(run_count):
-            schedule.append(now + idx * 5)
-        full_simulation_end_timestamp = now + run_count * 5
-        return schedule
-    base_interval = total_span / max(1, run_count)
-    jitter_window = base_interval * 0.6
-    offsets: List[float] = []
-    for index in range(run_count):
-        ideal = index * base_interval
-        jitter = random.uniform(-jitter_window, jitter_window) if jitter_window > 0 else 0.0
-        offset = max(0.0, min(total_span * 0.98, ideal + jitter))
-        offsets.append(offset)
-    offsets.sort()
-    for offset in offsets:
-        schedule.append(now + offset)
-    full_simulation_end_timestamp = now + total_span
+    global full_simulation_schedule, full_simulation_end_timestamp
+    schedule = _FULL_SIM_STATE.prepare_schedule(run_count, total_duration_seconds)
+    full_simulation_schedule = _FULL_SIM_STATE.schedule
+    full_simulation_end_timestamp = _FULL_SIM_STATE.end_timestamp
     return schedule
 
 
 def _wait_for_next_full_simulation_slot(stop_signal: threading.Event) -> bool:
-    with lock:
-        if not full_simulation_schedule:
-            return False
-        next_slot = full_simulation_schedule.popleft()
-    while True:
-        if stop_signal.is_set():
-            return False
-        delay = next_slot - time.time()
-        if delay <= 0:
-            break
-        wait_time = min(delay, 1.0)
-        if wait_time <= 0:
-            break
-        if stop_signal.wait(wait_time):
-            return False
-    return True
+    return _FULL_SIM_STATE.wait_for_next_slot(stop_signal)
 
 
 def _calculate_full_simulation_run_target(question_count: int) -> float:
-    per_question_cfg = 0.0
-    if full_simulation_estimated_seconds > 0 and question_count > 0:
-        per_question_cfg = float(full_simulation_estimated_seconds) / max(1, question_count)
-    per_question_target = max(FULL_SIM_MIN_QUESTION_SECONDS, per_question_cfg)
-    base = max(5.0, per_question_target * max(1, question_count))
-    jitter = max(0.05, min(0.5, FULL_SIM_DURATION_JITTER))
-    upper = max(base + per_question_target * 0.5, base * (1 + jitter))
-    return random.uniform(base, upper)
+    return _FULL_SIM_STATE.calculate_run_target(question_count)
 
 
 def _build_per_question_delay_plan(question_count: int, target_seconds: float) -> List[float]:
-    if question_count <= 0 or target_seconds <= 0:
-        return []
-    avg_delay = target_seconds / max(1, question_count)
-    min_delay = max(FULL_SIM_MIN_DELAY_SECONDS, avg_delay * 0.8, FULL_SIM_MIN_QUESTION_SECONDS)
-    max_possible_min = target_seconds / max(1, question_count)
-    if min_delay > max_possible_min:
-        min_delay = max(FULL_SIM_MIN_DELAY_SECONDS * 0.2, max_possible_min)
-    min_delay = max(0.02, min_delay)
-    baseline_total = min_delay * question_count
-    remaining = max(0.0, target_seconds - baseline_total)
-    if remaining <= 0:
-        return [target_seconds / max(1, question_count)] * question_count
-    weights = [random.uniform(0.3, 1.2) for _ in range(question_count)]
-    total_weight = sum(weights) or 1.0
-    extras = [remaining * (w / total_weight) for w in weights]
-    return [min_delay + extra for extra in extras]
+    return _FULL_SIM_STATE.build_per_question_delay_plan(question_count, target_seconds)
 
 
 def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = None) -> bool:
@@ -4559,24 +4509,24 @@ class SurveyGUI:
             message_type = message_type_var.get()
             
             if not message_content:
-                messagebox.showwarning("提示", "请输入消息内容", parent=window)
+                log_popup_warning("提示", "请输入消息内容", parent=window)
                 return
             
             # 如果是卡密获取或白嫖卡密类型，邮箱必填；其他类型选填
             if message_type in ["卡密获取", "白嫖卡密（？）"]:
                 if not email:
-                    messagebox.showwarning("提示", f"{message_type}必须填写邮箱地址", parent=window)
+                    log_popup_warning("提示", f"{message_type}必须填写邮箱地址", parent=window)
                     return
             
             # 验证邮箱格式（如果填写了邮箱）
             if email:
                 email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
                 if not re.match(email_pattern, email):
-                    messagebox.showwarning("提示", "邮箱格式不正确，请输入有效的邮箱地址", parent=window)
+                    log_popup_warning("提示", "邮箱格式不正确，请输入有效的邮箱地址", parent=window)
                     return
 
             if not requests:
-                messagebox.showerror("错误", "requests 模块未安装，无法发送消息", parent=window)
+                log_popup_error("错误", "requests 模块未安装，无法发送消息", parent=window)
                 return
             # 组合邮箱、来源和消息内容
             try:
@@ -4600,7 +4550,7 @@ class SurveyGUI:
                         def update_ui_no_requests():
                             status_label.config(text="")
                             send_btn.config(state=tk.NORMAL)
-                            messagebox.showerror("错误", "requests 模块未安装", parent=window)
+                            log_popup_error("错误", "requests 模块未安装", parent=window)
                         window.after(0, update_ui_no_requests)
                         return
                     
@@ -4626,10 +4576,10 @@ class SurveyGUI:
                                 success_message = "发送成功！请留意邮件信息！如未及时发送请在帮助-加入QQ群进群反馈！"
                             else:
                                 success_message = "消息已成功发送！"
-                            messagebox.showinfo("成功", success_message, parent=window)
+                            log_popup_info("成功", success_message, parent=window)
                             window.destroy()
                         else:
-                            messagebox.showerror("错误", f"发送失败，服务器返回: {response.status_code}", parent=window)
+                            log_popup_error("错误", f"发送失败，服务器返回: {response.status_code}", parent=window)
                     
                     window.after(0, update_ui_success)
                     
@@ -4638,7 +4588,7 @@ class SurveyGUI:
                         status_label.config(text="")
                         send_btn.config(state=tk.NORMAL)
                         logging.error(f"发送联系消息失败: {exc}")
-                        messagebox.showerror("错误", f"发送失败：\n{str(exc)}", parent=window)
+                        log_popup_error("错误", f"发送失败：\n{str(exc)}", parent=window)
                     
                     window.after(0, update_ui_error)
 
@@ -4674,7 +4624,7 @@ class SurveyGUI:
         
         if not os.path.exists(payment_image_path):
             logging.error(f"未找到支付二维码图片: {payment_image_path}")
-            messagebox.showerror("资源缺失", f"没有找到支付二维码图片：\n{payment_image_path}")
+            log_popup_error("资源缺失", f"没有找到支付二维码图片：\n{payment_image_path}")
             window.destroy()
             return
 
@@ -4683,7 +4633,7 @@ class SurveyGUI:
                 display_image = payment_image.copy()
         except Exception as exc:
             logging.error(f"加载支付二维码失败: {exc}")
-            messagebox.showerror("加载失败", f"支付二维码图片加载失败：\n{exc}")
+            log_popup_error("加载失败", f"支付二维码图片加载失败：\n{exc}")
             window.destroy()
             return
 
@@ -4733,7 +4683,7 @@ class SurveyGUI:
                 subprocess.Popen(["xdg-open", image_path], close_fds=True)
         except Exception as exc:
             logging.error(f"打开支付二维码原图失败: {exc}")
-            messagebox.showerror("打开失败", f"无法打开原图：\n{image_path}\n\n错误: {exc}")
+            log_popup_error("打开失败", f"无法打开原图：\n{image_path}\n\n错误: {exc}")
 
     def _clear_logs_display(self):
         """清空日志显示"""
@@ -5437,23 +5387,7 @@ class SurveyGUI:
                 pass
 
     def _update_full_simulation_controls_state(self):
-        state = tk.NORMAL if self.full_simulation_enabled_var.get() else tk.DISABLED
-        cleaned: List[tk.Widget] = []
-        for widget in getattr(self, "_full_simulation_control_widgets", []):
-            if widget is None:
-                continue
-            try:
-                if widget.winfo_exists():
-                    widget.configure(state=state)
-                    cleaned.append(widget)
-            except Exception:
-                try:
-                    if widget.winfo_exists():
-                        widget["state"] = state
-                        cleaned.append(widget)
-                except Exception:
-                    continue
-        self._full_simulation_control_widgets = cleaned
+        return full_simulation_ui.update_full_simulation_controls_state(self)
 
     def _update_parameter_widgets_state(self):
         locking = bool(self.full_simulation_enabled_var.get())
@@ -5538,7 +5472,7 @@ class SurveyGUI:
         if not RegistryManager.is_quota_unlimited():
             count = RegistryManager.read_submit_count()
             if count >= 20:
-                messagebox.showwarning(
+                log_popup_warning(
                     "提示",
                     "随机IP已达20份限制，请通过卡密验证解锁无限额度后再启用。",
                     parent=self.root
@@ -5646,12 +5580,12 @@ class SurveyGUI:
         def on_validate():
             card_input = card_var.get().strip()
             if not card_input:
-                messagebox.showwarning("提示", "请输入卡密", parent=dialog)
+                log_popup_warning("提示", "请输入卡密", parent=dialog)
                 return
             
             # 目前采用简单的本地验证
             if self._validate_card(card_input):
-                messagebox.showinfo("成功", "卡密验证成功！已启用无限额度，随机IP可无限使用。", parent=dialog)
+                log_popup_info("成功", "卡密验证成功！已启用无限额度，随机IP可无限使用。", parent=dialog)
                 RegistryManager.reset_submit_count()
                 RegistryManager.write_card_validate_result(True)
                 RegistryManager.set_quota_unlimited(True)  # 启用无限额度
@@ -5663,7 +5597,7 @@ class SurveyGUI:
                 result_var.set(True)
                 dialog.destroy()
             else:
-                messagebox.showerror("失败", "卡密无效，请检查后重试。", parent=dialog)
+                log_popup_error("失败", "卡密无效，请检查后重试。", parent=dialog)
 
         ttk.Button(button_frame, text="验证", command=on_validate).pack(side=tk.RIGHT, padx=(5, 0))
         ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.RIGHT, padx=(5, 0))
@@ -5763,133 +5697,50 @@ class SurveyGUI:
         # 检查当前状态
         if RegistryManager.is_quota_unlimited():
             # 已启用无限额度，提供禁用选项
-            result = messagebox.askyesno("确认", "当前已启用无限额度。\n是否要禁用无限额度并恢复计数限制？")
+            result = log_popup_confirm("确认", "当前已启用无限额度。\n是否要禁用无限额度并恢复计数限制？")
             if result:
                 RegistryManager.set_quota_unlimited(False)
                 RegistryManager.reset_submit_count()
                 logging.info("已禁用无限额度，恢复计数限制")
                 self._refresh_ip_counter_display()
-                messagebox.showinfo("成功", "已禁用无限额度，恢复为20份限制。")
+                log_popup_info("成功", "已禁用无限额度，恢复为20份限制。")
         else:
             # 未启用无限额度，提供卡密验证
-            result = messagebox.askyesno("确认", "确定要启用无限额度吗？\n(需要卡密验证)")
+            result = log_popup_confirm("确认", "确定要启用无限额度吗？\n(需要卡密验证)")
             if result:
                 self._show_card_validation_dialog()
                 # 验证成功后计数已重置并启用无限额度
 
     def _refresh_full_simulation_status_label(self):
-        label = getattr(self, '_full_sim_status_label', None)
-        if not label or not label.winfo_exists():
-            return
-        enabled = bool(self.full_simulation_enabled_var.get())
-        status_text = "已开启" if enabled else "未开启"
-        color = "#2e7d32" if enabled else "#E4A207"
-        label.config(text=f"当前状态：{status_text}", foreground=color)
+        return full_simulation_ui.refresh_full_simulation_status_label(self)
 
     def _update_full_sim_time_section_visibility(self):
-        frame = getattr(self, "_full_sim_timing_frame", None)
-        if not frame or not frame.winfo_exists():
-            return
-        has_target = bool(str(self.full_sim_target_var.get()).strip())
-        try:
-            managed = frame.winfo_manager()
-        except Exception:
-            managed = ""
-        if has_target:
-            if not managed:
-                frame.pack(fill=tk.X, pady=(4, 0))
-        else:
-            if managed:
-                frame.pack_forget()
+        return full_simulation_ui.update_full_sim_time_section_visibility(self)
 
     def _sync_full_sim_target_to_main(self):
-        if not self.full_simulation_enabled_var.get():
-            return
-        target_value = self.full_sim_target_var.get().strip()
-        if target_value:
-            self.target_var.set(target_value)
+        return full_simulation_ui.sync_full_sim_target_to_main(self)
 
     def _get_full_simulation_question_count(self) -> int:
-        count = len(self.question_entries)
-        if count <= 0 and self._last_questions_info:
-            try:
-                count = len(self._last_questions_info)
-            except Exception:
-                count = 0
-        return max(0, count)
+        return int(full_simulation_ui.get_full_simulation_question_count(self))
 
     @staticmethod
     def _parse_positive_int(value: Any) -> int:
-        try:
-            parsed = int(str(value).strip())
-        except Exception:
-            return 0
-        return parsed if parsed > 0 else 0
+        return int(full_simulation_ui.parse_positive_int(value))
 
     def _set_full_sim_duration(self, minutes_var: tk.StringVar, seconds_var: tk.StringVar, total_seconds: int) -> bool:
-        try:
-            total = max(0, int(total_seconds))
-        except Exception:
-            total = 0
-        minutes = total // 60
-        seconds = total % 60
-        try:
-            current_minutes = int(str(minutes_var.get()).strip() or "0")
-        except Exception:
-            current_minutes = 0
-        try:
-            current_seconds = int(str(seconds_var.get()).strip() or "0")
-        except Exception:
-            current_seconds = 0
-        if current_minutes * 60 + current_seconds == total:
-            return False
-        minutes_var.set(str(minutes))
-        seconds_var.set(str(seconds))
-        return True
+        return bool(full_simulation_ui.set_full_sim_duration(minutes_var, seconds_var, total_seconds))
 
     def _auto_update_full_simulation_times(self):
-        if getattr(self, "_suspend_full_sim_autofill", False):
-            return
-        question_count = self._get_full_simulation_question_count()
-        if question_count <= 0:
-            return
-        per_question_seconds = 3
-        estimated_seconds = question_count * per_question_seconds
-        self._set_full_sim_duration(self.full_sim_estimated_minutes_var, self.full_sim_estimated_seconds_var, estimated_seconds)
-        target_value = self._parse_positive_int(self.full_sim_target_var.get()) or self._parse_positive_int(self.target_var.get())
-        if target_value > 0:
-            total_seconds = estimated_seconds * target_value
-            self._set_full_sim_duration(self.full_sim_total_minutes_var, self.full_sim_total_seconds_var, total_seconds)
-        self._update_full_sim_time_section_visibility()
+        return full_simulation_ui.auto_update_full_simulation_times(self)
 
     def _on_full_sim_target_changed(self, *_):
-        self._mark_config_changed()
-        self._sync_full_sim_target_to_main()
-        self._auto_update_full_simulation_times()
+        return full_simulation_ui.on_full_sim_target_changed(self)
 
     def _on_main_target_changed(self, *_):
-        self._mark_config_changed()
-        self._auto_update_full_simulation_times()
+        return full_simulation_ui.on_main_target_changed(self)
 
     def _on_full_simulation_toggle(self, *args):
-        if self.full_simulation_enabled_var.get() and not self.full_sim_target_var.get().strip():
-            current_target = self.target_var.get().strip()
-            if current_target:
-                self.full_sim_target_var.set(current_target)
-        if self.full_simulation_enabled_var.get():
-            if self._threads_value_before_full_sim is None:
-                self._threads_value_before_full_sim = self.thread_var.get().strip() or "1"
-            if self.thread_var.get().strip() != "1":
-                self.thread_var.set("1")
-        else:
-            if self._threads_value_before_full_sim is not None:
-                self.thread_var.set(self._threads_value_before_full_sim or "1")
-            self._threads_value_before_full_sim = None
-        self._sync_full_sim_target_to_main()
-        self._update_full_simulation_controls_state()
-        self._update_parameter_widgets_state()
-        self._refresh_full_simulation_status_label()
-        self._mark_config_changed()
+        return full_simulation_ui.on_full_simulation_toggle(self)
 
     def _restore_saved_paned_position(self, target_position: int, attempts: int = 5, delay_ms: int = 120) -> None:
         """
@@ -6025,112 +5876,7 @@ class SurveyGUI:
 
 
     def _open_full_simulation_window(self):
-        existing = getattr(self, "_full_simulation_window", None)
-        if existing:
-            try:
-                if existing.winfo_exists():
-                    existing.lift()
-                    existing.focus_force()
-                    self._center_child_window(existing)
-                    return
-                else:
-                    self._full_simulation_window = None
-            except tk.TclError:
-                self._full_simulation_window = None
-
-        window = tk.Toplevel(self.root)
-        window.title("全真模拟设置")
-        window.resizable(False, False)
-        window.transient(self.root)
-        self._full_simulation_window = window
-
-        def _on_close():
-            if self._full_simulation_window is window:
-                self._full_simulation_window = None
-                self._full_simulation_control_widgets = []
-            try:
-                window.destroy()
-            except Exception:
-                pass
-
-        window.protocol("WM_DELETE_WINDOW", _on_close)
-
-        container = ttk.Frame(window, padding=20)
-        container.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(
-            container,
-            text="在特定时段内按照真实考试节奏自动填答与提交。",
-            wraplength=360,
-            justify="left"
-        ).pack(anchor="w")
-
-        ttk.Checkbutton(
-            container,
-            text="启用全真模拟（任务会被节奏管控，仅允许单线程执行）",
-            variable=self.full_simulation_enabled_var
-        ).pack(anchor="w", pady=(8, 6))
-
-        if not self.full_sim_target_var.get().strip():
-            current_target = self.target_var.get().strip()
-            if current_target:
-                self.full_sim_target_var.set(current_target)
-
-        target_frame = ttk.Frame(container)
-        target_frame.pack(fill=tk.X, pady=(4, 6))
-        ttk.Label(target_frame, text="目标份数：").grid(row=0, column=0, sticky="w")
-        target_entry = ttk.Entry(target_frame, textvariable=self.full_sim_target_var, width=10)
-        target_entry.grid(row=0, column=1, padx=(6, 0))
-        ttk.Label(target_frame, text="（覆盖主面板的目标设置）", foreground="#616161").grid(row=0, column=2, padx=(8, 0), sticky="w")
-
-        timing_frame = ttk.LabelFrame(container, text="时间参数", padding=12)
-        timing_frame.pack(fill=tk.X, pady=(4, 0))
-        self._full_sim_timing_frame = timing_frame
-
-        ttk.Label(timing_frame, text="预计单次作答").grid(row=0, column=0, sticky="w")
-        est_min_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_estimated_minutes_var, width=6)
-        est_min_entry.grid(row=0, column=1, padx=(8, 4))
-        ttk.Label(timing_frame, text="分").grid(row=0, column=2, padx=(0, 8))
-        est_sec_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_estimated_seconds_var, width=6)
-        est_sec_entry.grid(row=0, column=3, padx=(0, 4))
-        ttk.Label(timing_frame, text="秒").grid(row=0, column=4, padx=(0, 12))
-
-        ttk.Label(timing_frame, text="模拟总时长").grid(row=1, column=0, sticky="w", pady=(10, 0))
-        total_min_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_total_minutes_var, width=6)
-        total_min_entry.grid(row=1, column=1, padx=(8, 4), pady=(10, 0))
-        ttk.Label(timing_frame, text="分").grid(row=1, column=2, padx=(0, 8), pady=(10, 0))
-        total_sec_entry = ttk.Entry(timing_frame, textvariable=self.full_sim_total_seconds_var, width=6)
-        total_sec_entry.grid(row=1, column=3, padx=(0, 4), pady=(10, 0))
-        ttk.Label(timing_frame, text="秒").grid(row=1, column=4, padx=(0, 12), pady=(10, 0))
-
-        ttk.Label(
-            container,
-            text="启动后所有执行参数全部锁定，仅使用本窗口中的设置。",
-            foreground="#d84315",
-            wraplength=360,
-            justify="left"
-        ).pack(anchor="w", pady=(10, 0))
-
-        action_frame = ttk.Frame(container)
-        action_frame.pack(fill=tk.X, pady=(12, 0))
-        ttk.Button(action_frame, text="完成", command=_on_close, width=10).pack(side=tk.RIGHT)
-
-        self._full_simulation_control_widgets = [
-            target_entry,
-            est_min_entry,
-            est_sec_entry,
-            total_min_entry,
-            total_sec_entry,
-        ]
-        self._update_full_simulation_controls_state()
-        self._refresh_full_simulation_status_label()
-        self._update_full_sim_time_section_visibility()
-        self._update_parameter_widgets_state()
-
-        window.update_idletasks()
-        self._center_child_window(window)
-        window.lift()
-        window.focus_force()
+        return full_simulation_ui.open_full_simulation_window(self)
 
     def add_question_dialog(self):
         """弹出对话框来添加新的题目配置"""
@@ -9232,6 +8978,9 @@ class SurveyGUI:
         if full_sim_enabled:
             full_simulation_estimated_seconds = full_sim_est_seconds
             full_simulation_total_duration_seconds = full_sim_total_seconds
+            _FULL_SIM_STATE.enabled = True
+            _FULL_SIM_STATE.estimated_seconds = int(full_sim_est_seconds or 0)
+            _FULL_SIM_STATE.total_duration_seconds = int(full_sim_total_seconds or 0)
             schedule = _prepare_full_simulation_schedule(target, full_sim_total_seconds)
             if not schedule:
                 self.start_button.config(state=tk.NORMAL)
@@ -9243,6 +8992,7 @@ class SurveyGUI:
         else:
             full_simulation_estimated_seconds = 0
             full_simulation_total_duration_seconds = 0
+            _FULL_SIM_STATE.disable()
             _reset_full_simulation_runtime_state()
         fail_threshold = max(1, math.ceil(target_num / 4) + 1)
         cur_num = 0

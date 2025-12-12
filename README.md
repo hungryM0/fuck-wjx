@@ -84,61 +84,52 @@ In the GUI that opens:
 
 **Key Configuration Guide**
 
+Before tweaking these controls make sure the survey has been parsed via the configuration wizard—you can revisit the wizard after each change.
+
 - `Survey Link`
-  - Enter the full WenJuanXing survey page link (example: `https://v.wjx.cn/vm/...`).
-  - Or click the "Upload QR Code" button to upload a survey QR code image - the program will auto-decode and fill in the link.
+  - Paste the full WenJuanXing survey URL (example: `https://v.wjx.cn/vm/...`).
+  - Alternatively use the "Upload QR Code" button and let the UI decode the link automatically.
+  - The parsed questions refresh each time you change the link, so make sure the preview shows the expected questions.
 
 - `Target Count`
-  - Total number of submissions to auto-fill and submit.
-  - Higher numbers take longer; for testing, start with a smaller number (e.g., 3-5).
+  - The total number of submissions the bot will attempt.
+  - Start with 3–5 entries to verify everything looks right; raise the number after confirming the workflow is stable.
+  - The UI shows a countdown of how many samples remain, so you can pause early if needed.
 
 - `Browser Count`
-  - Number of simultaneous browser instances (concurrency).
-  - Higher values = faster overall speed, but more CPU/memory usage, potentially causing lag.
-  - For typical home computers, 2-5 is recommended; adjust based on your specs.
+  - Controls how many Playwright browser instances run in parallel.
+  - Higher values increase throughput but consume more CPU/RAM; typical home machines handle 2–5 safely.
+  - If you plan long runs, monitor your system and reduce the count when usage spikes.
 
 - `Distribution Method`
-  - `Completely Random`:
-    - For multiple-choice questions, randomly select answers from all candidate options.
-    - Suitable when you don't care about distribution and just want to "finish quickly".
-  - `Custom Weight`:
-    - Set a "weight" for each option; the program randomly selects answers based on weight ratios.
-    - Example: Set A:50%, B:30%, C:20% to better simulate realistic survey data distribution.
-    - In the GUI, adjust weights via sliders or input boxes with real-time percentage display.
+  - `Completely Random` picks answers uniformly from all available choices—good for dry runs.
+  - `Custom Weight` lets you assign a weight to each option and the bot samples based on the resulting probability distribution.
+  - Adjust sliders or enter percentages directly; the UI recalculates the preview ratio instantly.
 
 - `Question List Area`
-  - Left panel shows all parsed questions and question types from the current survey.
-  - Click a question to view/edit its answer presets and weight configuration on the right.
-  - For complex question types (multi-select, matrix), set weights or fixed selection status for each sub-option separately.
+  - The left column lists all parsed questions and their detected types.
+  - Select a question to open its configuration pane on the right, where you can edit answer presets, toggle required options, or lock/unlock selections.
+  - For multi-select or matrix questions, define weights or fixed states per row/column so complex layouts behave predictably.
 
 - `Select All` / Batch Operations
-  - Checkbox in the top-left corner of the table header is the "Select All" button:
-    - Check: Select all questions at once.
-    - Uncheck: Deselect all questions.
-  - After selecting multiple questions, use "Batch Delete", "Batch Edit", etc. from the bottom or right-click menu:
-    - Batch Delete: Remove custom configurations for these questions (doesn't affect original survey questions).
-    - Batch Edit: Apply the same distribution method or answer strategy to multiple questions simultaneously.
+  - Use the header checkbox to select every question at once or clear the selection.
+  - Once questions are selected, right-click or use the buttons below to run batch operations:
+    - `Batch Delete` removes user-defined strategies without touching the original survey data.
+    - `Batch Edit` applies the same distribution/answer strategy across the selected group.
 
 - `Fill-in / Subjective Question Configuration`
-  - For fill-in questions, you can:
-    - Set a fixed answer (every submission gets the same content), e.g., name, department, etc.
-    - Or enter a "candidate answer list" - the program randomly picks one to fill in.
-  - For subjective questions (long text), you can:
-    - Configure a fixed text block.
-    - Or preset multiple responses for the program to randomly select, avoiding identical answers for every submission.
+  - For fill-in questions you can assign a single fixed answer or supply a list of candidates—each submission randomly picks one entry.
+  - Subjective (long-text) questions accept text blocks or multiple presets; mix them to make answers appear less repetitive.
+  - Use the preview to confirm line breaks and formatting before running the bot.
 
 - `Auto Configure Survey`
-  - After clicking "Auto Configure Survey", the program will:
-    - Visit the survey link and parse the page structure.
-    - Auto-identify question types (single-choice, multi-choice, matrix, fill-in, etc.).
-    - Provide default configurations for common question types (e.g., assign even weights to all options), which you can fine-tune.
-  - If parsing fails, check if the survey link is correct, if login is required, or if access restrictions are set.
+  - Click this button anytime you change the survey link; the tool will visit the page, detect question types, and apply an initial strategy.
+  - Some surveys require login or additional verification; if parsing fails, verify the link, cookies, or whether the survey is private.
 
 - `Start Execution`
-  - After confirming all parameters are correct, click "Start Execution":
-    - The program auto-fills and submits the survey according to the set "Target Count", "Browser Count", and question strategies.
-    - The interface typically displays current progress, successful submission count, and error logs.
-  - To stop during execution, close the program directly or use the "Stop" button provided in the interface (if implemented).
+  - After checking all inputs, hit "Start Execution" to let the bot auto-fill submissions according to your target count and strategy.
+  - The log area on the right shows progress, success count, and any errors during runtime.
+  - Use the built-in "Stop" button or close the window to halt the process immediately if needed.
 
 ---
 
