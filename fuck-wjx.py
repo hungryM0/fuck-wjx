@@ -2848,30 +2848,42 @@ def vacant(driver: BrowserDriver, current, index):
         values = [part.strip() for part in parts]
 
         input_elements: List[Any] = []
+        question_div = None
         try:
             question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
             candidates = question_div.find_elements(By.CSS_SELECTOR, "input, textarea")
         except Exception:
             candidates = []
 
-        for candidate in candidates:
-            try:
-                tag_name = (candidate.tag_name or "").lower()
-            except Exception:
-                tag_name = ""
-            input_type = ""
-            try:
-                input_type = (candidate.get_attribute("type") or "").lower()
-            except Exception:
-                input_type = ""
-            if input_type == "hidden":
-                continue
-            if tag_name == "textarea" or (tag_name == "input" and input_type in ("", "text", "search", "tel", "number")):
+        def _collect_text_inputs(cands: List[Any]):
+            for candidate in cands:
                 try:
-                    if candidate.is_displayed():
-                        input_elements.append(candidate)
+                    tag_name = (candidate.tag_name or "").lower()
                 except Exception:
-                    input_elements.append(candidate)
+                    tag_name = ""
+                input_type = ""
+                try:
+                    input_type = (candidate.get_attribute("type") or "").lower()
+                except Exception:
+                    input_type = ""
+                if input_type == "hidden":
+                    continue
+                if tag_name == "textarea" or (tag_name == "input" and input_type in ("", "text", "search", "tel", "number")):
+                    try:
+                        if candidate.is_displayed():
+                            input_elements.append(candidate)
+                    except Exception:
+                        input_elements.append(candidate)
+
+        _collect_text_inputs(candidates)
+
+        # 兜底：部分多项填空的输入框不会出现在通用查询结果里，尝试按 id 前缀再找一遍
+        if question_div and len(input_elements) < 2:
+            try:
+                fallback_candidates = question_div.find_elements(By.CSS_SELECTOR, f"input[id^='q{current}_'], textarea[id^='q{current}_']")
+            except Exception:
+                fallback_candidates = []
+            _collect_text_inputs(fallback_candidates)
 
         if not input_elements:
             try:
