@@ -343,6 +343,51 @@ _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
 _REPORTED_MULTI_LIMITS: Set[Tuple[str, int]] = set()
 
 
+def _generate_random_chinese_name_value() -> str:
+    surname_pool = [
+        "张", "王", "李", "赵", "陈", "杨", "刘", "黄", "周", "吴", "徐", "孙", "马", "朱", "胡", "林",
+        "郭", "何", "高", "罗", "郑", "梁", "谢", "宋", "唐", "韩", "曹", "许", "邓", "冯",
+    ]
+    given_pool = "嘉伟俊涛明强磊洋超刚凯鹏华建鑫宇泽浩瑞博杰涛宁安晨泽轩磊晨豪轩皓轩梓轩浩宇子豪思远家豪文博宇航志强明浩志伟文涛文轩梓豪志鹏伟豪君豪承泽"
+    surname = random.choice(surname_pool)
+    given_len = 1 if random.random() < 0.65 else 2
+    given = "".join(random.choice(given_pool) for _ in range(given_len))
+    return f"{surname}{given}"
+
+
+def _generate_random_mobile_value() -> str:
+    prefixes = (
+        "130", "131", "132", "133", "134", "135", "136", "137", "138", "139",
+        "147", "150", "151", "152", "153", "155", "156", "157", "158", "159",
+        "166", "171", "172", "173", "175", "176", "177", "178", "180", "181",
+        "182", "183", "184", "185", "186", "187", "188", "189", "198", "199",
+    )
+    tail = "".join(str(random.randint(0, 9)) for _ in range(8))
+    return random.choice(prefixes) + tail
+
+
+def _generate_random_generic_text_value() -> str:
+    samples = [
+        "已填写", "同上", "无", "OK", "收到", "确认", "正常", "通过", "测试数据", "自动填写",
+    ]
+    base = random.choice(samples)
+    suffix = str(random.randint(10, 999))
+    return f"{base}{suffix}"
+
+
+def _resolve_dynamic_text_token_value(token: Any) -> str:
+    if token is None:
+        return DEFAULT_FILL_TEXT
+    text = str(token).strip()
+    if text == "__RANDOM_NAME__":
+        return _generate_random_chinese_name_value()
+    if text == "__RANDOM_MOBILE__":
+        return _generate_random_mobile_value()
+    if text == "__RANDOM_TEXT__":
+        return _generate_random_generic_text_value()
+    return text or DEFAULT_FILL_TEXT
+
+
 class AliyunCaptchaBypassError(RuntimeError):
     """在阿里云智能验证无法自动通过时抛出。"""
 
@@ -2291,6 +2336,15 @@ def _count_text_inputs_in_soup(question_div) -> int:
             style_text = (cand.get("style") or "").lower()
         except Exception:
             style_text = ""
+        try:
+            class_attr = cand.get("class") or []
+            if isinstance(class_attr, str):
+                class_text = class_attr.lower()
+            else:
+                class_text = " ".join(class_attr).lower()
+        except Exception:
+            class_text = ""
+        is_textcont = "textcont" in class_text or "textedit" in class_text
 
         # 跳过隐藏元素（type hidden 或 display:none）
         if input_type == "hidden" or "display:none" in style_text or "visibility:hidden" in style_text:
@@ -2312,14 +2366,17 @@ def _count_text_inputs_in_soup(question_div) -> int:
             contenteditable = (cand.get("contenteditable") or "").lower() == "true"
         except Exception:
             contenteditable = False
-        if contenteditable and tag_name in {"span", "div"}:
+        if (contenteditable or is_textcont) and tag_name in {"span", "div"}:
             count += 1
     return count
 
 
 def _count_visible_text_inputs_driver(question_div) -> int:
     try:
-        candidates = question_div.find_elements(By.CSS_SELECTOR, "input, textarea, span[contenteditable='true'], div[contenteditable='true']")
+        candidates = question_div.find_elements(
+            By.CSS_SELECTOR,
+            "input, textarea, span[contenteditable='true'], div[contenteditable='true'], .textCont, .textcont"
+        )
     except Exception:
         candidates = []
     count = 0
@@ -2337,6 +2394,11 @@ def _count_visible_text_inputs_driver(question_div) -> int:
             style_text = (cand.get_attribute("style") or "").lower()
         except Exception:
             style_text = ""
+        try:
+            class_attr = (cand.get_attribute("class") or "").lower()
+        except Exception:
+            class_attr = ""
+        is_textcont = "textcont" in class_attr or "textedit" in class_attr
 
         # 跳过隐藏元素（type hidden 或 display:none / visibility:hidden）
         if input_type == "hidden" or "display:none" in style_text or "visibility:hidden" in style_text:
@@ -2363,7 +2425,7 @@ def _count_visible_text_inputs_driver(question_div) -> int:
             contenteditable = (cand.get_attribute("contenteditable") or "").lower() == "true"
         except Exception:
             contenteditable = False
-        if contenteditable and tag_name in {"span", "div"}:
+        if (contenteditable or is_textcont) and tag_name in {"span", "div"}:
             try:
                 if cand.is_displayed():
                     count += 1
@@ -2398,7 +2460,9 @@ def _should_mark_as_multi_text(type_code: Any, option_count: int, text_input_cou
         return True
     if normalized in _KNOWN_NON_TEXT_QUESTION_TYPES:
         return False
-    return (option_count or 0) == 0
+    if (option_count or 0) == 0:
+        return True
+    return (option_count or 0) <= 1 and text_input_count >= 2
 
 
 def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
@@ -2898,6 +2962,81 @@ def _fill_text_question_input(driver: BrowserDriver, element, value: Optional[An
     )
 
 
+def _fill_contenteditable_element(driver: BrowserDriver, element, value: str) -> None:
+    """在可编辑的 span/div 上模拟“点击-输入-派发事件”的行为，并同步隐藏输入框。"""
+    text_value = value if value else DEFAULT_FILL_TEXT
+    # 尝试让元素获取焦点并清空历史内容
+    try:
+        driver.execute_script(
+            """
+            const el = arguments[0];
+            if (!el) { return; }
+            try { el.focus(); } catch (err) {}
+            if (window.getSelection && document.createRange) {
+                const sel = window.getSelection();
+                const range = document.createRange();
+                try {
+                    range.selectNodeContents(el);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                } catch (err) {}
+            }
+            if (document.execCommand) {
+                try { document.execCommand('delete'); } catch (err) {}
+            }
+            try { el.innerText = ''; } catch (err) { el.textContent = ''; }
+            """,
+            element,
+        )
+    except Exception:
+        pass
+
+    typed_successfully = False
+    try:
+        element.send_keys(text_value)
+        typed_successfully = True
+    except Exception:
+        typed_successfully = False
+
+    driver.execute_script(
+        """
+        const el = arguments[0];
+        const value = arguments[1];
+        const typed = !!arguments[2];
+        if (!el) {
+            return;
+        }
+        if (!typed) {
+            try { el.innerText = value; } catch (err) { el.textContent = value; }
+        }
+        const eventOptions = { bubbles: true };
+        ['input','change','blur','keyup','keydown','keypress'].forEach(name => {
+            try { el.dispatchEvent(new Event(name, eventOptions)); } catch (err) {}
+        });
+        const container = el.closest ? el.closest('.textEdit') : null;
+        let hiddenInput = null;
+        if (container) {
+            hiddenInput = container.querySelector('input[type="text"], input[type="hidden"]');
+            if (!hiddenInput) {
+                hiddenInput = container.previousElementSibling;
+            }
+        }
+        if (hiddenInput && hiddenInput.tagName && (hiddenInput.type === 'text' || hiddenInput.type === 'hidden')) {
+            try {
+                hiddenInput.value = value;
+                hiddenInput.setAttribute('value', value);
+            } catch (err) {}
+            ['input','change','blur','keyup','keydown','keypress'].forEach(name => {
+                try { hiddenInput.dispatchEvent(new Event(name, eventOptions)); } catch (err) {}
+            });
+        }
+        """,
+        element,
+        text_value,
+        typed_successfully,
+    )
+
+
 def vacant(driver: BrowserDriver, current, index):
     def _infer_text_entry(driver_obj: BrowserDriver, q_num: int) -> Tuple[str, List[str]]:
         try:
@@ -2925,8 +3064,19 @@ def vacant(driver: BrowserDriver, current, index):
         answer_candidates = [DEFAULT_FILL_TEXT]
     if len(selection_probabilities) != len(answer_candidates):
         selection_probabilities = normalize_probabilities([1.0] * len(answer_candidates))
+    resolved_candidates = []
+    for candidate in answer_candidates:
+        try:
+            text_value = _resolve_dynamic_text_token_value(candidate)
+        except Exception:
+            text_value = DEFAULT_FILL_TEXT
+        resolved_candidates.append(text_value if text_value else DEFAULT_FILL_TEXT)
+
+    if len(selection_probabilities) != len(resolved_candidates):
+        selection_probabilities = normalize_probabilities([1.0] * len(resolved_candidates))
+
     selected_index = numpy.random.choice(a=numpy.arange(0, len(selection_probabilities)), p=selection_probabilities)
-    selected_answer = answer_candidates[selected_index] if answer_candidates else DEFAULT_FILL_TEXT
+    selected_answer = resolved_candidates[selected_index] if resolved_candidates else DEFAULT_FILL_TEXT
 
     if entry_kind == "multi_text":
         raw_text = "" if selected_answer is None else str(selected_answer)
@@ -2942,7 +3092,10 @@ def vacant(driver: BrowserDriver, current, index):
         if not values or all(not v for v in values):
             values = [DEFAULT_FILL_TEXT]
 
-        input_elements: List[Any] = []
+        # 先区分「可见可编辑」与「隐藏/不可见」的输入，避免把答案映射到隐藏框导致填充失败
+        primary_inputs: List[Any] = []   # 优先填写：contenteditable 节点、可见输入框
+        secondary_inputs: List[Any] = [] # 兜底填写：隐藏或不可见的输入框
+        seen_nodes: Set[int] = set()
         question_div = None
         try:
             question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
@@ -2950,70 +3103,95 @@ def vacant(driver: BrowserDriver, current, index):
         except Exception:
             candidates = []
 
+        def _mark_and_append(target_list: List[Any], node: Any):
+            obj_id = id(node)
+            if obj_id in seen_nodes:
+                return
+            seen_nodes.add(obj_id)
+            target_list.append(node)
+
         def _collect_text_inputs(cands: List[Any]):
             for candidate in cands:
                 try:
                     tag_name = (candidate.tag_name or "").lower()
                 except Exception:
                     tag_name = ""
-                input_type = ""
                 try:
                     input_type = (candidate.get_attribute("type") or "").lower()
                 except Exception:
                     input_type = ""
-
                 try:
-                    contenteditable = (candidate.get_attribute("contenteditable") or "").lower() == "true"
+                    contenteditable_attr = (candidate.get_attribute("contenteditable") or "").lower()
                 except Exception:
-                    contenteditable = False
+                    contenteditable_attr = ""
+                try:
+                    class_attr = (candidate.get_attribute("class") or "").lower()
+                except Exception:
+                    class_attr = ""
+                is_contenteditable = (contenteditable_attr == "true") or ("textcont" in class_attr and tag_name in {"span", "div"})
 
                 # 兼容内容可编辑的 span/div（如问卷星 gapfill 的 textCont），不再依赖显示检测
-                if contenteditable and tag_name in {"span", "div"}:
-                    input_elements.append(candidate)
+                if is_contenteditable and tag_name in {"span", "div"}:
+                    _mark_and_append(primary_inputs, candidate)
                     continue
 
                 # 优先收集可见的常规输入框，若可见性检测返回 False 也尝试保留一次
-                if input_type != "hidden" and (tag_name == "textarea" or (tag_name == "input" and input_type in ("", "text", "search", "tel", "number"))):
+                if tag_name == "textarea" or (tag_name == "input" and input_type in ("", "text", "search", "tel", "number")):
                     try:
                         displayed = candidate.is_displayed()
                     except Exception:
                         displayed = True
-                    if displayed:
-                        input_elements.append(candidate)
+                    # hidden 类型直接归类为兜底节点，避免占用答案顺序
+                    if input_type == "hidden":
+                        _mark_and_append(secondary_inputs, candidate)
                         continue
-                    # 如果未检测为可见，但类型匹配，仍尝试加入，避免 bounding_box 返回 None 的场景
-                    input_elements.append(candidate)
+                    if displayed:
+                        _mark_and_append(primary_inputs, candidate)
+                        continue
+                    _mark_and_append(secondary_inputs, candidate)
 
         _collect_text_inputs(candidates)
 
         # 兜底查找 contenteditable 的文本节点，并保持 DOM 顺序
         if question_div:
             try:
-                    editable_nodes = question_div.find_elements(By.CSS_SELECTOR, "span[contenteditable='true'], div[contenteditable='true'], .textCont")
+                editable_nodes = question_div.find_elements(By.CSS_SELECTOR, "span[contenteditable='true'], div[contenteditable='true'], .textCont")
             except Exception:
                 editable_nodes = []
             _collect_text_inputs(editable_nodes)
 
         # 兜底：部分多项填空的输入框不会出现在通用查询结果里，尝试按 id 前缀再找一遍
-        if question_div and len(input_elements) < 2:
+        if question_div and (len(primary_inputs) + len(secondary_inputs)) < 2:
             try:
                 fallback_candidates = question_div.find_elements(By.CSS_SELECTOR, f"input[id^='q{current}_'], textarea[id^='q{current}_']")
             except Exception:
                 fallback_candidates = []
             _collect_text_inputs(fallback_candidates)
 
-        if not input_elements:
+        if not primary_inputs and not secondary_inputs:
             try:
-                input_elements = [driver.find_element(By.CSS_SELECTOR, f"#q{current}")]
+                primary_inputs = [driver.find_element(By.CSS_SELECTOR, f"#q{current}")]
             except Exception:
-                input_elements = []
+                primary_inputs = []
 
-        # 若输入框数量多于答案数量，扩展默认值
-        if len(values) < len(input_elements):
-            values.extend([DEFAULT_FILL_TEXT] * (len(input_elements) - len(values)))
+        input_elements = primary_inputs + secondary_inputs if primary_inputs else secondary_inputs
+        visible_count = len(primary_inputs) if primary_inputs else len(input_elements)
+
+        # 若答案数量少于可见输入框数量，扩展默认值；隐藏输入框不再占用答案配额
+        fill_values = [v if v else DEFAULT_FILL_TEXT for v in values] or [DEFAULT_FILL_TEXT]
+        while len(fill_values) < visible_count:
+            fill_values.append(DEFAULT_FILL_TEXT)
+
+        def _resolve_value_for_index(idx: int) -> str:
+            if idx < visible_count:
+                return fill_values[idx] if idx < len(fill_values) else DEFAULT_FILL_TEXT
+            rel = idx - visible_count
+            if rel < len(fill_values):
+                return fill_values[rel]
+            return fill_values[-1] if fill_values else DEFAULT_FILL_TEXT
 
         for idx_input, element in enumerate(input_elements):
-            value = values[idx_input] if idx_input < len(values) else DEFAULT_FILL_TEXT
+            value = _resolve_value_for_index(idx_input)
             if not value:
                 value = DEFAULT_FILL_TEXT
             try:
@@ -3021,7 +3199,6 @@ def vacant(driver: BrowserDriver, current, index):
             except Exception:
                 tag_name = ""
             if tag_name in {"span", "div"}:
-                # 直接写入 contenteditable 节点，并触发事件，同时同步其关联的隐藏 input
                 try:
                     _smooth_scroll_to_element(driver, element, 'center')
                 except Exception:
@@ -3030,38 +3207,16 @@ def vacant(driver: BrowserDriver, current, index):
                     element.click()
                 except Exception:
                     pass
-                driver.execute_script(
-                    """
-                    const el = arguments[0];
-                    const value = arguments[1];
-                    if (!el) return;
-                    try { el.focus(); } catch (err) {}
-                    try { el.innerText = value; } catch (err) { el.textContent = value; }
-                    const opts = { bubbles: true };
-                    ['input','change','blur','keyup','keydown','keypress'].forEach(name => {
-                        try { el.dispatchEvent(new Event(name, opts)); } catch (err) {}
-                    });
-
-                    // 同步前置隐藏文本框（问卷星 gapfill 场景）
-                    const label = el.closest ? el.closest('.textEdit') : null;
-                    const hiddenInput = label ? label.previousElementSibling : null;
-                    if (hiddenInput && hiddenInput.tagName && hiddenInput.type === 'text') {
-                        try { hiddenInput.value = value; } catch (err) {}
-                        try { hiddenInput.setAttribute('value', value); } catch (err) {}
-                        ['input','change','blur','keyup','keydown','keypress'].forEach(name => {
-                            try { hiddenInput.dispatchEvent(new Event(name, opts)); } catch (err) {}
-                        });
-                    }
-                    """,
-                    element,
-                    value,
-                )
+                _fill_contenteditable_element(driver, element, value)
             else:
                 _fill_text_question_input(driver, element, value)
 
         # 再兜底：直接按顺序写入隐藏输入框 q{current}_n，避免验证遗漏
         try:
-            for idx_value, val in enumerate(values, start=1):
+            sync_values = fill_values if fill_values else [DEFAULT_FILL_TEXT]
+            sync_count = max(len(sync_values), len(input_elements), visible_count)
+            for idx_value in range(sync_count):
+                val = sync_values[idx_value] if idx_value < len(sync_values) else (sync_values[-1] if sync_values else DEFAULT_FILL_TEXT)
                 driver.execute_script(
                     """
                     const id = arguments[0];
@@ -3074,7 +3229,7 @@ def vacant(driver: BrowserDriver, current, index):
                         try { el.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
                     });
                     """,
-                    f"q{current}_{idx_value}",
+                    f"q{current}_{idx_value + 1}",
                     val or DEFAULT_FILL_TEXT,
                 )
         except Exception:
@@ -3127,21 +3282,29 @@ def single(driver: BrowserDriver, current, index):
 def _normalize_droplist_probs(prob_config: Union[List[float], int, None], option_count: int) -> List[float]:
     if option_count <= 0:
         return []
-    if isinstance(prob_config, list) and len(prob_config) == option_count:
-        try:
-            return normalize_probabilities(list(prob_config))
-        except Exception:
-            pass
     if prob_config == -1 or prob_config is None:
         try:
             return normalize_probabilities([1.0] * option_count)
         except Exception:
             return [1.0 / option_count] * option_count
     try:
-        base = list(prob_config) if isinstance(prob_config, list) else [1.0] * option_count
-        if len(base) != option_count:
-            base = [1.0] * option_count
-        return normalize_probabilities(base)
+        # 尽量保留用户配置的配比，即便选项数量有变化也不直接退回平均分配
+        if isinstance(prob_config, (list, tuple)):
+            base = list(prob_config)
+        else:
+            try:
+                base = list(prob_config)  # type: ignore
+            except Exception:
+                base = []
+        sanitized = [max(0.0, float(v)) if v is not None else 0.0 for v in base]
+        if len(sanitized) < option_count:
+            sanitized.extend([0.0] * (option_count - len(sanitized)))
+        elif len(sanitized) > option_count:
+            sanitized = sanitized[:option_count]
+        total = sum(sanitized)
+        if total > 0:
+            return [value / total for value in sanitized]
+        return [1.0 / option_count] * option_count
     except Exception:
         return [1.0 / option_count] * option_count
 
@@ -3846,6 +4009,265 @@ def _click_submit_button(driver: BrowserDriver) -> bool:
     return False
 
 
+
+def _verify_privacy_agreement_checked(driver: BrowserDriver) -> bool:
+    script = r"""
+        (() => {
+            const KEYWORDS = /(阅读|已阅|同意|确认|接受|已知悉).*(协议|条款|须知|隐私|声明|政策|约定)/;
+            const candidates = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+            for (const input of candidates) {
+                if (!input.checked) continue;
+                let text = (input.getAttribute('aria-label') || input.getAttribute('title') || '');
+                if (input.labels && input.labels.length) {
+                    for (const label of input.labels) {
+                        text += (label.innerText || label.textContent || '') + ' ';
+                    }
+                }
+                const wrapper = input.closest('.protocol, .agreement, .wjxprivacy, label, span, div, p');
+                if (wrapper) {
+                    text += (wrapper.innerText || wrapper.textContent || '') + ' ';
+                }
+                if (KEYWORDS.test(text.replace(/\s+/g, ''))) {
+                    return true;
+                }
+            }
+            const textNodes = document.querySelectorAll('.protocol, .agreement, .wjxprivacy, .tipagree, label, span, div, p, a');
+            for (const node of textNodes) {
+                const text = (node.innerText || node.textContent || '').replace(/\s+/g, '');
+                if (!text || !KEYWORDS.test(text)) {
+                    continue;
+                }
+                const ariaChecked = (node.getAttribute('aria-checked') || '').toLowerCase();
+                if (ariaChecked === 'true' || ariaChecked === 'checked') {
+                    return true;
+                }
+                const cls = (node.getAttribute('class') || '').toLowerCase();
+                if (/checked|selected|active|cur|on/.test(cls)) {
+                    return true;
+                }
+            }
+            return false;
+        })();
+    """
+    try:
+        return bool(driver.execute_script(script))
+    except Exception:
+        return False
+
+
+def _click_privacy_checkbox_candidates(driver: BrowserDriver) -> bool:
+    selectors = [
+        "input[type='checkbox'][id*='agree']",
+        "input[type='checkbox'][name*='agree']",
+        "input[type='checkbox'][id*='protocol']",
+        ".protocol input[type='checkbox']",
+        ".agreement input[type='checkbox']",
+        ".wjxprivacy input[type='checkbox']",
+        ".tipagree input[type='checkbox']",
+        "label[for*='agree']",
+        "label[for*='protocol']",
+        ".protocol label",
+        ".agreement label",
+        ".wjxprivacy label",
+        ".tipagree label",
+        ".protocol",
+        ".agreement",
+        ".wjxprivacy",
+        ".tipagree",
+    ]
+    for selector in selectors:
+        try:
+            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+        except Exception:
+            continue
+        for element in elements:
+            try:
+                displayed = element.is_displayed()
+            except Exception:
+                displayed = True
+            if not displayed:
+                continue
+            try:
+                _smooth_scroll_to_element(driver, element, 'center')
+            except Exception:
+                pass
+            for click_action in (
+                lambda: element.click(),
+                lambda: driver.execute_script("arguments[0].click();", element),
+            ):
+                try:
+                    click_action()
+                    time.sleep(0.05)
+                    if _verify_privacy_agreement_checked(driver):
+                        return True
+                except Exception:
+                    continue
+    return False
+
+
+def _ensure_privacy_agreement_checked(driver: BrowserDriver) -> bool:
+    """
+    若页面存在“已阅读并同意”类隐私/协议复选框，则自动勾选，返回 True 表示已处理或本就勾选。
+    """
+    if _verify_privacy_agreement_checked(driver):
+        return True
+    if _click_privacy_checkbox_candidates(driver):
+        logging.debug("已尝试点击隐私/协议候选元素")
+        return True
+    script = r"""
+        (() => {
+            const KEYWORDS = /(阅读|已阅|同意|确认|接受|已知悉).*(协议|条款|须知|隐私|声明|政策|约定)/;
+            const EVENT_NAMES = ['pointerdown','mousedown','pointerup','mouseup','click','input','change','blur','keyup','keydown','keypress'];
+            const fireEvents = (el) => {
+                if (!el) return;
+                for (const name of EVENT_NAMES) {
+                    try { el.dispatchEvent(new Event(name, { bubbles: true })); } catch (_) {}
+                }
+            };
+            const ensureChecked = (input) => {
+                if (!input || input.disabled) return false;
+                if (input.type && input.type.toLowerCase() !== 'checkbox') return false;
+                if (input.checked) return true;
+                try { input.scrollIntoView({block: 'center'}); } catch (_) {}
+                try {
+                    input.click();
+                    if (input.checked) {
+                        fireEvents(input);
+                        return true;
+                    }
+                } catch (_) {}
+                try {
+                    input.checked = true;
+                    input.setAttribute('checked', 'checked');
+                    fireEvents(input);
+                    return true;
+                } catch (_) {}
+                return !!input.checked;
+            };
+            const dispatchClicks = (node) => {
+                if (!node) return;
+                try { node.scrollIntoView({block:'center'}); } catch (_) {}
+                EVENT_NAMES.forEach(name => {
+                    try { node.dispatchEvent(new Event(name, { bubbles: true })); } catch (_) {}
+                });
+            };
+            const collectText = (input) => {
+                let text = (input.getAttribute('aria-label') || input.getAttribute('title') || '');
+                if (input.labels && input.labels.length) {
+                    for (const label of input.labels) {
+                        text += (label.innerText || label.textContent || '') + ' ';
+                    }
+                }
+                const wrapper = input.closest('.protocol, .agreement, .wjxprivacy, label, span, div, p');
+                if (wrapper) {
+                    text += (wrapper.innerText || wrapper.textContent || '') + ' ';
+                }
+                return text.replace(/\s+/g, '');
+            };
+            const inputs = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+            const strongCandidates = inputs.filter(input => KEYWORDS.test(collectText(input)));
+            if (strongCandidates.length) {
+                for (const input of strongCandidates) {
+                    if (ensureChecked(input)) {
+                        return true;
+                    }
+                }
+            }
+            const selectors = [
+                '#agree', '#agreement', '#confirm', '#protocol input[type="checkbox"]',
+                '.agreement input[type="checkbox"]', '.protocol input[type="checkbox"]',
+                '.survey-agree input[type="checkbox"]', '.wjxprivacy input[type="checkbox"]',
+                '.tipagree input[type="checkbox"]',
+                'input[name*="agree"]', 'input[id*="agree"]', 'input[class*="agree"]',
+                'input[name*="protocol"]', 'input[id*="protocol"]', 'input[class*="protocol"]'
+            ];
+            for (const sel of selectors) {
+                const nodes = document.querySelectorAll(sel);
+                for (const node of nodes) {
+                    if (ensureChecked(node)) {
+                        return true;
+                    }
+                }
+            }
+            const textNodes = document.querySelectorAll('.protocol, .agreement, .wjxprivacy, .tipagree, label, span, div, p, a, li');
+            for (const node of textNodes) {
+                const text = (node.innerText || node.textContent || '').replace(/\s+/g, '');
+                if (!text || !KEYWORDS.test(text)) {
+                    continue;
+                }
+                let input = null;
+                if (node.tagName === 'LABEL') {
+                    const id = node.getAttribute('for');
+                    if (id) {
+                        input = document.getElementById(id);
+                    }
+                }
+                if (!input) {
+                    input = node.querySelector('input[type="checkbox"]');
+                }
+                if (!input) {
+                    let search = node.previousElementSibling;
+                    let attempts = 0;
+                    while (search && attempts < 3 && !input) {
+                        if (search.tagName === 'INPUT' && search.type && search.type.toLowerCase() === 'checkbox') {
+                            input = search;
+                            break;
+                        }
+                        if (search.querySelector) {
+                            input = search.querySelector('input[type="checkbox"]');
+                        }
+                        search = search.previousElementSibling;
+                        attempts += 1;
+                    }
+                }
+                if (!input) {
+                    let parent = node.parentElement;
+                    let hops = 0;
+                    while (parent && hops < 4 && !input) {
+                        input = parent.querySelector('input[type="checkbox"]');
+                        parent = parent.parentElement;
+                        hops += 1;
+                    }
+                }
+                if (input) {
+                    if (ensureChecked(input)) {
+                        return true;
+                    }
+                    dispatchClicks(node);
+                    if (input.checked) {
+                        fireEvents(input);
+                        return true;
+                    }
+                    continue;
+                }
+                dispatchClicks(node);
+                const checkedAfter = document.querySelector('input[type="checkbox"]:checked');
+                if (checkedAfter && KEYWORDS.test((node.innerText || node.textContent || '').replace(/\s+/g, ''))) {
+                    return true;
+                }
+            }
+            const globalFlags = ['agree', 'isAgree', 'agreeFlag', 'protocolChecked', 'hasReadProtocol'];
+            let toggled = false;
+            for (const name of globalFlags) {
+                if (Object.prototype.hasOwnProperty.call(window, name)) {
+                    try {
+                        window[name] = true;
+                        toggled = true;
+                    } catch (_) {}
+                }
+            }
+            return toggled;
+        })();
+    """
+    try:
+        result = bool(driver.execute_script(script))
+        if result or _verify_privacy_agreement_checked(driver):
+            logging.debug("已自动勾选隐私/协议复选框")
+            return True
+    except Exception:
+        pass
+    return _verify_privacy_agreement_checked(driver)
+
 def _sleep_with_stop(stop_signal: Optional[threading.Event], seconds: float) -> bool:
     """带停止信号的睡眠，返回 True 表示被中断。"""
     if seconds <= 0:
@@ -4006,6 +4428,7 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
     last_submit_had_captcha = False
 
     def _click_submit_buttons():
+        _ensure_privacy_agreement_checked(driver)
         clicked = False
         try:
             driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
@@ -8652,6 +9075,18 @@ class SurveyGUI:
         default = "确认题干后，根据下方输入区域逐步设置答案或权重，完成后点击“下一题”即可保存。"
         return hints.get(type_code, default)
 
+    def _generate_random_chinese_name(self) -> str:
+        return _generate_random_chinese_name_value()
+
+    def _generate_random_mobile(self) -> str:
+        return _generate_random_mobile_value()
+
+    def _generate_random_generic_text(self) -> str:
+        return _generate_random_generic_text_value()
+
+    def _resolve_dynamic_text_token(self, token: Any) -> str:
+        return _resolve_dynamic_text_token_value(token)
+
     def _show_wizard_for_question(self, questions_info, current_index):
         if current_index >= len(questions_info):
             self._refresh_tree()
@@ -9053,65 +9488,114 @@ class SurveyGUI:
                 self._show_wizard_for_question(questions_info, current_index + 1)
 
         elif is_text_like_question:
-            answer_header = "位置候选列表：" if is_location_question else "填空答案列表："
+            answer_header = "位置候选列表：" if is_location_question else "填空答案策略："
             ttk.Label(config_frame, text=answer_header, font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5, fill=tk.X)
-            
-            answer_vars = []
-            answers_inner_frame = ttk.Frame(config_frame)
-            answers_inner_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-            
+
+            answer_vars: List[tk.StringVar] = []
+            normalized_title = re.sub(r"\s+", "", str(q.get("title") or "").lower())
+            name_keywords = ("姓名", "名字", "称呼", "联系人", "收件人", "监护人", "学生", "家长", "name")
+            phone_keywords = ("手机号", "手机号码", "电话", "联系电话", "联系方式", "mobile", "phone")
+            has_name_hint = any(keyword in normalized_title for keyword in name_keywords)
+            has_phone_hint = any(keyword in normalized_title for keyword in phone_keywords)
+
+            mode_var = tk.StringVar(value="custom")
+
             def add_answer_field(initial_value=""):
                 row_frame = ttk.Frame(answers_inner_frame)
                 row_frame.pack(fill=tk.X, pady=3, padx=5)
-                
+
                 ttk.Label(row_frame, text=f"答案{len(answer_vars)+1}:", width=8).pack(side=tk.LEFT)
-                
+
                 var = tk.StringVar(value=initial_value)
                 entry_widget = ttk.Entry(row_frame, textvariable=var, width=35)
                 entry_widget.pack(side=tk.LEFT, padx=5)
-                
+
                 def remove_field():
                     row_frame.destroy()
                     answer_vars.remove(var)
                     update_labels()
-                
+
                 if len(answer_vars) > 0:
                     ttk.Button(row_frame, text="✖", width=3, command=remove_field).pack(side=tk.LEFT)
-                
+
                 answer_vars.append(var)
+                update_labels()
                 return var
-            
+
             def update_labels():
                 for i, child in enumerate(answers_inner_frame.winfo_children()):
                     if child.winfo_children():
                         label = child.winfo_children()[0]
                         if isinstance(label, ttk.Label):
                             label.config(text=f"答案{i+1}:")
-            
-            add_answer_field("")
-            
+
+            def ensure_custom_frame_visibility():
+                if mode_var.get() == "custom":
+                    answers_inner_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+                    add_btn_frame.pack(fill=tk.X, pady=(5, 0))
+                else:
+                    answers_inner_frame.pack_forget()
+                    add_btn_frame.pack_forget()
+
+            def random_token_for_question() -> str:
+                if has_name_hint:
+                    return "__RANDOM_NAME__"
+                if has_phone_hint:
+                    return "__RANDOM_MOBILE__"
+                return "__RANDOM_TEXT__"
+
+            mode_frame = ttk.Frame(config_frame)
+            mode_frame.pack(fill=tk.X, pady=(0, 6))
+
+            ttk.Radiobutton(
+                mode_frame,
+                text="每次随机填入",
+                variable=mode_var,
+                value="random",
+                command=ensure_custom_frame_visibility,
+            ).pack(side=tk.LEFT, padx=(0, 10))
+
+            ttk.Radiobutton(
+                mode_frame,
+                text="自定义答案列表",
+                variable=mode_var,
+                value="custom",
+                command=ensure_custom_frame_visibility,
+            ).pack(side=tk.LEFT)
+
+            answers_inner_frame = ttk.Frame(config_frame)
             add_btn_frame = ttk.Frame(config_frame)
-            add_btn_frame.pack(fill=tk.X, pady=(5, 0))
+            add_answer_field("")
+
             ttk.Button(add_btn_frame, text="+ 添加答案", command=lambda: add_answer_field()).pack(anchor="w")
+
             if is_location_question:
                 ttk.Label(
                     config_frame,
                     text="可填写“地名”或“地名|经度,纬度”，未提供经纬度时系统会尝试自动解析。",
                     foreground="gray"
                 ).pack(anchor="w", pady=(4, 0), fill=tk.X)
+
+            ensure_custom_frame_visibility()
             
             def save_and_next():
-                values = [var.get().strip() for var in answer_vars if var.get().strip()]
-                if not values:
-                    self._log_popup_error("错误", "请填写至少一个答案")
-                    return
+                if mode_var.get() == "random":
+                    values = [random_token_for_question()]
+                    probabilities = [1.0]
+                else:
+                    values = [var.get().strip() for var in answer_vars if var.get().strip()]
+                    if not values:
+                        self._log_popup_error("错误", "请填写至少一个答案")
+                        return
+                    probabilities = normalize_probabilities([1.0] * len(values))
+
                 entry = QuestionEntry(
                     question_type="text",
-                    probabilities=normalize_probabilities([1.0] * len(values)),
+                    probabilities=probabilities,
                     texts=values,
                     rows=1,
                     option_count=len(values),
-                    distribution_mode="equal",
+                    distribution_mode="random" if mode_var.get() == "random" else "equal",
                     custom_weights=None,
                     is_location=bool(q.get("is_location")),
                 )
