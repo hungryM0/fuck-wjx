@@ -56,6 +56,7 @@ from updater import (
     perform_update as _perform_update_impl,
 )
 
+import full_simulation_mode
 from full_simulation_mode import FULL_SIM_STATE as _FULL_SIM_STATE
 import full_simulation_ui
 
@@ -428,6 +429,10 @@ def _resolve_dynamic_text_token_value(token: Any) -> str:
 
 class AliyunCaptchaBypassError(RuntimeError):
     """检测到阿里云智能验证（需要人工交互）时抛出，用于快速放弃当前浏览器示例。"""
+
+
+class SecurityConfirmDetectedError(RuntimeError):
+    """检测到系统安全校验确认弹窗（需要安全校验，请重新提交），按配置直接放弃当前浏览器示例并计为失败。"""
 
 
 class LoadingSplash:
@@ -3009,27 +3014,8 @@ def _build_per_question_delay_plan(question_count: int, target_seconds: float) -
 
 
 def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = None) -> bool:
-    """根据配置在提交前等待一段时间，返回 True 表示等待过程中被中断。"""
-    if _full_simulation_active():
-        return False
-    global answer_duration_range_seconds
-    min_delay, max_delay = answer_duration_range_seconds
-    min_delay = max(0, min_delay)
-    max_delay = max(min_delay, max(0, max_delay))
-    if max_delay <= 0:
-        return False
-    wait_seconds = random.uniform(min_delay, max_delay)
-    if wait_seconds <= 0:
-        return False
-    logging.info(
-        "[Action Log] Simulating answer duration: waiting %.1f seconds before submit",
-        wait_seconds,
-    )
-    if stop_signal:
-        interrupted = stop_signal.wait(wait_seconds)
-        return bool(interrupted and stop_signal.is_set())
-    time.sleep(wait_seconds)
-    return False
+    # 委托到模块实现，传入当前配置范围以避免模块依赖全局变量
+    return full_simulation_mode.simulate_answer_duration_delay(stop_signal, answer_duration_range_seconds)
 
 
 def _smooth_scroll_to_element(driver: BrowserDriver, element, block: str = 'center') -> None:
@@ -3758,54 +3744,47 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
             clicked = _click_submit_button(driver)
         return clicked
 
-    def _click_security_confirm_dialog():
-        """点击"需要安全校验，请重新提交！"弹窗的确认按钮。"""
+    def _detect_security_confirm_dialog() -> bool:
+        """检测页面中是否存在“需要安全校验，请重新提交”类型的弹窗或确认按钮。
+
+        此函数仅检测，不执行任何点击或交互操作。
+        返回 True 表示检测到安全校验弹窗/按钮。
+        """
         script = r"""
             (() => {
-                // 查找 layui 弹窗中的确认按钮
-                const selectors = [
-                    '.layui-layer-btn0',
-                    '.layui-layer-btn a',
-                    '.layui-layer-dialog .layui-layer-btn0',
-                    '.layui-layer .layui-layer-btn a',
-                    '.layui-layer-btn .layui-layer-btn0',
-                    'a.layui-layer-btn0',
-                    '.layui-layer-page .layui-layer-btn a',
-                    '.layui-layer-dialog .layui-layer-btn a'
-                ];
-                const matchText = (txt) => /^(确\s*定|确\s*认|OK|好的?)$/i.test((txt || '').trim());
-                
-                // 方法1: 使用选择器查找
-                for (const sel of selectors) {
-                    const nodes = document.querySelectorAll(sel);
-                    for (const node of nodes) {
-                        if (!node.offsetParent) continue; // 跳过不可见元素
-                        const text = (node.innerText || node.textContent || '').trim();
-                        if (matchText(text)) {
-                            try { node.click(); return true; } catch (e) {}
+                const phrases = ['需要安全校验', '安全校验', '安全 验证', '需要安全验证', '请重新提交'];
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const checkDoc = (doc) => {
+                    const nodes = doc.querySelectorAll('div, span, p, a, button');
+                    for (const el of nodes) {
+                        if (!visible(el)) continue;
+                        const text = (el.innerText || el.textContent || '').trim();
+                        if (!text) continue;
+                        for (const p of phrases) {
+                            if (text.includes(p)) return true;
                         }
                     }
+                    return false;
+                };
+                if (checkDoc(document)) return true;
+                const frames = Array.from(document.querySelectorAll('iframe'));
+                for (const frame of frames) {
+                    try {
+                        const doc = frame.contentDocument || frame.contentWindow?.document;
+                        if (doc && checkDoc(doc)) return true;
+                    } catch (e) {}
                 }
-                
-                // 方法2: 查找所有可见的 a 标签和 button 标签
-                const allButtons = [...document.querySelectorAll('a, button')];
-                for (const btn of allButtons) {
-                    if (!btn.offsetParent) continue; // 跳过不可见元素
-                    const text = (btn.innerText || btn.textContent || '').trim();
-                    if (matchText(text)) {
-                        try { btn.click(); return true; } catch (e) {}
-                    }
-                }
-                
                 return false;
             })();
         """
         try:
-            result = driver.execute_script(script)
-            if result:
-                logging.debug("已点击安全校验确认弹窗")
-                time.sleep(0.3)
-            return result
+            return bool(driver.execute_script(script))
         except Exception:
             return False
 
@@ -3813,12 +3792,15 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
     if pre_submit_delay > 0 and _sleep_with_stop(stop_signal, pre_submit_delay):
         return
     _click_submit_buttons()
-    # 检查并处理"需要安全校验"的确认弹窗，多次尝试
-    for _ in range(5):  # 尝试5次，共约1.5秒
+    # 检查是否出现“需要安全校验/安全校验”类型的弹窗：
+    # - 出现：按配置直接放弃当前浏览器示例（抛出异常交给上层处理并计失败）
+    # - 未出现：继续后续流程
+    for _ in range(5):
         if stop_signal and stop_signal.is_set():
             return
-        if _click_security_confirm_dialog():
-            break  # 成功点击就退出
+        if _detect_security_confirm_dialog():
+            logging.warning("检测到安全校验弹窗（需要安全校验，请重新提交），将放弃当前浏览器示例并计为失败。")
+            raise SecurityConfirmDetectedError("检测到安全校验弹窗，按配置直接放弃")
         if _sleep_with_stop(stop_signal, 0.3):
             return
     if stop_signal and stop_signal.is_set():
@@ -4002,13 +3984,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             if stop_signal.is_set() or not finished:
                 break
             need_watch_submit = bool(last_submit_had_captcha)
-            if full_simulation_enabled:
-                # 稍微放慢提交完成检测，降低触发阿里云验证概率
-                max_wait = 0.12 if not need_watch_submit else (0.25 if fast_mode else min(0.4, POST_SUBMIT_URL_MAX_WAIT))
-                poll_interval = 0.05 if fast_mode else POST_SUBMIT_URL_POLL_INTERVAL
-            else:
-                max_wait = 0.1 if not need_watch_submit else (0.2 if fast_mode else POST_SUBMIT_URL_MAX_WAIT)
-                poll_interval = 0.05 if fast_mode else POST_SUBMIT_URL_POLL_INTERVAL
+            max_wait, poll_interval = full_simulation_mode.get_post_submit_wait_params(need_watch_submit, fast_mode)
             wait_deadline = time.time() + max_wait
             while time.time() < wait_deadline:
                 if stop_signal.is_set():
@@ -4065,33 +4041,9 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 # 成功提交后关闭浏览器，全真模拟直接换新实例，避免停留完成页
                 if full_simulation_enabled or random_user_agent_enabled or proxy_ip_pool:
                     if full_simulation_enabled:
-                        # 快速检测是否到达完成页，无需长时间等待广告
-                        detected = False
-                        try:
-                            # 检测完成页面的特定元素
-                            divdsc = driver.find_element("id", "divdsc")
-                            if divdsc and divdsc.is_displayed():
-                                text = divdsc.text or ""
-                                if "答卷已经提交" in text or "感谢您的参与" in text:
-                                    detected = True
-                        except Exception:
-                            pass
-                        
-                        if not detected:
-                            # 备用检测：检查页面文本
-                            try:
-                                page_text = driver.execute_script("return document.body.innerText || '';") or ""
-                                if "答卷已经提交" in page_text or "感谢您的参与" in page_text:
-                                    detected = True
-                            except Exception:
-                                pass
-                        
-                        if detected:
-                            # 确认已到达完成页，等待2秒后关闭
-                            time.sleep(2.0)
-                        else:
-                            # 未检测到完成标识，使用原有等待时间
-                            time.sleep(0.3)
+                        # 委托给模块检测是否为完成页
+                        detected = full_simulation_mode.is_survey_completion_page(driver)
+                        time.sleep(2.0 if detected else 0.3)
                     _dispose_driver()
         except Exception:
             driver_had_error = True
