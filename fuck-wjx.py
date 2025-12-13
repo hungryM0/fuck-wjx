@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import importlib.util
 from pathlib import Path
 from collections import deque
 from copy import deepcopy
@@ -132,6 +133,13 @@ from wjx.random_ip import (
     _fetch_new_proxy_batch,
     _proxy_is_responsive,
     _normalize_proxy_address,
+    on_random_ip_toggle,
+    ensure_random_ip_ready,
+    refresh_ip_counter_display,
+    reset_ip_counter,
+    handle_random_ip_submission,
+    normalize_random_ip_enabled_value,
+    reset_quota_limit_dialog_flag,
 )
 
 from wjx.log_utils import (
@@ -194,7 +202,6 @@ _update_boot_splash(45, "正在加载界面组件...")
 # 导入版本号及相关常量
 from wjx.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, GITHUB_API_URL, ISSUE_FEEDBACK_URL
 # 导入注册表管理器
-from wjx.registry_manager import RegistryManager
 # 导入配置常量
 from wjx.config import (
     USER_AGENT_PRESETS,
@@ -639,21 +646,6 @@ def _geocode_location_name(place_name: str) -> Optional[str]:
     return lnglat_value
 
 
-def _filter_valid_user_agent_keys(selected_keys: List[str]) -> List[str]:
-    """过滤并保留合法的 UA key"""
-    return [key for key in (selected_keys or []) if key in USER_AGENT_PRESETS]
-
-
-def _select_user_agent_from_keys(selected_keys: List[str]) -> Tuple[Optional[str], Optional[str]]:
-    """从给定 key 列表中随机挑选 UA，返回 (ua, label)"""
-    pool = _filter_valid_user_agent_keys(selected_keys)
-    if not pool:
-        return None, None
-    key = random.choice(pool)
-    preset = USER_AGENT_PRESETS.get(key) or {}
-    return preset.get("ua"), preset.get("label")
-
-
 def _kill_playwright_browser_processes():
     """
     强制终止由 Playwright 启动的浏览器进程。
@@ -1031,8 +1023,6 @@ random_user_agent_enabled = False
 user_agent_pool_keys: List[str] = []
 wechat_login_bypass_enabled = True
 last_submit_had_captcha = False
-# 标记是否已经因达到20份限制而弹出过对话框
-_quota_limit_dialog_shown = False
 
 # 极速模式：全真模拟/随机IP关闭且时间间隔为0时自动启用
 def _is_fast_mode() -> bool:
@@ -1142,6 +1132,19 @@ class QuestionEntry:
             return f"{self.option_count} 个选项 - 配比 {weights_str}{fillable_hint}"
 
         return f"{self.option_count} 个选项 - {mode_text}{fillable_hint}"
+
+
+_LOAD_SAVE_MODULE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wjx", "load&save.py")
+_load_save_spec = importlib.util.spec_from_file_location("load_and_save", _LOAD_SAVE_MODULE_PATH)
+if _load_save_spec is None or _load_save_spec.loader is None:
+    raise ImportError("无法加载 load&save.py 模块")
+_load_save = importlib.util.module_from_spec(_load_save_spec)
+_load_save_spec.loader.exec_module(_load_save)
+_load_save.set_question_entry_class(QuestionEntry)
+_load_save.set_runtime_directory_getter(_get_runtime_directory)
+ConfigPersistenceMixin = _load_save.ConfigPersistenceMixin
+_filter_valid_user_agent_keys = _load_save._filter_valid_user_agent_keys
+_select_user_agent_from_keys = _load_save._select_user_agent_from_keys
 
 
 def _get_entry_type_label(entry: QuestionEntry) -> str:
@@ -1343,18 +1346,6 @@ def _normalize_html_text(value: Optional[str]) -> str:
     if not value:
         return ""
     return _HTML_SPACE_RE.sub(" ", value).strip()
-
-
-def _sanitize_filename(value: str, max_length: int = 80) -> str:
-    """将字符串转换为适合作为文件名的形式。"""
-    text = value.strip()
-    if not text:
-        return ""
-    text = _INVALID_FILENAME_CHARS_RE.sub("_", text)
-    text = text.strip(" ._")
-    if max_length and len(text) > max_length:
-        text = text[:max_length].rstrip(" ._")
-    return text
 
 
 def _extract_survey_title_from_html(html: str) -> Optional[str]:
@@ -4056,33 +4047,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         
                         # 检查是否启用了随机IP提交，如果是，更新计数
                         if random_proxy_ip_enabled:
-                            # 检查是否已启用无限额度
-                            if not RegistryManager.is_quota_unlimited():
-                                ip_count = RegistryManager.increment_submit_count()
-                                logging.info(f"随机IP提交计数: {ip_count}/20")
-                                
-                                # 当达到20份时，停止任务并显示验证窗口
-                                if ip_count >= 20:
-                                    logging.warning("随机IP提交已达20份，停止任务并弹出卡密验证窗口")
-                                    stop_signal.set()  # 立即停止任务
-                                    
-                                    # 取消勾选随机IP并显示验证窗口
-                                    if gui_instance:
-                                        def uncheck_and_show():
-                                            global _quota_limit_dialog_shown
-                                            if not _quota_limit_dialog_shown:
-                                                _quota_limit_dialog_shown = True
-                                                # 取消勾选随机IP复选框
-                                                gui_instance._suspend_random_ip_notice = True
-                                                try:
-                                                    gui_instance.random_ip_enabled_var.set(False)
-                                                finally:
-                                                    gui_instance._suspend_random_ip_notice = False
-                                                # 显示卡密验证窗口
-                                                gui_instance._show_card_validation_dialog()
-                                        gui_instance.root.after(0, uncheck_and_show)
-                            else:
-                                logging.info("已启用无限额度，无需验证")
+                            handle_random_ip_submission(gui_instance, stop_signal)
                         
                         if target_num > 0 and cur_num >= target_num:
                             stop_signal.set()
@@ -4140,7 +4105,7 @@ TYPE_OPTIONS = [
 
 LABEL_TO_TYPE = {label: value for value, label in TYPE_OPTIONS}
 
-class SurveyGUI:
+class SurveyGUI(ConfigPersistenceMixin):
 
     def _save_logs_to_file(self):
         records = LOG_BUFFER_HANDLER.get_records()
@@ -4712,10 +4677,10 @@ class SurveyGUI:
     def _schedule_ip_counter_refresh(self):
         """定期刷新随机IP计数显示"""
         try:
-            self._refresh_ip_counter_display()
+            refresh_ip_counter_display(self)
         except Exception as e:
             logging.debug(f"刷新IP计数显示出错: {e}")
-        
+
         # 继续定期刷新（每2秒刷新一次）
         if not getattr(self, "_closing", False):
             self.root.after(2000, self._schedule_ip_counter_refresh)
@@ -5156,7 +5121,7 @@ class SurveyGUI:
             random_ip_frame,
             text="启用随机 IP 提交（若触发智能验证可尝试开启此选项）",
             variable=self.random_ip_enabled_var,
-            command=self._on_random_ip_toggle,
+            command=lambda: on_random_ip_toggle(self),
         )
         random_ip_toggle.pack(side=tk.LEFT)
         self._wechat_login_bypass_toggle_widget = wechat_bypass_toggle
@@ -5169,9 +5134,13 @@ class SurveyGUI:
         ttk.Label(ip_counter_frame, text="随机IP计数：").pack(side=tk.LEFT, padx=5)
         self._ip_counter_label = ttk.Label(ip_counter_frame, text="0/20", font=("Segoe UI", 10, "bold"), foreground="blue")
         self._ip_counter_label.pack(side=tk.LEFT, padx=5)
-        self._ip_reset_button = ttk.Button(ip_counter_frame, text="解锁无限IP", command=self._reset_ip_counter)
+        self._ip_reset_button = ttk.Button(
+            ip_counter_frame,
+            text="解锁无限IP",
+            command=lambda: reset_ip_counter(self),
+        )
         self._ip_reset_button.pack(side=tk.LEFT, padx=2)
-        self._refresh_ip_counter_display()
+        refresh_ip_counter_display(self)
 
         
         # 高级选项：手动配置（始终显示）
@@ -5451,268 +5420,6 @@ class SurveyGUI:
     def _on_random_ua_toggle(self):
         self._apply_random_ua_widgets_state()
         self._mark_config_changed()
-
-    def _confirm_random_ip_usage(self) -> bool:
-        notice = (
-            "启用随机IP提交前请确认：\n\n"
-            "1) 代理来源于网络，具有被攻击的安全风险，确认启用视为已知悉风险并自愿承担一切后果；\n"
-            "2) 禁止用于污染他人数据，否则可能被封禁或承担法律责任。\n"
-            "3) 随机IP维护成本高昂，如需大量使用需要付费。\n\n"
-            "是否确认已知悉并继续启用随机IP提交？"
-        )
-        if self._log_popup_confirm("随机IP使用声明", notice, icon="warning"):
-            self._random_ip_disclaimer_ack = True
-            return True
-        return False
-
-    def _on_random_ip_toggle(self):
-        if getattr(self, "_suspend_random_ip_notice", False):
-            return
-        if not self.random_ip_enabled_var.get():
-            return
-        
-        # 检查是否已达到计数限制且未启用无限额度
-        if not RegistryManager.is_quota_unlimited():
-            count = RegistryManager.read_submit_count()
-            if count >= 20:
-                log_popup_warning(
-                    "提示",
-                    "随机IP已达20份限制，请通过卡密验证解锁无限额度后再启用。",
-                    parent=self.root
-                )
-                self._suspend_random_ip_notice = True
-                try:
-                    self.random_ip_enabled_var.set(False)
-                finally:
-                    self._suspend_random_ip_notice = False
-                return
-        
-        if self._confirm_random_ip_usage():
-            return
-        self._suspend_random_ip_notice = True
-        try:
-            self.random_ip_enabled_var.set(False)
-        finally:
-            self._suspend_random_ip_notice = False
-
-    def _show_card_validation_dialog(self):
-        """显示卡密验证对话框"""
-        dialog = tk.Toplevel(self.root)
-        dialog.title("随机IP额度限制")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.protocol("WM_DELETE_WINDOW", lambda: dialog.destroy())
-        dialog.grab_set()
-
-        container = ttk.Frame(dialog, padding=15)
-        container.pack(fill=tk.BOTH, expand=True)
-
-        # 标题和说明
-        ttk.Label(container, text="解锁无限随机IP提交额度", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
-        
-        # 使用 Text 组件来支持富文本格式（不同颜色）
-        # 获取系统默认背景色
-        style = ttk.Style()
-        bg_color = style.lookup('TFrame', 'background')
-        if not bg_color:
-            bg_color = self.root.cget('background')
-        
-        text_widget = tk.Text(container, wrap=tk.WORD, height=10, font=("Microsoft YaHei", 10), 
-                             relief=tk.FLAT, borderwidth=0, background=bg_color, cursor="arrow")
-        text_widget.pack(anchor=tk.W, pady=(0, 15), fill=tk.X)
-        
-        # 插入文本内容
-        text_widget.insert("1.0", "作者只是一个大一小登，但是由于ip池及开发成本较高，用户量大，问卷份数要求多，\n")
-        text_widget.insert(tk.END, "加上学业压力，导致长期如此无偿经营困难……\n\n")
-        text_widget.insert(tk.END, "1.在菜单栏-捐助中赞助")
-        
-        # "任意金额"用蓝色
-        blue_start = text_widget.index(tk.END + "-1c")
-        text_widget.insert(tk.END, "任意金额")
-        blue_end = text_widget.index(tk.END + "-1c")
-        text_widget.tag_add("blue", blue_start, blue_end)
-        text_widget.tag_config("blue", foreground="#0066CC")
-        
-        text_widget.insert(tk.END, "（多少都行♥）\n")
-        text_widget.insert(tk.END, "2.在上方菜单栏-联系中找到开发者，并留下联系邮箱、交易订单号\n")
-        text_widget.insert(tk.END, "3.开发者验证后会发送卡密到你的邮箱，输入卡密后即可解锁无限随机IP提交额度\n")
-        
-        # 第4点用灰色
-        gray_start = text_widget.index(tk.END + "-1c")
-        text_widget.insert(tk.END, "4.你也可以通过自己的口才白嫖卡密（误）")
-        gray_end = text_widget.index(tk.END + "-1c")
-        text_widget.tag_add("gray", gray_start, gray_end)
-        text_widget.tag_config("gray", foreground="#C3BABA")
-        
-        text_widget.insert(tk.END, "\n\n感谢您的支持与理解！🙏")
-        
-        # 禁用编辑
-        text_widget.config(state=tk.DISABLED)
-
-        # 按钮行：感谢文字 + 捐助按钮 + 联系按钮
-        thanks_button_frame = ttk.Frame(container)
-        thanks_button_frame.pack(fill=tk.X, pady=(10, 15))
-        
-        ttk.Button(
-            thanks_button_frame,
-            text="💰 捐助",
-            command=lambda: [dialog.destroy(), self._open_donation_dialog()],
-            width=10
-        ).pack(side=tk.RIGHT, padx=(5, 0))
-        
-        ttk.Button(
-            thanks_button_frame,
-            text="📧 联系",
-            command=lambda: [dialog.destroy(), self._open_contact_dialog(default_type="卡密获取")],
-            width=10
-        ).pack(side=tk.RIGHT, padx=(5, 0))
-
-        # 卡密输入框
-        ttk.Label(container, text="请输入卡密：", font=("Segoe UI", 10)).pack(anchor=tk.W, pady=(0, 5))
-        card_var = tk.StringVar()
-        card_entry = ttk.Entry(container, textvariable=card_var, width=30, show="*")
-        card_entry.pack(fill=tk.X, pady=(0, 15))
-        card_entry.focus()
-
-        # 按钮框
-        button_frame = ttk.Frame(container)
-        button_frame.pack(fill=tk.X, pady=(10, 0))
-
-        result_var = tk.BooleanVar(value=False)
-
-        def on_validate():
-            card_input = card_var.get().strip()
-            if not card_input:
-                log_popup_warning("提示", "请输入卡密", parent=dialog)
-                return
-            
-            # 目前采用简单的本地验证
-            if self._validate_card(card_input):
-                log_popup_info("成功", "卡密验证成功！已启用无限额度，随机IP可无限使用。", parent=dialog)
-                RegistryManager.reset_submit_count()
-                RegistryManager.write_card_validate_result(True)
-                RegistryManager.set_quota_unlimited(True)  # 启用无限额度
-                logging.info("卡密验证成功，已启用无限额度")
-                self._refresh_ip_counter_display()  # 刷新计数显示
-                # 重置对话框标记，允许下次达到限制时再次弹出
-                global _quota_limit_dialog_shown
-                _quota_limit_dialog_shown = False
-                result_var.set(True)
-                dialog.destroy()
-            else:
-                log_popup_error("失败", "卡密无效，请检查后重试。", parent=dialog)
-
-        ttk.Button(button_frame, text="验证", command=on_validate).pack(side=tk.RIGHT, padx=(5, 0))
-        ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.RIGHT, padx=(5, 0))
-
-        self._apply_window_scaling(dialog, base_width=380, base_height=250, min_height=200)
-        self._center_child_window(dialog)
-
-        dialog.wait_window()
-        return result_var.get()
-
-    def _validate_card(self, card_code: str) -> bool:
-        """
-        验证卡密
-        从 https://hungrym0.top/password.txt 获取正确的卡密进行验证
-        """
-        if not card_code:
-            logging.warning("卡密为空")
-            return False
-        
-        try:
-            # 从远程服务器获取正确的卡密
-            card_code_stripped = card_code.strip()
-            
-            # 尝试从远程获取卡密
-            if requests is None:
-                logging.warning("requests 模块未安装，无法验证卡密")
-                return False
-            
-            try:
-                response = requests.get(
-                    "https://hungrym0.top/password.txt",
-                    timeout=10,
-                    headers=DEFAULT_HTTP_HEADERS
-                )
-                
-                if response.status_code != 200:
-                    logging.warning(f"无法获取卡密列表，服务器返回: {response.status_code}")
-                    return False
-                
-                # 获取所有有效的卡密（支持多行，每行一个）
-                valid_cards = set()
-                for line in response.text.strip().split('\n'):
-                    line = line.strip()
-                    if line:  # 跳过空行
-                        valid_cards.add(line)
-                
-                # 检查输入的卡密是否在有效卡密列表中
-                if card_code_stripped in valid_cards:
-                    # 只记录卡密前4位和后4位，隐藏中间部分
-                    display = f"{card_code_stripped[:4]}***{card_code_stripped[-4:]}" if len(card_code_stripped) > 8 else "***"
-                    logging.info(f"卡密 {display} 验证通过")
-                    return True
-                else:
-                    logging.warning(f"卡密验证失败：输入的卡密不在有效列表中")
-                    return False
-                    
-            except requests.exceptions.Timeout:
-                logging.error("获取卡密列表超时（10秒）")
-                return False
-            except requests.exceptions.ConnectionError as e:
-                logging.error(f"无法连接到卡密服务器: {e}")
-                return False
-            except Exception as e:
-                logging.error(f"获取卡密列表出错: {e}")
-                return False
-                
-        except Exception as e:
-            logging.error(f"卡密验证出现异常: {e}")
-            return False
-
-    def _refresh_ip_counter_display(self):
-        """刷新随机IP计数显示"""
-        try:
-            label = getattr(self, "_ip_counter_label", None)
-            button = getattr(self, "_ip_reset_button", None)
-            if label and label.winfo_exists():
-                # 检查是否启用了无限额度
-                is_unlimited = RegistryManager.is_quota_unlimited()
-                if is_unlimited:
-                    label.config(text="∞ (无限额度)", foreground="green")
-                    if button and button.winfo_exists():
-                        button.config(text="恢复限制")
-                else:
-                    count = RegistryManager.read_submit_count()
-                    percentage = min(100, int((count / 20) * 100)) if count < 20 else 100
-                    if count >= 20:
-                        label.config(text=f"{count}/20 (已达上限)", foreground="red")
-                    else:
-                        label.config(text=f"{count}/20 ({percentage}%)", foreground="blue")
-                    if button and button.winfo_exists():
-                        button.config(text="解锁无限IP")
-        except Exception as e:
-            logging.debug(f"刷新IP计数显示出错: {e}")
-
-    def _reset_ip_counter(self):
-        """重置随机IP提交计数或禁用无限额度"""
-        # 检查当前状态
-        if RegistryManager.is_quota_unlimited():
-            # 已启用无限额度，提供禁用选项
-            result = log_popup_confirm("确认", "当前已启用无限额度。\n是否要禁用无限额度并恢复计数限制？")
-            if result:
-                RegistryManager.set_quota_unlimited(False)
-                RegistryManager.reset_submit_count()
-                logging.info("已禁用无限额度，恢复计数限制")
-                self._refresh_ip_counter_display()
-                log_popup_info("成功", "已禁用无限额度，恢复为20份限制。")
-        else:
-            # 未启用无限额度，提供卡密验证
-            result = log_popup_confirm("确认", "确定要启用无限额度吗？\n(需要卡密验证)")
-            if result:
-                self._show_card_validation_dialog()
-                # 验证成功后计数已重置并启用无限额度
 
     def _refresh_full_simulation_status_label(self):
         return full_simulation_ui.refresh_full_simulation_status_label(self)
@@ -8867,15 +8574,8 @@ class SurveyGUI:
         if random_ua_flag and not random_ua_keys_list:
             self._log_popup_error("参数错误", "启用随机 UA 时至少选择一个终端类型")
             return
-        if random_proxy_flag and not self._random_ip_disclaimer_ack:
-            if not self._confirm_random_ip_usage():
-                self._suspend_random_ip_notice = True
-                try:
-                    self.random_ip_enabled_var.set(False)
-                finally:
-                    self._suspend_random_ip_notice = False
-                self._log_popup_info("已取消随机IP提交", "未同意免责声明，已禁用随机IP提交。")
-                return
+        if random_proxy_flag and not ensure_random_ip_ready(self):
+            return
         ctx = {
             "url_value": url_value,
             "target": target,
@@ -9003,8 +8703,7 @@ class SurveyGUI:
         stop_event = threading.Event()
         
         # 重置对话框标记，允许新的任务达到限制时弹出对话框
-        global _quota_limit_dialog_shown
-        _quota_limit_dialog_shown = False
+        reset_quota_limit_dialog_flag()
         
         # 重置进度条
         self.progress_value = 0
@@ -9439,550 +9138,6 @@ class SurveyGUI:
         
         # 设置窗口位置
         self.root.geometry(f"+{x}+{y}")
-
-    def _get_config_path(self) -> str:
-        return os.path.join(_get_runtime_directory(), "config.json")
-
-    def _get_configs_directory(self) -> str:
-        """返回多配置保存目录，并在需要时创建。"""
-        configs_dir = os.path.join(_get_runtime_directory(), "configs")
-        os.makedirs(configs_dir, exist_ok=True)
-        return configs_dir
-
-    def _get_default_config_initial_name(self) -> str:
-        """根据问卷标题生成默认的配置文件名。"""
-        if self._last_survey_title:
-            sanitized = _sanitize_filename(self._last_survey_title)
-            if sanitized:
-                return sanitized
-        return f"wjx_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    def _build_current_config_data(self) -> Dict[str, Any]:
-        """收集当前界面上的配置数据。"""
-        paned_sash_pos = None
-        try:
-            paned_sash_pos = self.main_paned.sashpos(0)
-        except Exception:
-            pass
-
-        return {
-            "url": self.url_var.get(),
-            "target_num": self.target_var.get(),
-            "num_threads": self.thread_var.get(),
-            "submit_interval": self._serialize_submit_interval(),
-            "answer_duration_range": self._serialize_answer_duration_config(),
-            "full_simulation": self._serialize_full_simulation_config(),
-            "random_user_agent": self._serialize_random_ua_config(),
-            "wechat_login_bypass_enabled": bool(self.wechat_login_bypass_enabled_var.get()),
-            "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
-            "paned_position": paned_sash_pos,
-            "questions": [
-                {
-                    "question_type": entry.question_type,
-                    "probabilities": entry.probabilities
-                    if not isinstance(entry.probabilities, int)
-                    else entry.probabilities,
-                    "texts": entry.texts,
-                    "rows": entry.rows,
-                    "option_count": entry.option_count,
-                    "distribution_mode": entry.distribution_mode,
-                    "custom_weights": entry.custom_weights,
-                    "question_num": entry.question_num,
-                    "option_fill_texts": entry.option_fill_texts,
-                    "fillable_option_indices": entry.fillable_option_indices,
-                    "is_location": bool(entry.is_location),
-                }
-                for entry in self.question_entries
-            ],
-        }
-
-    def _serialize_submit_interval(self) -> Dict[str, int]:
-        def _normalize(value: Any, *, cap_seconds: bool = False) -> int:
-            try:
-                text = str(value).strip()
-            except Exception:
-                text = ""
-            if not text:
-                parsed = 0
-            else:
-                try:
-                    parsed = int(text)
-                except ValueError:
-                    parsed = 0
-            parsed = max(0, parsed)
-            if cap_seconds:
-                parsed = min(59, parsed)
-            return parsed
-
-        minutes_text = self.interval_minutes_var.get()
-        seconds_text = self.interval_seconds_var.get()
-        max_minutes_text = self.interval_max_minutes_var.get()
-        max_seconds_text = self.interval_max_seconds_var.get()
-
-        minutes = _normalize(minutes_text)
-        seconds = _normalize(seconds_text, cap_seconds=True)
-        max_minutes = _normalize(max_minutes_text, cap_seconds=False)
-        max_seconds = _normalize(max_seconds_text, cap_seconds=True)
-
-        min_total = minutes * 60 + seconds
-        max_total = max_minutes * 60 + max_seconds
-        if (not str(max_minutes_text).strip() and not str(max_seconds_text).strip()) or max_total < min_total:
-            max_minutes, max_seconds = minutes, seconds
-
-        return {
-            "minutes": minutes,
-            "seconds": seconds,
-            "max_minutes": max_minutes,
-            "max_seconds": max_seconds,
-        }
-
-    def _serialize_answer_duration_config(self) -> Dict[str, int]:
-        def _normalize(value: Any) -> int:
-            try:
-                text = str(value).strip()
-            except Exception:
-                text = ""
-            if not text:
-                parsed = 0
-            else:
-                try:
-                    parsed = int(text)
-                except ValueError:
-                    parsed = 0
-            return max(0, parsed)
-
-        min_seconds = _normalize(self.answer_duration_min_var.get())
-        max_seconds = _normalize(self.answer_duration_max_var.get())
-        if max_seconds < min_seconds:
-            max_seconds = min_seconds
-        return {"min_seconds": min_seconds, "max_seconds": max_seconds}
-
-    def _get_random_ua_option_vars(self) -> List[Tuple[str, tk.BooleanVar]]:
-        return [
-            ("pc_web", self.random_ua_pc_web_var),
-            ("wechat_android", self.random_ua_android_wechat_var),
-            ("wechat_ios", self.random_ua_ios_wechat_var),
-            ("wechat_ipad", self.random_ua_ipad_wechat_var),
-            ("ipad_web", self.random_ua_ipad_web_var),
-            ("wechat_android_tablet", self.random_ua_android_tablet_wechat_var),
-            ("android_tablet_web", self.random_ua_android_tablet_web_var),
-            ("wechat_mac", self.random_ua_mac_wechat_var),
-            ("wechat_windows", self.random_ua_windows_wechat_var),
-            ("mac_web", self.random_ua_mac_web_var),
-        ]
-
-    def _get_selected_random_ua_keys(self) -> List[str]:
-        return [key for key, var in self._get_random_ua_option_vars() if var.get()]
-
-    def _serialize_random_ua_config(self) -> Dict[str, Any]:
-        return {
-            "enabled": bool(self.random_ua_enabled_var.get()),
-            "selected": _filter_valid_user_agent_keys(self._get_selected_random_ua_keys()),
-        }
-
-    def _serialize_full_simulation_config(self) -> Dict[str, Any]:
-        def _normalize(value: Any, *, cap_seconds: bool = False) -> int:
-            try:
-                text = str(value).strip()
-            except Exception:
-                text = ""
-            if not text:
-                parsed = 0
-            else:
-                try:
-                    parsed = int(text)
-                except ValueError:
-                    parsed = 0
-            parsed = max(0, parsed)
-            if cap_seconds:
-                parsed = min(59, parsed)
-            return parsed
-
-        return {
-            "enabled": bool(self.full_simulation_enabled_var.get()),
-            "target": _normalize(self.full_sim_target_var.get()),
-            "estimated_minutes": _normalize(self.full_sim_estimated_minutes_var.get()),
-            "estimated_seconds": _normalize(self.full_sim_estimated_seconds_var.get(), cap_seconds=True),
-            "total_minutes": _normalize(self.full_sim_total_minutes_var.get()),
-            "total_seconds": _normalize(self.full_sim_total_seconds_var.get(), cap_seconds=True),
-        }
-
-    def _apply_submit_interval_config(self, interval_config: Optional[Dict[str, Any]]):
-        if not isinstance(interval_config, dict):
-            interval_config = {}
-
-        def _format_value(raw_value: Any, *, cap_seconds: bool = False) -> str:
-            try:
-                text = str(raw_value).strip()
-            except Exception:
-                text = ""
-            if not text:
-                parsed = 0
-            else:
-                try:
-                    parsed = int(text)
-                except ValueError:
-                    parsed = 0
-            parsed = max(0, parsed)
-            if cap_seconds:
-                parsed = min(59, parsed)
-            return str(parsed)
-
-        minutes_value = interval_config.get("minutes")
-        seconds_value = interval_config.get("seconds")
-        max_minutes_value = interval_config.get("max_minutes")
-        max_seconds_value = interval_config.get("max_seconds")
-
-        if max_minutes_value is None and max_seconds_value is None:
-            max_minutes_value = minutes_value
-            max_seconds_value = seconds_value
-
-        self.interval_minutes_var.set(_format_value(minutes_value))
-        self.interval_seconds_var.set(_format_value(seconds_value, cap_seconds=True))
-        self.interval_max_minutes_var.set(_format_value(max_minutes_value if max_minutes_value is not None else minutes_value))
-        self.interval_max_seconds_var.set(
-            _format_value(
-                max_seconds_value if max_seconds_value is not None else seconds_value,
-                cap_seconds=True,
-            )
-        )
-
-    def _apply_answer_duration_config(self, config: Optional[Dict[str, Any]]):
-        if not isinstance(config, dict):
-            config = {}
-
-        def _format_value(raw_value: Any) -> str:
-            try:
-                text = str(raw_value).strip()
-            except Exception:
-                text = ""
-            if not text:
-                parsed = 0
-            else:
-                try:
-                    parsed = int(text)
-                except ValueError:
-                    parsed = 0
-            return str(max(0, parsed))
-
-        self.answer_duration_min_var.set(_format_value(config.get("min_seconds")))
-        self.answer_duration_max_var.set(_format_value(config.get("max_seconds")))
-
-    def _apply_random_ua_config(self, config: Optional[Dict[str, Any]]):
-        enabled = False
-        selected_keys = list(DEFAULT_RANDOM_UA_KEYS)
-        if isinstance(config, dict):
-            enabled = bool(config.get("enabled"))
-            selected_keys = _filter_valid_user_agent_keys(
-                config.get("selected") or config.get("options") or list(DEFAULT_RANDOM_UA_KEYS)
-            )
-            if not selected_keys:
-                selected_keys = list(DEFAULT_RANDOM_UA_KEYS)
-        self.random_ua_enabled_var.set(enabled)
-        for key, var in self._get_random_ua_option_vars():
-            var.set(key in selected_keys)
-        self._apply_random_ua_widgets_state()
-
-    def _pick_random_user_agent(self) -> Tuple[Optional[str], Optional[str]]:
-        if not self.random_ua_enabled_var.get():
-            return None, None
-        return _select_user_agent_from_keys(self._get_selected_random_ua_keys())
-
-    def _apply_full_simulation_config(self, config: Optional[Dict[str, Any]]):
-        if not isinstance(config, dict):
-            config = {}
-
-        def _format(raw_value: Any, *, cap_seconds: bool = False) -> str:
-            try:
-                text = str(raw_value).strip()
-            except Exception:
-                text = ""
-            if not text:
-                parsed = 0
-            else:
-                try:
-                    parsed = int(text)
-                except ValueError:
-                    parsed = 0
-            parsed = max(0, parsed)
-            if cap_seconds:
-                parsed = min(59, parsed)
-            return str(parsed)
-
-        self.full_simulation_enabled_var.set(bool(config.get("enabled")))
-        self.full_sim_target_var.set(_format(config.get("target")))
-        self.full_sim_estimated_minutes_var.set(_format(config.get("estimated_minutes")))
-        self.full_sim_estimated_seconds_var.set(_format(config.get("estimated_seconds"), cap_seconds=True))
-        self.full_sim_total_minutes_var.set(_format(config.get("total_minutes")))
-        self.full_sim_total_seconds_var.set(_format(config.get("total_seconds"), cap_seconds=True))
-
-    def _write_config_file(self, file_path: str, config_data: Optional[Dict[str, Any]] = None):
-        """将配置写入指定文件。"""
-        config_to_save = config_data if config_data is not None else self._build_current_config_data()
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(config_to_save, f, ensure_ascii=False, indent=2)
-
-    def _save_config(self):
-        try:
-            self._write_config_file(self._get_config_path())
-        except Exception as e:
-            print(f"保存配置失败: {e}")
-
-    def _apply_config_data(self, config: Dict[str, Any], *, restore_paned_position: bool = True):
-        """将配置数据应用到界面。"""
-        if not isinstance(config, dict):
-            raise ValueError("配置文件格式不正确")
-
-        self._suspend_full_sim_autofill = True
-        try:
-            self.url_var.set(config.get("url", ""))
-            self.target_var.set(config.get("target_num", ""))
-            self.thread_var.set(config.get("num_threads", ""))
-            self._apply_random_ua_config(config.get("random_user_agent"))
-            
-            # 加载随机IP配置时需要检查计数限制
-            random_proxy_enabled_in_config = bool(config.get("random_proxy_enabled"))
-            if random_proxy_enabled_in_config:
-                # 检查是否已达到计数限制且未启用无限额度
-                if not RegistryManager.is_quota_unlimited():
-                    count = RegistryManager.read_submit_count()
-                    if count >= 20:
-                        logging.warning(f"配置中启用了随机IP，但已达到20份限制，已禁用此选项")
-                        random_proxy_enabled_in_config = False
-
-            self.random_ip_enabled_var.set(random_proxy_enabled_in_config)
-            self.wechat_login_bypass_enabled_var.set(bool(config.get("wechat_login_bypass_enabled", False)))
-            self._apply_submit_interval_config(config.get("submit_interval"))
-            self._apply_answer_duration_config(config.get("answer_duration_range"))
-            self._apply_full_simulation_config(config.get("full_simulation"))
-
-            if restore_paned_position:
-                paned_position = config.get("paned_position")
-                if paned_position is not None:
-                    try:
-                        desired_position = int(paned_position)
-                    except (TypeError, ValueError):
-                        desired_position = None
-                    if desired_position is not None:
-                        self._restore_saved_paned_position(desired_position)
-
-            questions_data = config.get("questions") or []
-            self.question_entries.clear()
-            def _load_option_fill_texts_from_config(raw_value: Any) -> Optional[List[Optional[str]]]:
-                if not isinstance(raw_value, list):
-                    return None
-                normalized: List[Optional[str]] = []
-                has_value = False
-                for item in raw_value:
-                    if item is None:
-                        normalized.append(None)
-                        continue
-                    try:
-                        text_value = str(item).strip()
-                    except Exception:
-                        text_value = ""
-                    if text_value:
-                        has_value = True
-                        normalized.append(text_value)
-                    else:
-                        normalized.append(None)
-                return normalized if has_value else None
-
-            def _load_fillable_indices_from_config(raw_value: Any) -> Optional[List[int]]:
-                if not isinstance(raw_value, list):
-                    return None
-                parsed: List[int] = []
-                for item in raw_value:
-                    try:
-                        index_value = int(item)
-                    except (TypeError, ValueError):
-                        continue
-                    if index_value >= 0:
-                        parsed.append(index_value)
-                return parsed if parsed else None
-            if isinstance(questions_data, list):
-                for q_data in questions_data:
-                    entry = QuestionEntry(
-                        question_type=q_data.get("question_type", "single"),
-                        probabilities=q_data.get("probabilities", -1),
-                        texts=q_data.get("texts"),
-                        rows=q_data.get("rows", 1),
-                        option_count=q_data.get("option_count", 0),
-                        distribution_mode=q_data.get("distribution_mode", "random"),
-                        custom_weights=q_data.get("custom_weights"),
-                        question_num=q_data.get("question_num"),
-                        option_fill_texts=_load_option_fill_texts_from_config(q_data.get("option_fill_texts")),
-                        fillable_option_indices=_load_fillable_indices_from_config(q_data.get("fillable_option_indices")),
-                        is_location=bool(q_data.get("is_location")),
-                    )
-                    if entry.fillable_option_indices is None and entry.option_fill_texts:
-                        derived = [idx for idx, value in enumerate(entry.option_fill_texts) if value]
-                        entry.fillable_option_indices = derived if derived else None
-                    self.question_entries.append(entry)
-            self._refresh_tree()
-        finally:
-            self._suspend_full_sim_autofill = False
-
-        self._save_initial_config()
-        self._config_changed = False
-        self._update_full_simulation_controls_state()
-        self._update_parameter_widgets_state()
-
-        def _duration_total_seconds(min_var: tk.StringVar, sec_var: tk.StringVar) -> int:
-            try:
-                minutes = int(str(min_var.get()).strip() or "0")
-            except Exception:
-                minutes = 0
-            try:
-                seconds = int(str(sec_var.get()).strip() or "0")
-            except Exception:
-                seconds = 0
-            return max(0, minutes) * 60 + max(0, seconds)
-
-        if (
-            _duration_total_seconds(self.full_sim_estimated_minutes_var, self.full_sim_estimated_seconds_var) == 0
-            or _duration_total_seconds(self.full_sim_total_minutes_var, self.full_sim_total_seconds_var) == 0
-        ):
-            self._auto_update_full_simulation_times()
-        else:
-            self._update_full_sim_time_section_visibility()
-
-    def _load_config_from_file(self, file_path: str, *, silent: bool = False, restore_paned_position: bool = True):
-        """从指定路径加载配置。"""
-        with open(file_path, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        self._apply_config_data(config, restore_paned_position=restore_paned_position)
-        if not silent:
-            print(f"已加载配置：{os.path.basename(file_path)}")
-
-    def _load_config(self):
-        config_path = self._get_config_path()
-        if not os.path.exists(config_path):
-            return
-
-        should_load_last = True
-        try:
-            should_load_last = self._log_popup_confirm(
-                "加载上次配置",
-                "检测到上一次保存的配置。\n是否要继续加载该配置？"
-            )
-        except Exception as e:
-            print(f"询问是否加载上次配置时出错，将默认加载：{e}")
-
-        if not should_load_last:
-            print("用户选择在启动时不加载上一次保存的配置")
-            return
-
-        try:
-            self._load_config_from_file(config_path, silent=True, restore_paned_position=True)
-            print(f"已加载上次配置：{len(self.question_entries)} 道题目")
-        except Exception as e:
-            print(f"加载配置失败: {e}")
-
-    def _save_config_as_dialog(self, *, show_popup: bool = True) -> bool:
-        """通过对话框保存配置到用户自定义文件。"""
-        configs_dir = self._get_configs_directory()
-        default_name = self._get_default_config_initial_name()
-        file_path = filedialog.asksaveasfilename(
-            parent=self.root,
-            title="保存配置",
-            defaultextension=".json",
-            initialfile=f"{default_name}.json",
-            initialdir=configs_dir,
-            filetypes=(("JSON 配置文件", "*.json"), ("所有文件", "*.*")),
-        )
-        if not file_path:
-            return False
-        try:
-            self._write_config_file(file_path)
-            if show_popup:
-                self._log_popup_info("保存配置", f"配置已保存到:\n{file_path}")
-            return True
-        except Exception as exc:
-            logging.error(f"保存配置失败: {exc}")
-            self._log_popup_error("保存配置失败", f"无法保存配置:\n{exc}")
-            return False
-
-    def _load_config_from_dialog(self):
-        """通过对话框加载用户选择的配置文件。"""
-        configs_dir = self._get_configs_directory()
-        file_path = filedialog.askopenfilename(
-            parent=self.root,
-            title="加载配置",
-            initialdir=configs_dir,
-            filetypes=(("JSON 配置文件", "*.json"), ("所有文件", "*.*")),
-        )
-        if not file_path:
-            return
-        try:
-            self._load_config_from_file(file_path, restore_paned_position=False)
-            self._log_popup_info("加载配置", f"已加载配置:\n{file_path}")
-        except Exception as exc:
-            logging.error(f"加载配置失败: {exc}")
-            self._log_popup_error("加载配置失败", f"无法加载配置:\n{exc}")
-
-    def _save_initial_config(self):
-        """保存初始配置状态以便检测后续变化"""
-        self._initial_config = {
-            "url": self.url_var.get(),
-            "target_num": self.target_var.get(),
-            "num_threads": self.thread_var.get(),
-            "submit_interval": self._serialize_submit_interval(),
-            "answer_duration_range": self._serialize_answer_duration_config(),
-            "full_simulation": self._serialize_full_simulation_config(),
-            "random_user_agent": self._serialize_random_ua_config(),
-            "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
-            "questions": [
-                {
-                    "question_type": entry.question_type,
-                    "probabilities": entry.probabilities if not isinstance(entry.probabilities, int) else entry.probabilities,
-                    "texts": entry.texts,
-                    "rows": entry.rows,
-                    "option_count": entry.option_count,
-                    "distribution_mode": entry.distribution_mode,
-                    "custom_weights": entry.custom_weights,
-                    "question_num": entry.question_num,
-                    "option_fill_texts": entry.option_fill_texts,
-                    "fillable_option_indices": entry.fillable_option_indices,
-                    "is_location": bool(entry.is_location),
-                }
-                for entry in self.question_entries
-            ],
-        }
-
-    def _mark_config_changed(self):
-        """标记配置已改动"""
-        self._config_changed = True
-
-    def _has_config_changed(self) -> bool:
-        """检查配置是否有实质性改动"""
-        current_config = {
-            "url": self.url_var.get(),
-            "target_num": self.target_var.get(),
-            "num_threads": self.thread_var.get(),
-            "submit_interval": self._serialize_submit_interval(),
-            "answer_duration_range": self._serialize_answer_duration_config(),
-            "full_simulation": self._serialize_full_simulation_config(),
-            "random_user_agent": self._serialize_random_ua_config(),
-            "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
-            "questions": [
-                {
-                    "question_type": entry.question_type,
-                    "probabilities": entry.probabilities if not isinstance(entry.probabilities, int) else entry.probabilities,
-                    "texts": entry.texts,
-                    "rows": entry.rows,
-                    "option_count": entry.option_count,
-                    "distribution_mode": entry.distribution_mode,
-                    "custom_weights": entry.custom_weights,
-                    "question_num": entry.question_num,
-                    "option_fill_texts": entry.option_fill_texts,
-                    "fillable_option_indices": entry.fillable_option_indices,
-                    "is_location": bool(entry.is_location),
-                }
-                for entry in self.question_entries
-            ],
-        }
-        return current_config != self._initial_config
 
     def _check_updates_on_startup(self):
         """在启动时后台检查更新"""
