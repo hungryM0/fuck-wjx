@@ -193,6 +193,8 @@ from wjx.random_ip import (
     handle_random_ip_submission,
     normalize_random_ip_enabled_value,
     reset_quota_limit_dialog_flag,
+    set_proxy_api_override,
+    get_effective_proxy_api_url,
 )
 
 from wjx.log_utils import (
@@ -5188,6 +5190,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         self.random_ua_mac_web_var = tk.BooleanVar(value=False)
         self.wechat_login_bypass_enabled_var = tk.BooleanVar(value=False)
         self.random_ip_enabled_var = tk.BooleanVar(value=False)
+        self.random_ip_api_var = tk.StringVar(value="")
         self.full_simulation_enabled_var = tk.BooleanVar(value=False)
         self.full_sim_target_var = tk.StringVar(value="")
         self.full_sim_estimated_minutes_var = tk.StringVar(value="3")
@@ -5197,6 +5200,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         self.log_dark_mode_var = tk.BooleanVar(value=False)
         self._full_simulation_control_widgets: List[tk.Widget] = []
         self.preview_button: Optional[ttk.Button] = None
+        self._load_custom_ip_config()
         self._build_ui()
         if self._loading_splash:
             self._loading_splash.update_progress(90, "主界面加载完成，即将显示...")
@@ -5804,6 +5808,66 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._apply_random_ua_widgets_state()
         self._mark_config_changed()
 
+    def _get_random_ip_api_text(self) -> str:
+        try:
+            return str(self.random_ip_api_var.get()).strip()
+        except Exception:
+            return ""
+
+    def _get_custom_ip_config_path(self) -> str:
+        return os.path.join(_get_runtime_directory(), "custom_ip.json")
+
+    def _load_custom_ip_config(self) -> str:
+        path = self._get_custom_ip_config_path()
+        try:
+            with open(path, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+        except FileNotFoundError:
+            return ""
+        except Exception as exc:
+            logging.error(f"加载自定义随机IP接口失败: {exc}")
+            return ""
+        try:
+            if isinstance(data, dict):
+                raw = data.get("random_proxy_api") or data.get("api") or data.get("url")
+                api_value = str(raw).strip() if raw is not None else ""
+            else:
+                api_value = str(data).strip()
+        except Exception:
+            api_value = ""
+        self.random_ip_api_var.set(api_value)
+        try:
+            set_proxy_api_override(api_value)
+        except Exception:
+            pass
+        return api_value
+
+    def _sync_random_ip_api_override(self) -> str:
+        api_value = self._get_random_ip_api_text()
+        try:
+            return set_proxy_api_override(api_value)
+        except Exception:
+            return get_effective_proxy_api_url()
+
+    def _save_random_ip_api_setting(self):
+        effective = self._sync_random_ip_api_override()
+        try:
+            payload = {"random_proxy_api": self._get_random_ip_api_text()}
+            with open(self._get_custom_ip_config_path(), "w", encoding="utf-8") as fp:
+                json.dump(payload, fp, ensure_ascii=False, indent=2)
+            self._log_popup_info(
+                "已保存",
+                (
+                    "自定义随机 IP 提取接口已保存并生效。\n"
+                    "出于隐私不展示具体地址。\n\n"
+                    "提示：修改后需点击“保存”按钮才会生效；留空则继续使用 .env 中的接口配置。\n"
+                    f"保存位置：{self._get_custom_ip_config_path()}"
+                ),
+            )
+        except Exception as exc:
+            logging.error(f"保存随机 IP 接口失败: {exc}")
+            self._log_popup_error("保存失败", f"随机 IP 接口保存失败：{exc}")
+
     def _refresh_full_simulation_status_label(self):
         return full_simulation_ui.refresh_full_simulation_status_label(self)
 
@@ -5956,6 +6020,23 @@ class SurveyGUI(ConfigPersistenceMixin):
             ua_option_widgets.append(cb)
         self._random_ua_option_widgets.extend(ua_option_widgets)
         self._settings_window_widgets.extend(ua_option_widgets)
+
+        ip_api_frame = ttk.LabelFrame(proxy_frame, text="随机 IP 接口", padding=10)
+        ip_api_frame.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(ip_api_frame, text="自定义随机 IP 提取 API：").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ip_api_entry = ttk.Entry(ip_api_frame, textvariable=self.random_ip_api_var, width=50)
+        ip_api_entry.grid(row=0, column=1, sticky="we")
+        ip_api_save_btn = ttk.Button(ip_api_frame, text="保存", command=self._save_random_ip_api_setting, width=10)
+        ip_api_save_btn.grid(row=0, column=2, padx=(10, 0))
+        ttk.Label(
+            ip_api_frame,
+            text="（如果你不知道这是什么，请不要轻易修改这个设置！）\n",
+            foreground="#ff0000",
+            wraplength=460,
+            justify="left",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ip_api_frame.columnconfigure(1, weight=1)
+        self._settings_window_widgets.extend([ip_api_entry, ip_api_save_btn])
 
         button_frame = ttk.Frame(content)
         button_frame.pack(fill=tk.X, pady=(18, 0))
@@ -8952,11 +9033,14 @@ class SurveyGUI(ConfigPersistenceMixin):
                 self.preview_survey()
                 return
         random_proxy_flag = bool(self.random_ip_enabled_var.get())
+        effective_proxy_api = get_effective_proxy_api_url()
         random_ua_flag = bool(self.random_ua_enabled_var.get())
         random_ua_keys_list = self._get_selected_random_ua_keys() if random_ua_flag else []
         if random_ua_flag and not random_ua_keys_list:
             self._log_popup_error("参数错误", "启用随机 UA 时至少选择一个终端类型")
             return
+        if random_proxy_flag:
+            logging.info("[Action Log] 随机IP接口：已配置（出于隐私不展示具体地址）")
         if random_proxy_flag and not ensure_random_ip_ready(self):
             return
         ctx = {
@@ -8974,6 +9058,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             "random_ua_flag": random_ua_flag,
             "random_ua_keys_list": random_ua_keys_list,
             "wechat_login_bypass_enabled": bool(self.wechat_login_bypass_enabled_var.get()),
+            "random_proxy_api": effective_proxy_api,
         }
         if random_proxy_flag:
             self.start_button.config(state=tk.DISABLED)
@@ -8992,7 +9077,13 @@ class SurveyGUI(ConfigPersistenceMixin):
             except Exception:
                 need_count = 1
             need_count = max(1, need_count)
-            proxy_pool = _fetch_new_proxy_batch(expected_count=need_count)
+            proxy_api = ctx.get("random_proxy_api")
+            if proxy_api is not None:
+                try:
+                    set_proxy_api_override(proxy_api)
+                except Exception:
+                    pass
+            proxy_pool = _fetch_new_proxy_batch(expected_count=need_count, proxy_url=proxy_api)
         except (OSError, ValueError, RuntimeError) as exc:
             self.root.after(0, lambda: self._on_proxy_load_failed(str(exc)))
             return

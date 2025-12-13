@@ -27,6 +27,29 @@ from .registry_manager import RegistryManager
 RANDOM_IP_FREE_LIMIT = 20
 CARD_VALIDATION_ENDPOINT = "https://hungrym0.top/password.txt"
 _quota_limit_dialog_shown = False
+_proxy_api_url_override: Optional[str] = None
+
+
+def get_effective_proxy_api_url() -> str:
+    """返回当前生效的随机 IP 提取接口。为空时回退到配置/环境变量。"""
+    override = (_proxy_api_url_override or "").strip()
+    return override or PROXY_REMOTE_URL
+
+
+def set_proxy_api_override(api_url: Optional[str]) -> str:
+    """
+    设置自定义随机 IP 提取接口地址，并返回最终生效的地址。
+    传入空值时会回退到 .env 中的配置。
+    """
+    global _proxy_api_url_override
+    try:
+        cleaned = str(api_url).strip()
+    except Exception:
+        cleaned = ""
+    previous = _proxy_api_url_override
+    _proxy_api_url_override = cleaned or None
+    effective = get_effective_proxy_api_url()
+    return effective
 
 
 def _parse_proxy_line(line: str) -> Optional[str]:
@@ -55,12 +78,12 @@ def _parse_proxy_line(line: str) -> Optional[str]:
     return f"{host}:{port}"
 
 
-def _load_proxy_ip_pool() -> List[str]:
+def _load_proxy_ip_pool(proxy_url: Optional[str] = None) -> List[str]:
     if requests is None:
         raise RuntimeError("requests 模块不可用，无法从远程获取代理列表")
-    proxy_url = PROXY_REMOTE_URL
+    target_url = (proxy_url or "").strip() or get_effective_proxy_api_url()
     try:
-        response = requests.get(proxy_url, headers=DEFAULT_HTTP_HEADERS, timeout=12)
+        response = requests.get(target_url, headers=DEFAULT_HTTP_HEADERS, timeout=12)
         response.raise_for_status()
     except Exception as exc:
         raise OSError(f"获取远程代理列表失败：{exc}") from exc
@@ -127,14 +150,14 @@ def _load_proxy_ip_pool() -> List[str]:
         seen.add(candidate)
         proxies.append(candidate)
     if not proxies:
-        raise ValueError(f"代理列表为空，请检查远程地址：{proxy_url}")
+        raise ValueError(f"代理列表为空，请检查远程地址：{target_url}")
     random.shuffle(proxies)
     if len(proxies) > PROXY_MAX_PROXIES:
         proxies = proxies[:PROXY_MAX_PROXIES]
     return proxies
 
 
-def _fetch_new_proxy_batch(expected_count: int = 1) -> List[str]:
+def _fetch_new_proxy_batch(expected_count: int = 1, proxy_url: Optional[str] = None) -> List[str]:
     try:
         expected = int(expected_count)
     except Exception:
@@ -144,7 +167,7 @@ def _fetch_new_proxy_batch(expected_count: int = 1) -> List[str]:
     # 多尝试几次，尽量拿到足够数量的 IP
     attempts = max(2, expected)
     for _ in range(attempts):
-        batch = _load_proxy_ip_pool()
+        batch = _load_proxy_ip_pool(proxy_url)
         for proxy in batch:
             if proxy not in proxies:
                 proxies.append(proxy)
