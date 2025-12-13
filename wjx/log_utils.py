@@ -147,12 +147,32 @@ class LogBufferHandler(logging.Handler):
         if not message or not original_level:
             return message
         original_label = f"[{original_level.upper()}]"
+        replacement_label = f"[{category.upper()}]"
+
+        deduped = LogBufferHandler._collapse_adjacent_label(message, original_label, replacement_label)
+        if deduped is not None:
+            return deduped
+
         if category.upper() == original_level.upper():
             return message
-        replacement_label = f"[{category.upper()}]"
         if original_label in message:
             return message.replace(original_label, replacement_label, 1)
         return message
+
+    @staticmethod
+    def _collapse_adjacent_label(message: str, original_label: str, target_label: str) -> Optional[str]:
+        if not message or not original_label or not target_label:
+            return None
+        index = message.find(original_label)
+        if index == -1:
+            return None
+        remainder = message[index + len(original_label):]
+        trimmed = remainder.lstrip()
+        if not trimmed.startswith(target_label):
+            return None
+        whitespace = remainder[: len(remainder) - len(trimmed)]
+        suffix = trimmed[len(target_label):]
+        return f"{message[:index]}{target_label}{whitespace}{suffix}"
 
 
 LOG_BUFFER_HANDLER = LogBufferHandler()

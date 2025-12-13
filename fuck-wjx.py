@@ -606,6 +606,32 @@ class SecurityConfirmDetectedError(RuntimeError):
     """检测到系统安全校验确认弹窗（需要安全校验，请重新提交），按配置直接放弃当前浏览器示例并计为失败。"""
 
 
+class AgreementModalRequiresManualError(RuntimeError):
+    """检测到“同意并继续”等协议弹窗且无法自动点击，需要人工处理。"""
+
+
+def _agreement_modal_visible(driver: BrowserDriver) -> bool:
+    script = r"""
+        return (() => {
+            const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
+            const el = document.querySelector('.layui-layer-btn0');
+            if (!el || !visible(el)) return false;
+            const text = (el.innerText || el.textContent || '').trim();
+            return /同意/.test(text);
+        })();
+    """
+    try:
+        return bool(driver.execute_script(script))
+    except Exception:
+        return False
+
+
 def _get_runtime_directory() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
@@ -2705,6 +2731,29 @@ def vacant(driver: BrowserDriver, current, index):
                 )
         except Exception:
             pass
+
+        # 触发题目容器上的输入相关事件，避免多项填空未触发脚本校验
+        try:
+            driver.execute_script(
+                """
+                return (function() {
+                    const qid = arguments[0];
+                    const container = document.getElementById(qid);
+                    if (!container) return false;
+                    const inputs = container.querySelectorAll('input, textarea, [contenteditable=\"true\"], .textCont, .textcont');
+                    const events = ['input','change','blur','keyup','keydown'];
+                    inputs.forEach(el => {
+                        events.forEach(name => {
+                            try { el.dispatchEvent(new Event(name, { bubbles: true })); } catch (_) {}
+                        });
+                    });
+                    return true;
+                })();
+                """,
+                f"div{current}"
+            )
+        except Exception:
+            pass
         return
 
     try:
@@ -3400,34 +3449,266 @@ def _click_submit_button(driver: BrowserDriver) -> bool:
     return False
 
 
+def _click_agreement_modal_if_present(
+    driver: BrowserDriver, stop_signal: Optional[threading.Event] = None
+) -> bool:
+    """
+    检测并点击“同意/同意并继续”类弹窗按钮，返回是否点击。
+    """
+    def _sleep(seconds: float) -> bool:
+        if seconds <= 0:
+            return False
+        if stop_signal:
+            interrupted = stop_signal.wait(seconds)
+            return bool(interrupted and stop_signal.is_set())
+        time.sleep(seconds)
+        return False
+
+    def _playwright_force_click() -> bool:
+        page = getattr(driver, "page", None)
+        if not page:
+            return False
+        selectors = (
+            "div.layui-layer-btn a.layui-layer-btn0",
+            "a.layui-layer-btn0",
+            ".layui-layer-btn0",
+        )
+        try:
+            frames = list(getattr(page, "frames", []) or [])
+        except Exception:
+            frames = []
+        if not frames:
+            try:
+                frames = [page.main_frame]
+            except Exception:
+                frames = []
+        for frame in frames:
+            if stop_signal and stop_signal.is_set():
+                return False
+            for selector in selectors:
+                try:
+                    handle = frame.query_selector(selector)
+                except Exception:
+                    handle = None
+                if not handle:
+                    continue
+                try:
+                    handle.scroll_into_view_if_needed(timeout=500)
+                except Exception:
+                    pass
+                # 优先使用 Playwright 的真实点击（isTrusted=true），必要时强制 force
+                clicked = False
+                for kwargs in ({"timeout": 800, "force": True}, {"timeout": 800}):
+                    try:
+                        handle.click(**kwargs)
+                        clicked = True
+                        break
+                    except TypeError:
+                        try:
+                            handle.click()
+                            clicked = True
+                            break
+                        except Exception:
+                            continue
+                    except Exception:
+                        continue
+                if not clicked:
+                    # 坐标兜底：点元素中心
+                    try:
+                        box = handle.bounding_box()
+                    except Exception:
+                        box = None
+                    if box:
+                        try:
+                            x = float(box.get("x") or 0) + float(box.get("width") or 0) / 2
+                            y = float(box.get("y") or 0) + float(box.get("height") or 0) / 2
+                            page.mouse.click(x, y)
+                            clicked = True
+                        except Exception:
+                            clicked = False
+                if clicked:
+                    # 给弹窗一点时间关闭，再校验是否消失
+                    try:
+                        page.wait_for_timeout(120)
+                    except Exception:
+                        pass
+                    if not _agreement_modal_visible(driver):
+                        return True
+        return False
+
+    def _click_once() -> bool:
+        # 先尝试用 Playwright 原生点击（更接近真实用户点击）
+        if _agreement_modal_visible(driver) and _playwright_force_click():
+            return True
+
+        # 先尝试显式选择器：div.layui-layer-btn 下的“同意并继续”按钮
+        selector_pairs = [
+            (By.CSS_SELECTOR, ".layui-layer-btn .layui-layer-btn0"),
+            (By.CSS_SELECTOR, ".layui-layer-btn0"),
+            (By.CSS_SELECTOR, ".layui-layer-btn a.layui-layer-btn0"),
+            (By.XPATH, "//div[contains(@class,'layui-layer-btn')]//a[contains(@class,'layui-layer-btn0')]"),
+            (By.XPATH, "//div[contains(@class,'layui-layer-btn')]//a[contains(normalize-space(),'同意')]"),
+        ]
+        for by, value in selector_pairs:
+            try:
+                elems = driver.find_elements(by, value)
+            except Exception:
+                continue
+            for el in elems:
+                try:
+                    if not el.is_displayed():
+                        continue
+                except Exception:
+                    continue
+                try:
+                    _smooth_scroll_to_element(driver, el, "center")
+                except Exception:
+                    pass
+                for click_method in (
+                    lambda: el.click(),
+                    lambda: driver.execute_script("arguments[0].click();", el),
+                    lambda: driver.execute_script(
+                        "arguments[0].dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,composed:true}));",
+                        el,
+                    ),
+                ):
+                    try:
+                        click_method()
+                        if _sleep(0.12):
+                            return False
+                        if not _agreement_modal_visible(driver):
+                            return True
+                    except Exception:
+                        continue
+        # JS 兜底：解除隐藏/禁用并直接触发点击
+        script = r"""
+            return (() => {
+                const KEYWORDS = /(同意并继续|同意|确认并继续|继续|接受|agree|consent)/i;
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const normalize = (el) => {
+                    try {
+                        el.style.display = '';
+                        el.style.visibility = 'visible';
+                        el.style.opacity = '1';
+                        el.style.pointerEvents = 'auto';
+                        el.removeAttribute('disabled');
+                    } catch (_) {}
+                };
+                const fireClick = (el) => {
+                    if (!el) return false;
+                    normalize(el);
+                    try { el.scrollIntoView({block:'center'}); } catch (_) {}
+                    try { el.click(); return true; } catch (_) {}
+                    try {
+                        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
+                        return true;
+                    } catch (_) {}
+                    return false;
+                };
+                const list = Array.from(document.querySelectorAll('.layui-layer-btn0, .layui-layer-btn a, .layui-layer-btn button, button, a'));
+                for (const el of list) {
+                    const text = (el.innerText || el.textContent || '').trim();
+                    if (!text || !KEYWORDS.test(text)) continue;
+                    if (fireClick(el)) return true;
+                }
+                return false;
+            })();
+        """
+        try:
+            if driver.execute_script(script):
+                if _sleep(0.12):
+                    return False
+                if not _agreement_modal_visible(driver):
+                    return True
+        except Exception:
+            pass
+        # XPath 兜底
+        for xpath in (
+            "//div[contains(@class,'layui-layer-btn')]//a[contains(normalize-space(),'同意')]",
+            "//a[contains(normalize-space(.),'同意')]",
+            "//button[contains(normalize-space(.),'同意')]",
+            "//a[contains(normalize-space(.),'继续')]",
+            "//button[contains(normalize-space(.),'继续')]",
+        ):
+            try:
+                elements = driver.find_elements(By.XPATH, xpath)
+            except Exception:
+                continue
+            for element in elements:
+                try:
+                    if not element.is_displayed():
+                        continue
+                except Exception:
+                    continue
+                try:
+                    _smooth_scroll_to_element(driver, element, 'center')
+                except Exception:
+                    pass
+                for click_method in (
+                    lambda: element.click(),
+                    lambda: driver.execute_script("arguments[0].click();", element),
+                ):
+                    try:
+                        click_method()
+                        if _sleep(0.12):
+                            return False
+                        if not _agreement_modal_visible(driver):
+                            return True
+                    except Exception:
+                        continue
+        return False
+
+    poll_interval = 0.2
+    max_attempts = 7
+    for attempt in range(max_attempts):
+        if stop_signal and stop_signal.is_set():
+            return False
+        if not _agreement_modal_visible(driver):
+            return False
+        if _click_once():
+            return True
+        if attempt < max_attempts - 1:
+            if _sleep(poll_interval):
+                return False
+    return False
+
+
 
 def _verify_privacy_agreement_checked(driver: BrowserDriver) -> bool:
     script = r"""
-        (() => {
+        return (() => {
             const KEYWORDS = /(阅读|已阅|同意|确认|接受|已知悉).*(协议|条款|须知|隐私|声明|政策|约定)/;
-            const candidates = Array.from(document.querySelectorAll('input[type="checkbox"]'));
-            for (const input of candidates) {
-                if (!input.checked) continue;
+            const isCheckedByKeywords = (node) => {
+                if (!node) return false;
+                const text = (node.innerText || node.textContent || '').replace(/\s+/g, '');
+                return text && KEYWORDS.test(text);
+            };
+            const inputs = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+            for (const input of inputs) {
+                if (!input || !input.checked) continue;
                 let text = (input.getAttribute('aria-label') || input.getAttribute('title') || '');
                 if (input.labels && input.labels.length) {
-                    for (const label of input.labels) {
+                    input.labels.forEach(label => {
                         text += (label.innerText || label.textContent || '') + ' ';
-                    }
+                    });
                 }
-                const wrapper = input.closest('.protocol, .agreement, .wjxprivacy, label, span, div, p');
-                if (wrapper) {
-                    text += (wrapper.innerText || wrapper.textContent || '') + ' ';
+                const wrap = input.closest('.protocol, .agreement, .wjxprivacy, .tipagree, label, span, div, p');
+                if (wrap) {
+                    text += (wrap.innerText || wrap.textContent || '') + ' ';
                 }
                 if (KEYWORDS.test(text.replace(/\s+/g, ''))) {
                     return true;
                 }
             }
-            const textNodes = document.querySelectorAll('.protocol, .agreement, .wjxprivacy, .tipagree, label, span, div, p, a');
-            for (const node of textNodes) {
-                const text = (node.innerText || node.textContent || '').replace(/\s+/g, '');
-                if (!text || !KEYWORDS.test(text)) {
-                    continue;
-                }
+            const nodes = document.querySelectorAll('.protocol, .agreement, .wjxprivacy, .tipagree, label, span, div, p, a');
+            for (const node of nodes) {
+                if (!isCheckedByKeywords(node)) continue;
                 const ariaChecked = (node.getAttribute('aria-checked') || '').toLowerCase();
                 if (ariaChecked === 'true' || ariaChecked === 'checked') {
                     return true;
@@ -3437,6 +3718,14 @@ def _verify_privacy_agreement_checked(driver: BrowserDriver) -> bool:
                     return true;
                 }
             }
+            try {
+                const globalFlags = ['agree', 'isAgree', 'agreeFlag', 'protocolChecked', 'hasReadProtocol'];
+                for (const name of globalFlags) {
+                    if (Object.prototype.hasOwnProperty.call(window, name) && window[name]) {
+                        return true;
+                    }
+                }
+            } catch (_) {}
             return false;
         })();
     """
@@ -3448,51 +3737,82 @@ def _verify_privacy_agreement_checked(driver: BrowserDriver) -> bool:
 
 def _click_privacy_checkbox_candidates(driver: BrowserDriver) -> bool:
     selectors = [
+        "#checkxiexi",
         "input[type='checkbox'][id*='agree']",
         "input[type='checkbox'][name*='agree']",
         "input[type='checkbox'][id*='protocol']",
+        "input[type='checkbox'][name*='protocol']",
+        "input[type='checkbox'][id*='privacy']",
+        "input[type='checkbox'][name*='privacy']",
         ".protocol input[type='checkbox']",
         ".agreement input[type='checkbox']",
         ".wjxprivacy input[type='checkbox']",
         ".tipagree input[type='checkbox']",
+        "[role='checkbox']",
+    ]
+    label_selectors = [
+        "label[for='checkxiexi']",
         "label[for*='agree']",
         "label[for*='protocol']",
+        "label[for*='privacy']",
         ".protocol label",
         ".agreement label",
         ".wjxprivacy label",
         ".tipagree label",
-        ".protocol",
-        ".agreement",
-        ".wjxprivacy",
-        ".tipagree",
+        "[onclick*='xieyiCheck']",
     ]
-    for selector in selectors:
-        try:
-            elements = driver.find_elements(By.CSS_SELECTOR, selector)
-        except Exception:
-            continue
-        for element in elements:
+
+    def _try_elements(elems) -> bool:
+        for element in elems:
             try:
-                displayed = element.is_displayed()
+                visible = element.is_displayed()
             except Exception:
-                displayed = True
-            if not displayed:
+                visible = True
+            if not visible:
                 continue
             try:
                 _smooth_scroll_to_element(driver, element, 'center')
             except Exception:
                 pass
-            for click_action in (
+            for action in (
                 lambda: element.click(),
                 lambda: driver.execute_script("arguments[0].click();", element),
             ):
                 try:
-                    click_action()
+                    action()
                     time.sleep(0.05)
                     if _verify_privacy_agreement_checked(driver):
                         return True
                 except Exception:
                     continue
+        return False
+
+    for selector in selectors:
+        try:
+            elems = driver.find_elements(By.CSS_SELECTOR, selector)
+        except Exception:
+            elems = []
+        if elems and _try_elements(elems):
+            return True
+
+    for selector in label_selectors:
+        try:
+            labels = driver.find_elements(By.CSS_SELECTOR, selector)
+        except Exception:
+            labels = []
+        if labels and _try_elements(labels):
+            return True
+
+    # 调用页面内置协议函数（如 xieyiCheck）
+    try:
+        invoked = driver.execute_script(
+            "return (typeof window.xieyiCheck === 'function') ? !!(window.xieyiCheck() || true) : false;"
+        )
+        if invoked and _verify_privacy_agreement_checked(driver):
+            return True
+    except Exception:
+        pass
+
     return False
 
 
@@ -3506,148 +3826,95 @@ def _ensure_privacy_agreement_checked(driver: BrowserDriver) -> bool:
         logging.debug("已尝试点击隐私/协议候选元素")
         return True
     script = r"""
-        (() => {
+        return (() => {
             const KEYWORDS = /(阅读|已阅|同意|确认|接受|已知悉).*(协议|条款|须知|隐私|声明|政策|约定)/;
-            const EVENT_NAMES = ['pointerdown','mousedown','pointerup','mouseup','click','input','change','blur','keyup','keydown','keypress'];
-            const fireEvents = (el) => {
+            const EVENTS = ['pointerdown','mousedown','pointerup','mouseup','click','input','change','blur','keyup','keydown'];
+            const fire = (el) => {
                 if (!el) return;
-                for (const name of EVENT_NAMES) {
+                EVENTS.forEach(name => {
                     try { el.dispatchEvent(new Event(name, { bubbles: true })); } catch (_) {}
-                }
-            };
-            const ensureChecked = (input) => {
-                if (!input || input.disabled) return false;
-                if (input.type && input.type.toLowerCase() !== 'checkbox') return false;
-                if (input.checked) return true;
-                try { input.scrollIntoView({block: 'center'}); } catch (_) {}
-                try {
-                    input.click();
-                    if (input.checked) {
-                        fireEvents(input);
-                        return true;
-                    }
-                } catch (_) {}
-                try {
-                    input.checked = true;
-                    input.setAttribute('checked', 'checked');
-                    fireEvents(input);
-                    return true;
-                } catch (_) {}
-                return !!input.checked;
-            };
-            const dispatchClicks = (node) => {
-                if (!node) return;
-                try { node.scrollIntoView({block:'center'}); } catch (_) {}
-                EVENT_NAMES.forEach(name => {
-                    try { node.dispatchEvent(new Event(name, { bubbles: true })); } catch (_) {}
                 });
             };
-            const collectText = (input) => {
-                let text = (input.getAttribute('aria-label') || input.getAttribute('title') || '');
-                if (input.labels && input.labels.length) {
-                    for (const label of input.labels) {
-                        text += (label.innerText || label.textContent || '') + ' ';
-                    }
+            const markChecked = (input) => {
+                if (!input || input.disabled) return false;
+                const type = (input.type || '').toLowerCase();
+                if (type && type !== 'checkbox') return false;
+                try { input.scrollIntoView({block:'center'}); } catch(_) {}
+                try { input.click(); } catch(_) {}
+                if (!input.checked) {
+                    try { input.checked = true; input.setAttribute('checked','checked'); } catch(_) {}
                 }
-                const wrapper = input.closest('.protocol, .agreement, .wjxprivacy, label, span, div, p');
-                if (wrapper) {
-                    text += (wrapper.innerText || wrapper.textContent || '') + ' ';
+                if (input.checked) {
+                    fire(input);
+                    return true;
                 }
-                return text.replace(/\s+/g, '');
+                return false;
             };
-            const inputs = Array.from(document.querySelectorAll('input[type="checkbox"]'));
-            const strongCandidates = inputs.filter(input => KEYWORDS.test(collectText(input)));
-            if (strongCandidates.length) {
-                for (const input of strongCandidates) {
-                    if (ensureChecked(input)) {
-                        return true;
-                    }
-                }
-            }
+            const textMatch = (node) => {
+                if (!node) return false;
+                const txt = (node.innerText || node.textContent || '').replace(/\s+/g, '');
+                return txt && KEYWORDS.test(txt);
+            };
             const selectors = [
-                '#agree', '#agreement', '#confirm', '#protocol input[type="checkbox"]',
-                '.agreement input[type="checkbox"]', '.protocol input[type="checkbox"]',
-                '.survey-agree input[type="checkbox"]', '.wjxprivacy input[type="checkbox"]',
-                '.tipagree input[type="checkbox"]',
-                'input[name*="agree"]', 'input[id*="agree"]', 'input[class*="agree"]',
-                'input[name*="protocol"]', 'input[id*="protocol"]', 'input[class*="protocol"]'
+                '#checkxiexi',
+                'input[type=\"checkbox\"][id*=\"agree\"]',
+                'input[type=\"checkbox\"][name*=\"agree\"]',
+                'input[type=\"checkbox\"][id*=\"protocol\"]',
+                'input[type=\"checkbox\"][name*=\"protocol\"]',
+                'input[type=\"checkbox\"][id*=\"privacy\"]',
+                'input[type=\"checkbox\"][name*=\"privacy\"]',
+                '.protocol input[type=\"checkbox\"]',
+                '.agreement input[type=\"checkbox\"]',
+                '.wjxprivacy input[type=\"checkbox\"]',
+                '.tipagree input[type=\"checkbox\"]',
+                '[role=\"checkbox\"]'
             ];
             for (const sel of selectors) {
                 const nodes = document.querySelectorAll(sel);
                 for (const node of nodes) {
-                    if (ensureChecked(node)) {
-                        return true;
-                    }
+                    if (markChecked(node)) return true;
                 }
             }
-            const textNodes = document.querySelectorAll('.protocol, .agreement, .wjxprivacy, .tipagree, label, span, div, p, a, li');
-            for (const node of textNodes) {
-                const text = (node.innerText || node.textContent || '').replace(/\s+/g, '');
-                if (!text || !KEYWORDS.test(text)) {
-                    continue;
+            const labels = Array.from(document.querySelectorAll('label')).filter(l => {
+                const f = (l.getAttribute('for') || '').toLowerCase();
+                return f.includes('agree') || f.includes('protocol') || f.includes('privacy') || textMatch(l);
+            });
+            for (const label of labels) {
+                const forId = label.getAttribute('for');
+                if (forId) {
+                    const target = document.getElementById(forId);
+                    if (markChecked(target)) return true;
                 }
-                let input = null;
-                if (node.tagName === 'LABEL') {
-                    const id = node.getAttribute('for');
-                    if (id) {
-                        input = document.getElementById(id);
-                    }
-                }
-                if (!input) {
-                    input = node.querySelector('input[type="checkbox"]');
-                }
-                if (!input) {
-                    let search = node.previousElementSibling;
-                    let attempts = 0;
-                    while (search && attempts < 3 && !input) {
-                        if (search.tagName === 'INPUT' && search.type && search.type.toLowerCase() === 'checkbox') {
-                            input = search;
-                            break;
-                        }
-                        if (search.querySelector) {
-                            input = search.querySelector('input[type="checkbox"]');
-                        }
-                        search = search.previousElementSibling;
-                        attempts += 1;
-                    }
-                }
-                if (!input) {
-                    let parent = node.parentElement;
-                    let hops = 0;
-                    while (parent && hops < 4 && !input) {
-                        input = parent.querySelector('input[type="checkbox"]');
-                        parent = parent.parentElement;
-                        hops += 1;
-                    }
-                }
-                if (input) {
-                    if (ensureChecked(input)) {
-                        return true;
-                    }
-                    dispatchClicks(node);
-                    if (input.checked) {
-                        fireEvents(input);
-                        return true;
-                    }
-                    continue;
-                }
-                dispatchClicks(node);
-                const checkedAfter = document.querySelector('input[type="checkbox"]:checked');
-                if (checkedAfter && KEYWORDS.test((node.innerText || node.textContent || '').replace(/\s+/g, ''))) {
-                    return true;
-                }
+                const input = label.querySelector('input[type=\"checkbox\"]');
+                if (markChecked(input)) return true;
+                try { label.click(); } catch(_) {}
+                if (markChecked(input)) return true;
             }
-            const globalFlags = ['agree', 'isAgree', 'agreeFlag', 'protocolChecked', 'hasReadProtocol'];
-            let toggled = false;
-            for (const name of globalFlags) {
-                if (Object.prototype.hasOwnProperty.call(window, name)) {
-                    try {
-                        window[name] = true;
-                        toggled = true;
-                    } catch (_) {}
-                }
+            const wrappers = document.querySelectorAll('.protocol, .agreement, .wjxprivacy, .tipagree, .protocol-wrapper, .wjx_templet_beautifyInput');
+            for (const wrap of wrappers) {
+                if (!textMatch(wrap)) continue;
+                const input = wrap.querySelector('input[type=\"checkbox\"]');
+                if (markChecked(input)) return true;
+                try { wrap.click(); } catch(_) {}
+                if (markChecked(input)) return true;
             }
-            return toggled;
+            try {
+                if (typeof window.xieyiCheck === 'function') {
+                    window.xieyiCheck();
+                    if (document.querySelector('input[type=\"checkbox\"]:checked')) return true;
+                }
+            } catch (_) {}
+            try {
+                const flags = ['agree','isAgree','agreeFlag','protocolChecked','hasReadProtocol'];
+                let toggled = false;
+                flags.forEach(name => {
+                    if (Object.prototype.hasOwnProperty.call(window, name)) {
+                        try { window[name] = true; toggled = true; } catch (_) {}
+                    }
+                });
+                return toggled;
+            } catch (_) {}
+            return false;
         })();
     """
     try:
@@ -3820,6 +4087,10 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
 
     def _click_submit_buttons():
         _ensure_privacy_agreement_checked(driver)
+        if _agreement_modal_visible(driver):
+            if not _click_agreement_modal_if_present(driver, stop_signal=stop_signal):
+                # 站点可能要求真实用户点击（反自动化），此处避免无意义等待，交由上层快速换实例
+                raise AgreementModalRequiresManualError("检测到“同意并继续”弹窗但无法自动点击")
         clicked = False
         try:
             driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
@@ -3837,6 +4108,15 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
             pass
         if not clicked:
             clicked = _click_submit_button(driver)
+        if not clicked:
+            # 若提交按钮被“同意并继续”弹窗挡住，再尝试点击弹窗后重试提交（多尝试几次）
+            for _ in range(3):
+                _click_agreement_modal_if_present(driver, stop_signal=stop_signal)
+                if settle_delay > 0:
+                    time.sleep(min(0.2, settle_delay))
+                if _click_submit_button(driver):
+                    clicked = True
+                    break
         return clicked
 
     def _detect_security_confirm_dialog() -> bool:
@@ -4024,6 +4304,27 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             pass
         driver = None
 
+    def _is_device_quota_limit_page(instance: BrowserDriver) -> bool:
+        """
+        检测“设备已达到最大填写次数”提示页。
+        """
+        script = r"""
+            return (() => {
+                const text = (document.body?.innerText || '').replace(/\s+/g, '');
+                if (!text) return false;
+                const hasLimit = text.includes('设备已达到最大填写次数')
+                    || (text.includes('达到最大填写次数') && text.includes('设备'))
+                    || text.includes('最大填写次数');
+                const hasThanks = text.includes('感谢参与') || text.includes('感谢参与!');
+                const hasApology = text.includes('很抱歉') || text.includes('提示');
+                return hasLimit && (hasThanks || hasApology);
+            })();
+        """
+        try:
+            return bool(instance.execute_script(script))
+        except Exception:
+            return False
+
     while True:
         if stop_signal.is_set():
             break
@@ -4072,6 +4373,23 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             driver.get(url)
             if stop_signal.is_set():
                 break
+            if _is_device_quota_limit_page(driver):
+                logging.warning("检测到“设备已达到最大填写次数”提示页，直接放弃当前浏览器实例并标记为成功。")
+                with lock:
+                    if target_num <= 0 or cur_num < target_num:
+                        cur_num += 1
+                        logging.info(
+                            f"[OK/Quota] 已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
+                        )
+                        if random_proxy_ip_enabled:
+                            handle_random_ip_submission(gui_instance, stop_signal)
+                        if target_num > 0 and cur_num >= target_num:
+                            stop_signal.set()
+                    else:
+                        stop_signal.set()
+                        break
+                _dispose_driver()
+                continue
             initial_url = driver.current_url
             if stop_signal.is_set():
                 break
@@ -4114,6 +4432,18 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         detected = full_simulation_mode.is_survey_completion_page(driver)
                         time.sleep(2.0 if detected else 0.3)
                     _dispose_driver()
+        except AgreementModalRequiresManualError as exc:
+            driver_had_error = True
+            if stop_signal.is_set():
+                break
+            logging.warning(f"{exc}，将快速关闭当前实例并重试。")
+            with lock:
+                cur_fail += 1
+                print(f"已失败{cur_fail}次, 失败次数达到{int(fail_threshold)}次将强制停止")
+            if cur_fail >= fail_threshold:
+                logging.critical("失败次数过多，强制停止，请检查配置是否正确")
+                stop_signal.set()
+                break
         except Exception:
             driver_had_error = True
             if stop_signal.is_set():

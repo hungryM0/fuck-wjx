@@ -271,7 +271,8 @@ def confirm_random_ip_usage(gui: Any) -> bool:
         "启用随机IP提交前请确认：\n\n"
         "1) 代理来源于网络，具有被攻击的安全风险，确认启用视为已知悉风险并自愿承担一切后果；\n"
         "2) 禁止用于污染他人数据，否则可能被封禁或承担法律责任。\n"
-        "3) 随机IP维护成本高昂，如需大量使用需要付费。\n\n"
+        "3) 目前技术暂无法指定地区ip，有可能后续会支持。\n"
+        "4) 随机IP维护成本高昂，如需大量使用需要付费。\n\n"
         "是否确认已知悉并继续启用随机IP提交？"
     )
     confirmed = bool(
@@ -397,7 +398,7 @@ def show_card_validation_dialog(gui: Any) -> bool:
         "作者只是一个大一小登，但是由于ip池及开发成本较高，用户量大，问卷份数要求多，\n",
     )
     text_widget.insert(tk.END, "加上学业压力，导致长期如此无偿经营困难……\n\n")
-    text_widget.insert(tk.END, "1.在菜单栏-捐助中赞助")
+    text_widget.insert(tk.END, "1.捐助")
 
     blue_start = text_widget.index(tk.END + "-1c")
     text_widget.insert(tk.END, "任意金额")
@@ -406,14 +407,14 @@ def show_card_validation_dialog(gui: Any) -> bool:
     text_widget.tag_config("blue", foreground="#0066CC")
 
     text_widget.insert(tk.END, "（多少钱都行♥）\n")
-    text_widget.insert(tk.END, "2.在上方菜单栏-联系中找到开发者，并留下联系邮箱、交易订单号\n")
-    text_widget.insert(tk.END, "3.开发者验证后会发送卡密到你的邮箱，输入卡密后即可解锁无限随机IP提交额度\n")
+    text_widget.insert(tk.END, "2.在“联系”中找到开发者，并留下联系邮箱\n")
+    text_widget.insert(tk.END, "3.开发者会发送卡密到你的邮箱，输入卡密后即可解锁无限随机IP提交额度\n")
 
     gray_start = text_widget.index(tk.END + "-1c")
     text_widget.insert(tk.END, "4.你也可以通过自己的口才白嫖卡密（误）")
     gray_end = text_widget.index(tk.END + "-1c")
     text_widget.tag_add("gray", gray_start, gray_end)
-    text_widget.tag_config("gray", foreground="#C3BABA")
+    text_widget.tag_config("gray", foreground="#918A8A")
     text_widget.insert(tk.END, "\n\n感谢您的支持与理解！🙏")
     text_widget.config(state=tk.DISABLED)
 
