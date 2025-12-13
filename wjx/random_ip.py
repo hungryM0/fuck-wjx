@@ -550,7 +550,7 @@ def show_card_validation_dialog(gui: Any) -> bool:
     text_widget.tag_add("blue", blue_start, blue_end)
     text_widget.tag_config("blue", foreground="#0066CC")
 
-    text_widget.insert(tk.END, "（多少钱都行♥）\n")
+    text_widget.insert(tk.END, "（多少都行♥）\n")
     text_widget.insert(tk.END, "2.在“联系”中找到开发者，并留下联系邮箱\n")
     text_widget.insert(tk.END, "3.开发者会发送卡密到你的邮箱，输入卡密后即可解锁无限随机IP提交额度\n")
 
@@ -563,14 +563,7 @@ def show_card_validation_dialog(gui: Any) -> bool:
     text_widget.config(state=tk.DISABLED)
 
     thanks_button_frame = ttk.Frame(container)
-    thanks_button_frame.pack(fill=tk.X, pady=(10, 15))
-
-    ttk.Button(
-        thanks_button_frame,
-        text="💰 捐助",
-        command=lambda: [dialog.destroy(), getattr(gui, "_open_donation_dialog", lambda: None)()],
-        width=10,
-    ).pack(side=tk.RIGHT, padx=(5, 0))
+    thanks_button_frame.pack(fill=tk.X, pady=(10, 15), anchor=tk.W)
 
     ttk.Button(
         thanks_button_frame,
@@ -580,7 +573,14 @@ def show_card_validation_dialog(gui: Any) -> bool:
             getattr(gui, "_open_contact_dialog", lambda **kwargs: None)(default_type="卡密获取"),
         ],
         width=10,
-    ).pack(side=tk.RIGHT, padx=(5, 0))
+    ).pack(side=tk.LEFT, padx=(0, 5))
+
+    ttk.Button(
+        thanks_button_frame,
+        text="💰 捐助",
+        command=lambda: [dialog.destroy(), getattr(gui, "_open_donation_dialog", lambda: None)()],
+        width=10,
+    ).pack(side=tk.LEFT, padx=(0, 5))
 
     ttk.Label(container, text="请输入卡密：", font=("Segoe UI", 10)).pack(anchor=tk.W, pady=(0, 5))
     card_var = tk.StringVar()
