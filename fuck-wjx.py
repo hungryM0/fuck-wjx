@@ -21,6 +21,111 @@ from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set, Deque
 from urllib.parse import urlparse
 import webbrowser
 
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+
+
+class LoadingSplash:
+    def __init__(
+        self,
+        master: Optional[tk.Tk],
+        title: str = "正在加载",
+        message: str = "程序正在启动，请稍候...",
+        width: int = 360,
+        height: int = 140,
+    ):
+        self.master = master or tk.Tk()
+        self.width = width
+        self.height = height
+        self.window = tk.Toplevel(self.master)
+        self.window.withdraw()
+        self.window.overrideredirect(True)
+        self.window.attributes("-topmost", True)
+        self.window.configure(bg="#f8fafb")
+        self.message_var = tk.StringVar(value=message)
+        self.progress_value = 0
+
+        self.window.title(title)
+        frame = ttk.Frame(self.window, padding=15, relief="solid", borderwidth=1)
+        frame.pack(expand=True, fill=tk.BOTH)
+
+        ttk.Label(frame, text=title, font=("Segoe UI", 11, "bold")).pack(anchor="center")
+        ttk.Label(frame, textvariable=self.message_var, wraplength=width - 30, justify="center").pack(pady=(8, 12))
+
+        # 创建进度条容器
+        progress_frame = ttk.Frame(frame)
+        progress_frame.pack(fill=tk.X)
+
+        self.progress = ttk.Progressbar(progress_frame, mode="determinate", length=width - 60, maximum=100)
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.progress_label = ttk.Label(progress_frame, text="0%", width=4, anchor="center")
+        self.progress_label.pack(side=tk.LEFT, padx=(5, 0))
+
+    def show(self):
+        self._center()
+        self.window.deiconify()
+        self.window.update()
+
+    def update_progress(self, percent: int, message: Optional[str] = None):
+        """更新进度条和消息"""
+        self.progress_value = min(100, max(0, percent))
+        self.progress["value"] = self.progress_value
+        self.progress_label.config(text=f"{self.progress_value}%")
+        if message is not None:
+            self.message_var.set(message)
+        self.window.update_idletasks()
+
+    def update_message(self, message: str):
+        self.message_var.set(message)
+        self.window.update_idletasks()
+
+    def close(self):
+        if self.window.winfo_exists():
+            self.window.destroy()
+
+    def _center(self):
+        self.window.update_idletasks()
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        x = (screen_width - self.width) // 2
+        y = (screen_height - self.height) // 2
+        self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
+
+
+_boot_root: Optional[tk.Tk] = None
+_boot_splash: Optional[LoadingSplash] = None
+
+
+def _preload_boot_splash():
+    """在导入重量级模块前尽早显示启动进度条。"""
+    global _boot_root, _boot_splash
+    if _boot_splash is not None:
+        return
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        splash = LoadingSplash(root, title="加载中", message="正在准备问卷星速填...")
+        splash.show()
+        splash.update_progress(5, "正在加载核心模块...")
+        _boot_root = root
+        _boot_splash = splash
+    except Exception:
+        _boot_root = None
+        _boot_splash = None
+
+
+def _update_boot_splash(percent: int, message: Optional[str] = None):
+    if _boot_splash:
+        try:
+            _boot_splash.update_progress(percent, message)
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    _preload_boot_splash()
+
 from wjx.random_ip import (
     _parse_proxy_line,
     _load_proxy_ip_pool,
@@ -56,16 +161,18 @@ from wjx.updater import (
     perform_update as _perform_update_impl,
 )
 
+_update_boot_splash(20, "正在加载应用模块...")
+
 import wjx.full_simulation_mode as full_simulation_mode
 from wjx.full_simulation_mode import FULL_SIM_STATE as _FULL_SIM_STATE
 import wjx.full_simulation_ui as full_simulation_ui
 
 import numpy
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
 from PIL import Image, ImageTk
 from pyzbar.pyzbar import decode as pyzbar_decode
+
+_update_boot_splash(35, "正在加载依赖库...")
 
 try:
     import requests
@@ -81,6 +188,8 @@ try:
     from bs4 import BeautifulSoup
 except ImportError:
     BeautifulSoup = None
+
+_update_boot_splash(45, "正在加载界面组件...")
 
 # 导入版本号及相关常量
 from wjx.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, GITHUB_API_URL, ISSUE_FEEDBACK_URL
@@ -130,6 +239,8 @@ from wjx.config import (
     _CHINESE_MULTI_LIMIT_PATTERNS,
     _ENGLISH_MULTI_LIMIT_PATTERNS,
 )
+
+_update_boot_splash(55, "正在准备界面配置...")
 
 # Playwright + Selenium 兼容封装
 class NoSuchElementException(Exception):
@@ -434,66 +545,6 @@ class AliyunCaptchaBypassError(RuntimeError):
 class SecurityConfirmDetectedError(RuntimeError):
     """检测到系统安全校验确认弹窗（需要安全校验，请重新提交），按配置直接放弃当前浏览器示例并计为失败。"""
 
-
-class LoadingSplash:
-    def __init__(self, master: Optional[tk.Tk], title: str = "正在加载", message: str = "程序正在启动，请稍候...", width: int = 360, height: int = 140):
-        self.master = master or tk.Tk()
-        self.width = width
-        self.height = height
-        self.window = tk.Toplevel(self.master)
-        self.window.withdraw()
-        self.window.overrideredirect(True)
-        self.window.attributes("-topmost", True)
-        self.window.configure(bg="#f8fafb")
-        self.message_var = tk.StringVar(value=message)
-        self.progress_value = 0
-
-        self.window.title(title)
-        frame = ttk.Frame(self.window, padding=15, relief="solid", borderwidth=1)
-        frame.pack(expand=True, fill=tk.BOTH)
-
-        ttk.Label(frame, text=title, font=("Segoe UI", 11, "bold")).pack(anchor="center")
-        ttk.Label(frame, textvariable=self.message_var, wraplength=width - 30, justify="center").pack(pady=(8, 12))
-        
-        # 创建进度条容器
-        progress_frame = ttk.Frame(frame)
-        progress_frame.pack(fill=tk.X)
-        
-        self.progress = ttk.Progressbar(progress_frame, mode="determinate", length=width - 60, maximum=100)
-        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        self.progress_label = ttk.Label(progress_frame, text="0%", width=4, anchor="center")
-        self.progress_label.pack(side=tk.LEFT, padx=(5, 0))
-
-    def show(self):
-        self._center()
-        self.window.deiconify()
-        self.window.update()
-
-    def update_progress(self, percent: int, message: Optional[str] = None):
-        """更新进度条和消息"""
-        self.progress_value = min(100, max(0, percent))
-        self.progress['value'] = self.progress_value
-        self.progress_label.config(text=f"{self.progress_value}%")
-        if message is not None:
-            self.message_var.set(message)
-        self.window.update_idletasks()
-
-    def update_message(self, message: str):
-        self.message_var.set(message)
-        self.window.update_idletasks()
-
-    def close(self):
-        if self.window.winfo_exists():
-            self.window.destroy()
-
-    def _center(self):
-        self.window.update_idletasks()
-        screen_width = self.window.winfo_screenwidth()
-        screen_height = self.window.winfo_screenheight()
-        x = (screen_width - self.width) // 2
-        y = (screen_height - self.height) // 2
-        self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
 
 def _get_runtime_directory() -> str:
     if getattr(sys, "frozen", False):
@@ -9967,21 +10018,30 @@ class SurveyGUI:
 
 
 def main():
+    global _boot_root, _boot_splash
     setup_logging()
-    base_root = tk.Tk()
+    base_root = _boot_root or tk.Tk()
     base_root.withdraw()
-    splash = LoadingSplash(base_root, title="加载中", message="正在准备问卷星速填...")
-    splash.show()
-    
-    splash.update_progress(20, "正在初始化环境...")
-    splash.update_progress(40, "正在加载界面...")
-    
+    if _boot_root is None:
+        _boot_root = base_root
+
+    splash = _boot_splash or LoadingSplash(base_root, title="加载中", message="正在准备问卷星速填...")
+    if _boot_splash is None:
+        splash.show()
+    else:
+        splash.update_message("正在准备问卷星速填...")
+
+    splash.update_progress(max(getattr(splash, "progress_value", 0), 25), "正在初始化环境...")
+    splash.update_progress(max(getattr(splash, "progress_value", 0), 45), "正在加载界面...")
+
     gui = None
     try:
         gui = SurveyGUI(root=base_root, loading_splash=splash)
-        splash.update_progress(80, "主界面加载完成...")
+        splash.update_progress(max(getattr(splash, "progress_value", 0), 85), "主界面加载完成...")
     finally:
         splash.close()
+        if _boot_splash is splash:
+            _boot_splash = None
     if gui:
         gui.run()
 
