@@ -5844,9 +5844,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                 info_message = "已恢复默认随机 IP 接口。\n"
             else:
                 info_message = (
-                    "自定义随机 IP 提取接口已保存并生效。\n"
-                    "出于隐私不展示具体地址。\n\n"
-                    "提示：修改后需点击“保存”按钮才会生效；留空则继续使用 .env 中的接口配置。\n"
+                    "自定义随机 IP 提取接口已保存并生效！\n\n"
                     f"保存位置：{config_path}"
                 )
             self._log_popup_info(
@@ -6042,7 +6040,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         ttk.Label(
             ip_api_frame,
             text="（如果你不知道这是什么，请不要轻易修改这个设置！）\n",
-            foreground="#ff0000",
+            foreground="#ca2500",
             wraplength=460,
             justify="left",
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
