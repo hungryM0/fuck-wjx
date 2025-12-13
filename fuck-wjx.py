@@ -21,7 +21,7 @@ from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set, Deque
 from urllib.parse import urlparse
 import webbrowser
 
-from random_ip import (
+from wjx.random_ip import (
     _parse_proxy_line,
     _load_proxy_ip_pool,
     _fetch_new_proxy_batch,
@@ -29,7 +29,7 @@ from random_ip import (
     _normalize_proxy_address,
 )
 
-from log_utils import (
+from wjx.log_utils import (
     StreamToLogger,
     ORIGINAL_STDOUT,
     ORIGINAL_STDERR,
@@ -48,7 +48,7 @@ from log_utils import (
     log_popup_confirm,
 )
 
-from updater import (
+from wjx.updater import (
     UpdateManager,
     check_updates_on_startup,
     show_update_notification,
@@ -56,9 +56,9 @@ from updater import (
     perform_update as _perform_update_impl,
 )
 
-import full_simulation_mode
-from full_simulation_mode import FULL_SIM_STATE as _FULL_SIM_STATE
-import full_simulation_ui
+import wjx.full_simulation_mode as full_simulation_mode
+from wjx.full_simulation_mode import FULL_SIM_STATE as _FULL_SIM_STATE
+import wjx.full_simulation_ui as full_simulation_ui
 
 import numpy
 import tkinter as tk
@@ -83,11 +83,11 @@ except ImportError:
     BeautifulSoup = None
 
 # 导入版本号及相关常量
-from version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, GITHUB_API_URL, ISSUE_FEEDBACK_URL
+from wjx.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, GITHUB_API_URL, ISSUE_FEEDBACK_URL
 # 导入注册表管理器
-from registry_manager import RegistryManager
+from wjx.registry_manager import RegistryManager
 # 导入配置常量
-from config import (
+from wjx.config import (
     USER_AGENT_PRESETS,
     DEFAULT_RANDOM_UA_KEYS,
     DEFAULT_USER_AGENT,

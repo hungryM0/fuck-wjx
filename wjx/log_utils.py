@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Any
 
-from config import LOG_BUFFER_CAPACITY, LOG_FORMAT, LOG_DIR_NAME
+from .config import LOG_BUFFER_CAPACITY, LOG_FORMAT, LOG_DIR_NAME
 
 
 LOG_LIGHT_THEME = {

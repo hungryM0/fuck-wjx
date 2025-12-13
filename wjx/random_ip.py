@@ -10,7 +10,7 @@ try:
 except ImportError:  # pragma: no cover
     requests = None
 
-from config import (
+from .config import (
     DEFAULT_HTTP_HEADERS,
     PROXY_REMOTE_URL,
     PROXY_MAX_PROXIES,

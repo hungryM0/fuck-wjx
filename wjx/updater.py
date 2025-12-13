@@ -17,7 +17,7 @@ try:
 except ImportError:  # pragma: no cover
     version = None
 
-from version import __VERSION__, GITHUB_API_URL
+from .version import __VERSION__, GITHUB_API_URL
 
 
 def _get_runtime_directory() -> str:

@@ -7,7 +7,7 @@ from typing import Deque, List, Any, Tuple, Optional
 import time
 import logging
 
-from config import FULL_SIM_DURATION_JITTER, FULL_SIM_MIN_DELAY_SECONDS
+from .config import FULL_SIM_DURATION_JITTER, FULL_SIM_MIN_DELAY_SECONDS
 
 
 FULL_SIM_MIN_QUESTION_SECONDS = 3.0
@@ -154,7 +154,7 @@ def simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = None
 def get_post_submit_wait_params(need_watch_submit: bool, fast_mode: bool) -> Tuple[float, float]:
     """计算提交后用于检测页面跳转的最大等待时间与轮询间隔。"""
     try:
-        from config import POST_SUBMIT_URL_MAX_WAIT, POST_SUBMIT_URL_POLL_INTERVAL
+        from .config import POST_SUBMIT_URL_MAX_WAIT, POST_SUBMIT_URL_POLL_INTERVAL
     except Exception:
         POST_SUBMIT_URL_MAX_WAIT = 10.0
         POST_SUBMIT_URL_POLL_INTERVAL = 0.2
