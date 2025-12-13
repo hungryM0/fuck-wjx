@@ -198,6 +198,7 @@ from wjx.random_ip import (
     get_custom_proxy_api_config_path,
     load_custom_proxy_api_config,
     save_custom_proxy_api_config,
+    reset_custom_proxy_api_config,
 )
 
 from wjx.log_utils import (
@@ -5204,7 +5205,15 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._full_simulation_control_widgets: List[tk.Widget] = []
         self.preview_button: Optional[ttk.Button] = None
         self._custom_ip_config_path = get_custom_proxy_api_config_path(_get_runtime_directory())
-        loaded_random_ip_api = load_custom_proxy_api_config(config_path=self._custom_ip_config_path)
+        try:
+            loaded_random_ip_api = load_custom_proxy_api_config(config_path=self._custom_ip_config_path)
+        except Exception as exc:
+            logging.error(f"加载自定义随机IP接口失败：{exc}")
+            try:
+                messagebox.showerror("随机 IP 接口错误", f"自定义随机IP接口无效：{exc}")
+            except Exception:
+                pass
+            loaded_random_ip_api = ""
         if isinstance(loaded_random_ip_api, str):
             self.random_ip_api_var.set(loaded_random_ip_api)
         self._build_ui()
@@ -5527,12 +5536,13 @@ class SurveyGUI(ConfigPersistenceMixin):
         ttk.Label(ip_counter_frame, text="随机IP计数：").pack(side=tk.LEFT, padx=5)
         self._ip_counter_label = ttk.Label(ip_counter_frame, text="0/20", font=("Segoe UI", 10, "bold"), foreground="blue")
         self._ip_counter_label.pack(side=tk.LEFT, padx=5)
+        self._ip_reset_button_pack_opts = {"side": tk.LEFT, "padx": 2}
         self._ip_reset_button = ttk.Button(
             ip_counter_frame,
             text="解锁无限IP",
             command=lambda: reset_ip_counter(self),
         )
-        self._ip_reset_button.pack(side=tk.LEFT, padx=2)
+        self._ip_reset_button.pack(**self._ip_reset_button_pack_opts)
         refresh_ip_counter_display(self)
 
         
@@ -5827,18 +5837,45 @@ class SurveyGUI(ConfigPersistenceMixin):
         )
         try:
             save_custom_proxy_api_config(api_value, config_path=config_path)
-            self._log_popup_info(
-                "已保存",
-                (
+            is_reset = not str(api_value or "").strip()
+            if is_reset:
+                self.random_ip_api_var.set("")
+            if is_reset:
+                info_message = "已恢复默认随机 IP 接口。\n"
+            else:
+                info_message = (
                     "自定义随机 IP 提取接口已保存并生效。\n"
                     "出于隐私不展示具体地址。\n\n"
                     "提示：修改后需点击“保存”按钮才会生效；留空则继续使用 .env 中的接口配置。\n"
                     f"保存位置：{config_path}"
-                ),
+                )
+            self._log_popup_info(
+                "已保存" if not is_reset else "已重置",
+                info_message,
             )
+            refresh_ip_counter_display(self)
         except Exception as exc:
             logging.error(f"保存随机 IP 接口失败: {exc}")
             self._log_popup_error("保存失败", f"随机 IP 接口保存失败：{exc}")
+
+    def _reset_random_ip_api_setting(self):
+        config_path = getattr(self, "_custom_ip_config_path", None) or get_custom_proxy_api_config_path(
+            _get_runtime_directory()
+        )
+        # 重置时忽略输入框内容是否合规，直接清空并恢复默认
+        self.random_ip_api_var.set("")
+        try:
+            reset_custom_proxy_api_config(config_path=config_path)
+            self._log_popup_info(
+                "已重置",
+                (
+                    "已删除自定义随机 IP 接口配置并恢复为默认接口。\n"
+                ),
+            )
+            refresh_ip_counter_display(self)
+        except Exception as exc:
+            logging.error(f"重置随机 IP 接口失败: {exc}")
+            self._log_popup_error("重置失败", f"重置随机 IP 接口失败：{exc}")
 
     def _refresh_full_simulation_status_label(self):
         return full_simulation_ui.refresh_full_simulation_status_label(self)
@@ -6000,15 +6037,17 @@ class SurveyGUI(ConfigPersistenceMixin):
         ip_api_entry.grid(row=0, column=1, sticky="we")
         ip_api_save_btn = ttk.Button(ip_api_frame, text="保存", command=self._save_random_ip_api_setting, width=10)
         ip_api_save_btn.grid(row=0, column=2, padx=(10, 0))
+        ip_api_reset_btn = ttk.Button(ip_api_frame, text="重置", command=self._reset_random_ip_api_setting, width=10)
+        ip_api_reset_btn.grid(row=1, column=2, padx=(10, 0), pady=(6, 0), sticky="w")
         ttk.Label(
             ip_api_frame,
             text="（如果你不知道这是什么，请不要轻易修改这个设置！）\n",
             foreground="#ff0000",
             wraplength=460,
             justify="left",
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ip_api_frame.columnconfigure(1, weight=1)
-        self._settings_window_widgets.extend([ip_api_entry, ip_api_save_btn])
+        self._settings_window_widgets.extend([ip_api_entry, ip_api_save_btn, ip_api_reset_btn])
 
         button_frame = ttk.Frame(content)
         button_frame.pack(fill=tk.X, pady=(18, 0))
@@ -9012,7 +9051,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             self._log_popup_error("参数错误", "启用随机 UA 时至少选择一个终端类型")
             return
         if random_proxy_flag:
-            logging.info("[Action Log] 随机IP接口：已配置（出于隐私不展示具体地址）")
+            logging.info("[Action Log] 随机IP接口：已配置成功")
         if random_proxy_flag and not ensure_random_ip_ready(self):
             return
         ctx = {
@@ -9051,10 +9090,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             need_count = max(1, need_count)
             proxy_api = ctx.get("random_proxy_api")
             if proxy_api is not None:
-                try:
-                    set_proxy_api_override(proxy_api)
-                except Exception:
-                    pass
+                set_proxy_api_override(proxy_api)
             proxy_pool = _fetch_new_proxy_batch(expected_count=need_count, proxy_url=proxy_api)
         except (OSError, ValueError, RuntimeError) as exc:
             self.root.after(0, lambda: self._on_proxy_load_failed(str(exc)))

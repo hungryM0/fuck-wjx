@@ -34,10 +34,32 @@ _proxy_api_url_override: Optional[str] = None
 _CUSTOM_PROXY_CONFIG_FILENAME = "custom_ip.json"
 
 
+def _validate_proxy_api_url(api_url: Optional[str]) -> str:
+    """
+    校验并清洗随机 IP 接口地址。
+    要求以 http:// 或 https:// 开头，否则抛出 ValueError。
+    """
+    try:
+        cleaned = str(api_url).strip()
+    except Exception:
+        cleaned = ""
+    if not cleaned:
+        return ""
+    lowered = cleaned.lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        raise ValueError("随机IP提取接口必须以 http:// 或 https:// 开头")
+    return cleaned
+
+
 def get_effective_proxy_api_url() -> str:
     """返回当前生效的随机 IP 提取接口。为空时回退到配置/环境变量。"""
     override = (_proxy_api_url_override or "").strip()
     return override or PROXY_REMOTE_URL
+
+
+def is_custom_proxy_api_active() -> bool:
+    """当前是否启用了用户自定义的随机 IP 接口。"""
+    return bool((_proxy_api_url_override or "").strip())
 
 
 def set_proxy_api_override(api_url: Optional[str]) -> str:
@@ -46,11 +68,7 @@ def set_proxy_api_override(api_url: Optional[str]) -> str:
     传入空值时会回退到 .env 中的配置。
     """
     global _proxy_api_url_override
-    try:
-        cleaned = str(api_url).strip()
-    except Exception:
-        cleaned = ""
-    previous = _proxy_api_url_override
+    cleaned = _validate_proxy_api_url(api_url)
     _proxy_api_url_override = cleaned or None
     effective = get_effective_proxy_api_url()
     return effective
@@ -105,10 +123,12 @@ def load_custom_proxy_api_config(
         return ""
     api_value = _extract_custom_proxy_api(data)
     try:
-        set_proxy_api_override(api_value)
-    except Exception:
-        pass
-    return api_value
+        cleaned_api = _validate_proxy_api_url(api_value)
+        set_proxy_api_override(cleaned_api)
+    except Exception as exc:
+        logging.error(f"自定义随机IP接口格式无效: {exc}")
+        raise
+    return cleaned_api
 
 
 def save_custom_proxy_api_config(
@@ -120,11 +140,36 @@ def save_custom_proxy_api_config(
     保存自定义随机 IP 接口配置到本地文件，并返回最终生效的接口地址。
     """
     path = os.fspath(config_path) if config_path else get_custom_proxy_api_config_path(base_dir)
-    effective = set_proxy_api_override(api_url)
-    payload = {"random_proxy_api": api_url}
+    cleaned = _validate_proxy_api_url(api_url)
+    if not cleaned:
+        return reset_custom_proxy_api_config(config_path=path)
+    effective = set_proxy_api_override(cleaned)
+    payload = {"random_proxy_api": cleaned}
     with open(path, "w", encoding="utf-8") as fp:
         json.dump(payload, fp, ensure_ascii=False, indent=2)
     return effective
+
+
+def reset_custom_proxy_api_config(
+    config_path: Optional[str] = None,
+    base_dir: Optional[str] = None,
+) -> str:
+    """
+    删除自定义接口配置文件并回退到默认接口，返回生效的地址。
+    """
+    path = os.fspath(config_path) if config_path else get_custom_proxy_api_config_path(base_dir)
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        logging.debug(f"删除自定义随机IP配置时出现问题：{exc}")
+    try:
+        set_proxy_api_override(None)
+    except Exception:
+        global _proxy_api_url_override
+        _proxy_api_url_override = None
+    return get_effective_proxy_api_url()
 
 
 def _parse_proxy_line(line: str) -> Optional[str]:
@@ -157,6 +202,7 @@ def _load_proxy_ip_pool(proxy_url: Optional[str] = None) -> List[str]:
     if requests is None:
         raise RuntimeError("requests 模块不可用，无法从远程获取代理列表")
     target_url = (proxy_url or "").strip() or get_effective_proxy_api_url()
+    _validate_proxy_api_url(target_url)
     try:
         response = requests.get(target_url, headers=DEFAULT_HTTP_HEADERS, timeout=12)
         response.raise_for_status()
@@ -586,9 +632,13 @@ def refresh_ip_counter_display(gui: Any):
     try:
         label = getattr(gui, "_ip_counter_label", None)
         button = getattr(gui, "_ip_reset_button", None)
+        pack_opts = getattr(gui, "_ip_reset_button_pack_opts", None) or {"side": tk.LEFT, "padx": 2}
+        using_custom_api = is_custom_proxy_api_active()
         if label and label.winfo_exists():
             is_unlimited = RegistryManager.is_quota_unlimited()
-            if is_unlimited:
+            if using_custom_api:
+                label.config(text="--/--", foreground="gray")
+            elif is_unlimited:
                 label.config(text="∞ (无限额度)", foreground="green")
                 if button and button.winfo_exists():
                     button.config(text="恢复限制")
@@ -601,6 +651,16 @@ def refresh_ip_counter_display(gui: Any):
                     label.config(text=f"{count}/{RANDOM_IP_FREE_LIMIT} ({percentage}%)", foreground="blue")
                 if button and button.winfo_exists():
                     button.config(text="解锁无限IP")
+        if button and button.winfo_exists():
+            if using_custom_api:
+                if button.winfo_manager():
+                    button.pack_forget()
+            else:
+                if not button.winfo_manager():
+                    try:
+                        button.pack(**{k: v for k, v in pack_opts.items() if k != "in"})
+                    except Exception:
+                        button.pack(side=tk.LEFT, padx=2)
     except Exception as exc:
         logging.debug(f"刷新IP计数显示出错: {exc}")
 
