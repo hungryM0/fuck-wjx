@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import tkinter as tk
@@ -34,6 +35,26 @@ def update_full_simulation_controls_state(gui: Any) -> None:
             except Exception:
                 continue
     gui._full_simulation_control_widgets = cleaned
+
+
+def update_full_sim_completion_time(gui: Any) -> None:
+    label = getattr(gui, "_full_sim_completion_label", None)
+    if not label or not label.winfo_exists():
+        return
+    try:
+        minutes = int(str(gui.full_sim_total_minutes_var.get()).strip() or "0")
+    except Exception:
+        minutes = 0
+    try:
+        seconds = int(str(gui.full_sim_total_seconds_var.get()).strip() or "0")
+    except Exception:
+        seconds = 0
+    total_seconds = max(0, minutes) * 60 + max(0, seconds)
+    if total_seconds <= 0:
+        label.config(text="预计完成时间：--")
+        return
+    finish_time = datetime.now() + timedelta(seconds=total_seconds)
+    label.config(text=f"预计完成时间：{finish_time:%Y-%m-%d %H:%M}")
 
 
 def update_full_sim_time_section_visibility(gui: Any) -> None:
@@ -102,6 +123,7 @@ def set_full_sim_duration(minutes_var: tk.StringVar, seconds_var: tk.StringVar, 
 
 
 def auto_update_full_simulation_times(gui: Any) -> None:
+    update_full_sim_time_section_visibility(gui)
     if getattr(gui, "_suspend_full_sim_autofill", False):
         return
     question_count = get_full_simulation_question_count(gui)
@@ -115,6 +137,7 @@ def auto_update_full_simulation_times(gui: Any) -> None:
         total_seconds = estimated_seconds * target_value
         set_full_sim_duration(gui.full_sim_total_minutes_var, gui.full_sim_total_seconds_var, total_seconds)
     update_full_sim_time_section_visibility(gui)
+    update_full_sim_completion_time(gui)
 
 
 def on_full_sim_target_changed(gui: Any, *_: Any) -> None:
@@ -174,6 +197,7 @@ def open_full_simulation_window(gui: Any) -> None:
         if gui._full_simulation_window is window:
             gui._full_simulation_window = None
             gui._full_simulation_control_widgets = []
+            gui._full_sim_completion_label = None
         try:
             window.destroy()
         except Exception:
@@ -230,6 +254,9 @@ def open_full_simulation_window(gui: Any) -> None:
     total_sec_entry = ttk.Entry(timing_frame, textvariable=gui.full_sim_total_seconds_var, width=6)
     total_sec_entry.grid(row=1, column=3, padx=(0, 4), pady=(10, 0))
     ttk.Label(timing_frame, text="秒").grid(row=1, column=4, padx=(0, 12), pady=(10, 0))
+    completion_label = ttk.Label(timing_frame, text="预计完成时间：--", foreground="#424242")
+    completion_label.grid(row=2, column=0, columnspan=5, sticky="w", pady=(8, 0))
+    gui._full_sim_completion_label = completion_label
 
     ttk.Label(
         container,
@@ -253,6 +280,7 @@ def open_full_simulation_window(gui: Any) -> None:
     update_full_simulation_controls_state(gui)
     refresh_full_simulation_status_label(gui)
     update_full_sim_time_section_visibility(gui)
+    update_full_sim_completion_time(gui)
     gui._update_parameter_widgets_state()
 
     window.update_idletasks()

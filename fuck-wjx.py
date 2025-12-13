@@ -5463,8 +5463,8 @@ class SurveyGUI(ConfigPersistenceMixin):
         self.full_sim_target_var.trace_add("write", lambda *args: self._on_full_sim_target_changed())
         self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._mark_config_changed())
         self.full_sim_estimated_seconds_var.trace("w", lambda *args: self._mark_config_changed())
-        self.full_sim_total_minutes_var.trace("w", lambda *args: self._mark_config_changed())
-        self.full_sim_total_seconds_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_sim_total_minutes_var.trace("w", lambda *args: self._on_full_sim_total_changed())
+        self.full_sim_total_seconds_var.trace("w", lambda *args: self._on_full_sim_total_changed())
         self.full_simulation_enabled_var.trace_add("write", lambda *args: self._on_full_simulation_toggle())
 
         def adjust_thread_count(delta: int) -> None:
@@ -5897,6 +5897,9 @@ class SurveyGUI(ConfigPersistenceMixin):
     def _auto_update_full_simulation_times(self):
         return full_simulation_ui.auto_update_full_simulation_times(self)
 
+    def _update_full_sim_completion_time(self):
+        return full_simulation_ui.update_full_sim_completion_time(self)
+
     def _on_full_sim_target_changed(self, *_):
         return full_simulation_ui.on_full_sim_target_changed(self)
 
@@ -5905,6 +5908,10 @@ class SurveyGUI(ConfigPersistenceMixin):
 
     def _on_full_simulation_toggle(self, *args):
         return full_simulation_ui.on_full_simulation_toggle(self)
+
+    def _on_full_sim_total_changed(self, *_):
+        self._mark_config_changed()
+        self._update_full_sim_completion_time()
 
     def _restore_saved_paned_position(self, target_position: int, attempts: int = 5, delay_ms: int = 120) -> None:
         """

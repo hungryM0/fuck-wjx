@@ -481,6 +481,7 @@ class ConfigPersistenceMixin:
             self._auto_update_full_simulation_times()
         else:
             self._update_full_sim_time_section_visibility()
+        self._update_full_sim_completion_time()
 
     def _load_config_from_file(self, file_path: str, *, silent: bool = False, restore_paned_position: bool = True):
         """从指定路径加载配置。"""
