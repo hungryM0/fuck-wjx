@@ -43,28 +43,50 @@ class LoadingSplash:
         self.window.overrideredirect(True)
         self.window.attributes("-topmost", True)
         self.window.configure(bg="#f8fafb")
+        self.window.minsize(width, height)
         self.message_var = tk.StringVar(value=message)
         self.progress_value = 0
 
+        frame_bg = "#ffffff"
         self.window.title(title)
-        frame = ttk.Frame(self.window, padding=15, relief="solid", borderwidth=1)
-        frame.pack(expand=True, fill=tk.BOTH)
+        frame = tk.Frame(
+            self.window,
+            bg=frame_bg,
+            padx=15,
+            pady=15,
+            bd=0,
+            relief="flat",
+        )
+        frame.pack(expand=True, fill=tk.BOTH, padx=15, pady=15)
 
-        ttk.Label(frame, text=title, font=("Segoe UI", 11, "bold")).pack(anchor="center")
-        ttk.Label(frame, textvariable=self.message_var, wraplength=width - 30, justify="center").pack(pady=(8, 12))
+        tk.Label(frame, text=title, font=("Segoe UI", 11, "bold"), bg=frame_bg).pack(anchor="center")
+
+        message_wrap = width - 40
+        message_area = tk.Frame(frame, bg=frame_bg, height=36)
+        message_area.pack(fill=tk.X, pady=(8, 12))
+        message_area.pack_propagate(False)
+        self.message_label = tk.Label(
+            message_area,
+            textvariable=self.message_var,
+            wraplength=message_wrap,
+            justify="center",
+            bg=frame_bg,
+            font=("Microsoft YaHei", 10),
+        )
+        self.message_label.pack(expand=True, fill=tk.BOTH)
 
         # 创建进度条容器
-        progress_frame = ttk.Frame(frame)
+        progress_frame = tk.Frame(frame, bg=frame_bg)
         progress_frame.pack(fill=tk.X)
 
         self.progress = ttk.Progressbar(progress_frame, mode="determinate", length=width - 60, maximum=100)
         self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.progress_label = ttk.Label(progress_frame, text="0%", width=4, anchor="center")
+        self.progress_label = tk.Label(progress_frame, text="0%", width=4, anchor="center", bg=frame_bg)
         self.progress_label.pack(side=tk.LEFT, padx=(5, 0))
 
     def show(self):
-        self._center()
+        self._center(recenter=True)
         self.window.deiconify()
         self.window.update()
 
@@ -74,24 +96,55 @@ class LoadingSplash:
         self.progress["value"] = self.progress_value
         self.progress_label.config(text=f"{self.progress_value}%")
         if message is not None:
-            self.message_var.set(message)
+            self._set_message_text(message)
+            self._center(recenter=False)
         self.window.update_idletasks()
 
     def update_message(self, message: str):
-        self.message_var.set(message)
+        self._set_message_text(message)
+        self._center(recenter=False)
         self.window.update_idletasks()
 
     def close(self):
         if self.window.winfo_exists():
             self.window.destroy()
 
-    def _center(self):
+    def _center(self, recenter: bool = False):
         self.window.update_idletasks()
+        desired_width = max(self.width, self.window.winfo_reqwidth())
+
+        if self.message_label is not None:
+            wrap_target = max(180, desired_width - 60)
+            self.message_label.configure(wraplength=wrap_target)
+            self.window.update_idletasks()
+            desired_width = max(self.width, self.window.winfo_reqwidth())
+
+        desired_height = max(self.height, self.window.winfo_reqheight())
+
         screen_width = self.window.winfo_screenwidth()
         screen_height = self.window.winfo_screenheight()
-        x = (screen_width - self.width) // 2
-        y = (screen_height - self.height) // 2
-        self.window.geometry(f"{self.width}x{self.height}+{x}+{y}")
+
+        if recenter or not self.window.winfo_viewable():
+            x = (screen_width - desired_width) // 2
+            y = (screen_height - desired_height) // 2
+        else:
+            current_x = self.window.winfo_x()
+            current_y = self.window.winfo_y()
+            max_x = max(0, screen_width - desired_width)
+            max_y = max(0, screen_height - desired_height)
+            x = min(max(current_x, 0), max_x)
+            y = min(max(current_y, 0), max_y)
+
+        self.window.geometry(f"{desired_width}x{desired_height}+{x}+{y}")
+
+    def _set_message_text(self, message: str):
+        if self.message_var.get() == message:
+            return
+        # 先清空再写入，避免在覆盖绘制时留下残影
+        self.message_var.set("")
+        self.window.update_idletasks()
+        self.message_var.set(message)
+        self.message_label.update_idletasks()
 
 
 _boot_root: Optional[tk.Tk] = None
