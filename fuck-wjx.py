@@ -2168,6 +2168,52 @@ def _log_multi_limit_once(driver: BrowserDriver, question_number: int, limit: Op
     _REPORTED_MULTI_LIMITS.add(cache_key)
 
 
+def _extract_reorder_required_from_text(text: Optional[str]) -> Optional[int]:
+    if not text:
+        return None
+    normalized = text.strip()
+    if not normalized:
+        return None
+    patterns = (
+        re.compile(r"(?:选|选择|勾选|挑选)[^0-9]{0,4}(\d+)\s*[项个条]"),
+        re.compile(r"至少\s*(\d+)\s*[项个条]"),
+    )
+    for pattern in patterns:
+        match = pattern.search(normalized)
+        if match:
+            return _safe_positive_int(match.group(1))
+    return None
+
+
+def detect_reorder_required_count(driver: BrowserDriver, question_number: int) -> Optional[int]:
+    """检测多选排序题需要勾选的数量，优先使用通用限制解析，失败后额外从题干文本抽取。"""
+    limit = detect_multiple_choice_limit(driver, question_number)
+    if limit:
+        return limit
+    try:
+        container = driver.find_element(By.CSS_SELECTOR, f"#div{question_number}")
+    except NoSuchElementException:
+        container = None
+    if container is None:
+        return None
+    fragments: List[str] = []
+    for selector in (".qtypetip", ".topichtml", ".field-label"):
+        try:
+            fragments.append(container.find_element(By.CSS_SELECTOR, selector).text)
+        except Exception:
+            continue
+    try:
+        fragments.append(container.text)
+    except Exception:
+        pass
+    for fragment in fragments:
+        required = _extract_reorder_required_from_text(fragment)
+        if required:
+            print(f"第{question_number}题检测到需要选择 {required} 项并排序。")
+            return required
+    return None
+
+
 def try_click_start_answer_button(
     driver: BrowserDriver, timeout: float = 1.0, stop_signal: Optional[threading.Event] = None
 ) -> bool:
@@ -3007,14 +3053,33 @@ def matrix(driver: BrowserDriver, current, index):
     column_elements = driver.find_elements(By.XPATH, columns_xpath)
     if len(column_elements) <= 1:
         return index
+    candidate_columns = list(range(2, len(column_elements) + 1))
     
     for row_index in range(1, matrix_row_count + 1):
-        probabilities = matrix_prob[index] if index < len(matrix_prob) else -1
+        raw_probabilities = matrix_prob[index] if index < len(matrix_prob) else -1
         index += 1
-        if probabilities == -1:
-            selected_column = random.randint(2, len(column_elements))
+        probabilities = raw_probabilities
+
+        if isinstance(probabilities, list):
+            try:
+                probs = [float(value) for value in probabilities]
+            except Exception:
+                probs = []
+            if len(probs) != len(candidate_columns):
+                logging.warning(
+                    "矩阵题第%d行的概率数量(%d)与列数(%d)不符，已自动调整为平均分布",
+                    row_index,
+                    len(probs),
+                    len(candidate_columns),
+                )
+                probs = [1.0] * len(candidate_columns)
+            try:
+                normalized_probs = normalize_probabilities(probs)
+            except Exception:
+                normalized_probs = [1.0 / len(candidate_columns)] * len(candidate_columns)
+            selected_column = numpy.random.choice(a=numpy.array(candidate_columns), p=normalized_probs)
         else:
-            selected_column = numpy.random.choice(a=numpy.arange(2, len(column_elements) + 1), p=probabilities)
+            selected_column = random.choice(candidate_columns)
         driver.find_element(
             By.CSS_SELECTOR, f"#drv{current}_{row_index} > td:nth-child({selected_column})"
         ).click()
@@ -3024,12 +3089,112 @@ def matrix(driver: BrowserDriver, current, index):
 def reorder(driver: BrowserDriver, current):
     items_xpath = f'//*[@id="div{current}"]/ul/li'
     order_items = driver.find_elements(By.XPATH, items_xpath)
-    for position in range(1, len(order_items) + 1):
-        selected_item = random.randint(position, len(order_items))
-        driver.find_element(
-            By.CSS_SELECTOR, f"#div{current} > ul > li:nth-child({selected_item})"
-        ).click()
-        time.sleep(0.4)
+    if not order_items:
+        return
+    try:
+        container = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
+    except Exception:
+        container = None
+
+    required_count = detect_reorder_required_count(driver, current)
+    max_select_limit = detect_multiple_choice_limit(driver, current)
+    if max_select_limit is not None:
+        _log_multi_limit_once(driver, current, max_select_limit)
+    # 优先使用题目要求数量，其次用最大限制，最后兜底为全部选项
+    if required_count is None:
+        effective_limit = max_select_limit if max_select_limit is not None else len(order_items)
+    else:
+        effective_limit = required_count
+        if max_select_limit is not None:
+            effective_limit = min(effective_limit, max_select_limit)
+    effective_limit = max(1, min(effective_limit, len(order_items)))
+
+    candidate_indices = list(range(len(order_items)))
+    random.shuffle(candidate_indices)
+    selected_indices = candidate_indices[:effective_limit]
+
+    def _is_item_selected(item) -> bool:
+        try:
+            inputs = item.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
+        except Exception:
+            inputs = []
+        for ipt in inputs:
+            try:
+                if ipt.is_selected():
+                    return True
+            except Exception:
+                continue
+        try:
+            cls = (item.get_attribute("class") or "").lower()
+            if any(token in cls for token in ("selected", "checked", "jqchecked", "active", "on")):
+                return True
+        except Exception:
+            pass
+        try:
+            badges = item.find_elements(By.CSS_SELECTOR, ".ui-icon-number, .order-number, .order-index, .num")
+            if badges:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _count_selected() -> int:
+        try:
+            if container:
+                return len(
+                    container.find_elements(
+                        By.CSS_SELECTOR,
+                        "input[type='checkbox']:checked, input[type='radio']:checked, li.jqchecked, li.selected, li.on, li.checked, .option.on, .option.selected",
+                    )
+                )
+        except Exception:
+            pass
+        count = 0
+        for item in order_items:
+            if _is_item_selected(item):
+                count += 1
+        return count
+
+    for option_idx in selected_indices:
+        item = order_items[option_idx]
+        if _is_item_selected(item):
+            continue
+        selector = f"#div{current} > ul > li:nth-child({option_idx + 1})"
+        try:
+            driver.find_element(By.CSS_SELECTOR, selector).click()
+        except Exception:
+            try:
+                item.click()
+            except Exception:
+                continue
+        time.sleep(0.2)
+        if _is_item_selected(item):
+            continue
+        try:
+            check = item.find_element(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
+            check.click()
+        except Exception:
+            pass
+        time.sleep(0.1)
+
+    selected_count = _count_selected()
+    if selected_count < effective_limit:
+        for option_idx, item in enumerate(order_items):
+            if selected_count >= effective_limit:
+                break
+            if _is_item_selected(item):
+                continue
+            try:
+                item.click()
+            except Exception:
+                try:
+                    check = item.find_element(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
+                    check.click()
+                except Exception:
+                    continue
+            time.sleep(0.1)
+            if _is_item_selected(item):
+                selected_count += 1
 
 
 def scale(driver: BrowserDriver, current, index):
@@ -3338,51 +3503,103 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
     return False
 
 
-def _click_submit_button(driver: BrowserDriver) -> bool:
-    """尝试点击“提交”按钮，兼容多种问卷模板。"""
+def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
+    """尝试点击"提交"按钮，兼容多种问卷模板。
+    
+    Args:
+        driver: 浏览器驱动
+        max_wait: 最大等待时间（秒），等待按钮变为可点击状态
+    """
+    # 首先尝试移除可能的遮挡元素并确保按钮可见
+    try:
+        driver.execute_script(
+            """
+            // 移除可能的遮挡层
+            const overlays = document.querySelectorAll('.layui-layer-shade, .modal-backdrop, .overlay');
+            overlays.forEach(el => { try { el.style.display = 'none'; } catch(_) {} });
+            
+            // 确保提交按钮可见
+            const submitSelectors = ['#submit_button', '#divSubmit', '#ctlNext', '#SM_BTN_1', 'a.mainBgColor'];
+            for (const sel of submitSelectors) {
+                const el = document.querySelector(sel);
+                if (el) {
+                    el.style.display = 'block';
+                    el.style.visibility = 'visible';
+                    el.style.opacity = '1';
+                    el.removeAttribute('disabled');
+                    el.classList.remove('disabled', 'hide', 'hidden');
+                }
+            }
+            """
+        )
+    except Exception:
+        pass
+    
     locator_candidates = [
         (By.CSS_SELECTOR, "#submit_button"),
         (By.CSS_SELECTOR, "#divSubmit"),
         (By.CSS_SELECTOR, "#ctlNext"),
         (By.CSS_SELECTOR, "#SM_BTN_1"),
+        # 问卷星常用的提交按钮样式
+        (By.CSS_SELECTOR, "a.mainBgColor"),
+        (By.CSS_SELECTOR, "a.button.mainBgColor"),
+        (By.CSS_SELECTOR, "div.mainBgColor"),
+        (By.CSS_SELECTOR, ".submitDiv a"),
+        (By.CSS_SELECTOR, ".btn-submit"),
+        (By.CSS_SELECTOR, "[class*='submit']"),
         (By.XPATH, "//a[contains(@onclick,'submit') or contains(@onclick,'Submit')]"),
         (By.XPATH, "//button[contains(@onclick,'submit') or contains(@onclick,'Submit')]"),
         (By.XPATH, "//a[contains(normalize-space(.),'提交')]"),
         (By.XPATH, "//button[contains(normalize-space(.),'提交')]"),
+        (By.XPATH, "//div[contains(normalize-space(.),'提交') and contains(@class,'mainBgColor')]"),
         (By.XPATH, "//a[contains(normalize-space(.),'完成')]"),
         (By.XPATH, "//button[contains(normalize-space(.),'完成')]"),
         (By.XPATH, "//a[contains(normalize-space(.),'交卷')]"),
         (By.XPATH, "//button[contains(normalize-space(.),'交卷')]"),
     ]
-    for by, value in locator_candidates:
-        try:
-            elements = driver.find_elements(by, value)
-        except Exception:
-            continue
-        for element in elements:
+    
+    # 等待并尝试点击按钮
+    start_time = time.time()
+    while time.time() - start_time < max_wait:
+        for by, value in locator_candidates:
             try:
-                if not element.is_displayed():
-                    continue
+                elements = driver.find_elements(by, value)
             except Exception:
                 continue
-            text = _extract_text_from_element(element)
-            if text and all(k not in text for k in ("提交", "完成", "交卷", "确认", "确定")):
-                # 如果文本里没这些关键字，尝试依赖 onclick 的元素照样点击
-                if not element.get_attribute("onclick"):
-                    continue
-            try:
-                _smooth_scroll_to_element(driver, element, 'center')
-            except Exception:
-                pass
-            for click_method in (
-                lambda: element.click(),
-                lambda: driver.execute_script("arguments[0].click();", element),
-            ):
+            for element in elements:
                 try:
-                    click_method()
-                    return True
+                    if not element.is_displayed():
+                        continue
                 except Exception:
                     continue
+                text = _extract_text_from_element(element)
+                if text and all(k not in text for k in ("提交", "完成", "交卷", "确认", "确定")):
+                    # 如果文本里没这些关键字，尝试依赖 onclick 的元素照样点击
+                    if not element.get_attribute("onclick"):
+                        continue
+                try:
+                    _smooth_scroll_to_element(driver, element, 'center')
+                except Exception:
+                    pass
+                # 等待一小段时间确保滚动完成
+                time.sleep(0.1)
+                for click_method in (
+                    lambda: element.click(),
+                    lambda: driver.execute_script("arguments[0].click();", element),
+                    lambda: driver.execute_script(
+                        "arguments[0].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));",
+                        element
+                    ),
+                ):
+                    try:
+                        click_method()
+                        logging.info("成功点击提交按钮")
+                        return True
+                    except Exception:
+                        continue
+        # 短暂等待后重试
+        time.sleep(0.3)
+    
     # JS 兜底：通过选择器和文本匹配点击，或调用全局提交函数
     try:
         executed = driver.execute_script(
@@ -3392,38 +3609,65 @@ def _click_submit_button(driver: BrowserDriver) -> bool:
                 '#divSubmit',
                 '#ctlNext',
                 '#SM_BTN_1',
+                'a.mainBgColor',
                 'a.button.mainBgColor',
+                'div.mainBgColor',
                 'a.button',
                 'button[type=\"submit\"]',
                 'button',
-                'a[href=\"javascript:;\" i]'
+                'a[href=\"javascript:;\"]',
+                '.submitDiv a',
+                '.btn-submit'
             ];
             const matchText = el => {
                 const t = (el.innerText || el.textContent || '').trim();
                 return /(提交|完成|交卷|确认提交)/.test(t);
             };
+            const visible = el => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
             for (const sel of selectors) {
                 const elList = Array.from(document.querySelectorAll(sel));
                 for (const el of elList) {
+                    if (!visible(el)) continue;
                     if (!matchText(el)) continue;
-                    try { el.scrollIntoView({block:'center'}); } catch(_) {}
+                    try { el.scrollIntoView({block:'center', behavior:'auto'}); } catch(_) {}
+                    // 尝试多种点击方式
                     try { el.click(); return true; } catch(_) {}
+                    try { el.focus(); el.click(); return true; } catch(_) {}
                     try {
-                        el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, composed:true}));
+                        el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, composed:true, view:window}));
+                        return true;
+                    } catch(_) {}
+                    try {
+                        const evt = document.createEvent('MouseEvents');
+                        evt.initMouseEvent('click', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+                        el.dispatchEvent(evt);
                         return true;
                     } catch(_) {}
                 }
             }
+            // 尝试调用全局提交函数
             const fnNames = ['submit_survey','submitSurvey','wjxwpr_submit','doSubmit','submit','Submit','save','Save'];
             for (const name of fnNames) {
                 if (typeof window[name] === 'function') {
                     try { window[name](); return true; } catch(_) {}
                 }
             }
+            // 最后尝试触发表单提交
+            const forms = document.querySelectorAll('form');
+            for (const form of forms) {
+                try { form.submit(); return true; } catch(_) {}
+            }
             return false;
             """
         )
         if executed:
+            logging.info("通过JS成功触发提交")
             return True
     except Exception:
         pass
@@ -3567,6 +3811,8 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 return False
             if _abort_requested():
                 return False
+            # 最后一页直接跳出循环，由后续的 submit() 处理提交
+            break
         clicked = _click_next_page_button(driver)
         if not clicked:
             raise NoSuchElementException("Next page button not found")
@@ -3591,30 +3837,30 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
 
     def _click_submit_buttons():
         clicked = False
+        # 首先尝试点击可能存在的弹窗确认按钮
         try:
-            driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a').click()
-            clicked = True
-            if settle_delay > 0:
-                time.sleep(settle_delay)
-        except Exception:
-            pass
-        try:
-            driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]').click()
-            clicked = True
-            if settle_delay > 0:
-                time.sleep(settle_delay)
-        except Exception:
-            pass
-        if not clicked:
-            clicked = _click_submit_button(driver)
-        if not clicked:
-            # 多尝试几次点击提交按钮
-            for _ in range(3):
+            layer_btn = driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a')
+            if layer_btn.is_displayed():
+                layer_btn.click()
+                clicked = True
                 if settle_delay > 0:
-                    time.sleep(min(0.2, settle_delay))
-                if _click_submit_button(driver):
-                    clicked = True
-                    break
+                    time.sleep(settle_delay)
+        except Exception:
+            pass
+        # 尝试点击 SM_BTN_1
+        try:
+            sm_btn = driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]')
+            if sm_btn.is_displayed():
+                sm_btn.click()
+                clicked = True
+                if settle_delay > 0:
+                    time.sleep(settle_delay)
+        except Exception:
+            pass
+        # 如果上面的方式都没成功，使用增强的提交按钮点击函数
+        if not clicked:
+            # 使用较长的等待时间来确保按钮可点击
+            clicked = _click_submit_button(driver, max_wait=15.0)
         return clicked
 
     def _detect_security_confirm_dialog() -> bool:
