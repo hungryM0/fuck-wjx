@@ -637,7 +637,7 @@ def refresh_ip_counter_display(gui: Any):
         if label and label.winfo_exists():
             is_unlimited = RegistryManager.is_quota_unlimited()
             if using_custom_api:
-                label.config(text="--/--", foreground="gray")
+                label.config(text="--/-- (已启用自定义接口)", foreground="#ff8c00")
             elif is_unlimited:
                 label.config(text="∞ (无限额度)", foreground="green")
                 if button and button.winfo_exists():

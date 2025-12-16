@@ -5300,11 +5300,17 @@ class SurveyGUI(ConfigPersistenceMixin):
         random_ip_frame.pack(fill=tk.X, padx=4, pady=(0, 4))
         random_ip_toggle = ttk.Checkbutton(
             random_ip_frame,
-            text="启用随机 IP 提交（若触发智能验证可尝试开启此选项）",
+            text="启用随机 IP 提交",
             variable=self.random_ip_enabled_var,
             command=lambda: on_random_ip_toggle(self),
         )
         random_ip_toggle.pack(side=tk.LEFT)
+        # 添加蓝色提示文字
+        ttk.Label(
+            random_ip_frame,
+            text="（若触发智能验证可尝试勾选此选项）",
+            foreground="#8B4308",
+        ).pack(side=tk.LEFT, padx=(2, 0))
         self._wechat_login_bypass_toggle_widget = wechat_bypass_toggle
         self._random_ip_toggle_widget = random_ip_toggle
         self._main_parameter_widgets.extend([wechat_bypass_toggle, random_ip_toggle])
@@ -5823,13 +5829,30 @@ class SurveyGUI(ConfigPersistenceMixin):
         ip_api_save_btn.grid(row=0, column=2, padx=(10, 0))
         ip_api_reset_btn = ttk.Button(ip_api_frame, text="重置", command=self._reset_random_ip_api_setting, width=10)
         ip_api_reset_btn.grid(row=1, column=2, padx=(10, 0), pady=(6, 0), sticky="w")
-        ttk.Label(
-            ip_api_frame,
-            text="（如果你不知道这是什么，请不要轻易修改这个设置！）\n",
-            foreground="#ca2500",
-            wraplength=460,
-            justify="left",
-        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        
+        # 创建醒目的警告框
+        warning_frame = tk.Frame(ip_api_frame, bg="#fff3cd", relief="solid", bd=2, highlightbackground="#ff6b6b", highlightthickness=2)
+        warning_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        warning_icon = tk.Label(warning_frame, text="⚠️", font=("Segoe UI", 16), bg="#fff3cd", fg="#dc3545")
+        warning_icon.pack(pady=(8, 0))
+        warning_title = tk.Label(
+            warning_frame,
+            text="❗ 重要提醒 ❗",
+            font=("Microsoft YaHei", 11, "bold"),
+            bg="#fff3cd",
+            fg="#dc3545"
+        )
+        warning_title.pack(pady=(2, 0))
+        warning_text = tk.Label(
+            warning_frame,
+            text="此处不是填写卡密的地方！\n如果你不知道API是什么，请不要在此处填写内容！",
+            font=("Microsoft YaHei", 10),
+            bg="#fff3cd",
+            fg="#856404",
+            wraplength=450,
+            justify="center"
+        )
+        warning_text.pack(pady=(4, 10))
         ip_api_frame.columnconfigure(1, weight=1)
         self._settings_window_widgets.extend([ip_api_entry, ip_api_save_btn, ip_api_reset_btn])
 
