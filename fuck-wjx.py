@@ -2778,14 +2778,17 @@ def vacant(driver: BrowserDriver, current, index):
                 })();
                 """,
                 f"div{current}"
-            )
+                )
         except Exception:
             pass
         return
 
+    filled = False
+    question_div = None
     try:
         input_element = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
         _fill_text_question_input(driver, input_element, selected_answer)
+        filled = True
     except Exception:
         try:
             question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
@@ -2802,11 +2805,61 @@ def vacant(driver: BrowserDriver, current, index):
                 input_type = (candidate.get_attribute("type") or "").lower()
             except Exception:
                 input_type = ""
-            if input_type == "hidden":
+            try:
+                style_attr = (candidate.get_attribute("style") or "").lower()
+            except Exception:
+                style_attr = ""
+            try:
+                displayed = candidate.is_displayed()
+            except Exception:
+                displayed = True
+            if (
+                input_type == "hidden"
+                or "display:none" in style_attr
+                or "visibility:hidden" in style_attr
+                or not displayed
+            ):
                 continue
             if tag_name == "textarea" or (tag_name == "input" and input_type in ("", "text", "search", "tel", "number")):
                 _fill_text_question_input(driver, candidate, selected_answer)
+                filled = True
                 break
+
+    if not filled and question_div is None:
+        try:
+            question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
+        except Exception:
+            question_div = None
+
+    if not filled and question_div is not None:
+        try:
+            editable_nodes = question_div.find_elements(
+                By.CSS_SELECTOR,
+                "span[contenteditable='true'], div[contenteditable='true'], .textCont, .textcont"
+            )
+        except Exception:
+            editable_nodes = []
+        for editable in editable_nodes:
+            try:
+                if not editable.is_displayed():
+                    continue
+            except Exception:
+                pass
+            try:
+                _smooth_scroll_to_element(driver, editable, 'center')
+            except Exception:
+                pass
+            try:
+                editable.click()
+            except Exception:
+                pass
+            try:
+                fill_value = DEFAULT_FILL_TEXT if selected_answer is None else str(selected_answer)
+                _fill_contenteditable_element(driver, editable, fill_value)
+                filled = True
+                break
+            except Exception:
+                continue
 
 
 def single(driver: BrowserDriver, current, index):
