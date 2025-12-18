@@ -1110,7 +1110,6 @@ random_proxy_ip_enabled = False
 proxy_ip_pool: List[str] = []
 random_user_agent_enabled = False
 user_agent_pool_keys: List[str] = []
-wechat_login_bypass_enabled = True
 last_submit_had_captcha = False
 _aliyun_captcha_stop_triggered = False
 _aliyun_captcha_stop_lock = threading.Lock()
@@ -2637,55 +2636,8 @@ def dismiss_resume_dialog_if_present(
     return False
 
 
-def dismiss_wechat_login_popup_if_present(
-    driver: BrowserDriver, stop_signal: Optional[threading.Event] = None
-) -> bool:
-    """
-    检查并移除“需要微信登录才能参与”的遮罩弹窗。
-    如检测到对应元素，则在页面环境中执行 show_zhezhao_utils(0, 0)，
-    然后移除遮罩与弹窗节点，最后再开始填写答案。
-    """
-    if not wechat_login_bypass_enabled:
-        return False
-    script = r"""
-        (function() {
-            var shade = document.getElementById('layui-layer-shade1');
-            var layer = document.getElementById('layui-layer1');
-            var hasPopup = !!(shade || layer);
-            if (!hasPopup) {
-                return false;
-            }
-            try {
-                if (typeof window.show_zhezhao_utils === 'function') {
-                    window.show_zhezhao_utils(0, 0);
-                }
-            } catch (e) {}
-            try {
-                if (shade && shade.parentNode) {
-                    shade.parentNode.removeChild(shade);
-                }
-            } catch (e) {}
-            try {
-                if (layer && layer.parentNode) {
-                    layer.parentNode.removeChild(layer);
-                }
-            } catch (e) {}
-            return true;
-        })();
-    """
-    try:
-        removed = bool(driver.execute_script(script))
-    except Exception as exc:
-        logging.debug("dismiss_wechat_login_popup_if_present failed: %s", exc)
-        return False
-    if removed:
-        logging.info("检测到微信登录遮罩弹窗，已执行 show_zhezhao_utils(0, 0) 并移除相关元素")
-    return removed
-
-
 def detect(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> List[int]:
     dismiss_resume_dialog_if_present(driver, stop_signal=stop_signal)
-    dismiss_wechat_login_popup_if_present(driver, stop_signal=stop_signal)
     try_click_start_answer_button(driver, stop_signal=stop_signal)
     question_counts_per_page: List[int] = []
     total_pages = len(driver.find_elements(By.XPATH, '//*[@id="divQuestion"]/fieldset'))
@@ -5299,7 +5251,31 @@ class SurveyGUI(ConfigPersistenceMixin):
         window.title("捐助")
         window.resizable(False, False)
         window.transient(self.root)
-        window.protocol("WM_DELETE_WINDOW", lambda: window.destroy())
+        opened_at = time.monotonic()
+        close_handled = False
+
+        def on_close():
+            nonlocal close_handled
+            if close_handled:
+                try:
+                    window.destroy()
+                except Exception:
+                    pass
+                return
+
+            close_handled = True
+            stayed_seconds = time.monotonic() - opened_at
+            try:
+                window.destroy()
+            finally:
+                if stayed_seconds > 5:
+                    try:
+                        if self.root and self.root.winfo_exists():
+                            self.root.after(0, lambda: self._open_contact_dialog(default_type="卡密获取"))
+                    except Exception:
+                        pass
+
+        window.protocol("WM_DELETE_WINDOW", on_close)
 
         # 加载payment.png图片
         payment_image_path = _get_resource_path(os.path.join("assets", "payment.png"))
@@ -5488,6 +5464,8 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._archived_notice_shown = False
         self._random_ip_disclaimer_ack = False
         self._suspend_random_ip_notice = False
+        self._random_ip_api_placeholder_text = "API地址（不是卡密）"
+        self._random_ip_api_placeholder_active = False
         self.url_var = tk.StringVar()
         self.target_var = tk.StringVar(value="")
         self.thread_var = tk.StringVar(value="2")
@@ -5521,7 +5499,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         self.random_ua_mac_wechat_var = tk.BooleanVar(value=False)
         self.random_ua_windows_wechat_var = tk.BooleanVar(value=False)
         self.random_ua_mac_web_var = tk.BooleanVar(value=False)
-        self.wechat_login_bypass_enabled_var = tk.BooleanVar(value=False)
         self.random_ip_enabled_var = tk.BooleanVar(value=False)
         self.random_ip_api_var = tk.StringVar(value="")
         self.full_simulation_enabled_var = tk.BooleanVar(value=False)
@@ -5787,7 +5764,6 @@ class SurveyGUI(ConfigPersistenceMixin):
             self.random_ua_mac_web_var,
         ):
             _ua_var.trace_add("write", lambda *args: self._mark_config_changed())
-        self.wechat_login_bypass_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.random_ip_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.full_sim_target_var.trace_add("write", lambda *args: self._on_full_sim_target_changed())
         self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._mark_config_changed())
@@ -5829,22 +5805,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         proxy_control_frame = ttk.Frame(step3_frame)
         proxy_control_frame.pack(fill=tk.X, padx=4, pady=(6, 2))
 
-        # 微信登录弹窗处理开关单独占一行
-        wechat_bypass_toggle = ttk.Checkbutton(
-            proxy_control_frame,
-            text="破解仅微信可作答（目前仍在开发中）",
-            variable=self.wechat_login_bypass_enabled_var,
-            )
-        wechat_bypass_toggle.pack(side=tk.LEFT, anchor="w")
-        # 默认不启用，且锁定为不可操作（灰显）
-        try:
-            wechat_bypass_toggle.configure(state=tk.DISABLED)
-        except Exception:
-            try:
-                wechat_bypass_toggle.state(['disabled'])
-            except Exception:
-                pass
-
         # 随机 IP 开关单独一行，放在微信弹窗开关下方
         random_ip_frame = ttk.Frame(step3_frame)
         random_ip_frame.pack(fill=tk.X, padx=4, pady=(0, 4))
@@ -5855,15 +5815,8 @@ class SurveyGUI(ConfigPersistenceMixin):
             command=lambda: on_random_ip_toggle(self),
         )
         random_ip_toggle.pack(side=tk.LEFT)
-        # 添加蓝色提示文字
-        ttk.Label(
-            random_ip_frame,
-            text="（若触发智能验证可尝试勾选此选项）",
-            foreground="#8B4308",
-        ).pack(side=tk.LEFT, padx=(2, 0))
-        self._wechat_login_bypass_toggle_widget = wechat_bypass_toggle
         self._random_ip_toggle_widget = random_ip_toggle
-        self._main_parameter_widgets.extend([wechat_bypass_toggle, random_ip_toggle])
+        self._main_parameter_widgets.extend([random_ip_toggle])
 
         # 随机IP计数显示和管理
         ip_counter_frame = ttk.Frame(step3_frame)
@@ -6108,7 +6061,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         targets += [w for w in getattr(self, '_settings_window_widgets', []) if w is not None]
         allowed_when_locked = []
         if locking:
-            # 不在锁定时允许启用微信弹窗绕过选项，始终保持锁定状态
             allowed_when_locked.extend(
                 [
                     getattr(self, "_random_ip_toggle_widget", None),
@@ -6116,14 +6068,10 @@ class SurveyGUI(ConfigPersistenceMixin):
             )
             allowed_when_locked.extend(getattr(self, "_random_ua_option_widgets", []))
             allowed_when_locked = [w for w in allowed_when_locked if w is not None]
-        # 强制微信绕过选项始终禁用
-        wechat_widget = getattr(self, "_wechat_login_bypass_toggle_widget", None)
         for widget in targets:
             desired_state = state
             if locking and widget in allowed_when_locked:
                 desired_state = tk.NORMAL
-            if widget is wechat_widget:
-                desired_state = tk.DISABLED
             try:
                 if widget.winfo_exists():
                     widget.configure(state=desired_state)
@@ -6161,7 +6109,13 @@ class SurveyGUI(ConfigPersistenceMixin):
 
     def _get_random_ip_api_text(self) -> str:
         try:
-            return str(self.random_ip_api_var.get()).strip()
+            value = str(self.random_ip_api_var.get()).strip()
+            placeholder_text = str(getattr(self, "_random_ip_api_placeholder_text", "") or "").strip()
+            if placeholder_text and value == placeholder_text:
+                return ""
+            if getattr(self, "_random_ip_api_placeholder_active", False):
+                return ""
+            return value
         except Exception:
             return ""
 
@@ -6375,34 +6329,91 @@ class SurveyGUI(ConfigPersistenceMixin):
         ttk.Label(ip_api_frame, text="自定义随机 IP 提取 API：").grid(row=0, column=0, sticky="w", padx=(0, 8))
         ip_api_entry = ttk.Entry(ip_api_frame, textvariable=self.random_ip_api_var, width=50)
         ip_api_entry.grid(row=0, column=1, sticky="we")
-        ip_api_save_btn = ttk.Button(ip_api_frame, text="保存", command=self._save_random_ip_api_setting, width=10)
+
+        placeholder_text = str(getattr(self, "_random_ip_api_placeholder_text", "") or "").strip() or "API地址（不是卡密）"
+        placeholder_style_name = "RandomIpApi.Placeholder.TEntry"
+        try:
+            normal_style_name = ip_api_entry.cget("style") or "TEntry"
+        except Exception:
+            normal_style_name = "TEntry"
+        try:
+            style = ttk.Style(window)
+            style.configure(placeholder_style_name, foreground="#9aa0a6")
+        except Exception:
+            style = None
+
+        def _apply_ip_api_entry_appearance(is_placeholder: bool) -> None:
+            try:
+                if is_placeholder:
+                    if style is not None:
+                        ip_api_entry.configure(style=placeholder_style_name)
+                    else:
+                        ip_api_entry.configure(foreground="#9aa0a6")
+                else:
+                    if style is not None:
+                        ip_api_entry.configure(style=normal_style_name)
+                    else:
+                        ip_api_entry.configure(foreground="")
+            except Exception:
+                pass
+
+        def _sync_ip_api_placeholder_from_value() -> None:
+            try:
+                current = str(self.random_ip_api_var.get() or "")
+            except Exception:
+                current = ""
+            if current.strip() and current.strip() != placeholder_text:
+                self._random_ip_api_placeholder_active = False
+                _apply_ip_api_entry_appearance(False)
+                return
+            self._random_ip_api_placeholder_active = True
+            try:
+                self.random_ip_api_var.set(placeholder_text)
+            except Exception:
+                pass
+            _apply_ip_api_entry_appearance(True)
+            try:
+                ip_api_entry.icursor(0)
+            except Exception:
+                pass
+
+        def _on_ip_api_focus_in(_event=None):
+            try:
+                current = str(self.random_ip_api_var.get() or "").strip()
+            except Exception:
+                current = ""
+            if getattr(self, "_random_ip_api_placeholder_active", False) or current == placeholder_text:
+                self._random_ip_api_placeholder_active = False
+                try:
+                    self.random_ip_api_var.set("")
+                except Exception:
+                    pass
+                _apply_ip_api_entry_appearance(False)
+
+        def _on_ip_api_focus_out(_event=None):
+            try:
+                current = str(self.random_ip_api_var.get() or "").strip()
+            except Exception:
+                current = ""
+            if not current:
+                _sync_ip_api_placeholder_from_value()
+
+        ip_api_entry.bind("<FocusIn>", _on_ip_api_focus_in, add="+")
+        ip_api_entry.bind("<FocusOut>", _on_ip_api_focus_out, add="+")
+        _sync_ip_api_placeholder_from_value()
+
+        def _on_ip_api_save():
+            self._save_random_ip_api_setting()
+            _sync_ip_api_placeholder_from_value()
+
+        def _on_ip_api_reset():
+            self._reset_random_ip_api_setting()
+            _sync_ip_api_placeholder_from_value()
+
+        ip_api_save_btn = ttk.Button(ip_api_frame, text="保存", command=_on_ip_api_save, width=10)
         ip_api_save_btn.grid(row=0, column=2, padx=(10, 0))
-        ip_api_reset_btn = ttk.Button(ip_api_frame, text="重置", command=self._reset_random_ip_api_setting, width=10)
+        ip_api_reset_btn = ttk.Button(ip_api_frame, text="重置", command=_on_ip_api_reset, width=10)
         ip_api_reset_btn.grid(row=1, column=2, padx=(10, 0), pady=(6, 0), sticky="w")
-        
-        # 创建醒目的警告框
-        warning_frame = tk.Frame(ip_api_frame, bg="#fff3cd", relief="solid", bd=2, highlightbackground="#ff6b6b", highlightthickness=2)
-        warning_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
-        warning_icon = tk.Label(warning_frame, text="⚠️", font=("Segoe UI", 16), bg="#fff3cd", fg="#dc3545")
-        warning_icon.pack(pady=(8, 0))
-        warning_title = tk.Label(
-            warning_frame,
-            text="❗ 重要提醒 ❗",
-            font=("Microsoft YaHei", 11, "bold"),
-            bg="#fff3cd",
-            fg="#dc3545"
-        )
-        warning_title.pack(pady=(2, 0))
-        warning_text = tk.Label(
-            warning_frame,
-            text="此处不是填写卡密的地方！\n如果你不知道API是什么，请不要在此处填写内容！",
-            font=("Microsoft YaHei", 10),
-            bg="#fff3cd",
-            fg="#856404",
-            wraplength=450,
-            justify="center"
-        )
-        warning_text.pack(pady=(4, 10))
         ip_api_frame.columnconfigure(1, weight=1)
         self._settings_window_widgets.extend([ip_api_entry, ip_api_save_btn, ip_api_reset_btn])
 
@@ -9425,7 +9436,6 @@ class SurveyGUI(ConfigPersistenceMixin):
             "random_proxy_flag": random_proxy_flag,
             "random_ua_flag": random_ua_flag,
             "random_ua_keys_list": random_ua_keys_list,
-            "wechat_login_bypass_enabled": bool(self.wechat_login_bypass_enabled_var.get()),
             "random_proxy_api": effective_proxy_api,
         }
         if random_proxy_flag:
@@ -9472,7 +9482,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         random_proxy_flag = bool(ctx.get("random_proxy_flag"))
         random_ua_flag = bool(ctx.get("random_ua_flag"))
         random_ua_keys_list = ctx.get("random_ua_keys_list", [])
-        wechat_bypass_flag = bool(ctx.get("wechat_login_bypass_enabled", True))
         if random_proxy_flag:
             logging.info(f"[Action Log] 启用随机代理 IP（每个浏览器独立分配），已预取 {len(proxy_pool)} 条（{PROXY_REMOTE_URL}）")
         try:
@@ -9502,7 +9511,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             f"[Action Log] Starting run url={url_value} target={target} threads={threads_count}"
         )
 
-        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool, random_user_agent_enabled, user_agent_pool_keys, wechat_login_bypass_enabled, _aliyun_captcha_stop_triggered, _target_reached_stop_triggered, _resume_after_aliyun_captcha_stop, _resume_snapshot
+        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool, random_user_agent_enabled, user_agent_pool_keys, _aliyun_captcha_stop_triggered, _target_reached_stop_triggered, _resume_after_aliyun_captcha_stop, _resume_snapshot
         url = url_value
         target_num = target
         # 强制限制线程数不超过12，确保用户电脑流畅
@@ -9514,7 +9523,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         proxy_ip_pool = proxy_pool if random_proxy_flag else []
         random_user_agent_enabled = random_ua_flag
         user_agent_pool_keys = random_ua_keys_list
-        wechat_login_bypass_enabled = wechat_bypass_flag
         if full_sim_enabled:
             full_simulation_estimated_seconds = full_sim_est_seconds
             full_simulation_total_duration_seconds = full_sim_total_seconds
