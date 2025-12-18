@@ -715,6 +715,11 @@ def handle_random_ip_submission(gui: Any, stop_signal: Optional[threading.Event]
         return
     ip_count = RegistryManager.increment_submit_count()
     logging.info(f"随机IP提交计数: {ip_count}/{RANDOM_IP_FREE_LIMIT}")
+    # 计数发生在工作线程中，这里主动把 UI 刷新调度到 Tk 主线程，避免主界面计数不更新
+    try:
+        _schedule_on_gui_thread(gui, lambda: refresh_ip_counter_display(gui))
+    except Exception:
+        pass
     if ip_count >= RANDOM_IP_FREE_LIMIT:
         logging.warning("随机IP提交已达20份，停止任务并弹出卡密验证窗口")
         if stop_signal:

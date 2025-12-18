@@ -612,11 +612,15 @@ def _resolve_dynamic_text_token_value(token: Any) -> str:
 
 
 class AliyunCaptchaBypassError(RuntimeError):
-    """检测到阿里云智能验证（需要人工交互）时抛出，用于快速放弃当前浏览器示例。"""
+    """检测到阿里云智能验证（需要人工交互）时抛出，用于触发全局停止。"""
 
 
 class SecurityConfirmDetectedError(RuntimeError):
     """检测到系统安全校验确认弹窗（需要安全校验，请重新提交），按配置直接放弃当前浏览器示例并计为失败。"""
+
+
+class EmptySurveySubmissionError(RuntimeError):
+    """检测到问卷未添加题目导致无法提交时抛出，用于关闭当前实例并继续下一份。"""
 
 
 
@@ -726,51 +730,41 @@ def _kill_playwright_browser_processes():
     
     killed_count = 0
     
-    # Playwright 启动的浏览器进程通常包含这些特征命令行参数
+    # 仅匹配命令行中明确包含 playwright 痕迹的进程，避免误杀用户浏览器。
+    # 说明：仅用 --user-data-dir 等通用参数会导致把用户正常浏览器也当成 Playwright 进程。
     playwright_indicators = [
-        '--enable-automation',
-        '--test-type',
-        '--remote-debugging-port',
-        '--user-data-dir=',  # Playwright 会创建临时用户数据目录
-        'playwright',
+        "playwright",
+        "ms-playwright",
+        "playwright_chromium",
+        "playwright_firefox",
+        "playwright_webkit",
     ]
     
     try:
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        browser_names = {"msedge.exe", "chrome.exe", "chromium.exe"}
+        indicators = [x.lower() for x in playwright_indicators if x]
+        for proc in psutil.process_iter(["pid", "name"]):
             try:
-                proc_info = proc.info
-                proc_name = proc_info.get('name', '').lower()
-                
-                # 只检查浏览器进程
-                if proc_name not in ['msedge.exe', 'chrome.exe', 'chromium.exe']:
+                proc_info = proc.info or {}
+                proc_name = (proc_info.get("name") or "").lower()
+                if proc_name not in browser_names:
                     continue
-                
-                cmdline = proc_info.get('cmdline')
+                try:
+                    cmdline = proc.cmdline()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
                 if not cmdline:
                     continue
-                
-                # 将命令行参数转为字符串便于检查
-                cmdline_str = ' '.join(cmdline).lower()
-                
-                # 检查是否包含 Playwright 特征
-                is_playwright_process = False
-                for indicator in playwright_indicators:
-                    if indicator.lower() in cmdline_str:
-                        is_playwright_process = True
-                        break
-                
-                # 如果确认是 Playwright 进程，则终止
-                if is_playwright_process:
-                    try:
-                        proc.kill()
-                        killed_count += 1
-                        logging.info(f"已终止 Playwright 浏览器进程: PID={proc_info['pid']}, Name={proc_name}")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                        
+                cmdline_str = " ".join(cmdline).lower()
+                if not any(ind in cmdline_str for ind in indicators):
+                    continue
+                try:
+                    proc.kill()
+                    killed_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
-                
     except Exception as e:
         logging.warning(f"清理浏览器进程时出错: {e}")
     
@@ -805,26 +799,54 @@ def _kill_processes_by_pid(pids: Set[int]) -> int:
     按 PID 精确终止一批进程，返回成功杀掉的数量。
     用于只清理当前会话启动的浏览器，避免全盘扫描导致卡顿。
     """
-    try:
-        import psutil
-    except ImportError:
-        logging.warning("psutil 未安装，无法按 PID 精确清理浏览器进程")
+    unique_pids = [int(p) for p in sorted(set(pids or [])) if int(p) > 0]
+    if not unique_pids:
         return 0
 
+    # 注意：这里返回的是“尝试终止”的数量；Windows 的 taskkill 不容易在静默模式下精确统计成功数。
+    attempted = 0
+
+    def _chunk(seq: List[int], size: int) -> List[List[int]]:
+        return [seq[i : i + size] for i in range(0, len(seq), size)]
+
+    # Windows 下优先用 taskkill，一次性杀多个 PID，避免每个 PID 都启动一个 taskkill 导致卡顿/GIL 抖动
+    if sys.platform.startswith("win"):
+        chunk_size = 24  # 兼顾命令行长度与调用次数
+        for batch in _chunk(unique_pids, chunk_size):
+            if not batch:
+                continue
+            args = ["taskkill", "/T", "/F"]
+            for pid in batch:
+                args.extend(["/PID", str(pid)])
+            try:
+                subprocess.run(
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=6,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                attempted += len(batch)
+            except Exception as exc:
+                logging.debug(f"taskkill 批量清理失败: {exc}", exc_info=True)
+        if attempted:
+            logging.info(f"按 PID 已请求终止 {attempted} 个浏览器进程")
+        return attempted
+
+    # 非 Windows / taskkill 不可用：退化为 psutil 逐个 kill
     killed = 0
-    for pid in list(set(pids or []))[:6]:
-        if not pid or pid <= 0:
-            continue
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return 0
+    for pid in unique_pids:
         try:
-            proc = psutil.Process(pid)
-            proc.kill()
+            psutil.Process(pid).kill()
             killed += 1
-            logging.info(f"已终止浏览器进程 PID={pid}")
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
         except Exception as exc:
             logging.debug(f"按 PID 清理浏览器失败 pid={pid}: {exc}", exc_info=True)
-    if killed > 0:
+    if killed:
         logging.info(f"按 PID 共终止 {killed} 个浏览器进程")
     return killed
 
@@ -923,7 +945,7 @@ def handle_aliyun_captcha(
 
     之前这里会尝试点击“智能验证/开始验证”等按钮做绕过；现在按需求改为：
     - 未出现：返回 False
-    - 出现：直接抛出 AliyunCaptchaBypassError，让上层快速放弃该浏览器示例并计为失败
+    - 出现：直接抛出 AliyunCaptchaBypassError，让上层触发全局停止
     """
     popup_locator = (By.ID, "aliyunCaptcha-window-popup")
     checkbox_locator = (By.ID, "aliyunCaptcha-checkbox-icon")
@@ -1043,7 +1065,7 @@ def handle_aliyun_captcha(
     if stop_signal and stop_signal.is_set():
         return False
 
-    logging.warning("检测到阿里云智能验证（按钮/弹窗），将放弃当前浏览器示例并计为失败。")
+    logging.warning("检测到阿里云智能验证（按钮/弹窗），将触发全局停止。")
     raise AliyunCaptchaBypassError("检测到阿里云智能验证，按配置直接放弃")
 
 
@@ -1090,6 +1112,12 @@ random_user_agent_enabled = False
 user_agent_pool_keys: List[str] = []
 wechat_login_bypass_enabled = True
 last_submit_had_captcha = False
+_aliyun_captcha_stop_triggered = False
+_aliyun_captcha_stop_lock = threading.Lock()
+_target_reached_stop_triggered = False
+_target_reached_stop_lock = threading.Lock()
+_resume_after_aliyun_captcha_stop = False
+_resume_snapshot: Dict[str, Any] = {}
 
 # 极速模式：全真模拟/随机IP关闭且时间间隔为0时自动启用
 def _is_fast_mode() -> bool:
@@ -1099,6 +1127,99 @@ def _is_fast_mode() -> bool:
         and submit_interval_range_seconds == (0, 0)
         and answer_duration_range_seconds == (0, 0)
     )
+
+
+def _trigger_aliyun_captcha_stop(
+    gui_instance: Optional[Any],
+    stop_signal: Optional[threading.Event],
+) -> None:
+    """检测到阿里云智能验证时触发全局停止，并提示用户启用随机 IP。"""
+    global _aliyun_captcha_stop_triggered
+    global _resume_after_aliyun_captcha_stop, _resume_snapshot
+    with _aliyun_captcha_stop_lock:
+        if _aliyun_captcha_stop_triggered:
+            if stop_signal:
+                stop_signal.set()
+            return
+        _aliyun_captcha_stop_triggered = True
+
+    if stop_signal:
+        stop_signal.set()
+
+    try:
+        _resume_after_aliyun_captcha_stop = True
+        _resume_snapshot = {
+            "url": url,
+            "target": target_num,
+            "cur_num": cur_num,
+            "cur_fail": cur_fail,
+        }
+    except Exception:
+        _resume_after_aliyun_captcha_stop = True
+        _resume_snapshot = {}
+
+    message = (
+        "检测到阿里云智能验证，为避免失败提交已停止所有任务。\n"
+        "请勾选“启用随机 IP 提交”后重试。"
+    )
+
+    def _notify():
+        try:
+            if gui_instance and hasattr(gui_instance, "force_stop_immediately"):
+                gui_instance.force_stop_immediately(reason="触发智能验证")
+            elif gui_instance and hasattr(gui_instance, "stop_run"):
+                gui_instance.stop_run()
+        except Exception:
+            logging.debug("阿里云智能验证触发停止失败", exc_info=True)
+        try:
+            if gui_instance and hasattr(gui_instance, "_log_popup_warning"):
+                gui_instance._log_popup_warning("智能验证提示", message)
+            else:
+                log_popup_warning("智能验证提示", message)
+        except Exception:
+            logging.warning("弹窗提示用户启用随机IP失败")
+
+    root = getattr(gui_instance, "root", None) if gui_instance else None
+    if root is not None:
+        try:
+            root.after(0, _notify)
+            return
+        except Exception:
+            pass
+    _notify()
+
+
+def _trigger_target_reached_stop(
+    gui_instance: Optional[Any],
+    stop_signal: Optional[threading.Event],
+) -> None:
+    """达到目标份数时触发全局立即停止。"""
+    global _target_reached_stop_triggered
+    with _target_reached_stop_lock:
+        if _target_reached_stop_triggered:
+            if stop_signal:
+                stop_signal.set()
+            return
+        _target_reached_stop_triggered = True
+
+    if stop_signal:
+        stop_signal.set()
+
+    def _notify():
+        try:
+            if gui_instance and hasattr(gui_instance, "force_stop_immediately"):
+                gui_instance.force_stop_immediately(reason="任务完成")
+        except Exception:
+            logging.debug("达到目标份数时触发强制停止失败", exc_info=True)
+
+    root = getattr(gui_instance, "root", None) if gui_instance else None
+    if root is not None:
+        try:
+            root.after(0, _notify)
+            return
+        except Exception:
+            pass
+    _notify()
 
 
 def _sync_full_sim_state_from_globals() -> None:
@@ -3931,7 +4052,7 @@ def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
                 ):
                     try:
                         click_method()
-                        logging.info("成功点击提交按钮")
+                        logging.debug("成功点击提交按钮")
                         return True
                     except Exception:
                         continue
@@ -4005,7 +4126,7 @@ def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
             """
         )
         if executed:
-            logging.info("通过JS成功触发提交")
+            logging.debug("通过JS成功触发提交")
             return True
     except Exception:
         pass
@@ -4271,10 +4392,69 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
         except Exception:
             return False
 
+    def _detect_empty_survey_submit_dialog() -> bool:
+        """检测“此问卷没有添加题目，不能提交”类型的提示弹窗。"""
+        script = r"""
+            (() => {
+                const text = (document.body?.innerText || '').replace(/\s+/g, '');
+                if (!text) return false;
+                const hasNoQuestion = (
+                    text.includes('没有添加题目')
+                    || text.includes('未添加题目')
+                    || (text.includes('问卷') && text.includes('没有') && text.includes('题目'))
+                );
+                if (!hasNoQuestion) return false;
+                const hasNoSubmit = text.includes('不能提交') || text.includes('无法提交');
+                if (!hasNoSubmit) return false;
+
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const checkDoc = (doc) => {
+                    const nodes = doc.querySelectorAll('div, span, p, a, button');
+                    for (const el of nodes) {
+                        if (!visible(el)) continue;
+                        const t = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+                        if (!t) continue;
+                        if ((t.includes('没有添加题目') || t.includes('未添加题目'))
+                            && (t.includes('不能提交') || t.includes('无法提交'))) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                if (checkDoc(document)) return true;
+                const frames = Array.from(document.querySelectorAll('iframe'));
+                for (const frame of frames) {
+                    try {
+                        const doc = frame.contentDocument || frame.contentWindow?.document;
+                        if (doc && checkDoc(doc)) return true;
+                    } catch (e) {}
+                }
+                return false;
+            })();
+        """
+        try:
+            return bool(driver.execute_script(script))
+        except Exception:
+            return False
+
 
     if pre_submit_delay > 0 and _sleep_with_stop(stop_signal, pre_submit_delay):
         return
     _click_submit_buttons()
+    for _ in range(5):
+        if stop_signal and stop_signal.is_set():
+            return
+        if _detect_empty_survey_submit_dialog():
+            logging.warning("检测到问卷未添加题目，无法提交，关闭当前实例并继续下一份。")
+            raise EmptySurveySubmissionError("问卷未添加题目，无法提交")
+        if _sleep_with_stop(stop_signal, 0.25):
+            return
     # 检查是否出现“需要安全校验/安全校验”类型的弹窗：
     # - 出现：按配置直接放弃当前浏览器示例（抛出异常交给上层处理并计失败）
     # - 未出现：继续后续流程
@@ -4289,7 +4469,7 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
     if stop_signal and stop_signal.is_set():
         return
     
-    # 阿里云智能验证：仅检测，出现即放弃（抛出异常交给上层计失败并关闭实例）
+    # 阿里云智能验证：仅检测，出现即触发全局停止（抛出异常交给上层处理）
     handle_aliyun_captcha(driver, timeout=3, stop_signal=stop_signal)
     try:
         slider_text_element = driver.find_element(By.XPATH, '//*[@id="nc_1__scale_text"]/span')
@@ -4420,12 +4600,42 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             return (() => {
                 const text = (document.body?.innerText || '').replace(/\s+/g, '');
                 if (!text) return false;
-                const hasLimit = text.includes('设备已达到最大填写次数')
-                    || (text.includes('达到最大填写次数') && text.includes('设备'))
-                    || text.includes('最大填写次数');
+
+                const limitMarkers = [
+                    '设备已达到最大填写次数',
+                    '已达到最大填写次数',
+                    '达到最大填写次数',
+                    '填写次数已达上限',
+                    '超过最大填写次数',
+                ];
+                const hasLimit = limitMarkers.some(marker => text.includes(marker));
+                if (!hasLimit) return false;
+
                 const hasThanks = text.includes('感谢参与') || text.includes('感谢参与!');
                 const hasApology = text.includes('很抱歉') || text.includes('提示');
-                return hasLimit && (hasThanks || hasApology);
+                if (!(hasThanks || hasApology)) return false;
+
+                const questionLike = document.querySelector(
+                    '#divQuestion, [id^="divquestion"], .div_question, .question, .wjx_question, [topic]'
+                );
+                if (questionLike) return false;
+
+                const startHints = ['开始作答', '开始答题', '开始填写', '继续作答', '继续填写'];
+                if (startHints.some(hint => text.includes(hint))) return false;
+
+                const submitSelectors = [
+                    '#submit_button',
+                    '#divSubmit',
+                    '#ctlNext',
+                    '#SM_BTN_1',
+                    '.submitDiv a',
+                    '.btn-submit',
+                    'button[type="submit"]',
+                    'a.mainBgColor',
+                ];
+                if (submitSelectors.some(sel => document.querySelector(sel))) return false;
+
+                return true;
             })();
         """
         try:
@@ -4493,6 +4703,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                             handle_random_ip_submission(gui_instance, stop_signal)
                         if target_num > 0 and cur_num >= target_num:
                             stop_signal.set()
+                            _trigger_target_reached_stop(gui_instance, stop_signal)
                     else:
                         stop_signal.set()
                         break
@@ -4507,16 +4718,29 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             need_watch_submit = bool(last_submit_had_captcha)
             max_wait, poll_interval = full_simulation_mode.get_post_submit_wait_params(need_watch_submit, fast_mode)
             wait_deadline = time.time() + max_wait
+            completion_detected = False
             while time.time() < wait_deadline:
                 if stop_signal.is_set():
                     break
-                if driver.current_url != initial_url:
+                current_url = driver.current_url
+                if current_url != initial_url:
+                    if "complete" in str(current_url).lower():
+                        completion_detected = True
                     break
+                if "complete" in str(current_url).lower():
+                    completion_detected = True
+                    break
+                try:
+                    if full_simulation_mode.is_survey_completion_page(driver):
+                        completion_detected = True
+                        break
+                except Exception:
+                    pass
                 time.sleep(poll_interval)
             final_url = driver.current_url
             if stop_signal.is_set():
                 break
-            if initial_url != final_url:
+            if initial_url != final_url or completion_detected:
                 with lock:
                     if target_num <= 0 or cur_num < target_num:
                         cur_num += 1
@@ -4530,16 +4754,27 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         
                         if target_num > 0 and cur_num >= target_num:
                             stop_signal.set()
+                            _trigger_target_reached_stop(gui_instance, stop_signal)
                     else:
                         stop_signal.set()
                         break
-                # 成功提交后关闭浏览器，全真模拟直接换新实例，避免停留完成页
-                if full_simulation_enabled or random_user_agent_enabled or proxy_ip_pool:
-                    if full_simulation_enabled:
-                        # 委托给模块检测是否为完成页
-                        detected = full_simulation_mode.is_survey_completion_page(driver)
-                        time.sleep(2.0 if detected else 0.3)
-                    _dispose_driver()
+                # 成功提交后立即关闭浏览器实例，不等待完成页
+                _dispose_driver()
+        except AliyunCaptchaBypassError:
+            driver_had_error = True
+            _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
+            break
+        except EmptySurveySubmissionError:
+            driver_had_error = True
+            if stop_signal.is_set():
+                break
+            with lock:
+                cur_fail += 1
+                print(f"已失败{cur_fail}次, 失败次数达到{int(fail_threshold)}次将强制停止")
+            if cur_fail >= fail_threshold:
+                logging.critical("失败次数过多，强制停止，请检查配置是否正确")
+                stop_signal.set()
+                break
         except Exception:
             driver_had_error = True
             if stop_signal.is_set():
@@ -5162,7 +5397,9 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         # 继续定期刷新（每2秒刷新一次）
         if not getattr(self, "_closing", False):
-            self.root.after(2000, self._schedule_ip_counter_refresh)
+            self._ip_counter_refresh_job = self.root.after(2000, self._schedule_ip_counter_refresh)
+        else:
+            self._ip_counter_refresh_job = None
 
     def _on_toggle_log_dark_mode(self):
         """切换日志区域的深色背景"""
@@ -5204,6 +5441,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         self.active_drivers: List[BrowserDriver] = []  # 跟踪活跃的浏览器实例
         self._launched_browser_pids: Set[int] = set()  # 跟踪本次会话启动的浏览器 PID
         self._stop_cleanup_thread_running = False  # 避免重复触发停止清理
+        self._force_stop_now = False  # 达到目标后立即停止，不等待线程收尾
         # 是否在点击停止后自动退出；可用环境变量 AUTO_EXIT_ON_STOP 控制，默认关闭
         _auto_exit_env = str(os.getenv("AUTO_EXIT_ON_STOP", "")).strip().lower()
         self._auto_exit_on_stop = _auto_exit_env in ("1", "true", "yes", "on")
@@ -5219,6 +5457,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._settings_window: Optional[tk.Toplevel] = None
         self._log_text_widget: Optional[tk.Text] = None
         self._log_refresh_job: Optional[str] = None
+        self._ip_counter_refresh_job: Optional[str] = None
         self._log_rendered_count = 0
         self._log_first_rendered_record: Optional[str] = None
         self._paned_position_restored = False
@@ -9263,7 +9502,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             f"[Action Log] Starting run url={url_value} target={target} threads={threads_count}"
         )
 
-        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool, random_user_agent_enabled, user_agent_pool_keys, wechat_login_bypass_enabled
+        global url, target_num, num_threads, fail_threshold, cur_num, cur_fail, stop_event, submit_interval_range_seconds, answer_duration_range_seconds, full_simulation_enabled, full_simulation_estimated_seconds, full_simulation_total_duration_seconds, full_simulation_schedule, random_proxy_ip_enabled, proxy_ip_pool, random_user_agent_enabled, user_agent_pool_keys, wechat_login_bypass_enabled, _aliyun_captcha_stop_triggered, _target_reached_stop_triggered, _resume_after_aliyun_captcha_stop, _resume_snapshot
         url = url_value
         target_num = target
         # 强制限制线程数不超过12，确保用户电脑流畅
@@ -9296,24 +9535,46 @@ class SurveyGUI(ConfigPersistenceMixin):
             _FULL_SIM_STATE.disable()
             _reset_full_simulation_runtime_state()
         fail_threshold = max(1, math.ceil(target_num / 4) + 1)
-        cur_num = 0
-        cur_fail = 0
         stop_event = threading.Event()
-        
+        _aliyun_captcha_stop_triggered = False
+        _target_reached_stop_triggered = False
+        self._force_stop_now = False
+
+        resume_allowed = False
+        if _resume_after_aliyun_captcha_stop and isinstance(_resume_snapshot, dict):
+            snap_url = str(_resume_snapshot.get("url") or "")
+            snap_target = int(_resume_snapshot.get("target") or 0)
+            if snap_url and snap_url == url_value and snap_target > 0 and target > 0:
+                if 0 < int(cur_num) < int(target):
+                    resume_allowed = True
+
+        if not resume_allowed:
+            cur_num = 0
+            cur_fail = 0
+        # 本次点击开始后，无论是否续跑，都清空“续跑标记”，避免下次误触发
+        _resume_after_aliyun_captcha_stop = False
+        _resume_snapshot = {}
         # 重置对话框标记，允许新的任务达到限制时弹出对话框
         reset_quota_limit_dialog_flag()
         
         # 重置进度条
         self.progress_value = 0
         self.total_submissions = target
-        self.current_submissions = 0
+        self.current_submissions = cur_num
         self.progress_bar['value'] = 0
         self.progress_label.config(text="0%")
+        if target > 0 and cur_num > 0:
+            progress = int((cur_num / target) * 100)
+            self.progress_bar['value'] = max(0, min(100, progress))
+            self.progress_label.config(text=f"{max(0, min(100, progress))}%")
 
         self.running = True
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL, text="🚫 停止")
-        self.status_var.set("正在启动浏览器...")
+        if resume_allowed:
+            self.status_var.set(f"继续执行 | 已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次")
+        else:
+            self.status_var.set("正在启动浏览器...")
 
         self.runner_thread = Thread(target=self._launch_threads, daemon=True)
         self.runner_thread.start()
@@ -9344,6 +9605,8 @@ class SurveyGUI(ConfigPersistenceMixin):
     def _wait_for_worker_threads(self, threads: List[Thread]):
         grace_deadline: Optional[float] = None
         while True:
+            if self._force_stop_now:
+                return
             alive_threads = [t for t in threads if t.is_alive()]
             self.worker_threads = alive_threads
             if not alive_threads:
@@ -9443,6 +9706,30 @@ class SurveyGUI(ConfigPersistenceMixin):
         deadline = time.time() + (STOP_FORCE_WAIT_SECONDS if wait_for_threads else 0)
         logging.info(f"[Stop] 后台清理启动: drivers={len(drivers_snapshot)} threads={len(worker_threads_snapshot)} pids={len(browser_pids_snapshot)}")
         try:
+            # 尽量从 driver 实例里补齐 PID，避免落入全盘扫描（psutil + cmdline）导致停止时 UI 卡顿
+            collected_pids: Set[int] = set(browser_pids_snapshot or set())
+            for driver in drivers_snapshot:
+                try:
+                    pid_single = getattr(driver, "browser_pid", None)
+                    if pid_single:
+                        collected_pids.add(int(pid_single))
+                except Exception:
+                    pass
+                try:
+                    pid_set = getattr(driver, "browser_pids", None)
+                    if pid_set:
+                        collected_pids.update(int(p) for p in pid_set)
+                except Exception:
+                    pass
+                try:
+                    browser_obj = getattr(driver, "_browser", None)
+                    proc = getattr(browser_obj, "process", None) if browser_obj else None
+                    pid = getattr(proc, "pid", None) if proc else None
+                    if pid:
+                        collected_pids.add(int(pid))
+                except Exception:
+                    pass
+
             for driver in drivers_snapshot:
                 try:
                     driver.quit()
@@ -9457,10 +9744,10 @@ class SurveyGUI(ConfigPersistenceMixin):
                     time.sleep(0.1)
             alive_threads = [t for t in worker_threads_snapshot if t.is_alive()]
             killed = 0
-            if alive_threads or browser_pids_snapshot:
-                killed = _kill_processes_by_pid(browser_pids_snapshot)
-            # 如果线程还活着或按 PID 没杀掉进程，兜底再扫一次 Playwright 进程
-            if alive_threads or (browser_pids_snapshot and killed == 0):
+            if alive_threads or collected_pids:
+                killed = _kill_processes_by_pid(collected_pids)
+            # 兜底：仅在完全无法捕获 PID 时，才尝试按命令行特征清理（避免误杀用户浏览器）
+            if alive_threads and not collected_pids:
                 try:
                     _kill_playwright_browser_processes()
                 except Exception as e:
@@ -9469,7 +9756,81 @@ class SurveyGUI(ConfigPersistenceMixin):
             self._stop_cleanup_thread_running = False
             logging.info("[Stop] 后台清理结束")
 
+    def force_stop_immediately(self, reason: Optional[str] = None):
+        """立即停止所有线程与浏览器实例，不等待线程收尾。"""
+        # 允许从后台线程触发：把 UI 操作切回主线程，避免 Tk 在多线程下卡死/异常卡顿
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                self.root.after(0, lambda: self.force_stop_immediately(reason=reason))
+            except Exception:
+                pass
+            return
+        if self._force_stop_now:
+            return
+        self._force_stop_now = True
+        self.stop_requested_by_user = True
+        self.stop_request_ts = time.time()
+        stop_event.set()
+        self.running = False
+        try:
+            self.stop_button.config(state=tk.DISABLED, text="停止")
+            self.start_button.config(state=tk.NORMAL)
+        except Exception:
+            pass
+        if self.status_job:
+            try:
+                self.root.after_cancel(self.status_job)
+            except Exception:
+                pass
+            self.status_job = None
+        if self._log_refresh_job:
+            try:
+                self.root.after_cancel(self._log_refresh_job)
+            except Exception:
+                pass
+            self._log_refresh_job = None
+        if self._ip_counter_refresh_job:
+            try:
+                self.root.after_cancel(self._ip_counter_refresh_job)
+            except Exception:
+                pass
+            self._ip_counter_refresh_job = None
+
+        label = reason or "已停止"
+        try:
+            self.status_var.set(f"{label} | 已提交 {cur_num}/{target_num} 份 | 失败 {cur_fail} 次")
+        except Exception:
+            pass
+
+        drivers_snapshot = list(self.active_drivers)
+        worker_threads_snapshot = list(self.worker_threads)
+        browser_pids_snapshot = set(self._launched_browser_pids)
+        self.active_drivers.clear()
+        self._launched_browser_pids.clear()
+        if not self._stop_cleanup_thread_running:
+            self._stop_cleanup_thread_running = True
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
+            self.root.after(
+                10,
+                lambda ds=drivers_snapshot, ws=worker_threads_snapshot, ps=browser_pids_snapshot: Thread(
+                    target=self._async_stop_cleanup,
+                    args=(ds, ws, ps),
+                    kwargs={"wait_for_threads": False},
+                    daemon=True,
+                ).start(),
+            )
+
     def stop_run(self):
+        # 允许从后台线程触发：把 UI 操作切回主线程，避免 Tk 在多线程下卡死/异常卡顿
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                self.root.after(0, self.stop_run)
+            except Exception:
+                pass
+            return
         if not self.running:
             return
         self.stop_requested_by_user = True
@@ -9491,6 +9852,13 @@ class SurveyGUI(ConfigPersistenceMixin):
             except Exception:
                 pass
             self._log_refresh_job = None
+        # 停止随机IP计数刷新，减少停止阶段 UI 额外负担
+        if self._ip_counter_refresh_job:
+            try:
+                self.root.after_cancel(self._ip_counter_refresh_job)
+            except Exception:
+                pass
+            self._ip_counter_refresh_job = None
 
         # 在后台线程里关闭浏览器并清理 Playwright 进程，避免阻塞主线程
         drivers_snapshot = list(self.active_drivers)
@@ -9500,7 +9868,14 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._launched_browser_pids.clear()
         if not self._stop_cleanup_thread_running:
             self._stop_cleanup_thread_running = True
-            self._start_stop_cleanup_with_grace(drivers_snapshot, worker_threads_snapshot, browser_pids_snapshot)
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
+            self.root.after(
+                10,
+                lambda ds=drivers_snapshot, ws=worker_threads_snapshot, ps=browser_pids_snapshot: self._start_stop_cleanup_with_grace(ds, ws, ps),
+            )
         if self._auto_exit_on_stop:
             # 清理线程启动后快速退出，规避 Tk 主线程后续卡顿
             self.root.after(150, self._exit_app)
@@ -9516,6 +9891,12 @@ class SurveyGUI(ConfigPersistenceMixin):
                 self.root.after_cancel(self._log_refresh_job)
             except Exception:
                 pass
+        if self._ip_counter_refresh_job:
+            try:
+                self.root.after_cancel(self._ip_counter_refresh_job)
+            except Exception:
+                pass
+            self._ip_counter_refresh_job = None
         
         self.stop_run()
         
