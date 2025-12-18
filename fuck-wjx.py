@@ -278,6 +278,7 @@ from wjx.config import (
     SUBMIT_CLICK_SETTLE_DELAY,
     POST_SUBMIT_URL_MAX_WAIT,
     POST_SUBMIT_URL_POLL_INTERVAL,
+    POST_SUBMIT_CLOSE_GRACE_SECONDS,
     PROXY_LIST_FILENAME,
     PROXY_MAX_PROXIES,
     PROXY_REMOTE_URL,
@@ -939,13 +940,16 @@ def create_playwright_driver(headless: bool = False, prefer_browsers: Optional[L
 
 
 def handle_aliyun_captcha(
-    driver: BrowserDriver, timeout: int = 3, stop_signal: Optional[threading.Event] = None
+    driver: BrowserDriver,
+    timeout: int = 3,
+    stop_signal: Optional[threading.Event] = None,
+    raise_on_detect: bool = True,
 ) -> bool:
     """检测是否出现阿里云智能验证。
 
     之前这里会尝试点击“智能验证/开始验证”等按钮做绕过；现在按需求改为：
     - 未出现：返回 False
-    - 出现：直接抛出 AliyunCaptchaBypassError，让上层触发全局停止
+    - 出现：默认抛出 AliyunCaptchaBypassError，让上层触发全局停止
     """
     popup_locator = (By.ID, "aliyunCaptcha-window-popup")
     checkbox_locator = (By.ID, "aliyunCaptcha-checkbox-icon")
@@ -1065,8 +1069,64 @@ def handle_aliyun_captcha(
     if stop_signal and stop_signal.is_set():
         return False
 
-    logging.warning("检测到阿里云智能验证（按钮/弹窗），将触发全局停止。")
-    raise AliyunCaptchaBypassError("检测到阿里云智能验证，按配置直接放弃")
+    logging.warning("检测到阿里云智能验证（按钮/弹窗）。")
+    if raise_on_detect:
+        raise AliyunCaptchaBypassError("检测到阿里云智能验证，按配置直接放弃")
+    return True
+
+
+def _detect_footer_captcha(driver: BrowserDriver) -> bool:
+    script = r"""
+        (() => {
+            const selectors = ['#captcha', '#captchabtn', '#captchaWrap', '#captchaOut'];
+            const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (visible(el)) return true;
+            }
+            return false;
+        })();
+    """
+    try:
+        return bool(driver.execute_script(script))
+    except Exception:
+        return False
+
+
+def _try_trigger_footer_captcha(driver: BrowserDriver) -> bool:
+    script = r"""
+        (() => {
+            const selectors = ['#captchabtn', '#captcha', '#captchaWrap'];
+            const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (!visible(el)) continue;
+                try { el.scrollIntoView({block:'center', behavior:'auto'}); } catch (_) {}
+                try { el.click(); return true; } catch (_) {}
+                try {
+                    el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+                    return true;
+                } catch (_) {}
+            }
+            return false;
+        })();
+    """
+    try:
+        return bool(driver.execute_script(script))
+    except Exception:
+        return False
 
 
 
@@ -1751,6 +1811,25 @@ def _driver_question_has_shared_text_input(question_div) -> bool:
     return any(keyword in text_blob for keyword in option_fill_keywords)
 
 
+def _count_prefixed_text_inputs_driver(driver: BrowserDriver, question_number: int, question_div=None) -> int:
+    """Count inputs like q{num}_1 used by gap-fill/multi-text questions."""
+    if not question_number:
+        return 0
+    prefix = f"q{question_number}_"
+    selector = (
+        f"input[id^='{prefix}'], textarea[id^='{prefix}'], "
+        f"input[name^='{prefix}'], textarea[name^='{prefix}']"
+    )
+    try:
+        if question_div is not None:
+            elements = question_div.find_elements(By.CSS_SELECTOR, selector)
+        else:
+            elements = driver.find_elements(By.CSS_SELECTOR, f"#div{question_number} {selector}")
+    except Exception:
+        return 0
+    return len(elements)
+
+
 def _verify_text_indicates_location(value: Optional[str]) -> bool:
     if not value:
         return False
@@ -2030,12 +2109,12 @@ def _count_visible_text_inputs_driver(question_div) -> int:
             contenteditable = (cand.get_attribute("contenteditable") or "").lower() == "true"
         except Exception:
             contenteditable = False
-            if (contenteditable or is_textcont) and tag_name in {"span", "div"}:
-                try:
-                    if cand.is_displayed():
-                        count += 1
-                except Exception:
+        if (contenteditable or is_textcont) and tag_name in {"span", "div"}:
+            try:
+                if cand.is_displayed():
                     count += 1
+            except Exception:
+                count += 1
     return count
 
 
@@ -2819,10 +2898,17 @@ def vacant(driver: BrowserDriver, current, index):
         except Exception:
             q_div = None
         text_input_count = _count_visible_text_inputs_driver(q_div) if q_div is not None else 0
+        prefixed_text_count = _count_prefixed_text_inputs_driver(driver_obj, q_num, q_div)
         is_location_question = _driver_question_is_location(q_div) if q_div is not None else False
-        is_multi = _should_mark_as_multi_text("1", 0, text_input_count, is_location_question) or text_input_count >= 2
+        has_multi_text_signature = prefixed_text_count > 0
+        is_multi = _should_mark_as_multi_text("1", 0, text_input_count, is_location_question)
+        if not is_multi and has_multi_text_signature and not is_location_question:
+            is_multi = True
         if is_multi:
-            blanks = max(2, text_input_count or 2)
+            blanks_hint = prefixed_text_count if prefixed_text_count > 0 else text_input_count
+            blanks = max(1, blanks_hint or 1)
+            if not has_multi_text_signature:
+                blanks = max(2, blanks)
             default_answer = MULTI_TEXT_DELIMITER.join([DEFAULT_FILL_TEXT] * blanks)
             return "multi_text", [default_answer]
         return "text", [DEFAULT_FILL_TEXT]
@@ -2852,6 +2938,11 @@ def vacant(driver: BrowserDriver, current, index):
 
     selected_index = numpy.random.choice(a=numpy.arange(0, len(selection_probabilities)), p=selection_probabilities)
     selected_answer = resolved_candidates[selected_index] if resolved_candidates else DEFAULT_FILL_TEXT
+
+    if entry_kind != "multi_text":
+        prefixed_text_count = _count_prefixed_text_inputs_driver(driver, current)
+        if prefixed_text_count > 0:
+            entry_kind = "multi_text"
 
     if entry_kind == "multi_text":
         raw_text = "" if selected_answer is None else str(selected_answer)
@@ -3915,63 +4006,38 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
 
 
 def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
-    """尝试点击"提交"按钮，兼容多种问卷模板。
-    
+    """点击“提交”按钮（简单版）。
+
+    设计目标：只做“找按钮 -> click”这一件事，不做 JS 强行触发/移除遮罩/调用全局函数等兜底。
+
     Args:
         driver: 浏览器驱动
-        max_wait: 最大等待时间（秒），等待按钮变为可点击状态
+        max_wait: 最大等待时间（秒），用于轮询等待按钮出现
     """
-    # 首先尝试移除可能的遮挡元素并确保按钮可见
-    try:
-        driver.execute_script(
-            """
-            // 移除可能的遮挡层
-            const overlays = document.querySelectorAll('.layui-layer-shade, .modal-backdrop, .overlay');
-            overlays.forEach(el => { try { el.style.display = 'none'; } catch(_) {} });
-            
-            // 确保提交按钮可见
-            const submitSelectors = ['#submit_button', '#divSubmit', '#ctlNext', '#SM_BTN_1', 'a.mainBgColor'];
-            for (const sel of submitSelectors) {
-                const el = document.querySelector(sel);
-                if (el) {
-                    el.style.display = 'block';
-                    el.style.visibility = 'visible';
-                    el.style.opacity = '1';
-                    el.removeAttribute('disabled');
-                    el.classList.remove('disabled', 'hide', 'hidden');
-                }
-            }
-            """
-        )
-    except Exception:
-        pass
-    
+
+    submit_keywords = ("提交", "完成", "交卷", "确认提交", "确认")
+
     locator_candidates = [
         (By.CSS_SELECTOR, "#submit_button"),
         (By.CSS_SELECTOR, "#divSubmit"),
         (By.CSS_SELECTOR, "#ctlNext"),
         (By.CSS_SELECTOR, "#SM_BTN_1"),
-        # 问卷星常用的提交按钮样式
-        (By.CSS_SELECTOR, "a.mainBgColor"),
-        (By.CSS_SELECTOR, "a.button.mainBgColor"),
-        (By.CSS_SELECTOR, "div.mainBgColor"),
-        (By.CSS_SELECTOR, ".submitDiv a"),
-        (By.CSS_SELECTOR, ".btn-submit"),
-        (By.CSS_SELECTOR, "[class*='submit']"),
-        (By.XPATH, "//a[contains(@onclick,'submit') or contains(@onclick,'Submit')]"),
-        (By.XPATH, "//button[contains(@onclick,'submit') or contains(@onclick,'Submit')]"),
-        (By.XPATH, "//a[contains(normalize-space(.),'提交')]"),
-        (By.XPATH, "//button[contains(normalize-space(.),'提交')]"),
-        (By.XPATH, "//div[contains(normalize-space(.),'提交') and contains(@class,'mainBgColor')]"),
-        (By.XPATH, "//a[contains(normalize-space(.),'完成')]"),
-        (By.XPATH, "//button[contains(normalize-space(.),'完成')]"),
-        (By.XPATH, "//a[contains(normalize-space(.),'交卷')]"),
-        (By.XPATH, "//button[contains(normalize-space(.),'交卷')]"),
+        (By.CSS_SELECTOR, "#SubmitBtnGroup .submitbtn"),
+        (By.CSS_SELECTOR, "button[type='submit']"),
+        (By.XPATH, "//a[normalize-space(.)='提交' or normalize-space(.)='完成' or normalize-space(.)='交卷' or normalize-space(.)='确认提交' or normalize-space(.)='确认']"),
+        (By.XPATH, "//button[normalize-space(.)='提交' or normalize-space(.)='完成' or normalize-space(.)='交卷' or normalize-space(.)='确认提交' or normalize-space(.)='确认']"),
     ]
-    
-    # 等待并尝试点击按钮
-    start_time = time.time()
-    while time.time() - start_time < max_wait:
+
+    def _text_looks_like_submit(element) -> bool:
+        text = (_extract_text_from_element(element) or "").strip()
+        if not text:
+            text = (element.get_attribute("value") or "").strip()
+        if not text:
+            return False
+        return any(k in text for k in submit_keywords)
+
+    deadline = time.time() + max(0.0, float(max_wait or 0.0))
+    while True:
         for by, value in locator_candidates:
             try:
                 elements = driver.find_elements(by, value)
@@ -3983,105 +4049,22 @@ def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
                         continue
                 except Exception:
                     continue
-                text = _extract_text_from_element(element)
-                if text and all(k not in text for k in ("提交", "完成", "交卷", "确认", "确定")):
-                    # 如果文本里没这些关键字，尝试依赖 onclick 的元素照样点击
-                    if not element.get_attribute("onclick"):
+
+                if by == By.CSS_SELECTOR and value in ("button[type='submit']",):
+                    if not _text_looks_like_submit(element):
                         continue
+
                 try:
-                    _smooth_scroll_to_element(driver, element, 'center')
+                    element.click()
+                    logging.debug("成功点击提交按钮：%s=%s", by, value)
+                    return True
                 except Exception:
-                    pass
-                # 等待一小段时间确保滚动完成
-                time.sleep(0.1)
-                for click_method in (
-                    lambda: element.click(),
-                    lambda: driver.execute_script("arguments[0].click();", element),
-                    lambda: driver.execute_script(
-                        "arguments[0].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));",
-                        element
-                    ),
-                ):
-                    try:
-                        click_method()
-                        logging.debug("成功点击提交按钮")
-                        return True
-                    except Exception:
-                        continue
-        # 短暂等待后重试
-        time.sleep(0.3)
-    
-    # JS 兜底：通过选择器和文本匹配点击，或调用全局提交函数
-    try:
-        executed = driver.execute_script(
-            """
-            const selectors = [
-                '#submit_button',
-                '#divSubmit',
-                '#ctlNext',
-                '#SM_BTN_1',
-                'a.mainBgColor',
-                'a.button.mainBgColor',
-                'div.mainBgColor',
-                'a.button',
-                'button[type=\"submit\"]',
-                'button',
-                'a[href=\"javascript:;\"]',
-                '.submitDiv a',
-                '.btn-submit'
-            ];
-            const matchText = el => {
-                const t = (el.innerText || el.textContent || '').trim();
-                return /(提交|完成|交卷|确认提交)/.test(t);
-            };
-            const visible = el => {
-                if (!el) return false;
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden') return false;
-                const rect = el.getBoundingClientRect();
-                return rect.width > 0 && rect.height > 0;
-            };
-            for (const sel of selectors) {
-                const elList = Array.from(document.querySelectorAll(sel));
-                for (const el of elList) {
-                    if (!visible(el)) continue;
-                    if (!matchText(el)) continue;
-                    try { el.scrollIntoView({block:'center', behavior:'auto'}); } catch(_) {}
-                    // 尝试多种点击方式
-                    try { el.click(); return true; } catch(_) {}
-                    try { el.focus(); el.click(); return true; } catch(_) {}
-                    try {
-                        el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, composed:true, view:window}));
-                        return true;
-                    } catch(_) {}
-                    try {
-                        const evt = document.createEvent('MouseEvents');
-                        evt.initMouseEvent('click', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
-                        el.dispatchEvent(evt);
-                        return true;
-                    } catch(_) {}
-                }
-            }
-            // 尝试调用全局提交函数
-            const fnNames = ['submit_survey','submitSurvey','wjxwpr_submit','doSubmit','submit','Submit','save','Save'];
-            for (const name of fnNames) {
-                if (typeof window[name] === 'function') {
-                    try { window[name](); return true; } catch(_) {}
-                }
-            }
-            // 最后尝试触发表单提交
-            const forms = document.querySelectorAll('form');
-            for (const form of forms) {
-                try { form.submit(); return true; } catch(_) {}
-            }
-            return false;
-            """
-        )
-        if executed:
-            logging.debug("通过JS成功触发提交")
-            return True
-    except Exception:
-        pass
+                    continue
+
+        if time.time() >= deadline:
+            break
+        time.sleep(0.2)
+
     return False
 
 
@@ -4265,6 +4248,11 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     submit(driver, stop_signal=active_stop)
     return True
 def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None):
+    """点击提交按钮并结束。
+
+    仅保留最基础的行为：可选等待 -> 点击提交 -> 可选稳定等待。
+    不再做弹窗确认/验证码检测/JS 强行触发等兜底逻辑。
+    """
     fast_mode = _is_fast_mode()
     settle_delay = 0 if fast_mode else SUBMIT_CLICK_SETTLE_DELAY
     pre_submit_delay = 0 if fast_mode else SUBMIT_INITIAL_DELAY
@@ -4272,181 +4260,45 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
     global last_submit_had_captcha
     last_submit_had_captcha = False
 
-    def _click_submit_buttons():
-        clicked = False
-        # 首先尝试点击可能存在的弹窗确认按钮
-        try:
-            layer_btn = driver.find_element(By.XPATH, '//*[@id="layui-layer1"]/div[3]/a')
-            if layer_btn.is_displayed():
-                layer_btn.click()
-                clicked = True
-                if settle_delay > 0:
-                    time.sleep(settle_delay)
-        except Exception:
-            pass
-        # 尝试点击 SM_BTN_1
-        try:
-            sm_btn = driver.find_element(By.XPATH, '//*[@id="SM_BTN_1"]')
-            if sm_btn.is_displayed():
-                sm_btn.click()
-                clicked = True
-                if settle_delay > 0:
-                    time.sleep(settle_delay)
-        except Exception:
-            pass
-        # 如果上面的方式都没成功，使用增强的提交按钮点击函数
-        if not clicked:
-            # 使用较长的等待时间来确保按钮可点击
-            clicked = _click_submit_button(driver, max_wait=15.0)
-        return clicked
-
-    def _detect_security_confirm_dialog() -> bool:
-        """检测页面中是否存在“需要安全校验，请重新提交”类型的弹窗或确认按钮。
-
-        此函数仅检测，不执行任何点击或交互操作。
-        返回 True 表示检测到安全校验弹窗/按钮。
-        """
-        script = r"""
-            (() => {
-                const phrases = ['需要安全校验', '安全校验', '安全 验证', '需要安全验证', '请重新提交'];
-                const visible = (el) => {
-                    if (!el) return false;
-                    const style = window.getComputedStyle(el);
-                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-                    const rect = el.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                };
-                const checkDoc = (doc) => {
-                    const nodes = doc.querySelectorAll('div, span, p, a, button');
-                    for (const el of nodes) {
-                        if (!visible(el)) continue;
-                        const text = (el.innerText || el.textContent || '').trim();
-                        if (!text) continue;
-                        for (const p of phrases) {
-                            if (text.includes(p)) return true;
-                        }
-                    }
-                    return false;
-                };
-                if (checkDoc(document)) return true;
-                const frames = Array.from(document.querySelectorAll('iframe'));
-                for (const frame of frames) {
-                    try {
-                        const doc = frame.contentDocument || frame.contentWindow?.document;
-                        if (doc && checkDoc(doc)) return true;
-                    } catch (e) {}
-                }
-                return false;
-            })();
-        """
-        try:
-            return bool(driver.execute_script(script))
-        except Exception:
-            return False
-
-    def _detect_empty_survey_submit_dialog() -> bool:
-        """检测“此问卷没有添加题目，不能提交”类型的提示弹窗。"""
-        script = r"""
-            (() => {
-                const text = (document.body?.innerText || '').replace(/\s+/g, '');
-                if (!text) return false;
-                const hasNoQuestion = (
-                    text.includes('没有添加题目')
-                    || text.includes('未添加题目')
-                    || (text.includes('问卷') && text.includes('没有') && text.includes('题目'))
-                );
-                if (!hasNoQuestion) return false;
-                const hasNoSubmit = text.includes('不能提交') || text.includes('无法提交');
-                if (!hasNoSubmit) return false;
-
-                const visible = (el) => {
-                    if (!el) return false;
-                    const style = window.getComputedStyle(el);
-                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-                    const rect = el.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                };
-                const checkDoc = (doc) => {
-                    const nodes = doc.querySelectorAll('div, span, p, a, button');
-                    for (const el of nodes) {
-                        if (!visible(el)) continue;
-                        const t = (el.innerText || el.textContent || '').replace(/\s+/g, '');
-                        if (!t) continue;
-                        if ((t.includes('没有添加题目') || t.includes('未添加题目'))
-                            && (t.includes('不能提交') || t.includes('无法提交'))) {
-                            return true;
-                        }
-                    }
-                    return false;
-                };
-                if (checkDoc(document)) return true;
-                const frames = Array.from(document.querySelectorAll('iframe'));
-                for (const frame of frames) {
-                    try {
-                        const doc = frame.contentDocument || frame.contentWindow?.document;
-                        if (doc && checkDoc(doc)) return true;
-                    } catch (e) {}
-                }
-                return false;
-            })();
-        """
-        try:
-            return bool(driver.execute_script(script))
-        except Exception:
-            return False
-
-
     if pre_submit_delay > 0 and _sleep_with_stop(stop_signal, pre_submit_delay):
         return
-    _click_submit_buttons()
-    for _ in range(5):
-        if stop_signal and stop_signal.is_set():
-            return
-        if _detect_empty_survey_submit_dialog():
-            logging.warning("检测到问卷未添加题目，无法提交，关闭当前实例并继续下一份。")
-            raise EmptySurveySubmissionError("问卷未添加题目，无法提交")
-        if _sleep_with_stop(stop_signal, 0.25):
-            return
-    # 检查是否出现“需要安全校验/安全校验”类型的弹窗：
-    # - 出现：按配置直接放弃当前浏览器示例（抛出异常交给上层处理并计失败）
-    # - 未出现：继续后续流程
-    for _ in range(5):
-        if stop_signal and stop_signal.is_set():
-            return
-        if _detect_security_confirm_dialog():
-            logging.warning("检测到安全校验弹窗（需要安全校验，请重新提交），将放弃当前浏览器示例并计为失败。")
-            raise SecurityConfirmDetectedError("检测到安全校验弹窗，按配置直接放弃")
-        if _sleep_with_stop(stop_signal, 0.3):
-            return
     if stop_signal and stop_signal.is_set():
         return
-    
-    # 阿里云智能验证：仅检测，出现即触发全局停止（抛出异常交给上层处理）
-    handle_aliyun_captcha(driver, timeout=3, stop_signal=stop_signal)
+
+    clicked = _click_submit_button(driver, max_wait=10.0)
+    if not clicked:
+        raise NoSuchElementException("Submit button not found")
+
+    if settle_delay > 0:
+        time.sleep(settle_delay)
+
+    # 有些模板点击“提交”后会弹出确认层，需要再点一次“确定/确认提交”
     try:
-        slider_text_element = driver.find_element(By.XPATH, '//*[@id="nc_1__scale_text"]/span')
-        slider_handle = driver.find_element(By.XPATH, '//*[@id="nc_1_n1z"]')
-        if str(slider_text_element.text).startswith("请按住滑块"):
-            slider_width = slider_text_element.size.get("width") or 0
-            handle = getattr(slider_handle, "_handle", None)
-            page = getattr(driver, "page", None)
-            if handle and page:
-                try:
-                    box = handle.bounding_box()
-                except Exception:
-                    box = None
-                if box:
-                    start_x = box["x"] + (box.get("width") or 0) / 2
-                    start_y = box["y"] + (box.get("height") or 0) / 2
-                    delta_x = slider_width if slider_width > 0 else 100
-                    try:
-                        page.mouse.move(start_x, start_y)
-                        page.mouse.down()
-                        page.mouse.move(start_x + delta_x, start_y, steps=15)
-                        page.mouse.up()
-                    except Exception:
-                        pass
-    except:
+        confirm_candidates = [
+            (By.XPATH, '//*[@id="layui-layer1"]/div[3]/a'),
+            (By.CSS_SELECTOR, "#layui-layer1 .layui-layer-btn a"),
+            (By.CSS_SELECTOR, ".layui-layer .layui-layer-btn a.layui-layer-btn0"),
+        ]
+        for by, value in confirm_candidates:
+            try:
+                el = driver.find_element(by, value)
+            except Exception:
+                el = None
+            if not el:
+                continue
+            try:
+                if not el.is_displayed():
+                    continue
+            except Exception:
+                continue
+            try:
+                el.click()
+                if settle_delay > 0:
+                    time.sleep(settle_delay)
+                break
+            except Exception:
+                continue
+    except Exception:
         pass
 
 
@@ -4675,11 +4527,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 if stop_signal.is_set():
                     break
                 current_url = driver.current_url
-                if current_url != initial_url:
-                    if "complete" in str(current_url).lower():
-                        completion_detected = True
-                    break
-                if "complete" in str(current_url).lower():
+                current_url_lower = str(current_url).lower()
+                if "complete" in current_url_lower:
                     completion_detected = True
                     break
                 try:
@@ -4692,30 +4541,48 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             final_url = driver.current_url
             if stop_signal.is_set():
                 break
-            if initial_url != final_url or completion_detected:
+            final_url_lower = str(final_url).lower()
+            success_detected = bool(completion_detected or ("complete" in final_url_lower))
+            if not success_detected:
+                raise TimeoutException("提交后未检测到完成页")
+            if success_detected:
                 with lock:
                     if target_num <= 0 or cur_num < target_num:
                         cur_num += 1
                         logging.info(
                             f"[OK] 已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
-                        
                         # 检查是否启用了随机IP提交，如果是，更新计数
                         if random_proxy_ip_enabled:
                             handle_random_ip_submission(gui_instance, stop_signal)
-                        
+                         
                         if target_num > 0 and cur_num >= target_num:
                             stop_signal.set()
                             _trigger_target_reached_stop(gui_instance, stop_signal)
                     else:
                         stop_signal.set()
                         break
-                # 成功提交后立即关闭浏览器实例，不等待完成页
+                # 成功判定后增加缓冲等待，避免过早关闭导致提交请求被中断
+                grace_seconds = float(POST_SUBMIT_CLOSE_GRACE_SECONDS or 0.0)
+                if grace_seconds > 0 and not stop_signal.is_set():
+                    time.sleep(grace_seconds)
                 _dispose_driver()
         except AliyunCaptchaBypassError:
             driver_had_error = True
             _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
             break
+        except TimeoutException as exc:
+            driver_had_error = True
+            if stop_signal.is_set():
+                break
+            logging.warning("提交未完成（未检测到完成页）：%s", exc)
+            with lock:
+                cur_fail += 1
+                print(f"已失败{cur_fail}次, 失败次数达到{int(fail_threshold)}次将强制停止")
+            if cur_fail >= fail_threshold:
+                logging.critical("失败次数过多，强制停止，请检查配置是否正确")
+                stop_signal.set()
+                break
         except EmptySurveySubmissionError:
             driver_had_error = True
             if stop_signal.is_set():
@@ -5918,9 +5785,9 @@ class SurveyGUI(ConfigPersistenceMixin):
         # 进度条区域（在上面）
         progress_frame = ttk.Frame(action_frame)
         progress_frame.pack(fill=tk.X, pady=(0, 5))
-        
+         
         ttk.Label(progress_frame, text="执行进度:", font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=(0, 5))
-        
+         
         self.progress_bar = ttk.Progressbar(
             progress_frame, 
             mode='determinate', 
@@ -5948,8 +5815,8 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         self.status_var = tk.StringVar(value="等待配置...")
         status_label = ttk.Label(button_frame, textvariable=self.status_var)
-        status_label.pack(side=tk.LEFT, padx=10)
-        
+        status_label.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
+          
         self._load_config()
         self._update_full_simulation_controls_state()
         self._update_parameter_widgets_state()

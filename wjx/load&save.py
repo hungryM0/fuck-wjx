@@ -103,6 +103,12 @@ class ConfigPersistenceMixin:
         except Exception:
             pass
 
+        wechat_login_bypass_var = getattr(self, "wechat_login_bypass_enabled_var", None)
+        try:
+            wechat_login_bypass_enabled = bool(wechat_login_bypass_var.get()) if wechat_login_bypass_var is not None else False
+        except Exception:
+            wechat_login_bypass_enabled = False
+
         return {
             "url": self.url_var.get(),
             "target_num": self.target_var.get(),
@@ -111,7 +117,7 @@ class ConfigPersistenceMixin:
             "answer_duration_range": self._serialize_answer_duration_config(),
             "full_simulation": self._serialize_full_simulation_config(),
             "random_user_agent": self._serialize_random_ua_config(),
-            "wechat_login_bypass_enabled": bool(self.wechat_login_bypass_enabled_var.get()),
+            "wechat_login_bypass_enabled": wechat_login_bypass_enabled,
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "paned_position": paned_sash_pos,
             "questions": [
@@ -383,7 +389,12 @@ class ConfigPersistenceMixin:
             )
 
             self.random_ip_enabled_var.set(random_proxy_enabled_in_config)
-            self.wechat_login_bypass_enabled_var.set(bool(config.get("wechat_login_bypass_enabled", False)))
+            wechat_login_bypass_var = getattr(self, "wechat_login_bypass_enabled_var", None)
+            if wechat_login_bypass_var is not None:
+                try:
+                    wechat_login_bypass_var.set(bool(config.get("wechat_login_bypass_enabled", False)))
+                except Exception:
+                    pass
             self._apply_submit_interval_config(config.get("submit_interval"))
             self._apply_answer_duration_config(config.get("answer_duration_range"))
             self._apply_full_simulation_config(config.get("full_simulation"))

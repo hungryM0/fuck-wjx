@@ -159,6 +159,9 @@ SUBMIT_CLICK_SETTLE_DELAY = 0.25
 POST_SUBMIT_URL_MAX_WAIT = 0.5
 # 提交后 URL 变化检测轮询间隔（秒）
 POST_SUBMIT_URL_POLL_INTERVAL = 0.1
+# 判定提交成功后，关闭浏览器实例前的缓冲等待（秒）
+# 目的：避免过早关闭页面导致提交请求尚未发送/尚未完成就被中断。
+POST_SUBMIT_CLOSE_GRACE_SECONDS = 1.2
 # 停止操作的强制等待时间（秒）
 STOP_FORCE_WAIT_SECONDS = 1.5
 
