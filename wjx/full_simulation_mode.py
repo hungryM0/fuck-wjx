@@ -158,11 +158,14 @@ def get_post_submit_wait_params(need_watch_submit: bool, fast_mode: bool) -> Tup
     except Exception:
         POST_SUBMIT_URL_MAX_WAIT = 10.0
         POST_SUBMIT_URL_POLL_INTERVAL = 0.2
+
+    base_wait = float(POST_SUBMIT_URL_MAX_WAIT)
     if FULL_SIM_STATE.enabled:
-        max_wait = 0.12 if not need_watch_submit else (0.25 if fast_mode else min(0.4, float(POST_SUBMIT_URL_MAX_WAIT)))
+        # 不论是否需要人工验证码，都至少等待配置的最大时间，避免提交跳转尚未发生就被判定为失败/进入下一轮
+        max_wait = base_wait if not need_watch_submit else (0.25 if fast_mode else min(0.4, base_wait))
         poll_interval = 0.05 if fast_mode else float(POST_SUBMIT_URL_POLL_INTERVAL)
     else:
-        max_wait = 0.1 if not need_watch_submit else (0.2 if fast_mode else float(POST_SUBMIT_URL_MAX_WAIT))
+        max_wait = base_wait if not need_watch_submit else (0.2 if fast_mode else base_wait)
         poll_interval = 0.05 if fast_mode else float(POST_SUBMIT_URL_POLL_INTERVAL)
     return float(max_wait), float(poll_interval)
 
