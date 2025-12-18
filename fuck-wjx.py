@@ -1218,8 +1218,8 @@ def _trigger_aliyun_captcha_stop(
         _resume_snapshot = {}
 
     message = (
-        "检测到阿里云智能验证，为避免失败提交已停止所有任务。\n"
-        "请勾选“启用随机 IP 提交”后重试。"
+        "检测到阿里云智能验证，为避免失败提交已停止所有任务。\n\n"
+        "是否启用随机 IP 提交以绕过智能验证？\n"
     )
 
     def _notify():
@@ -1231,10 +1231,19 @@ def _trigger_aliyun_captcha_stop(
         except Exception:
             logging.debug("阿里云智能验证触发停止失败", exc_info=True)
         try:
-            if gui_instance and hasattr(gui_instance, "_log_popup_warning"):
-                gui_instance._log_popup_warning("智能验证提示", message)
+            if gui_instance and hasattr(gui_instance, "_log_popup_confirm"):
+                confirmed = bool(gui_instance._log_popup_confirm("智能验证提示", message, icon="warning"))
             else:
-                log_popup_warning("智能验证提示", message)
+                confirmed = bool(log_popup_confirm("智能验证提示", message, icon="warning"))
+
+            if confirmed and gui_instance:
+                try:
+                    var = getattr(gui_instance, "random_ip_enabled_var", None)
+                    if var is not None and hasattr(var, "set"):
+                        var.set(True)
+                    on_random_ip_toggle(gui_instance)
+                except Exception:
+                    logging.warning("自动启用随机IP失败", exc_info=True)
         except Exception:
             logging.warning("弹窗提示用户启用随机IP失败")
 
@@ -4572,10 +4581,86 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
             break
         except TimeoutException as exc:
-            driver_had_error = True
             if stop_signal.is_set():
                 break
-            logging.warning("提交未完成（未检测到完成页）：%s", exc)
+            logging.debug("提交未完成（未检测到完成页）：%s", exc)
+
+            # 未检测到完成页时再等一会：
+            # 1) 继续等待完成页跳转/文案出现
+            # 2) 若仍未完成，检查是否出现阿里云智能验证；若出现则按既有流程触发全局停止
+            completion_detected = False
+            extra_wait_seconds = max(1.0, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 3.0)
+            extra_poll = max(0.05, float(POST_SUBMIT_URL_POLL_INTERVAL or 0.1))
+            extra_deadline = time.time() + extra_wait_seconds
+            while time.time() < extra_deadline:
+                if stop_signal.is_set():
+                    break
+                try:
+                    current_url = driver.current_url
+                except Exception:
+                    current_url = ""
+                if "complete" in str(current_url).lower():
+                    completion_detected = True
+                    break
+                try:
+                    if full_simulation_mode.is_survey_completion_page(driver):
+                        completion_detected = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(extra_poll)
+
+            if not completion_detected and not stop_signal.is_set():
+                aliyun_detected = False
+                try:
+                    aliyun_detected = handle_aliyun_captcha(
+                        driver,
+                        timeout=3,
+                        stop_signal=stop_signal,
+                        raise_on_detect=False,
+                    )
+                except Exception:
+                    aliyun_detected = False
+                if aliyun_detected:
+                    driver_had_error = True
+                    _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
+                    break
+
+            if not completion_detected and not stop_signal.is_set():
+                try:
+                    current_url = driver.current_url
+                except Exception:
+                    current_url = ""
+                if "complete" in str(current_url).lower():
+                    completion_detected = True
+                else:
+                    try:
+                        completion_detected = bool(full_simulation_mode.is_survey_completion_page(driver))
+                    except Exception:
+                        completion_detected = False
+
+            if completion_detected:
+                driver_had_error = False
+                with lock:
+                    if target_num <= 0 or cur_num < target_num:
+                        cur_num += 1
+                        logging.info(
+                            f"[OK] 已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
+                        )
+                        if random_proxy_ip_enabled:
+                            handle_random_ip_submission(gui_instance, stop_signal)
+                        if target_num > 0 and cur_num >= target_num:
+                            stop_signal.set()
+                            _trigger_target_reached_stop(gui_instance, stop_signal)
+                    else:
+                        stop_signal.set()
+                grace_seconds = float(POST_SUBMIT_CLOSE_GRACE_SECONDS or 0.0)
+                if grace_seconds > 0 and not stop_signal.is_set():
+                    time.sleep(grace_seconds)
+                _dispose_driver()
+                continue
+
+            driver_had_error = True
             with lock:
                 cur_fail += 1
                 print(f"已失败{cur_fail}次, 失败次数达到{int(fail_threshold)}次将强制停止")
