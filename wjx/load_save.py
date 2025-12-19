@@ -28,7 +28,7 @@ def _ensure_question_entry_class():
     return QuestionEntry
 
 
-def _sanitize_filename(value: str, max_length: int = 80) -> str:
+def _sanitize_filename(value: Optional[str], max_length: int = 80) -> str:
     """移除文件名中的非法字符。"""
     normalized = "".join(ch for ch in (value or "") if ch.isprintable())
     normalized = normalized.strip().replace(" ", "_")
