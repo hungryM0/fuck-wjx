@@ -5,7 +5,7 @@ import logging
 import os
 import random
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import tkinter as tk
 from tkinter import filedialog
@@ -54,7 +54,63 @@ def _select_user_agent_from_keys(selected_keys: List[str]) -> Tuple[Optional[str
 
 
 class ConfigPersistenceMixin:
-    """封装配置加载与保存的通用逻辑，供 GUI 复用。"""
+    """封装配置加载与保存的通用逻辑,供 GUI 复用。
+    
+    注意: 此 mixin 期望在使用它的类中定义以下属性:
+    - url_var, target_var, thread_var (tk变量)
+    - random_ip_enabled_var (tk变量)
+    - interval_minutes_var, interval_seconds_var, interval_max_minutes_var, interval_max_seconds_var
+    - answer_duration_min_var, answer_duration_max_var
+    - full_simulation_enabled_var, full_sim_target_var, full_sim_estimated_minutes_var 等
+    - question_entries (问题条目列表)
+    - main_paned, root (tkinter组件)
+    - 各种方法: _log_popup_info, _log_popup_error, _log_popup_confirm 等
+    """
+    
+    # 类型提示: 这些属性将在子类中定义
+    if TYPE_CHECKING:
+        url_var: tk.StringVar
+        target_var: tk.StringVar
+        thread_var: tk.StringVar
+        random_ip_enabled_var: tk.BooleanVar
+        interval_minutes_var: tk.StringVar
+        interval_seconds_var: tk.StringVar
+        interval_max_minutes_var: tk.StringVar
+        interval_max_seconds_var: tk.StringVar
+        answer_duration_min_var: tk.StringVar
+        answer_duration_max_var: tk.StringVar
+        random_ua_enabled_var: tk.BooleanVar
+        random_ua_pc_web_var: tk.BooleanVar
+        random_ua_android_wechat_var: tk.BooleanVar
+        random_ua_ios_wechat_var: tk.BooleanVar
+        random_ua_ipad_wechat_var: tk.BooleanVar
+        random_ua_ipad_web_var: tk.BooleanVar
+        random_ua_android_tablet_wechat_var: tk.BooleanVar
+        random_ua_android_tablet_web_var: tk.BooleanVar
+        random_ua_mac_wechat_var: tk.BooleanVar
+        random_ua_windows_wechat_var: tk.BooleanVar
+        random_ua_mac_web_var: tk.BooleanVar
+        full_simulation_enabled_var: tk.BooleanVar
+        full_sim_target_var: tk.StringVar
+        full_sim_estimated_minutes_var: tk.StringVar
+        full_sim_estimated_seconds_var: tk.StringVar
+        full_sim_total_minutes_var: tk.StringVar
+        full_sim_total_seconds_var: tk.StringVar
+        question_entries: List[Any]
+        main_paned: Any
+        root: tk.Tk
+        _last_survey_title: Optional[str]
+        def _log_popup_info(self, title: str, message: str, **kwargs) -> str: ...
+        def _log_popup_error(self, title: str, message: str, **kwargs) -> str: ...
+        def _log_popup_confirm(self, title: str, message: str, **kwargs) -> bool: ...
+        def _refresh_tree(self) -> None: ...
+        def _update_full_simulation_controls_state(self) -> None: ...
+        def _update_parameter_widgets_state(self) -> None: ...
+        def _apply_random_ua_widgets_state(self) -> None: ...
+        def _auto_update_full_simulation_times(self) -> None: ...
+        def _update_full_sim_time_section_visibility(self) -> None: ...
+        def _update_full_sim_completion_time(self) -> None: ...
+        def _restore_saved_paned_position(self, target_position: int, attempts: int = 5, delay_ms: int = 120) -> None: ...
 
     def _get_config_path(self) -> str:
         return os.path.join(get_runtime_directory(), "config.json")

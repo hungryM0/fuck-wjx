@@ -3714,7 +3714,13 @@ class SurveyGUI(ConfigPersistenceMixin):
                 return idx
         return None
 
-    def _handle_auto_config_entry(self, entry: QuestionEntry, question_meta: Optional[Dict[str, Any]] = None):
+    def _handle_auto_config_entry(
+        self,
+        entry: QuestionEntry,
+        question_meta: Optional[Dict[str, Any]] = None,
+        *,
+        overwrite_existing: Optional[bool] = None,
+    ):
         question_id = None
         question_title = ""
         if question_meta:
@@ -3723,6 +3729,18 @@ class SurveyGUI(ConfigPersistenceMixin):
         entry.question_num = question_id
         conflict_index = self._find_entry_index_by_question(question_id)
         if conflict_index is not None:
+            if overwrite_existing is True:
+                previous_entry = deepcopy(self.question_entries[conflict_index])
+                self.question_entries[conflict_index] = entry
+                self._wizard_commit_log.append(
+                    {"action": "replace", "index": conflict_index, "previous": previous_entry}
+                )
+                logging.info(f"[Action Log] Wizard overwrote configuration for question {question_id or '?'}")
+                return
+            if overwrite_existing is False:
+                self._wizard_commit_log.append({"action": "skip"})
+                logging.info(f"[Action Log] Wizard kept existing configuration for question {question_id or '?'}")
+                return
             question_label = f"第 {question_id} 题" if question_id else "该题目"
             title_suffix = f"「{question_title[:40]}{'...' if len(question_title) > 40 else ''}」" if question_title else ""
             message = (
@@ -3863,6 +3881,14 @@ class SurveyGUI(ConfigPersistenceMixin):
             return
         
         q = questions_info[current_index]
+        question_id = self._normalize_question_identifier(q.get("num"))
+        existing_entry: Optional[QuestionEntry] = None
+        existing_entry_index = self._find_entry_index_by_question(question_id)
+        if existing_entry_index is not None:
+            try:
+                existing_entry = self.question_entries[existing_entry_index]
+            except Exception:
+                existing_entry = None
         type_code = q["type_code"]
         is_location_question = bool(q.get("is_location"))
         normalized_type_code = _normalize_question_type_code(type_code)
@@ -4108,7 +4134,9 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         option_texts_in_question = q.get('option_texts', [])
 
-        def _build_fillable_inputs() -> Tuple[List[Optional[tk.StringVar]], Callable[[ttk.Frame, int], None]]:
+        def _build_fillable_inputs(
+            initial_fill_texts: Optional[List[Optional[str]]] = None,
+        ) -> Tuple[List[Optional[tk.StringVar]], Callable[[ttk.Frame, int], None]]:
             option_total = q.get('options') or 0
             valid_indices = {idx for idx in detected_fillable_indices if isinstance(idx, int) and 0 <= idx < option_total}
             if option_total <= 0 or not valid_indices:
@@ -4122,7 +4150,10 @@ class SurveyGUI(ConfigPersistenceMixin):
                 inline_row = ttk.Frame(parent_frame)
                 inline_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(2, 4))
                 ttk.Label(inline_row, text="附加填空：").pack(side=tk.LEFT)
-                var = tk.StringVar(value='')
+                initial_value = ""
+                if initial_fill_texts and opt_index < len(initial_fill_texts):
+                    initial_value = initial_fill_texts[opt_index] or ""
+                var = tk.StringVar(value=initial_value)
                 entry_widget = ttk.Entry(inline_row, textvariable=var, width=32)
                 entry_widget.pack(side=tk.LEFT, padx=(6, 6), fill=tk.X, expand=True)
                 self._bind_ime_candidate_position(entry_widget)
@@ -4249,7 +4280,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                     custom_weights=None,
                     is_location=False,
                 )
-                self._handle_auto_config_entry(entry, q)
+                self._handle_auto_config_entry(entry, q, overwrite_existing=True)
                 _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
 
@@ -4367,7 +4398,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                     custom_weights=None,
                     is_location=bool(q.get("is_location")),
                 )
-                self._handle_auto_config_entry(entry, q)
+                self._handle_auto_config_entry(entry, q, overwrite_existing=True)
                 _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
@@ -4380,7 +4411,15 @@ class SurveyGUI(ConfigPersistenceMixin):
             sliders_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
             sliders = []
-            fill_text_vars, attach_inline_fill = _build_fillable_inputs()
+            existing_prob_weights: Optional[List[float]] = None
+            existing_fill_texts: Optional[List[Optional[str]]] = None
+            if existing_entry and existing_entry.question_type == "multiple":
+                if isinstance(existing_entry.custom_weights, list):
+                    existing_prob_weights = existing_entry.custom_weights
+                if isinstance(existing_entry.option_fill_texts, list):
+                    existing_fill_texts = existing_entry.option_fill_texts
+
+            fill_text_vars, attach_inline_fill = _build_fillable_inputs(existing_fill_texts)
             for i in range(q['options']):
                 row_frame = ttk.Frame(sliders_frame)
                 row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
@@ -4394,11 +4433,17 @@ class SurveyGUI(ConfigPersistenceMixin):
                                        anchor="w", wraplength=500)
                 text_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
 
-                var = tk.DoubleVar(value=50.0)
+                initial_prob = 50.0
+                if existing_prob_weights and i < len(existing_prob_weights):
+                    try:
+                        initial_prob = float(existing_prob_weights[i])
+                    except Exception:
+                        initial_prob = 50.0
+                var = tk.DoubleVar(value=initial_prob)
                 slider = ttk.Scale(row_frame, from_=0, to=100, variable=var, orient=tk.HORIZONTAL)
                 slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
 
-                label = ttk.Label(row_frame, text="50%", width=6, anchor="e")
+                label = ttk.Label(row_frame, text=f"{int(var.get())}%", width=6, anchor="e")
                 label.grid(row=1, column=2, sticky="e")
 
                 var.trace_add("write", lambda *args, l=label, v=var: l.config(text=f"{int(v.get())}%"))
@@ -4421,7 +4466,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                     option_fill_texts=fill_values,
                     fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
-                self._handle_auto_config_entry(entry, q)
+                self._handle_auto_config_entry(entry, q, overwrite_existing=True)
                 _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
@@ -4451,16 +4496,37 @@ class SurveyGUI(ConfigPersistenceMixin):
 
             ttk.Label(config_frame, text="选择分布方式：").pack(anchor="w", pady=10, fill=tk.X)
 
-            dist_var = tk.StringVar(value="random")
+            initial_mode = "random"
+            initial_weights: Optional[List[float]] = None
+            existing_fill_texts: Optional[List[Optional[str]]] = None
+            if existing_entry:
+                if existing_entry.distribution_mode in ("custom", "equal"):
+                    initial_mode = "custom"
+                else:
+                    initial_mode = "random"
+                if isinstance(existing_entry.custom_weights, list):
+                    initial_weights = existing_entry.custom_weights
+                if isinstance(existing_entry.option_fill_texts, list):
+                    existing_fill_texts = existing_entry.option_fill_texts
+            if initial_weights and len(initial_weights) != q['options']:
+                initial_weights = None
+
+            dist_var = tk.StringVar(value=initial_mode)
 
             weight_frame = ttk.Frame(config_frame)
 
-            ttk.Radiobutton(config_frame, text="完全随机（每次随机选择）",
-                          variable=dist_var, value="random",
-                          command=lambda: weight_frame.pack_forget()).pack(anchor="w", pady=5, fill=tk.X)
-            ttk.Radiobutton(config_frame, text="自定义权重（使用滑块设置）",
-                          variable=dist_var, value="custom",
-                          command=lambda: weight_frame.pack(fill=tk.BOTH, expand=True, pady=10)).pack(anchor="w", pady=5, fill=tk.X)
+            ttk.Radiobutton(
+                config_frame,
+                text="完全随机（每次随机选择）",
+                variable=dist_var,
+                value="random",
+            ).pack(anchor="w", pady=5, fill=tk.X)
+            ttk.Radiobutton(
+                config_frame,
+                text="自定义权重（使用滑块设置）",
+                variable=dist_var,
+                value="custom",
+            ).pack(anchor="w", pady=5, fill=tk.X)
 
             ttk.Label(weight_frame, text="拖动滑块设置每个选项的权重比例：",
                      foreground="gray").pack(anchor="w", pady=(10, 5), fill=tk.X)
@@ -4472,7 +4538,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             fill_text_vars: List[Optional[tk.StringVar]] = []
             attach_inline_fill: Callable[[ttk.Frame, int], None] = lambda *_: None
             if type_code in ("3", "7"):
-                fill_text_vars, attach_inline_fill = _build_fillable_inputs()
+                fill_text_vars, attach_inline_fill = _build_fillable_inputs(existing_fill_texts)
             for i in range(q['options']):
                 slider_frame = ttk.Frame(sliders_weight_frame)
                 slider_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
@@ -4486,11 +4552,17 @@ class SurveyGUI(ConfigPersistenceMixin):
                                        anchor="w", wraplength=500)
                 text_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
 
-                var = tk.DoubleVar(value=1.0)
+                initial_value = 1.0
+                if initial_weights and i < len(initial_weights):
+                    try:
+                        initial_value = float(initial_weights[i])
+                    except Exception:
+                        initial_value = 1.0
+                var = tk.DoubleVar(value=initial_value)
                 slider = ttk.Scale(slider_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
                 slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
 
-                value_label = ttk.Label(slider_frame, text="1.0", width=6, anchor="e")
+                value_label = ttk.Label(slider_frame, text=f"{var.get():.1f}", width=6, anchor="e")
                 value_label.grid(row=1, column=2, sticky="e")
 
                 def update_label(v=var, l=value_label):
@@ -4531,9 +4603,19 @@ class SurveyGUI(ConfigPersistenceMixin):
                     option_fill_texts=fill_values,
                     fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
-                self._handle_auto_config_entry(entry, q)
+                self._handle_auto_config_entry(entry, q, overwrite_existing=True)
                 _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
+
+            def _toggle_weight_frame(*_):
+                if dist_var.get() == "custom":
+                    if not weight_frame.winfo_manager():
+                        weight_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+                else:
+                    weight_frame.pack_forget()
+
+            dist_var.trace_add("write", _toggle_weight_frame)
+            _toggle_weight_frame()
         
         # 按钮区域（固定在窗口底部）- 使用分隔线和更好的布局
         separator = ttk.Separator(wizard_win, orient='horizontal')
@@ -4567,7 +4649,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         prev_index = 0
         if self._wizard_history:
             prev_index = self._wizard_history.pop()
-        self._revert_last_wizard_action()
         if destroy_cb:
             destroy_cb()
         else:
@@ -4806,6 +4887,9 @@ class SurveyGUI(ConfigPersistenceMixin):
         proxy_ip_pool = proxy_pool if random_proxy_flag else []
         random_user_agent_enabled = random_ua_flag
         user_agent_pool_keys = random_ua_keys_list
+        # 从 engine 模块获取当前值，或初始化为 0
+        cur_num = getattr(engine, 'cur_num', 0)
+        cur_fail = getattr(engine, 'cur_fail', 0)
         # 同步到 engine 模块全局，避免 import * 的副本和运行线程读到旧值
         engine.url = url
         engine.target_num = target_num
@@ -5452,7 +5536,8 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         def _update_ime_pos(event=None):
             try:
-                bbox = widget.bbox("insert")
+                # bbox() 方法对于 Text/Entry 组件返回 (x, y, width, height)
+                bbox = widget.bbox(tk.INSERT)  # type: ignore[call-overload]
             except Exception:
                 bbox = None
             if not bbox:
