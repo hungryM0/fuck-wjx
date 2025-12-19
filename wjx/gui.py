@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+import queue
 
 from wjx import boot
 from wjx.boot import LoadingSplash
@@ -159,6 +160,47 @@ class SurveyGUI(ConfigPersistenceMixin):
         返回写入的文件路径。
         """
         return dump_threads_to_file(tag, _get_runtime_directory())
+
+    def _post_to_ui_thread(self, callback: Callable[[], None]) -> None:
+        """将需要操作 UI 的回调安全地派发到主线程执行。"""
+        if callback is None:
+            return
+        try:
+            self._ui_task_queue.put(callback)
+        except Exception:
+            logging.debug("无法加入 UI 回调队列", exc_info=True)
+
+    def _drain_ui_task_queue(self):
+        """周期性拉取队列中的 UI 任务并在主线程执行。"""
+        delay_ms = 60
+        try:
+            while True:
+                try:
+                    callback = self._ui_task_queue.get_nowait()
+                except queue.Empty:
+                    break
+                delay_ms = 15
+                try:
+                    callback()
+                except Exception:
+                    logging.debug("UI 回调执行失败", exc_info=True)
+        finally:
+            try:
+                self._ui_task_job = self.root.after(delay_ms, self._drain_ui_task_queue)
+            except Exception:
+                self._ui_task_job = None
+
+    def _start_ui_task_loop(self):
+        """启动 UI 任务队列的轮询，确保在关闭前始终运行。"""
+        if getattr(self, "_ui_task_job", None):
+            try:
+                self.root.after_cancel(self._ui_task_job)
+            except Exception:
+                pass
+        try:
+            self._ui_task_job = self.root.after(0, self._drain_ui_task_queue)
+        except Exception:
+            self._ui_task_job = None
 
     def _exit_app(self):
         """结束应用，优先销毁 Tk，再强制退出以避免残留卡顿。"""
@@ -690,6 +732,8 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._launched_browser_pids: Set[int] = set()  # 跟踪本次会话启动的浏览器 PID
         self._stop_cleanup_thread_running = False  # 避免重复触发停止清理
         self._force_stop_now = False  # 达到目标后立即停止，不等待线程收尾
+        self._ui_task_queue: "queue.SimpleQueue[Callable[[], None]]" = queue.SimpleQueue()
+        self._ui_task_job: Optional[str] = None
         # 是否在点击停止后自动退出；可用环境变量 AUTO_EXIT_ON_STOP 控制，默认关闭
         _auto_exit_env = str(os.getenv("AUTO_EXIT_ON_STOP", "")).strip().lower()
         self._auto_exit_on_stop = _auto_exit_env in ("1", "true", "yes", "on")
@@ -733,6 +777,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._full_simulation_window: Optional[tk.Toplevel] = None
         self._full_sim_status_label: Optional[ttk.Label] = None
 
+        self._start_ui_task_loop()
         self._archived_notice_shown = False
         self._random_ip_disclaimer_ack = False
         self._suspend_random_ip_notice = False
@@ -4816,11 +4861,11 @@ class SurveyGUI(ConfigPersistenceMixin):
             proxy_api = ctx.get("random_proxy_api")
             proxy_pool = _fetch_new_proxy_batch(expected_count=need_count, proxy_url=proxy_api)
         except (OSError, ValueError, RuntimeError) as exc:
-            self.root.after(0, lambda: self._on_proxy_load_failed(str(exc)))
+            self._post_to_ui_thread(lambda: self._on_proxy_load_failed(str(exc)))
             return
         if getattr(self, "_closing", False):
             return
-        self.root.after(0, lambda: self._finish_start_run(ctx, proxy_pool))
+        self._post_to_ui_thread(lambda: self._finish_start_run(ctx, proxy_pool))
 
     def _on_proxy_load_failed(self, message: str):
         if getattr(self, "_closing", False):
@@ -5165,7 +5210,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         # 允许从后台线程触发：把 UI 操作切回主线程，避免 Tk 在多线程下卡死/异常卡顿
         if threading.current_thread() is not threading.main_thread():
             try:
-                self.root.after(0, lambda: self.force_stop_immediately(reason=reason))
+                self._post_to_ui_thread(lambda: self.force_stop_immediately(reason=reason))
             except Exception:
                 pass
             return
@@ -5234,7 +5279,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         # 允许从后台线程触发：把 UI 操作切回主线程，避免 Tk 在多线程下卡死/异常卡顿
         if threading.current_thread() is not threading.main_thread():
             try:
-                self.root.after(0, self.stop_run)
+                self._post_to_ui_thread(self.stop_run)
             except Exception:
                 pass
             return
@@ -5292,6 +5337,12 @@ class SurveyGUI(ConfigPersistenceMixin):
 
     def on_close(self):
         self._closing = True
+        if getattr(self, "_ui_task_job", None):
+            try:
+                self.root.after_cancel(self._ui_task_job)
+            except Exception:
+                pass
+            self._ui_task_job = None
         # 停止日志刷新
         if self._log_refresh_job:
             try:

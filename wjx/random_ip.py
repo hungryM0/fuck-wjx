@@ -393,6 +393,13 @@ def _schedule_on_gui_thread(gui: Any, callback: Callable[[], None]):
     if gui is None:
         callback()
         return
+    dispatcher = getattr(gui, "_post_to_ui_thread", None)
+    if callable(dispatcher):
+        try:
+            dispatcher(callback)
+            return
+        except Exception:
+            logging.debug("将回调派发到 GUI 线程失败", exc_info=True)
     root = getattr(gui, "root", None)
     if root is None:
         callback()
