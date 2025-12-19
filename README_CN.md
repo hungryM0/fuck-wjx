@@ -8,8 +8,6 @@
 
 **注意：此项目仅供学习与测试目的使用，请确保对目标问卷有自动提交的授权，避免滥用或违反他人服务条款，严禁污染他人的问卷数据**
 
-<img width="600" height="505" alt="gui" src="https://github.com/user-attachments/assets/2d6f051b-112b-488f-b5ac-df52f90bffc9" />
-
 ---
 
 **主要特性**
@@ -24,11 +22,11 @@
 - ⏸️随时停止：可随时优雅地停止执行而不丢失进度
 - 📁支持保存问卷，方便多次复用同一份问卷的答案策略
 
-<img width="600" height="505" alt="QQ20251207-110703" src="https://github.com/user-attachments/assets/9e376c4f-43bc-4e97-b9b2-55f44d6d8c3f" />
+<img width="600" height="505" alt="gui" src="https://github.com/user-attachments/assets/e9f71c9b-5222-4196-916c-df6eed5a743b" />
 
 ---
 
-**如果你只是一个想刷问卷的无辜大学生（？）**
+**如果你只是一个无辜路人大学生（？）**
 
 ✅可直接在本项目的 [Release](https://github.com/hungryM0/fuck-wjx/releases/latest) 中下载发行版exe程序，双击运行，开箱即用，无需任何额外复杂繁琐的环境部署！
 
