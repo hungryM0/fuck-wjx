@@ -576,11 +576,11 @@ def handle_aliyun_captcha(
 
 url = ""
 
-single_prob: List[Union[List[float], int]] = []
-droplist_prob: List[Union[List[float], int]] = []
+single_prob: List[Union[List[float], int, float, None]] = []
+droplist_prob: List[Union[List[float], int, float, None]] = []
 multiple_prob: List[List[float]] = []
-matrix_prob: List[Union[List[float], int]] = []
-scale_prob: List[Union[List[float], int]] = []
+matrix_prob: List[Union[List[float], int, float, None]] = []
+scale_prob: List[Union[List[float], int, float, None]] = []
 texts: List[List[str]] = []
 texts_prob: List[List[float]] = []
 # 多项填空题：同一题含多个输入框，内部使用 "||" 分隔每个填空项
@@ -673,6 +673,8 @@ def _trigger_aliyun_captcha_stop(
         except Exception:
             logging.debug("阿里云智能验证触发停止失败", exc_info=True)
         try:
+            if threading.current_thread() is not threading.main_thread():
+                return
             if gui_instance and hasattr(gui_instance, "_log_popup_confirm"):
                 confirmed = bool(gui_instance._log_popup_confirm("智能验证提示", message, icon="warning"))
             else:
@@ -689,13 +691,20 @@ def _trigger_aliyun_captcha_stop(
         except Exception:
             logging.warning("弹窗提示用户启用随机IP失败")
 
+    dispatcher = getattr(gui_instance, "_post_to_ui_thread", None) if gui_instance else None
+    if callable(dispatcher):
+        try:
+            dispatcher(_notify)
+            return
+        except Exception:
+            logging.debug("派发阿里云停止事件到主线程失败", exc_info=True)
     root = getattr(gui_instance, "root", None) if gui_instance else None
-    if root is not None:
+    if root is not None and threading.current_thread() is threading.main_thread():
         try:
             root.after(0, _notify)
             return
         except Exception:
-            pass
+            logging.debug("root.after 派发阿里云停止事件失败", exc_info=True)
     _notify()
 
 
@@ -722,8 +731,15 @@ def _trigger_target_reached_stop(
         except Exception:
             logging.debug("达到目标份数时触发强制停止失败", exc_info=True)
 
+    dispatcher = getattr(gui_instance, "_post_to_ui_thread", None) if gui_instance else None
+    if callable(dispatcher):
+        try:
+            dispatcher(_notify)
+            return
+        except Exception:
+            logging.debug("派发任务完成事件到主线程失败", exc_info=True)
     root = getattr(gui_instance, "root", None) if gui_instance else None
-    if root is not None:
+    if root is not None and threading.current_thread() is threading.main_thread():
         try:
             root.after(0, _notify)
             return
@@ -745,6 +761,17 @@ def normalize_probabilities(values: List[float]) -> List[float]:
     if total <= 0:
         raise ValueError("概率列表的和必须大于0")
     return [value / total for value in values]
+
+
+def _normalize_single_like_prob_config(prob_config: Union[List[float], int, float, None], option_count: int) -> Union[List[float], int]:
+    """
+    将单选/下拉/量表的权重长度对齐到选项数。
+    - -1 保持随机
+    - 其余情况按 _normalize_droplist_probs 逻辑扩展/截断并归一化
+    """
+    if prob_config == -1 or prob_config is None:
+        return -1
+    return _normalize_droplist_probs(prob_config, option_count)
 
 
 @dataclass
@@ -826,7 +853,13 @@ class QuestionEntry:
                     return str(int(rounded))
                 return f"{rounded}".rstrip("0").rstrip(".")
 
-            weights_str = ":".join(_format_ratio(max(w, 0.1)) for w in self.custom_weights)
+            def _safe_weight(raw_value: Any) -> float:
+                try:
+                    return max(float(raw_value), 0.0)
+                except Exception:
+                    return 0.0
+
+            weights_str = ":".join(_format_ratio(_safe_weight(w)) for w in self.custom_weights)
             return f"{self.option_count} 个选项 - 配比 {weights_str}{fillable_hint}"
 
         return f"{self.option_count} 个选项 - {mode_text}{fillable_hint}"
@@ -945,10 +978,10 @@ def configure_probabilities(entries: List[QuestionEntry]):
     for entry in entries:
         probs = entry.probabilities
         if entry.question_type == "single":
-            single_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+            single_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
             single_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "dropdown":
-            droplist_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+            droplist_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
             droplist_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "multiple":
             if not isinstance(probs, list):
@@ -965,7 +998,7 @@ def configure_probabilities(entries: List[QuestionEntry]):
                 for _ in range(rows):
                     matrix_prob.append(-1)
         elif entry.question_type == "scale":
-            scale_prob.append(normalize_probabilities(probs) if isinstance(probs, list) else -1)
+            scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
         elif entry.question_type in ("text", "multi_text"):
             raw_values = entry.texts or []
             normalized_values: List[str] = []
@@ -2667,20 +2700,25 @@ def single(driver: BrowserDriver, current, index):
     if not option_elements:
         logging.warning(f"第{current}题未找到任何单选选项，已跳过该题。")
         return
-    probabilities = single_prob[index] if index < len(single_prob) else -1
-    if probabilities == -1:
-        selected_option = random.randint(1, len(option_elements))
-    else:
-        if len(probabilities) != len(option_elements):
-            logging.warning(
-                "单选题概率配置与选项数不一致（题号%s，概率数%s，选项数%s），已改为平均随机选择。",
-                current,
-                len(probabilities),
-                len(option_elements),
-            )
-            selected_option = random.randint(1, len(option_elements))
-        else:
-            selected_option = numpy.random.choice(a=numpy.arange(1, len(option_elements) + 1), p=probabilities)
+    prob_config = single_prob[index] if index < len(single_prob) else -1
+    config_len = None
+    try:
+        if hasattr(prob_config, "__len__") and not isinstance(prob_config, (int, float)):
+            config_len = len(prob_config)
+    except Exception:
+        config_len = None
+    probabilities = _normalize_droplist_probs(prob_config, len(option_elements))
+    if config_len is not None and config_len != len(option_elements):
+        logging.debug(
+            "单选题概率配置与选项数不一致（题号%s，概率数%s，选项数%s），已按设定权重自动扩展/截断并重新归一化。",
+            current,
+            config_len,
+            len(option_elements),
+        )
+    selected_option = numpy.random.choice(
+        a=numpy.arange(1, len(probabilities) + 1),
+        p=probabilities,
+    )
     target_index = selected_option - 1
     target_elem = option_elements[target_index] if target_index < len(option_elements) else None
     clicked = False
@@ -2710,7 +2748,7 @@ def single(driver: BrowserDriver, current, index):
     _fill_option_additional_text(driver, current, selected_option - 1, fill_value)
 
 
-def _normalize_droplist_probs(prob_config: Union[List[float], int, None], option_count: int) -> List[float]:
+def _normalize_droplist_probs(prob_config: Union[List[float], int, float, None], option_count: int) -> List[float]:
     if option_count <= 0:
         return []
     if prob_config == -1 or prob_config is None:
