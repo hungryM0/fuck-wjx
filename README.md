@@ -162,3 +162,8 @@ Issues and PRs are welcome:
 - Add compatibility for more question types/page structures
 - Improve concurrency and error handling
 - Speed up submission process
+
+---
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=hungryM0/fuck-wjx&type=date&legend=top-left)](https://www.star-history.com/#hungryM0/fuck-wjx&type=date&legend=top-left)
