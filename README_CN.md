@@ -153,6 +153,11 @@ python fuck-wjx.py
 <img width="400" height="300" alt="payment" src="https://github.com/user-attachments/assets/62b6518f-97bb-4010-971a-3b89efb8359d" />
 
 ---
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=hungryM0/fuck-wjx&type=date&legend=top-left)](https://www.star-history.com/#hungryM0/fuck-wjx&type=date&legend=top-left)
+
+---
 
 **如何贡献**
 
