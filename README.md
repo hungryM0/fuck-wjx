@@ -27,7 +27,7 @@ This project is a fun extension with new features, providing a GUI for configuri
 
 ---
 
-**If You're Just a Survey-Filling Newbie**
+**If You're Just a passer-by**
 
 ✅ Download the exe release directly from [Release](https://github.com/hungryM0/fuck-wjx/releases/latest), double-click to run, ready to use out-of-the-box, no complex environment setup required!
 
