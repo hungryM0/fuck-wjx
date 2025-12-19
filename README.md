@@ -22,7 +22,8 @@ This project is a fun extension with new features, providing a GUI for configuri
 - ⏸️ Stop anytime: gracefully stop execution at any time without losing progress
 - 📁 Save survey configurations for reusing answer strategies on the same survey
 
-<img width="600" height="505" alt="QQ20251207-110703" src="https://github.com/user-attachments/assets/9e376c4f-43bc-4e97-b9b2-55f44d6d8c3f" />
+<img width="600" height="505" alt="gui" src="https://github.com/user-attachments/assets/e9f71c9b-5222-4196-916c-df6eed5a743b" />
+
 
 ---
 
