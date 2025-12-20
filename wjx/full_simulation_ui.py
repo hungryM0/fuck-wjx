@@ -122,6 +122,27 @@ def set_full_sim_duration(minutes_var: tk.StringVar, seconds_var: tk.StringVar, 
     return True
 
 
+def sync_full_sim_total_with_estimated(gui: Any) -> None:
+    """根据单次作答时长和目标份数，同步计算总时长。"""
+    target_value = parse_positive_int(gui.full_sim_target_var.get()) or parse_positive_int(gui.target_var.get())
+    if target_value <= 0:
+        return
+    try:
+        est_minutes = int(str(gui.full_sim_estimated_minutes_var.get()).strip() or "0")
+    except Exception:
+        est_minutes = 0
+    try:
+        est_seconds = int(str(gui.full_sim_estimated_seconds_var.get()).strip() or "0")
+    except Exception:
+        est_seconds = 0
+    estimated_seconds = max(0, est_minutes) * 60 + max(0, est_seconds)
+    if estimated_seconds <= 0:
+        return
+    total_seconds = estimated_seconds * target_value
+    if set_full_sim_duration(gui.full_sim_total_minutes_var, gui.full_sim_total_seconds_var, total_seconds):
+        update_full_sim_completion_time(gui)
+
+
 def auto_update_full_simulation_times(gui: Any) -> None:
     update_full_sim_time_section_visibility(gui)
     if getattr(gui, "_suspend_full_sim_autofill", False):

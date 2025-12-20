@@ -1086,8 +1086,8 @@ class SurveyGUI(ConfigPersistenceMixin):
         self.random_ip_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.fail_stop_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.full_sim_target_var.trace_add("write", lambda *args: self._on_full_sim_target_changed())
-        self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._mark_config_changed())
-        self.full_sim_estimated_seconds_var.trace("w", lambda *args: self._mark_config_changed())
+        self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._on_full_sim_estimated_changed())
+        self.full_sim_estimated_seconds_var.trace("w", lambda *args: self._on_full_sim_estimated_changed())
         self.full_sim_total_minutes_var.trace("w", lambda *args: self._on_full_sim_total_changed())
         self.full_sim_total_seconds_var.trace("w", lambda *args: self._on_full_sim_total_changed())
         self.full_simulation_enabled_var.trace_add("write", lambda *args: self._on_full_simulation_toggle())
@@ -1510,6 +1510,13 @@ class SurveyGUI(ConfigPersistenceMixin):
 
     def _set_full_sim_duration(self, minutes_var: tk.StringVar, seconds_var: tk.StringVar, total_seconds: int) -> bool:
         return bool(full_simulation_ui.set_full_sim_duration(minutes_var, seconds_var, total_seconds))
+
+    def _sync_full_sim_total_with_estimated(self):
+        return full_simulation_ui.sync_full_sim_total_with_estimated(self)
+
+    def _on_full_sim_estimated_changed(self, *_):
+        self._mark_config_changed()
+        self._sync_full_sim_total_with_estimated()
 
     def _auto_update_full_simulation_times(self):
         return full_simulation_ui.auto_update_full_simulation_times(self)
