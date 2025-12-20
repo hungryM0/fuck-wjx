@@ -74,6 +74,7 @@ class ConfigPersistenceMixin:
         thread_var: tk.StringVar
         random_ip_enabled_var: tk.BooleanVar
         fail_stop_enabled_var: tk.BooleanVar
+        auto_exit_on_stop_var: tk.BooleanVar
         interval_minutes_var: tk.StringVar
         interval_seconds_var: tk.StringVar
         interval_max_minutes_var: tk.StringVar
@@ -155,6 +156,7 @@ class ConfigPersistenceMixin:
             "wechat_login_bypass_enabled": wechat_login_bypass_enabled,
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "fail_stop_enabled": bool(self.fail_stop_enabled_var.get()),
+            "auto_exit_on_stop": bool(self.auto_exit_on_stop_var.get()),
             "paned_position": paned_sash_pos,
             "questions": [
                 {
@@ -429,6 +431,15 @@ class ConfigPersistenceMixin:
                 self.fail_stop_enabled_var.set(bool(config.get("fail_stop_enabled", True)))
             except Exception:
                 self.fail_stop_enabled_var.set(True)
+            try:
+                auto_exit_flag = bool(config.get("auto_exit_on_stop", False))
+            except Exception:
+                auto_exit_flag = False
+            self.auto_exit_on_stop_var.set(auto_exit_flag)
+            try:
+                self._auto_exit_on_stop = auto_exit_flag
+            except Exception:
+                pass
             wechat_login_bypass_var = getattr(self, "wechat_login_bypass_enabled_var", None)
             if wechat_login_bypass_var is not None:
                 try:
@@ -620,6 +631,7 @@ class ConfigPersistenceMixin:
             "random_user_agent": self._serialize_random_ua_config(),
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "fail_stop_enabled": bool(self.fail_stop_enabled_var.get()),
+            "auto_exit_on_stop": bool(self.auto_exit_on_stop_var.get()),
             "questions": [
                 {
                     "question_type": entry.question_type,
@@ -654,6 +666,7 @@ class ConfigPersistenceMixin:
             "random_user_agent": self._serialize_random_ua_config(),
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "fail_stop_enabled": bool(self.fail_stop_enabled_var.get()),
+            "auto_exit_on_stop": bool(self.auto_exit_on_stop_var.get()),
             "questions": [
                 {
                     "question_type": entry.question_type,

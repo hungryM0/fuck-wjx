@@ -738,6 +738,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         # 是否在点击停止后自动退出；可用环境变量 AUTO_EXIT_ON_STOP 控制，默认关闭
         _auto_exit_env = str(os.getenv("AUTO_EXIT_ON_STOP", "")).strip().lower()
         self._auto_exit_on_stop = _auto_exit_env in ("1", "true", "yes", "on")
+        self.auto_exit_on_stop_var = tk.BooleanVar(value=self._auto_exit_on_stop)
         self.stop_requested_by_user: bool = False
         self.stop_request_ts: Optional[float] = None
         self.running = False
@@ -1085,6 +1086,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             _ua_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.random_ip_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
         self.fail_stop_enabled_var.trace_add("write", lambda *args: self._mark_config_changed())
+        self.auto_exit_on_stop_var.trace_add("write", lambda *args: self._on_auto_exit_toggle())
         self.full_sim_target_var.trace_add("write", lambda *args: self._on_full_sim_target_changed())
         self.full_sim_estimated_minutes_var.trace("w", lambda *args: self._on_full_sim_estimated_changed())
         self.full_sim_estimated_seconds_var.trace("w", lambda *args: self._on_full_sim_estimated_changed())
@@ -1385,6 +1387,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                 [
                     getattr(self, "_random_ip_toggle_widget", None),
                     getattr(self, "_fail_stop_toggle_widget", None),
+                    getattr(self, "_auto_exit_toggle_widget", None),
                 ]
             )
             allowed_when_locked.extend(getattr(self, "_random_ua_option_widgets", []))
@@ -1426,6 +1429,13 @@ class SurveyGUI(ConfigPersistenceMixin):
 
     def _on_random_ua_toggle(self):
         self._apply_random_ua_widgets_state()
+        self._mark_config_changed()
+
+    def _on_auto_exit_toggle(self):
+        try:
+            self._auto_exit_on_stop = bool(self.auto_exit_on_stop_var.get())
+        except Exception:
+            self._auto_exit_on_stop = False
         self._mark_config_changed()
 
     def _get_random_ip_api_text(self) -> str:
@@ -1580,6 +1590,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._random_ua_option_widgets = []
         self._random_ua_toggle_widget = None
         self._fail_stop_toggle_widget = None
+        self._auto_exit_toggle_widget = None
         self._full_sim_status_label = None
 
         def _on_close():
@@ -1589,6 +1600,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                 self._random_ua_option_widgets = []
                 self._random_ua_toggle_widget = None
                 self._fail_stop_toggle_widget = None
+                self._auto_exit_toggle_widget = None
                 self._full_sim_status_label = None
             try:
                 window.destroy()
@@ -1636,6 +1648,21 @@ class SurveyGUI(ConfigPersistenceMixin):
         ).pack(anchor="w", padx=(22, 0), pady=(0, 6))
         self._fail_stop_toggle_widget = fail_stop_toggle
         self._settings_window_widgets.append(fail_stop_toggle)
+
+        auto_exit_toggle = ttk.Checkbutton(
+            safety_card,
+            text="停止时直接退出程序",
+            variable=self.auto_exit_on_stop_var,
+            command=self._on_auto_exit_toggle,
+        )
+        auto_exit_toggle.pack(anchor="w", pady=(0, 2))
+        ttk.Label(
+            safety_card,
+            text="点击停止直接退出，防止线程阻塞引发卡顿。",
+            foreground="#6b6b6b",
+        ).pack(anchor="w", padx=(22, 0), pady=(0, 6))
+        self._auto_exit_toggle_widget = auto_exit_toggle
+        self._settings_window_widgets.append(auto_exit_toggle)
 
         ua_toggle = ttk.Checkbutton(
             safety_card,
