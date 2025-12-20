@@ -1612,16 +1612,48 @@ class SurveyGUI(ConfigPersistenceMixin):
         content = ttk.Frame(window, padding=20)
         content.pack(fill=tk.BOTH, expand=True)
 
-        header_frame = ttk.Frame(content)
-        header_frame.pack(fill=tk.X, pady=(0, 12))
+        hero_frame = tk.Frame(
+            content,
+            bg="#f4f7ff",
+            highlightbackground="#dbe7ff",
+            highlightthickness=1,
+            bd=0,
+        )
+        hero_frame.pack(fill=tk.X, pady=(0, 12))
+
+        hero_left = tk.Frame(hero_frame, bg="#f4f7ff")
+        hero_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=12, pady=10)
+        tk.Label(
+            hero_left,
+            text="✨ 全真模拟模式",
+            bg="#f4f7ff",
+            fg="#0f3d7a",
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            hero_left,
+            text="模拟真实作答流程，支持调整问卷作答时长。",
+            bg="#f4f7ff",
+            fg="#44516b",
+        ).pack(anchor="w", pady=(2, 0))
+
+        hero_actions = tk.Frame(hero_frame, bg="#f4f7ff")
+        hero_actions.pack(side=tk.RIGHT, padx=12, pady=10)
+        status_label = ttk.Label(
+            hero_actions,
+            text="当前状态：未开启",
+            foreground="#E4A207",
+            font=("Segoe UI", 10, "bold"),
+            padding=(8, 4),
+        )
+        status_label.pack(anchor="e", fill=tk.X, pady=(0, 6))
         ttk.Button(
-            header_frame,
-            text="全真模拟设置",
+            hero_actions,
+            text="打开全真模拟设置",
             command=self._open_full_simulation_window,
-            style="Accent.TButton"
-        ).pack(side=tk.LEFT)
-        status_label = ttk.Label(header_frame, text="当前状态：未开启", foreground="#FF8C00")
-        status_label.pack(side=tk.LEFT, padx=(12, 0))
+            style="Accent.TButton",
+            width=18,
+        ).pack(anchor="e", fill=tk.X)
         self._full_sim_status_label = status_label
         self._refresh_full_simulation_status_label()
 
