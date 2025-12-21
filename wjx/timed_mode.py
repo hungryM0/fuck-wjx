@@ -61,6 +61,24 @@ def _normalize_interval(value: float) -> float:
     return max(_MIN_REFRESH_INTERVAL, min(interval, _MAX_REFRESH_INTERVAL))
 
 
+def _parse_countdown_seconds(normalized_text: str) -> Optional[float]:
+    """
+    从“距离开始还有X天Y时Z分W秒”文案中提取剩余秒数。
+    返回 None 表示未检测到倒计时。
+    """
+    if not normalized_text:
+        return None
+    match = re.search(r"距离开始还有(?:(\d+)天)?(?:(\d+)时)?(?:(\d+)分)?(?:(\d+)秒)?", normalized_text)
+    if not match:
+        return None
+    days = int(match.group(1) or 0)
+    hours = int(match.group(2) or 0)
+    minutes = int(match.group(3) or 0)
+    seconds = int(match.group(4) or 0)
+    total = days * 86400 + hours * 3600 + minutes * 60 + seconds
+    return float(total)
+
+
 def _page_status(driver: BrowserDriver) -> tuple[bool, bool, bool, str]:
     """
     返回 (ready, not_started, ended, normalized_text)
@@ -156,6 +174,14 @@ def wait_until_open(
             _log(f"[Timed Mode] 刷新失败，将继续重试：{exc}")
 
         ready, not_started, ended, normalized_text = _page_status(driver)
+        countdown_seconds = _parse_countdown_seconds(normalized_text)
+        if countdown_seconds is not None:
+            # 倒计时阶段加速刷新，越接近开放刷新越快
+            if countdown_seconds <= 1.0:
+                interval = _MIN_REFRESH_INTERVAL
+            elif countdown_seconds <= 5.0:
+                interval = max(_MIN_REFRESH_INTERVAL, min(interval, 0.3))
+
         if ready:
             _log("[Timed Mode] 检测到问卷已开放，开始填写...")
             return True
@@ -170,10 +196,17 @@ def wait_until_open(
         elif normalized_text:
             reason = "尚未开放，继续刷新等待..."
         now = time.time()
+        if countdown_seconds is not None and countdown_seconds <= 1.0:
+            reason = f"检测到倒计时 <= {countdown_seconds:.1f}s，正快速刷新..."
+
         if reason and (reason != last_reason or now - last_log_ts >= _LOG_INTERVAL_SECONDS):
             _log(f"[Timed Mode] {reason}")
             last_reason = reason
             last_log_ts = now
+
+        # 倒计时刚结束，直接再刷一次，不做额外等待
+        if countdown_seconds is not None and countdown_seconds <= 0.0:
+            continue
 
         if stop_signal is not None and getattr(stop_signal, "wait", lambda *_: False)(interval):
             return False
