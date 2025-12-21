@@ -1056,19 +1056,16 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         auto_config_frame = ttk.Frame(step2_frame)
         auto_config_frame.pack(fill=tk.X, pady=(0, 5))
-        ttk.Label(
-            auto_config_frame,
-            text="快速生成：自动抓取问卷并预填配置",
-            foreground="#0f3d7a",
-            justify="left",
-        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        button_row = ttk.Frame(auto_config_frame)
+        button_row.pack(fill=tk.X)
         self.preview_button = ttk.Button(
-            auto_config_frame,
+            button_row,
             text="⚡ 自动配置问卷",
             command=self.preview_survey,
             style="Accent.TButton"
         )
-        self.preview_button.pack(side=tk.RIGHT, padx=5)
+        self.preview_button.pack(side=tk.LEFT, padx=5)
 
         # 执行设置区域（放在配置题目下方）
         step3_frame = ttk.LabelFrame(self.scrollable_content, text="💣 执行设置", padding=10)
@@ -1153,17 +1150,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         thread_inc_button.grid(row=0, column=2, padx=(2, 0))
         self._main_parameter_widgets.extend([thread_dec_button, thread_entry, thread_inc_button])
         self._timed_mode_locked_widgets.extend([target_entry, thread_dec_button, thread_entry, thread_inc_button])
-
-        timed_mode_frame = ttk.LabelFrame(step3_frame, text="⏱️ 定时模式", padding=10)
-        timed_mode_frame.pack(fill=tk.X, padx=4, pady=(6, 4))
-        timed_toggle = ttk.Checkbutton(
-            timed_mode_frame,
-            text="问卷定时开放时启用自动刷新等待（仅提交 1 份）",
-            variable=self.timed_mode_enabled_var,
-            command=self._on_timed_mode_toggle,
-        )
-        timed_toggle.grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self._main_parameter_widgets.extend([timed_toggle])
 
         # 随机 IP 开关单独一行，放在微信弹窗开关下方
         random_ip_frame = ttk.Frame(step3_frame)
@@ -1827,6 +1813,24 @@ class SurveyGUI(ConfigPersistenceMixin):
             ua_option_widgets.append(cb)
         self._random_ua_option_widgets.extend(ua_option_widgets)
         self._settings_window_widgets.extend(ua_option_widgets)
+
+        timed_mode_frame = ttk.LabelFrame(advanced_frame, text="⏱️ 定时模式", padding=10)
+        timed_mode_frame.pack(fill=tk.X, pady=(10, 0))
+        timed_toggle = ttk.Checkbutton(
+            timed_mode_frame,
+            text="问卷定时开放时启用自动刷新等待（仅提交 1 份）",
+            variable=self.timed_mode_enabled_var,
+            command=self._on_timed_mode_toggle,
+        )
+        timed_toggle.pack(anchor="w", pady=(0, 2))
+        ttk.Label(
+            timed_mode_frame,
+            text="开放前保持单实例快速刷新，开放后立即填写并提交后停止。",
+            foreground="#6b6b6b",
+            wraplength=440,
+            justify="left",
+        ).pack(anchor="w", padx=(22, 0))
+        self._settings_window_widgets.append(timed_toggle)
 
         ttk.Separator(advanced_frame, orient="horizontal").pack(fill=tk.X, pady=(12, 10))
 
