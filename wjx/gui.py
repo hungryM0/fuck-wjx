@@ -46,6 +46,10 @@ _resume_after_aliyun_captcha_stop = getattr(engine, "_resume_after_aliyun_captch
 _resume_snapshot = getattr(engine, "_resume_snapshot", {})
 
 
+class SurveyNotOpenError(Exception):
+    """问卷未开放或已关闭导致无法解析时抛出。"""
+
+
 class SurveyGUI(ConfigPersistenceMixin):
 
     def _save_logs_to_file(self):
@@ -233,14 +237,14 @@ class SurveyGUI(ConfigPersistenceMixin):
         except Exception:
             return False
         host = (parsed.netloc or "").lower()
-        supported_domains = ("wjx.cn", "wjx.top")
+        supported_domains = ("wjx.cn", "wjx.top", "wjx.com")
         return bool(host) and any(
             host == domain or host.endswith(f".{domain}") for domain in supported_domains
         )
 
     def _validate_wjx_url(self, url: str) -> bool:
         if not self._is_supported_wjx_url(url):
-            self._log_popup_error("链接错误", "当前仅支持 wjx.cn / wjx.top 的问卷链接，请检查后重试。")
+            self._log_popup_error("链接错误", "当前仅支持 wjx.cn / wjx.top / wjx.com 的问卷链接，请检查后重试。")
             return False
         return True
 
@@ -3342,6 +3346,62 @@ class SurveyGUI(ConfigPersistenceMixin):
             lambda info: self._show_preview_window(info, preserve_existing=preserve_existing),
         )
 
+    def _detect_not_open_reason_from_text(self, text: str, *, has_questions: bool = False) -> Optional[str]:
+        """在页面文本中检测未开放/已结束提示，返回错误原因。"""
+        if not text:
+            return None
+        try:
+            normalized = "".join(str(text).split())
+        except Exception:
+            normalized = ""
+        if not normalized:
+            return None
+
+        lowered = normalized.lower()
+        not_started_keywords = getattr(timed_mode, "_NOT_STARTED_KEYWORDS", ())
+        ended_keywords = getattr(timed_mode, "_ENDED_KEYWORDS", ())
+
+        for kw in not_started_keywords:
+            if not kw:
+                continue
+            if kw in normalized or kw.lower() in lowered:
+                if has_questions:
+                    continue
+                return "检测到问卷尚未开放（未到开始时间/定时开放），请在开放后再试。"
+
+        patterns = (
+            r"将于\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*开放",
+            r"将于\d{1,2}[:点]\d{1,2}开放",
+            r"距离开始还有",
+        )
+        for pat in patterns:
+            if re.search(pat, normalized):
+                if has_questions:
+                    continue
+                return "检测到问卷尚未开放（存在倒计时/定时开放提示），请在开放后再试。"
+
+        for kw in ended_keywords:
+            if not kw:
+                continue
+            if kw in normalized or kw.lower() in lowered:
+                if has_questions:
+                    continue
+                return "检测到问卷已结束或关闭，自动配置无法解析。"
+
+        return None
+
+    def _detect_not_open_via_driver(self, driver) -> Optional[str]:
+        """使用浏览器实例检测未开放状态，返回错误原因。"""
+        try:
+            ready, not_started, ended, _ = timed_mode._page_status(driver)
+        except Exception:
+            return None
+        if not_started and not ready:
+            return "检测到问卷尚未开放（未到开始时间/定时开放），请在开放后再试。"
+        if ended:
+            return "检测到问卷已结束或关闭，自动配置无法解析。"
+        return None
+
     def _start_survey_parsing(self, url_value: str, result_handler: Callable[[List[Dict[str, Any]]], None], restore_button_state: bool = True):
         self._last_survey_title = None
         self._safe_preview_button_config(state=tk.DISABLED, text="加载中...")
@@ -3470,6 +3530,12 @@ class SurveyGUI(ConfigPersistenceMixin):
                 cleaned = re.sub(r"(?:[-|]\s*)?(?:问卷星.*)$", "", cleaned, flags=re.IGNORECASE).strip(" -_|")
                 if cleaned:
                     self._last_survey_title = cleaned
+
+            not_open_reason = self._detect_not_open_reason_from_text(page_source) if page_source else None
+            if not not_open_reason:
+                not_open_reason = self._detect_not_open_via_driver(driver)
+            if not_open_reason:
+                raise SurveyNotOpenError(not_open_reason)
             
             update_progress(60, "正在解析题目结构...")
             
@@ -3687,6 +3753,13 @@ class SurveyGUI(ConfigPersistenceMixin):
             if restore_button_state:
                 self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
             
+        except SurveyNotOpenError as e:
+            message = str(e) or "检测到问卷尚未开放，自动配置暂时无法解析。"
+            logging.warning(f"[Action Log] Survey not open: {message}")
+            if progress_win:
+                self.root.after(0, lambda: progress_win.destroy())
+            self.root.after(0, lambda msg=message: self._log_popup_error("问卷未开放", msg))
+            self.root.after(0, lambda: self._safe_preview_button_config(state=tk.NORMAL, text=self._get_preview_button_label()))
         except Exception as e:
             error_str = str(e)
             error_lower = error_str.lower()
@@ -3748,6 +3821,9 @@ class SurveyGUI(ConfigPersistenceMixin):
             if progress_callback:
                 progress_callback(25, "正在解析题目结构...")
             questions_info = parse_survey_questions_from_html(html)
+            not_open_reason = self._detect_not_open_reason_from_text(html, has_questions=bool(questions_info))
+            if not_open_reason:
+                raise SurveyNotOpenError(not_open_reason)
             if not questions_info:
                 logging.info("HTTP 解析未能找到任何题目，将回退到浏览器模式")
                 return None
