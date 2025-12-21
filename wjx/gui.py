@@ -763,6 +763,8 @@ class SurveyGUI(ConfigPersistenceMixin):
         # 是否在点击停止后自动退出；可用环境变量 AUTO_EXIT_ON_STOP 控制，默认关闭
         _auto_exit_env = str(os.getenv("AUTO_EXIT_ON_STOP", "")).strip().lower()
         self._auto_exit_on_stop = _auto_exit_env in ("1", "true", "yes", "on")
+        # 当首次点击“停止”时自动开启一次“停止后退出”，仅对下一次停止生效
+        self._auto_exit_delay_once = False
         self.auto_exit_on_stop_var = tk.BooleanVar(value=self._auto_exit_on_stop)
         self.stop_requested_by_user: bool = False
         self.stop_request_ts: Optional[float] = None
@@ -1470,6 +1472,8 @@ class SurveyGUI(ConfigPersistenceMixin):
             self._auto_exit_on_stop = bool(self.auto_exit_on_stop_var.get())
         except Exception:
             self._auto_exit_on_stop = False
+        # 手动切换时清除一次性延迟标记，避免状态错乱
+        self._auto_exit_delay_once = False
         self._mark_config_changed()
 
     def _apply_timed_mode_widgets_state(self):
@@ -5679,7 +5683,25 @@ class SurveyGUI(ConfigPersistenceMixin):
                 10,
                 lambda ds=drivers_snapshot, ws=worker_threads_snapshot, ps=browser_pids_snapshot: self._start_stop_cleanup_with_grace(ds, ws, ps),
             )
+        auto_exit_now = False
         if self._auto_exit_on_stop:
+            if self._auto_exit_delay_once:
+                # 首次点击后自动开启的场景，本次不退出，下一次生效
+                self._auto_exit_delay_once = False
+            else:
+                auto_exit_now = True
+        else:
+            # 第一次点击停止后自动开启一次“停止后退出”，下次点击停止时直接退出
+            self._auto_exit_on_stop = True
+            self._auto_exit_delay_once = True
+            try:
+                if not bool(self.auto_exit_on_stop_var.get()):
+                    self.auto_exit_on_stop_var.set(True)
+            except Exception:
+                pass
+            logging.info("[Action Log] 首次停止后已开启“停止后自动退出”，下次停止将直接退出程序。")
+
+        if auto_exit_now:
             # 清理线程启动后快速退出，规避 Tk 主线程后续卡顿
             self.root.after(150, self._exit_app)
         

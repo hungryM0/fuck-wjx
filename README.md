@@ -6,7 +6,8 @@ Inspired by https://github.com/Zemelee/wjx - don't forget to give that repo a st
 
 This project is a fun extension with new features, providing a GUI for configuring question distributions, weights, fill-in answers, etc., to automatically fill and batch-submit WenJuanXing (wjx.cn) surveys (a lifesaver for college students haha).
 
-**Note: This project is for learning and testing purposes only. Ensure you have authorization to auto-submit the target survey. Avoid abuse or violating service terms. DO NOT pollute others' survey data!**
+> [!WARNING]
+> **This project is for learning and testing purposes only.** Ensure you have authorization to auto-submit the target survey. Avoid abuse or violating service terms. **DO NOT pollute others' survey data!**
 
 ---
 
@@ -29,7 +30,8 @@ This project is a fun extension with new features, providing a GUI for configuri
 
 **If You're Just a passer-by**
 
-✅ Download the exe release directly from [Release](https://github.com/hungryM0/fuck-wjx/releases/latest), double-click to run, ready to use out-of-the-box, no complex environment setup required!
+> [!TIP]
+> ✅ Download the exe release directly from [Release](https://github.com/hungryM0/fuck-wjx/releases/latest), double-click to run, ready to use out-of-the-box, no complex environment setup required!
 
 ---
 
@@ -41,14 +43,16 @@ A mysterious QQ group, feel free to ask questions there~
 
 **Safety & Compliance**
 
-⚠️ Only run this tool with authorization or for testing purposes. Auto-submitting surveys may violate service terms or laws - use at your own risk. DO NOT pollute others' survey data without authorization!
+> [!WARNING]
+> ⚠️ Only run this tool with authorization or for testing purposes. Auto-submitting surveys may violate service terms or laws - use at your own risk. **DO NOT pollute others' survey data without authorization!**
 
 ---
 
 **Runtime Environment**
 
-- Windows 10/11, Linux compatible
-- Python 3.8+
+> [!NOTE]
+> - Windows 10/11, Linux compatible
+> - Python 3.8+
 
 **Python Dependencies**
 
