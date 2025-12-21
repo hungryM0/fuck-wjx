@@ -12,6 +12,11 @@ import tkinter as tk
 from tkinter import ttk
 
 try:
+    import winsound
+except ImportError:  # pragma: no cover
+    winsound = None
+
+try:
     import requests
 except ImportError:  # pragma: no cover
     requests = None
@@ -416,6 +421,22 @@ def reset_quota_limit_dialog_flag():
     _quota_limit_dialog_shown = False
 
 
+def _play_success_sound(gui: Any):
+    """卡密验证成功后的提示音，优先使用系统声音，失败则忽略。"""
+    try:
+        if winsound:
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            return
+    except Exception:
+        logging.debug("播放系统提示音失败", exc_info=True)
+    try:
+        root = getattr(gui, "root", None)
+        if root:
+            root.bell()
+    except Exception:
+        logging.debug("播放Tk提示音失败", exc_info=True)
+
+
 def confirm_random_ip_usage(gui: Any) -> bool:
     """显示随机 IP 使用声明，返回用户是否确认。"""
     notice = (
@@ -606,7 +627,6 @@ def show_card_validation_dialog(gui: Any) -> bool:
             log_popup_warning("提示", "请输入卡密", parent=dialog)
             return
         if _validate_card(card_input):
-            log_popup_info("成功", "卡密验证成功！已启用无限额度，随机IP可无限使用。", parent=dialog)
             RegistryManager.reset_submit_count()
             RegistryManager.write_card_validate_result(True)
             RegistryManager.set_quota_unlimited(True)
@@ -614,6 +634,19 @@ def show_card_validation_dialog(gui: Any) -> bool:
             refresh_ip_counter_display(gui)
             reset_quota_limit_dialog_flag()
             result_var.set(True)
+            _play_success_sound(gui)
+            enable_now = log_popup_confirm(
+                "成功",
+                "卡密验证成功！已解锁无限随机IP额度。\n\n是否立即开启随机IP提交？",
+                parent=dialog,
+                icon="question",
+            )
+            if enable_now:
+                try:
+                    _set_random_ip_enabled(gui, True)
+                    on_random_ip_toggle(gui)
+                except Exception:
+                    logging.debug("立即启用随机IP失败", exc_info=True)
             dialog.destroy()
         else:
             log_popup_error("失败", "卡密无效，请检查后重试。", parent=dialog)
