@@ -9,6 +9,7 @@ binaries += collect_dynamic_libs('pyzbar')
 datas = [
     ('assets', 'assets'),
     ('.env', '.'),
+    ('icon.ico', '.'),
 ]
 
 a = Analysis(

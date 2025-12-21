@@ -1,9 +1,11 @@
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import queue
 
 from wjx import boot
 from wjx.boot import LoadingSplash
+from wjx.config import APP_ICON_RELATIVE_PATH
 from wjx.runtime import get_runtime_directory as _get_runtime_directory, get_resource_path as _get_resource_path
 import wjx.engine as engine
 from wjx.engine import *  # noqa: F401,F403
@@ -718,6 +720,24 @@ class SurveyGUI(ConfigPersistenceMixin):
         self._shared_root = root is not None
         self.root = root if root is not None else tk.Tk()
         self._loading_splash = loading_splash
+
+        self._app_icon_path: Optional[str] = None
+        try:
+            icon_path = _get_resource_path(APP_ICON_RELATIVE_PATH)
+        except Exception:
+            icon_path = None
+        if icon_path and os.path.exists(icon_path):
+            try:
+                self.root.iconbitmap(default=icon_path)
+            except Exception:
+                pass
+            self._app_icon_path = icon_path
+            splash_window = getattr(self._loading_splash, "window", None)
+            if splash_window:
+                try:
+                    splash_window.iconbitmap(icon_path)
+                except Exception:
+                    pass
         self._configs_dir = self._get_configs_directory()
         # 在窗口标题中显示当前版本号
         try:

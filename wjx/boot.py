@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from typing import Optional
 
+import os
 import tkinter as tk
 from tkinter import ttk
+
+from wjx.config import APP_ICON_RELATIVE_PATH
+from wjx.runtime import get_resource_path as _get_resource_path
 
 
 class LoadingSplash:
@@ -18,6 +22,19 @@ class LoadingSplash:
         self.master = master or tk.Tk()
         self.width = width
         self.height = height
+
+        self._icon_path = None
+        try:
+            icon_path = _get_resource_path(APP_ICON_RELATIVE_PATH)
+        except Exception:
+            icon_path = None
+        if icon_path and os.path.exists(icon_path):
+            try:
+                self.master.iconbitmap(default=icon_path)
+            except Exception:
+                pass
+            self._icon_path = icon_path
+
         self.window = tk.Toplevel(self.master)
         self.window.withdraw()
         self.window.overrideredirect(True)
@@ -26,6 +43,12 @@ class LoadingSplash:
         self.window.minsize(width, height)
         self.message_var = tk.StringVar(value=message)
         self.progress_value = 0
+
+        if self._icon_path:
+            try:
+                self.window.iconbitmap(self._icon_path)
+            except Exception:
+                pass
 
         frame_bg = "#ffffff"
         self.window.title(title)

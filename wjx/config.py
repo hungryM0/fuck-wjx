@@ -148,6 +148,7 @@ LOG_BUFFER_CAPACITY = 2000
 LOG_DIR_NAME = "logs"
 
 # ==================== 资源路径配置 ====================
+APP_ICON_RELATIVE_PATH = "icon.ico"
 QQ_GROUP_QR_RELATIVE_PATH = os.path.join("assets", "QQ_group.jpg")
 
 # ==================== 提交行为配置 ====================
