@@ -4020,15 +4020,31 @@ class SurveyGUI(ConfigPersistenceMixin):
         return _resolve_dynamic_text_token_value(token)
 
     def _show_wizard_for_question(self, questions_info, current_index):
+        existing_wizard = getattr(self, "_wizard_window", None)
+
         if current_index >= len(questions_info):
             self._refresh_tree()
             logging.info(f"[Action Log] Wizard finished with {len(self.question_entries)} configured questions")
-            self._log_popup_info("完成",
-                              f"配置完成！\n\n"
-                              f"已配置 {len(self.question_entries)} 道题目。\n"
-                              f"可在下方题目列表中查看和编辑。")
+            self._log_popup_info(
+                "完成",
+                f"配置完成！\n\n已配置 {len(self.question_entries)} 道题目。\n可在下方题目列表中查看和编辑。"
+            )
             self._wizard_history.clear()
             self._wizard_commit_log.clear()
+            if existing_wizard and getattr(existing_wizard, "winfo_exists", lambda: False)():
+                try:
+                    existing_wizard.unbind_all("<MouseWheel>")
+                except Exception:
+                    pass
+                try:
+                    existing_wizard.grab_release()
+                except Exception:
+                    pass
+                try:
+                    existing_wizard.destroy()
+                except Exception:
+                    pass
+                self._wizard_window = None
             return
         
         q = questions_info[current_index]
@@ -4059,13 +4075,34 @@ class SurveyGUI(ConfigPersistenceMixin):
             return
 
         self._wizard_history.append(current_index)
-        
-        wizard_win = tk.Toplevel(self.root)
+
+        wizard_win = existing_wizard if existing_wizard and existing_wizard.winfo_exists() else None
+        if wizard_win is None:
+            wizard_win = tk.Toplevel(self.root)
+            wizard_win.geometry("800x600")
+            wizard_win.minsize(700, 500)  # 设置最小尺寸，防止窗口过小
+            wizard_win.transient(self.root)
+            wizard_win.grab_set()
+            self._center_child_window(wizard_win)
+            self._wizard_window = wizard_win
+        else:
+            try:
+                wizard_win.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+            for child in wizard_win.winfo_children():
+                try:
+                    child.destroy()
+                except Exception:
+                    pass
+            try:
+                wizard_win.deiconify()
+                wizard_win.lift()
+                wizard_win.grab_set()
+            except Exception:
+                pass
+
         wizard_win.title(f"配置向导 - 第 {current_index + 1}/{len(questions_info)} 题")
-        wizard_win.geometry("800x600")
-        wizard_win.minsize(700, 500)  # 设置最小尺寸，防止窗口过小
-        wizard_win.transient(self.root)
-        wizard_win.grab_set()
 
         # 创建可滚动的内容区域
         canvas = tk.Canvas(wizard_win, highlightthickness=0)
@@ -4119,13 +4156,14 @@ class SurveyGUI(ConfigPersistenceMixin):
         def _cleanup_wizard():
             _release_wizard_grab()
             try:
-                canvas.unbind_all("<MouseWheel>")
+                wizard_win.unbind_all("<MouseWheel>")
             except tk.TclError:
                 pass
             try:
                 wizard_win.destroy()
             except tk.TclError:
                 pass
+            self._wizard_window = None
         
         wizard_win.protocol("WM_DELETE_WINDOW", _cleanup_wizard)
         
@@ -4337,7 +4375,6 @@ class SurveyGUI(ConfigPersistenceMixin):
         
         def skip_question():
             self._wizard_commit_log.append({"action": "skip"})
-            _cleanup_wizard()
             self._show_wizard_for_question(questions_info, current_index + 1)
         
         if is_multi_text_question:
@@ -4432,7 +4469,6 @@ class SurveyGUI(ConfigPersistenceMixin):
                     is_location=False,
                 )
                 self._handle_auto_config_entry(entry, q, overwrite_existing=True)
-                _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
 
         elif is_text_like_question:
@@ -4550,7 +4586,6 @@ class SurveyGUI(ConfigPersistenceMixin):
                     is_location=bool(q.get("is_location")),
                 )
                 self._handle_auto_config_entry(entry, q, overwrite_existing=True)
-                _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
         elif type_code == "4":
@@ -4618,7 +4653,6 @@ class SurveyGUI(ConfigPersistenceMixin):
                     fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
                 self._handle_auto_config_entry(entry, q, overwrite_existing=True)
-                _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
         else:
@@ -4755,7 +4789,6 @@ class SurveyGUI(ConfigPersistenceMixin):
                     fillable_option_indices=detected_fillable_indices if detected_fillable_indices else None
                 )
                 self._handle_auto_config_entry(entry, q, overwrite_existing=True)
-                _cleanup_wizard()
                 self._show_wizard_for_question(questions_info, current_index + 1)
 
             def _toggle_weight_frame(*_):
@@ -4774,36 +4807,37 @@ class SurveyGUI(ConfigPersistenceMixin):
         
         btn_frame = ttk.Frame(wizard_win, padding=(15, 10, 15, 15))
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, before=separator)
-        
-        # 左侧按钮组
-        left_btn_frame = ttk.Frame(btn_frame)
-        left_btn_frame.pack(side=tk.LEFT, fill=tk.X)
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=0)
+
+        nav_frame = ttk.Frame(btn_frame)
+        nav_frame.grid(row=0, column=0, sticky="w")
         
         if current_index > 0:
-            prev_btn = ttk.Button(left_btn_frame, text="← 上一题", width=10,
-                      command=lambda: self._go_back_in_wizard(wizard_win, questions_info, current_index, _cleanup_wizard))
-            prev_btn.pack(side=tk.LEFT, padx=(0, 8), pady=2)
+            prev_btn = ttk.Button(
+                nav_frame,
+                text="← 上一题",
+                width=12,
+                command=lambda: self._go_back_in_wizard(questions_info, current_index),
+            )
+            prev_btn.grid(row=0, column=0, padx=(0, 10), pady=2)
         
-        skip_btn = ttk.Button(left_btn_frame, text="跳过", width=8, command=skip_question)
-        skip_btn.pack(side=tk.LEFT, padx=8, pady=2)
+        skip_btn = ttk.Button(nav_frame, text="跳过本题", width=10, command=skip_question)
+        skip_btn.grid(row=0, column=1, padx=8, pady=2)
         
-        next_btn = ttk.Button(left_btn_frame, text="下一题 →", width=10, command=save_and_next)
-        next_btn.pack(side=tk.LEFT, padx=8, pady=2)
+        next_btn = ttk.Button(nav_frame, text="下一题 →", width=12, command=save_and_next)
+        next_btn.grid(row=0, column=2, padx=(8, 0), pady=2)
         
         # 右侧取消按钮
-        cancel_btn = ttk.Button(btn_frame, text="取消向导", width=10, command=_cleanup_wizard)
-        cancel_btn.pack(side=tk.RIGHT, padx=(8, 0), pady=2)
+        cancel_btn = ttk.Button(btn_frame, text="取消向导", width=12, command=_cleanup_wizard)
+        cancel_btn.grid(row=0, column=1, sticky="e", padx=(10, 0), pady=2)
 
-    def _go_back_in_wizard(self, current_win, questions_info, current_index, destroy_cb=None):
+    def _go_back_in_wizard(self, questions_info, current_index):
         if self._wizard_history and self._wizard_history[-1] == current_index:
             self._wizard_history.pop()
         prev_index = 0
         if self._wizard_history:
             prev_index = self._wizard_history.pop()
-        if destroy_cb:
-            destroy_cb()
-        else:
-            current_win.destroy()
         self._show_wizard_for_question(questions_info, prev_index)
 
     def start_run(self):
