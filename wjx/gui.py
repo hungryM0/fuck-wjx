@@ -3785,7 +3785,9 @@ class SurveyGUI(ConfigPersistenceMixin):
     def _show_preview_window(self, questions_info, preserve_existing: bool = False):
         preview_win = tk.Toplevel(self.root)
         preview_win.title("问卷预览")
-        preview_win.geometry("900x600")
+        preview_win.geometry("760x500")
+        preview_win.minsize(640, 420)
+        self._center_child_window(preview_win)
         
         frame = ttk.Frame(preview_win, padding=10)
         frame.pack(fill=tk.BOTH, expand=True)
@@ -3796,18 +3798,18 @@ class SurveyGUI(ConfigPersistenceMixin):
         tree_frame.pack(fill=tk.BOTH, expand=True)
         
         columns = ("num", "title", "type", "details", "page")
-        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=20)
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=14)
         tree.heading("num", text="题号")
         tree.heading("title", text="题目标题")
         tree.heading("type", text="题型")
         tree.heading("details", text="详情")
         tree.heading("page", text="页码")
         
-        tree.column("num", width=50, anchor="center")
-        tree.column("title", width=400, anchor="w")
-        tree.column("type", width=120, anchor="center")
-        tree.column("details", width=180, anchor="center")
-        tree.column("page", width=60, anchor="center")
+        tree.column("num", width=60, anchor="center")
+        tree.column("title", width=340, anchor="w")
+        tree.column("type", width=110, anchor="center")
+        tree.column("details", width=150, anchor="center")
+        tree.column("page", width=70, anchor="center")
         
         scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=scrollbar.set)
