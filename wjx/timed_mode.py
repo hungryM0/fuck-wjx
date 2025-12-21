@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -20,6 +21,11 @@ _NOT_STARTED_KEYWORDS = (
     "未开放",
     "开放时间",
     "开始时间",
+    "将于",
+    "距离开始",
+    "倒计时",
+    "start in",
+    "countdown",
 )
 _ENDED_KEYWORDS = (
     "已结束",
@@ -71,7 +77,10 @@ def _page_status(driver: BrowserDriver) -> tuple[bool, bool, bool, str]:
                     const hasQuestionBlock = !!document.querySelector('#divQuestion fieldset, #divQuestion [topic]');
                     const hasInputs = !!document.querySelector('#divQuestion input, #divQuestion textarea, #divQuestion select');
                     const hasSubmit = !!document.querySelector('#submit_button, #divSubmit, #ctlNext, #SM_BTN_1, .submitDiv a');
-                    return hasQuestionBlock || hasInputs || hasSubmit;
+                    const hasStartBtn = !!document.querySelector(
+                        '#starttime, #ctlNext, #startbnt, #btstart, #SM_BTN_1, .startbtn, .btn-start, button[id*=\"start\" i], a[id*=\"start\" i]'
+                    );
+                    return hasQuestionBlock || hasInputs || hasSubmit || hasStartBtn;
                 })();
                 """
             )
@@ -85,11 +94,25 @@ def _page_status(driver: BrowserDriver) -> tuple[bool, bool, bool, str]:
     not_started = any(keyword in normalized for keyword in _NOT_STARTED_KEYWORDS)
     ended = any(keyword in normalized for keyword in _ENDED_KEYWORDS)
 
+    if not not_started:
+        patterns = (
+            r"将于\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*开放",
+            r"将于\d{1,2}[:点]\d{1,2}开放",
+            r"距离开始还有",
+        )
+        for pat in patterns:
+            if re.search(pat, normalized):
+                not_started = True
+                break
+
     # 某些提示仅有英文，简单兜底
     if "notstart" in lowered or "not start" in lowered:
         not_started = True
     if "finished" in lowered or "closed" in lowered:
         ended = True
+
+    if not_started or ended:
+        ready = False
 
     return ready, not_started, ended, normalized
 
