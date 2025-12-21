@@ -1,4 +1,4 @@
-# fuck-wjx (WJX Auto-Filler)
+# fuck-wjx
 
 English | [简体中文](./README_CN.md)
 
