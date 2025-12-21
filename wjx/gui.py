@@ -3132,7 +3132,13 @@ class SurveyGUI(ConfigPersistenceMixin):
             _set_save_command(save_multiple)
             
         else:
-            ttk.Label(frame, text=f"选项数: {entry.option_count}").pack(anchor="w", pady=5, fill=tk.X)
+            effective_option_count = engine._infer_option_count(entry)
+            if effective_option_count <= 0:
+                effective_option_count = max(1, entry.option_count or 1)
+            if effective_option_count != entry.option_count:
+                entry.option_count = effective_option_count
+
+            ttk.Label(frame, text=f"选项数: {effective_option_count}").pack(anchor="w", pady=5, fill=tk.X)
             if entry.question_type == "matrix":
                 ttk.Label(frame, text=f"矩阵行数: {entry.rows}").pack(anchor="w", pady=5, fill=tk.X)
 
@@ -3143,7 +3149,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             weight_frame = ttk.Frame(frame)
             slider_vars: List[tk.DoubleVar] = []
             option_texts = entry.texts if entry.texts else []
-            initial_weights = entry.custom_weights if entry.custom_weights else [1.0] * entry.option_count
+            initial_weights = entry.custom_weights if entry.custom_weights else [1.0] * effective_option_count
             slider_hint = "拖动滑块设置每个选项的权重（0-10）：" if entry.question_type != "matrix" else "拖动滑块设置每列被选中的优先级（0-10）："
             ttk.Label(weight_frame, text=slider_hint, foreground="gray").pack(anchor="w", pady=(5, 8), fill=tk.X)
 
@@ -3151,7 +3157,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             sliders_container.pack(fill=tk.BOTH, expand=True)
             inline_fill_vars: List[Optional[tk.StringVar]] = [None] * entry.option_count if entry.question_type in ("single", "dropdown") else []
 
-            for i in range(entry.option_count):
+            for i in range(effective_option_count):
                 row_frame = ttk.Frame(sliders_container)
                 row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
                 row_frame.columnconfigure(1, weight=1)
@@ -3194,6 +3200,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                         return
                     entry.custom_weights = weights
                     entry.probabilities = normalize_probabilities(weights)
+                    entry.option_count = max(entry.option_count, len(weights))
 
                 entry.distribution_mode = mode
                 entry.option_fill_texts = _collect_inline_fill_values(inline_fill_vars, entry.option_count)

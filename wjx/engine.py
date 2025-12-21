@@ -802,6 +802,36 @@ def _normalize_single_like_prob_config(prob_config: Union[List[float], int, floa
     return _normalize_droplist_probs(prob_config, option_count)
 
 
+def _infer_option_count(entry: "QuestionEntry") -> int:
+    """
+    当配置中缺少选项数量时，尽可能从已保存的权重/文本推导。
+    优先顺序：已有数量 > 自定义权重 > 概率列表长度 > 文本数量 >（量表题兜底为5）。
+    """
+    try:
+        if entry.option_count and entry.option_count > 0:
+            return int(entry.option_count)
+    except Exception:
+        pass
+    try:
+        if entry.custom_weights and len(entry.custom_weights) > 0:
+            return len(entry.custom_weights)
+    except Exception:
+        pass
+    try:
+        if isinstance(entry.probabilities, (list, tuple)) and len(entry.probabilities) > 0:
+            return len(entry.probabilities)
+    except Exception:
+        pass
+    try:
+        if entry.texts and len(entry.texts) > 0:
+            return len(entry.texts)
+    except Exception:
+        pass
+    if getattr(entry, "question_type", "") == "scale":
+        return 5
+    return 0
+
+
 @dataclass
 class QuestionEntry:
     question_type: str
@@ -1004,6 +1034,10 @@ def configure_probabilities(entries: List[QuestionEntry]):
     multiple_option_fill_texts = []
 
     for entry in entries:
+        # 若配置里未写明选项数，尽量从权重/概率推断，并回写以便后续编辑显示正确数量
+        inferred_count = _infer_option_count(entry)
+        if inferred_count and inferred_count != entry.option_count:
+            entry.option_count = inferred_count
         probs = entry.probabilities
         if entry.question_type == "single":
             single_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
@@ -2027,12 +2061,27 @@ def _log_multi_limit_once(
     _REPORTED_MULTI_LIMITS.add(cache_key)
 
 
-def _extract_reorder_required_from_text(text: Optional[str]) -> Optional[int]:
+def _extract_reorder_required_from_text(text: Optional[str], total_options: Optional[int] = None) -> Optional[int]:
     if not text:
         return None
     normalized = text.strip()
     if not normalized:
         return None
+    if total_options:
+        all_keywords = ("全选", "全部选择", "请选择全部", "全部选项", "所有选项", "全部排序", "全都排序")
+        if any(keyword in normalized for keyword in all_keywords):
+            return total_options
+        range_patterns = (
+            re.compile(r"数字?\s*(\d+)\s*[-~—－到]\s*(\d+)\s*填"),
+            re.compile(r"(\d+)\s*[-~—－到]\s*(\d+)\s*填入括号"),
+        )
+        for pattern in range_patterns:
+            match = pattern.search(normalized)
+            if match:
+                first = _safe_positive_int(match.group(1))
+                second = _safe_positive_int(match.group(2))
+                if first and second and max(first, second) == total_options:
+                    return total_options
     patterns = (
         re.compile(r"(?:选|选择|勾选|挑选)[^0-9]{0,4}(\d+)\s*[项个条]"),
         re.compile(r"至少\s*(\d+)\s*[项个条]"),
@@ -2044,11 +2093,12 @@ def _extract_reorder_required_from_text(text: Optional[str]) -> Optional[int]:
     return None
 
 
-def detect_reorder_required_count(driver: BrowserDriver, question_number: int) -> Optional[int]:
+def detect_reorder_required_count(
+    driver: BrowserDriver, question_number: int, total_options: Optional[int] = None
+) -> Optional[int]:
     """检测多选排序题需要勾选的数量，优先使用通用限制解析，失败后额外从题干文本抽取。"""
     limit = detect_multiple_choice_limit(driver, question_number)
-    if limit:
-        return limit
+    detected_required: Optional[int] = None
     try:
         container = driver.find_element(By.CSS_SELECTOR, f"#div{question_number}")
     except NoSuchElementException:
@@ -2066,11 +2116,14 @@ def detect_reorder_required_count(driver: BrowserDriver, question_number: int) -
     except Exception:
         pass
     for fragment in fragments:
-        required = _extract_reorder_required_from_text(fragment)
+        required = _extract_reorder_required_from_text(fragment, total_options)
         if required:
             print(f"第{question_number}题检测到需要选择 {required} 项并排序。")
-            return required
-    return None
+            detected_required = required
+            break
+    if detected_required is not None:
+        return detected_required
+    return limit
 
 
 def try_click_start_answer_button(
@@ -3083,10 +3136,152 @@ def reorder(driver: BrowserDriver, current):
     except Exception:
         container = None
 
-    required_count = detect_reorder_required_count(driver, current)
+    def _is_item_selected(item) -> bool:
+        try:
+            inputs = item.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
+        except Exception:
+            inputs = []
+        for ipt in inputs:
+            try:
+                if ipt.is_selected():
+                    return True
+            except Exception:
+                continue
+        try:
+            cls = (item.get_attribute("class") or "").lower()
+            # 部分排序题点击后会给 li 添加 check 类或数字类名
+            if any(token in cls for token in ("selected", "checked", "jqchecked", "active", "on", "check")):
+                return True
+        except Exception:
+            pass
+        try:
+            badges = item.find_elements(
+                By.CSS_SELECTOR, ".ui-icon-number, .order-number, .order-index, .num, .sortnum, .sortnum-sel"
+            )
+            for badge in badges:
+                try:
+                    text = _extract_text_from_element(badge).strip()
+                except Exception:
+                    text = ""
+                if text:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _count_selected() -> int:
+        try:
+            if container:
+                count = len(
+                    container.find_elements(
+                        By.CSS_SELECTOR,
+                        "input[type='checkbox']:checked, input[type='radio']:checked, li.jqchecked, li.selected, li.on, li.checked, li.check, .option.on, .option.selected",
+                    )
+                )
+                if count > 0:
+                    return count
+                # 对于排序题，数字标识可能在 span.sortnum 中
+                badges = container.find_elements(By.CSS_SELECTOR, ".sortnum, .sortnum-sel")
+                badge_count = 0
+                for badge in badges:
+                    try:
+                        text = _extract_text_from_element(badge).strip()
+                    except Exception:
+                        text = ""
+                    if text:
+                        badge_count += 1
+                if badge_count:
+                    return badge_count
+        except Exception:
+            pass
+        count = 0
+        for item in order_items:
+            if _is_item_selected(item):
+                count += 1
+        return count
+
+    def _click_item(option_idx: int, item) -> bool:
+        selector = f"#div{current} > ul > li:nth-child({option_idx + 1})"
+        for _ in range(3):
+            try:
+                _smooth_scroll_to_element(driver, item, 'center')
+            except Exception:
+                pass
+            try:
+                item.click()
+            except Exception:
+                pass
+            time.sleep(0.05)
+            if _is_item_selected(item):
+                return True
+            try:
+                driver.find_element(By.CSS_SELECTOR, selector).click()
+            except Exception:
+                try:
+                    driver.execute_script("arguments[0].click();", item)
+                except Exception:
+                    pass
+            time.sleep(0.05)
+            if _is_item_selected(item):
+                return True
+        return _is_item_selected(item)
+
+    def _ensure_reorder_complete(target_count: int) -> None:
+        target_count = max(1, min(target_count, total_options))
+        for _ in range(3):
+            current_count = _count_selected()
+            if current_count >= target_count:
+                return
+            missing_indices = [i for i, it in enumerate(order_items) if not _is_item_selected(it)]
+            if not missing_indices:
+                break
+            random.shuffle(missing_indices)
+            for option_idx in missing_indices:
+                item = order_items[option_idx]
+                if _click_item(option_idx, item):
+                    current_count += 1
+                    if current_count >= target_count:
+                        return
+            time.sleep(0.12)
+
+    def _wait_until_reorder_done(target_count: int, max_wait: float = 1.5) -> None:
+        target_count = max(1, min(target_count, total_options))
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            current_count = _count_selected()
+            if current_count >= target_count:
+                return
+            _ensure_reorder_complete(target_count)
+            time.sleep(0.08)
+
+    total_options = len(order_items)
+    required_count = detect_reorder_required_count(driver, current, total_options)
     min_select_limit, max_select_limit = detect_multiple_choice_limit_range(driver, current)
+    force_select_all = required_count is not None and required_count == total_options
+    if force_select_all and max_select_limit is not None and required_count is not None and max_select_limit < required_count:
+        max_select_limit = required_count
     if min_select_limit is not None or max_select_limit is not None:
         _log_multi_limit_once(driver, current, min_select_limit, max_select_limit)
+    if force_select_all:
+        candidate_indices = list(range(len(order_items)))
+        random.shuffle(candidate_indices)
+        for option_idx in candidate_indices:
+            item = order_items[option_idx]
+            if _is_item_selected(item):
+                continue
+            _click_item(option_idx, item)
+        # 如果仍有未选中的项，补点两轮，确保随机但全选
+        for _ in range(2):
+            selected_now = _count_selected()
+            if selected_now >= total_options:
+                break
+            missing_indices = [i for i, it in enumerate(order_items) if not _is_item_selected(it)]
+            random.shuffle(missing_indices)
+            for option_idx in missing_indices:
+                item = order_items[option_idx]
+                _click_item(option_idx, item)
+        _wait_until_reorder_done(total_options)
+        return
     # 优先使用题目要求数量，其次用最大限制，最后兜底为全部选项
     if required_count is None:
         effective_limit = max_select_limit if max_select_limit is not None else len(order_items)
@@ -3102,69 +3297,11 @@ def reorder(driver: BrowserDriver, current):
     random.shuffle(candidate_indices)
     selected_indices = candidate_indices[:effective_limit]
 
-    def _is_item_selected(item) -> bool:
-        try:
-            inputs = item.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
-        except Exception:
-            inputs = []
-        for ipt in inputs:
-            try:
-                if ipt.is_selected():
-                    return True
-            except Exception:
-                continue
-        try:
-            cls = (item.get_attribute("class") or "").lower()
-            if any(token in cls for token in ("selected", "checked", "jqchecked", "active", "on")):
-                return True
-        except Exception:
-            pass
-        try:
-            badges = item.find_elements(By.CSS_SELECTOR, ".ui-icon-number, .order-number, .order-index, .num")
-            if badges:
-                return True
-        except Exception:
-            pass
-        return False
-
-    def _count_selected() -> int:
-        try:
-            if container:
-                return len(
-                    container.find_elements(
-                        By.CSS_SELECTOR,
-                        "input[type='checkbox']:checked, input[type='radio']:checked, li.jqchecked, li.selected, li.on, li.checked, .option.on, .option.selected",
-                    )
-                )
-        except Exception:
-            pass
-        count = 0
-        for item in order_items:
-            if _is_item_selected(item):
-                count += 1
-        return count
-
     for option_idx in selected_indices:
         item = order_items[option_idx]
         if _is_item_selected(item):
             continue
-        selector = f"#div{current} > ul > li:nth-child({option_idx + 1})"
-        try:
-            driver.find_element(By.CSS_SELECTOR, selector).click()
-        except Exception:
-            try:
-                item.click()
-            except Exception:
-                continue
-        time.sleep(0.2)
-        if _is_item_selected(item):
-            continue
-        try:
-            check = item.find_element(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
-            check.click()
-        except Exception:
-            pass
-        time.sleep(0.1)
+        _click_item(option_idx, item)
 
     selected_count = _count_selected()
     if selected_count < effective_limit:
@@ -3173,17 +3310,9 @@ def reorder(driver: BrowserDriver, current):
                 break
             if _is_item_selected(item):
                 continue
-            try:
-                item.click()
-            except Exception:
-                try:
-                    check = item.find_element(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
-                    check.click()
-                except Exception:
-                    continue
-            time.sleep(0.1)
-            if _is_item_selected(item):
+            if _click_item(option_idx, item):
                 selected_count += 1
+    _wait_until_reorder_done(effective_limit)
 
 
 def scale(driver: BrowserDriver, current, index):
