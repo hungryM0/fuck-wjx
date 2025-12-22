@@ -1829,14 +1829,14 @@ class SurveyGUI(ConfigPersistenceMixin):
         timed_mode_frame.pack(fill=tk.X, pady=(10, 0))
         timed_toggle = ttk.Checkbutton(
             timed_mode_frame,
-            text="问卷定时开放时启用自动刷新等待（仅提交 1 份）",
+            text="预填模式",
             variable=self.timed_mode_enabled_var,
             command=self._on_timed_mode_toggle,
         )
         timed_toggle.pack(anchor="w", pady=(0, 2))
         ttk.Label(
             timed_mode_frame,
-            text="开放前保持单实例快速刷新，开放后立即填写并提交后停止。",
+            text="开放前单实例高频刷新，开放后立即填写并自动提交。",
             foreground="#6b6b6b",
             wraplength=440,
             justify="left",
@@ -3132,15 +3132,18 @@ class SurveyGUI(ConfigPersistenceMixin):
             _set_save_command(save_multiple)
             
         else:
+            rows_count = max(1, int(getattr(entry, "rows", 1))) if entry.question_type == "matrix" else 1
             effective_option_count = engine._infer_option_count(entry)
             if effective_option_count <= 0:
                 effective_option_count = max(1, entry.option_count or 1)
+            if entry.question_type == "matrix":
+                effective_option_count = max(effective_option_count, len(entry.texts or []), 1)
             if effective_option_count != entry.option_count:
                 entry.option_count = effective_option_count
 
             ttk.Label(frame, text=f"选项数: {effective_option_count}").pack(anchor="w", pady=5, fill=tk.X)
             if entry.question_type == "matrix":
-                ttk.Label(frame, text=f"矩阵行数: {entry.rows}").pack(anchor="w", pady=5, fill=tk.X)
+                ttk.Label(frame, text=f"矩阵行数: {rows_count}").pack(anchor="w", pady=5, fill=tk.X)
 
             ttk.Label(frame, text="选择分布方式：").pack(anchor="w", pady=10, fill=tk.X)
 
@@ -3148,62 +3151,162 @@ class SurveyGUI(ConfigPersistenceMixin):
 
             weight_frame = ttk.Frame(frame)
             slider_vars: List[tk.DoubleVar] = []
+            matrix_slider_vars: List[List[tk.DoubleVar]] = []
             option_texts = entry.texts if entry.texts else []
-            initial_weights = entry.custom_weights if entry.custom_weights else [1.0] * effective_option_count
-            slider_hint = "拖动滑块设置每个选项的权重（0-10）：" if entry.question_type != "matrix" else "拖动滑块设置每列被选中的优先级（0-10）："
+            initial_weights_raw = entry.custom_weights if entry.custom_weights is not None else [1.0] * effective_option_count
+
+            initial_matrix_weights: Optional[List[List[float]]] = None
+            if entry.question_type == "matrix":
+                def _normalize_matrix_weights(raw: Any) -> List[List[float]]:
+                    default_row = [1.0] * effective_option_count
+                    defaults = [list(default_row) for _ in range(rows_count)]
+                    if not isinstance(raw, list):
+                        return defaults
+                    if raw and isinstance(raw[0], (list, tuple)):
+                        source_rows = raw  # type: ignore[assignment]
+                    else:
+                        source_rows = [raw]
+                    normalized: List[List[float]] = []
+                    last_row = default_row
+                    for idx in range(rows_count):
+                        try:
+                            row_raw: List[Any] = list(source_rows[idx]) if idx < len(source_rows) else list(last_row)
+                        except Exception:
+                            row_raw = list(last_row)
+                        row_values: List[float] = []
+                        for item in row_raw:
+                            try:
+                                row_values.append(float(item))
+                            except Exception:
+                                row_values.append(1.0)
+                        if not row_values:
+                            row_values = list(default_row)
+                        if len(row_values) < effective_option_count:
+                            row_values += [1.0] * (effective_option_count - len(row_values))
+                        elif len(row_values) > effective_option_count:
+                            row_values = row_values[:effective_option_count]
+                        normalized.append(row_values)
+                        last_row = row_values
+                    return normalized
+
+                initial_matrix_weights = _normalize_matrix_weights(initial_weights_raw)
+                slider_hint = "为每一行单独设置各列的权重（0-10）："
+            else:
+                slider_hint = "拖动滑块设置每个选项的权重（0-10）："
+
             ttk.Label(weight_frame, text=slider_hint, foreground="gray").pack(anchor="w", pady=(5, 8), fill=tk.X)
 
             sliders_container = ttk.Frame(weight_frame)
             sliders_container.pack(fill=tk.BOTH, expand=True)
             inline_fill_vars: List[Optional[tk.StringVar]] = [None] * entry.option_count if entry.question_type in ("single", "dropdown") else []
 
-            for i in range(effective_option_count):
-                row_frame = ttk.Frame(sliders_container)
-                row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
-                row_frame.columnconfigure(1, weight=1)
+            if entry.question_type == "matrix":
+                for row_idx in range(rows_count):
+                    row_box = ttk.LabelFrame(sliders_container, text=f"第 {row_idx + 1} 行")
+                    row_box.pack(fill=tk.X, pady=6, padx=(6, 6))
+                    row_box.columnconfigure(1, weight=1)
+                    row_vars: List[tk.DoubleVar] = []
+                    for col_idx in range(effective_option_count):
+                        row_frame = ttk.Frame(row_box)
+                        row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
+                        row_frame.columnconfigure(1, weight=1)
 
-                option_text = option_texts[i] if i < len(option_texts) and option_texts[i] else ""
-                text_value = f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}"
-                ttk.Label(row_frame, text=text_value, anchor="w", wraplength=420).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+                        option_text = option_texts[col_idx] if col_idx < len(option_texts) and option_texts[col_idx] else ""
+                        text_value = f"列 {col_idx + 1}: {option_text}" if option_text else f"列 {col_idx + 1}"
+                        ttk.Label(row_frame, text=text_value, anchor="w", wraplength=420).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
 
-                initial_value = float(initial_weights[i]) if i < len(initial_weights) else 1.0
-                var = tk.DoubleVar(value=initial_value)
-                slider = ttk.Scale(row_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
-                slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
+                        initial_value = 1.0
+                        if initial_matrix_weights and row_idx < len(initial_matrix_weights) and col_idx < len(initial_matrix_weights[row_idx]):
+                            try:
+                                initial_value = float(initial_matrix_weights[row_idx][col_idx])
+                            except Exception:
+                                initial_value = 1.0
+                        var = tk.DoubleVar(value=initial_value)
+                        slider = ttk.Scale(row_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
+                        slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
 
-                value_label = ttk.Label(row_frame, text=f"{initial_value:.1f}", width=6, anchor="e")
-                value_label.grid(row=1, column=2, sticky="e")
+                        value_label = ttk.Label(row_frame, text=f"{initial_value:.1f}", width=6, anchor="e")
+                        value_label.grid(row=1, column=2, sticky="e")
 
-                def _update_value_label(v=var, lbl=value_label):
-                    lbl.config(text=f"{v.get():.1f}")
+                        def _update_value_label(v=var, lbl=value_label):
+                            lbl.config(text=f"{v.get():.1f}")
 
-                var.trace_add("write", lambda *args, v=var, lbl=value_label: _update_value_label(v, lbl))
-                slider_vars.append(var)
-                _attach_inline_fill_input(row_frame, i, inline_fill_vars)
+                        var.trace_add("write", lambda *args, v=var, lbl=value_label: _update_value_label(v, lbl))
+                        row_vars.append(var)
+                    matrix_slider_vars.append(row_vars)
+            else:
+                for i in range(effective_option_count):
+                    row_frame = ttk.Frame(sliders_container)
+                    row_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
+                    row_frame.columnconfigure(1, weight=1)
+
+                    option_text = option_texts[i] if i < len(option_texts) and option_texts[i] else ""
+                    text_value = f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}"
+                    ttk.Label(row_frame, text=text_value, anchor="w", wraplength=420).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
+                    initial_value = 1.0
+                    try:
+                        if isinstance(initial_weights_raw, list) and i < len(initial_weights_raw) and not isinstance(initial_weights_raw[0], (list, tuple)):
+                            initial_value = float(initial_weights_raw[i])
+                    except Exception:
+                        initial_value = 1.0
+                    var = tk.DoubleVar(value=initial_value)
+                    slider = ttk.Scale(row_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
+                    slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
+
+                    value_label = ttk.Label(row_frame, text=f"{initial_value:.1f}", width=6, anchor="e")
+                    value_label.grid(row=1, column=2, sticky="e")
+
+                    def _update_value_label(v=var, lbl=value_label):
+                        lbl.config(text=f"{v.get():.1f}")
+
+                    var.trace_add("write", lambda *args, v=var, lbl=value_label: _update_value_label(v, lbl))
+                    slider_vars.append(var)
+                    _attach_inline_fill_input(row_frame, i, inline_fill_vars)
 
             ttk.Radiobutton(frame, text="完全随机", variable=dist_var, value="random").pack(anchor="w", fill=tk.X)
             ttk.Radiobutton(frame, text="自定义权重（使用滑块设置）", variable=dist_var, value="custom").pack(anchor="w", fill=tk.X)
 
             def save_other():
                 mode = dist_var.get()
-                if mode == "random":
-                    entry.probabilities = -1
-                    entry.custom_weights = None
-                elif mode == "equal":
-                    weights = [1.0] * entry.option_count
-                    entry.custom_weights = weights
-                    entry.probabilities = normalize_probabilities(weights)
+                if entry.question_type == "matrix":
+                    if mode == "random":
+                        entry.probabilities = -1
+                        entry.custom_weights = None
+                        entry.option_fill_texts = None
+                    else:
+                        matrix_weights: List[List[float]] = []
+                        source_rows = matrix_slider_vars if matrix_slider_vars else [slider_vars]
+                        for row_vars in source_rows:
+                            matrix_weights.append([var.get() for var in row_vars])
+                        if not any(weight > 0 for row in matrix_weights for weight in row):
+                            self._log_popup_error("错误", "至少需要一行的权重大于 0")
+                            return
+                        entry.custom_weights = matrix_weights
+                        entry.probabilities = matrix_weights
+                        entry.option_count = max(entry.option_count, effective_option_count)
+                        entry.rows = max(1, len(matrix_weights))
+                        entry.option_fill_texts = None
                 else:
-                    weights = [var.get() for var in slider_vars]
-                    if not weights or all(w <= 0 for w in weights):
-                        self._log_popup_error("错误", "至少需要一个选项的权重大于 0")
-                        return
-                    entry.custom_weights = weights
-                    entry.probabilities = normalize_probabilities(weights)
-                    entry.option_count = max(entry.option_count, len(weights))
+                    if mode == "random":
+                        entry.probabilities = -1
+                        entry.custom_weights = None
+                    elif mode == "equal":
+                        weights = [1.0] * entry.option_count
+                        entry.custom_weights = weights
+                        entry.probabilities = normalize_probabilities(weights)
+                    else:
+                        weights = [var.get() for var in slider_vars]
+                        if not weights or all(w <= 0 for w in weights):
+                            self._log_popup_error("错误", "至少需要一个选项的权重大于 0")
+                            return
+                        entry.custom_weights = weights
+                        entry.probabilities = normalize_probabilities(weights)
+                        entry.option_count = max(entry.option_count, len(weights))
 
                 entry.distribution_mode = mode
-                entry.option_fill_texts = _collect_inline_fill_values(inline_fill_vars, entry.option_count)
+                if entry.question_type in ("single", "dropdown"):
+                    entry.option_fill_texts = _collect_inline_fill_values(inline_fill_vars, entry.option_count)
                 self._refresh_tree()
                 _close_edit_window()
                 logging.info(f"[Action Log] Saved distribution settings ({mode}) for question #{index+1}")
@@ -4842,9 +4945,10 @@ class SurveyGUI(ConfigPersistenceMixin):
                 self._show_wizard_for_question(questions_info, current_index + 1)
         
         else:
+            rows_count = max(1, int(q.get("rows") or 1)) if type_code == "6" else 1
             option_text = f"共 {q['options']} 个选项"
             if type_code == "6":
-                option_text = f"{q['rows']} 行 × {q['options']} 列"
+                option_text = f"{rows_count} 行 × {q['options']} 列"
             ttk.Label(config_frame, text=option_text).pack(anchor="w", pady=10, fill=tk.X)
 
             if type_code == "6" and q.get('option_texts'):
@@ -4881,6 +4985,45 @@ class SurveyGUI(ConfigPersistenceMixin):
                     existing_fill_texts = existing_entry.option_fill_texts
             if initial_weights and len(initial_weights) != q['options']:
                 initial_weights = None
+            initial_matrix_weights: Optional[List[List[float]]] = None
+            if type_code == "6":
+                def _normalize_matrix_weights(raw_weights: Any) -> List[List[float]]:
+                    default_row = [1.0] * q['options']
+                    defaults = [list(default_row) for _ in range(rows_count)]
+                    if not isinstance(raw_weights, list):
+                        return defaults
+                    if raw_weights and isinstance(raw_weights[0], (list, tuple)):
+                        source_rows = raw_weights  # type: ignore[assignment]
+                    else:
+                        source_rows = [raw_weights]
+                    normalized: List[List[float]] = []
+                    last_row = default_row
+                    for idx in range(rows_count):
+                        try:
+                            row_raw: List[Any] = list(source_rows[idx]) if idx < len(source_rows) else list(last_row)
+                        except Exception:
+                            row_raw = list(last_row)
+                        row_values: List[float] = []
+                        for item in row_raw:
+                            try:
+                                row_values.append(float(item))
+                            except Exception:
+                                row_values.append(1.0)
+                        if not row_values:
+                            row_values = list(default_row)
+                        if len(row_values) < q['options']:
+                            row_values += [1.0] * (q['options'] - len(row_values))
+                        elif len(row_values) > q['options']:
+                            row_values = row_values[:q['options']]
+                        normalized.append(row_values)
+                        last_row = row_values
+                    return normalized
+
+                if existing_entry and existing_entry.question_type == "matrix":
+                    weights_source = existing_entry.custom_weights or existing_entry.probabilities
+                    initial_matrix_weights = _normalize_matrix_weights(weights_source)
+                else:
+                    initial_matrix_weights = _normalize_matrix_weights([1.0] * q['options'])
 
             dist_var = tk.StringVar(value=initial_mode)
 
@@ -4899,54 +5042,136 @@ class SurveyGUI(ConfigPersistenceMixin):
                 value="custom",
             ).pack(anchor="w", pady=5, fill=tk.X)
 
-            ttk.Label(weight_frame, text="拖动滑块设置每个选项的权重比例：",
-                     foreground="gray").pack(anchor="w", pady=(10, 5), fill=tk.X)
-
             sliders_weight_frame = ttk.Frame(weight_frame)
             sliders_weight_frame.pack(fill=tk.BOTH, expand=True)
 
-            slider_vars = []
+            slider_vars: List[tk.DoubleVar] = []
+            matrix_slider_vars: List[List[tk.DoubleVar]] = []
             fill_text_vars: List[Optional[tk.StringVar]] = []
             attach_inline_fill: Callable[[ttk.Frame, int], None] = lambda *_: None
             if type_code in ("3", "7"):
                 fill_text_vars, attach_inline_fill = _build_fillable_inputs(existing_fill_texts)
-            for i in range(q['options']):
-                slider_frame = ttk.Frame(sliders_weight_frame)
-                slider_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
-                slider_frame.columnconfigure(1, weight=1)
 
-                option_text = ""
-                if i < len(q.get('option_texts', [])) and q['option_texts'][i]:
-                    option_text = q['option_texts'][i]
+            if type_code == "6":
+                ttk.Label(
+                    weight_frame,
+                    text="为每一行单独设置各列的权重（0-10）：",
+                    foreground="gray"
+                ).pack(anchor="w", pady=(10, 5), fill=tk.X)
+                for row_idx in range(rows_count):
+                    row_box = ttk.LabelFrame(sliders_weight_frame, text=f"第 {row_idx + 1} 行")
+                    row_box.pack(fill=tk.X, pady=6, padx=(6, 6))
+                    row_box.columnconfigure(1, weight=1)
+                    row_vars: List[tk.DoubleVar] = []
+                    for col_idx in range(q['options']):
+                        row_frame = ttk.Frame(row_box)
+                        row_frame.pack(fill=tk.X, pady=3, padx=(10, 10))
+                        row_frame.columnconfigure(1, weight=1)
 
-                text_label = ttk.Label(slider_frame, text=f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}",
-                                       anchor="w", wraplength=500)
-                text_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+                        option_text = ""
+                        if col_idx < len(q.get('option_texts', [])) and q['option_texts'][col_idx]:
+                            option_text = q['option_texts'][col_idx]
 
-                initial_value = 1.0
-                if initial_weights and i < len(initial_weights):
-                    try:
-                        initial_value = float(initial_weights[i])
-                    except Exception:
+                        ttk.Label(
+                            row_frame,
+                            text=f"列 {col_idx + 1}: {option_text}" if option_text else f"列 {col_idx + 1}",
+                            anchor="w",
+                            wraplength=500,
+                        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
                         initial_value = 1.0
-                var = tk.DoubleVar(value=initial_value)
-                slider = ttk.Scale(slider_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
-                slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
+                        if initial_matrix_weights and row_idx < len(initial_matrix_weights):
+                            row_weights = initial_matrix_weights[row_idx]
+                            if col_idx < len(row_weights):
+                                try:
+                                    initial_value = float(row_weights[col_idx])
+                                except Exception:
+                                    initial_value = 1.0
 
-                value_label = ttk.Label(slider_frame, text=f"{var.get():.1f}", width=6, anchor="e")
-                value_label.grid(row=1, column=2, sticky="e")
+                        var = tk.DoubleVar(value=initial_value)
+                        slider = ttk.Scale(row_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
+                        slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
 
-                def update_label(v=var, l=value_label):
-                    l.config(text=f"{v.get():.1f}")
+                        value_label = ttk.Label(row_frame, text=f"{initial_value:.1f}", width=6, anchor="e")
+                        value_label.grid(row=1, column=2, sticky="e")
 
-                var.trace_add("write", lambda *args, v=var, l=value_label: update_label(v, l))
-                slider_vars.append(var)
+                        def _update_label(v=var, lbl=value_label):
+                            lbl.config(text=f"{v.get():.1f}")
 
-                attach_inline_fill(slider_frame, i)
+                        var.trace_add("write", lambda *args, v=var, lbl=value_label: _update_label(v, lbl))
+                        row_vars.append(var)
+                    matrix_slider_vars.append(row_vars)
+            else:
+                ttk.Label(weight_frame, text="拖动滑块设置每个选项的权重比例：",
+                         foreground="gray").pack(anchor="w", pady=(10, 5), fill=tk.X)
+                for i in range(q['options']):
+                    slider_frame = ttk.Frame(sliders_weight_frame)
+                    slider_frame.pack(fill=tk.X, pady=4, padx=(10, 20))
+                    slider_frame.columnconfigure(1, weight=1)
+
+                    option_text = ""
+                    if i < len(q.get('option_texts', [])) and q['option_texts'][i]:
+                        option_text = q['option_texts'][i]
+
+                    text_label = ttk.Label(slider_frame, text=f"选项 {i+1}: {option_text}" if option_text else f"选项 {i+1}",
+                                           anchor="w", wraplength=500)
+                    text_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
+                    initial_value = 1.0
+                    if initial_weights and i < len(initial_weights):
+                        try:
+                            initial_value = float(initial_weights[i])
+                        except Exception:
+                            initial_value = 1.0
+                    var = tk.DoubleVar(value=initial_value)
+                    slider = ttk.Scale(slider_frame, from_=0, to=10, variable=var, orient=tk.HORIZONTAL)
+                    slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(20, 5))
+
+                    value_label = ttk.Label(slider_frame, text=f"{var.get():.1f}", width=6, anchor="e")
+                    value_label.grid(row=1, column=2, sticky="e")
+
+                    def update_label(v=var, l=value_label):
+                        l.config(text=f"{v.get():.1f}")
+
+                    var.trace_add("write", lambda *args, v=var, l=value_label: update_label(v, l))
+                    slider_vars.append(var)
+
+                    attach_inline_fill(slider_frame, i)
 
             def save_and_next():
                 mode = dist_var.get()
-                q_type_map = {"3": "single", "5": "scale", "6": "matrix", "7": "dropdown"}
+                if type_code == "6":
+                    q_type = "matrix"
+                    if mode == "random":
+                        probs: Union[int, List[List[float]]] = -1
+                        weights = None
+                    else:
+                        matrix_weights = []
+                        for row_vars in matrix_slider_vars:
+                            matrix_weights.append([var.get() for var in row_vars])
+                        if not matrix_weights:
+                            matrix_weights = [[1.0] * q['options'] for _ in range(rows_count)]
+                        if not any(weight > 0 for row in matrix_weights for weight in row):
+                            self._log_popup_error("错误", "至少需要一行的权重大于 0")
+                            return
+                        probs = matrix_weights
+                        weights = matrix_weights
+                    entry = QuestionEntry(
+                        question_type=q_type,
+                        probabilities=probs,
+                        texts=q.get('option_texts') or None,
+                        rows=rows_count,
+                        option_count=q['options'],
+                        distribution_mode=mode,
+                        custom_weights=weights,
+                        option_fill_texts=None,
+                        fillable_option_indices=None
+                    )
+                    self._handle_auto_config_entry(entry, q, overwrite_existing=True)
+                    self._show_wizard_for_question(questions_info, current_index + 1)
+                    return
+
+                q_type_map = {"3": "single", "5": "scale", "7": "dropdown"}
                 q_type = q_type_map.get(type_code, "single")
 
                 if mode == "random":
@@ -4967,7 +5192,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                     question_type=q_type,
                     probabilities=probs,
                     texts=None,
-                    rows=q['rows'] if type_code == "6" else 1,
+                    rows=1,
                     option_count=q['options'],
                     distribution_mode=mode,
                     custom_weights=weights,
