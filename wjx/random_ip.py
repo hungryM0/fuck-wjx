@@ -691,6 +691,7 @@ def refresh_ip_counter_display(gui: Any):
         label = getattr(gui, "_ip_counter_label", None)
         button = getattr(gui, "_ip_reset_button", None)
         pack_opts = getattr(gui, "_ip_reset_button_pack_opts", None) or {"side": tk.LEFT, "padx": 2}
+        hint_label = getattr(gui, "_ip_limit_hint_label", None)
         using_custom_api = is_custom_proxy_api_active()
         if label and label.winfo_exists():
             is_unlimited = RegistryManager.is_quota_unlimited()
@@ -699,7 +700,7 @@ def refresh_ip_counter_display(gui: Any):
             elif is_unlimited:
                 label.config(text="∞ (无限额度)", foreground="green")
                 if button and button.winfo_exists():
-                    button.config(text="恢复限制")
+                    button.config(text="恢复限制", state=tk.NORMAL)
             else:
                 count = RegistryManager.read_submit_count()
                 percentage = min(100, int((count / limit) * 100)) if count < limit else 100
@@ -708,7 +709,10 @@ def refresh_ip_counter_display(gui: Any):
                 else:
                     label.config(text=f"{count}/{limit} ({percentage}%)", foreground="blue")
                 if button and button.winfo_exists():
-                    button.config(text="解锁无限IP")
+                    if limit >= _PREMIUM_RANDOM_IP_LIMIT:
+                        button.config(text="已解锁", state=tk.DISABLED)
+                    else:
+                        button.config(text="解锁无限IP", state=tk.NORMAL)
         if button and button.winfo_exists():
             if using_custom_api:
                 if button.winfo_manager():
@@ -719,6 +723,19 @@ def refresh_ip_counter_display(gui: Any):
                         button.pack(**{k: v for k, v in pack_opts.items() if k != "in"})
                     except Exception:
                         button.pack(side=tk.LEFT, padx=2)
+        if hint_label and hint_label.winfo_exists():
+            if using_custom_api:
+                hint_label.config(text="")
+                if hint_label.winfo_manager():
+                    hint_label.pack_forget()
+            elif limit >= _PREMIUM_RANDOM_IP_LIMIT and not RegistryManager.is_quota_unlimited():
+                hint_label.config(text="❕如需更多额度请联系开发者说明情况", fg="#d2691e")
+                if not hint_label.winfo_manager():
+                    hint_label.pack(fill=tk.X, padx=5, pady=(2, 0))
+            else:
+                hint_label.config(text="")
+                if hint_label.winfo_manager():
+                    hint_label.pack_forget()
     except Exception as exc:
         logging.debug(f"刷新IP计数显示出错: {exc}")
 

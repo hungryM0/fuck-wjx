@@ -1172,7 +1172,7 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         # 随机IP计数显示和管理
         ip_counter_frame = ttk.Frame(step3_frame)
-        ip_counter_frame.pack(fill=tk.X, padx=4, pady=(0, 4))
+        ip_counter_frame.pack(fill=tk.X, padx=4, pady=(0, 2))
         ttk.Label(ip_counter_frame, text="随机IP计数：").pack(side=tk.LEFT, padx=5)
         self._ip_counter_label = ttk.Label(ip_counter_frame, text="0/20", font=("Segoe UI", 10, "bold"), foreground="blue")
         self._ip_counter_label.pack(side=tk.LEFT, padx=5)
@@ -1183,6 +1183,19 @@ class SurveyGUI(ConfigPersistenceMixin):
             command=lambda: reset_ip_counter(self),
         )
         self._ip_reset_button.pack(**self._ip_reset_button_pack_opts)
+
+        ip_hint_frame = ttk.Frame(step3_frame)
+        ip_hint_frame.pack(fill=tk.X, padx=4, pady=(0, 6))
+        self._ip_limit_hint_label = tk.Label(
+            ip_hint_frame,
+            text="",
+            fg="#d2691e",
+            font=("Segoe UI", 9),
+            anchor="w",
+            justify="left",
+        )
+        self._ip_limit_hint_label.pack(anchor="w", padx=5)
+
         refresh_ip_counter_display(self)
 
         
