@@ -23,6 +23,7 @@ class RegistryManager:
     REGISTRY_KEY = "RandomIPSubmitCount"
     REGISTRY_KEY_CARD = "CardValidateResult"
     REGISTRY_KEY_UNLIMITED = "UnlimitedQuota"
+    REGISTRY_KEY_LIMIT = "RandomIPQuotaLimit"
     
     @staticmethod
     def _get_registry_hkey() -> Optional[int]:
@@ -157,4 +158,36 @@ class RegistryManager:
             return True
         except Exception as e:
             logging.warning(f"设置无限额度失败: {e}")
+            return False
+
+    @staticmethod
+    def read_quota_limit(default: int = 20) -> int:
+        if winreg is None:
+            return default
+        try:
+            hkey = winreg.HKEY_CURRENT_USER
+            with winreg.OpenKey(hkey, RegistryManager.REGISTRY_PATH) as key:
+                value, _ = winreg.QueryValueEx(key, RegistryManager.REGISTRY_KEY_LIMIT)
+                limit = int(value)
+                return limit if limit > 0 else default
+        except FileNotFoundError:
+            return default
+        except Exception as e:
+            logging.debug(f"读取额度上限失败: {e}")
+            return default
+
+    @staticmethod
+    def write_quota_limit(limit: int) -> bool:
+        if winreg is None:
+            return False
+        try:
+            limit_val = max(1, int(limit))
+            hkey = winreg.HKEY_CURRENT_USER
+            key = winreg.CreateKeyEx(hkey, RegistryManager.REGISTRY_PATH, 0, winreg.KEY_WRITE)
+            winreg.SetValueEx(key, RegistryManager.REGISTRY_KEY_LIMIT, 0, winreg.REG_DWORD, limit_val)
+            winreg.CloseKey(key)
+            logging.info(f"随机IP额度上限已设置为 {limit_val}")
+            return True
+        except Exception as e:
+            logging.warning(f"写入额度上限失败: {e}")
             return False

@@ -32,7 +32,19 @@ from .log_utils import log_popup_info, log_popup_error, log_popup_warning, log_p
 from .registry_manager import RegistryManager
 
 
-RANDOM_IP_FREE_LIMIT = 20
+_DEFAULT_RANDOM_IP_FREE_LIMIT = 20
+def _load_random_ip_limit() -> int:
+    try:
+        limit = RegistryManager.read_quota_limit(_DEFAULT_RANDOM_IP_FREE_LIMIT)
+        limit = int(limit)
+        if limit > 0:
+            return limit
+    except Exception:
+        pass
+    return _DEFAULT_RANDOM_IP_FREE_LIMIT
+
+
+RANDOM_IP_FREE_LIMIT = _load_random_ip_limit()
 CARD_VALIDATION_ENDPOINT = "https://hungrym0.top/password.txt"
 _quota_limit_dialog_shown = False
 _proxy_api_url_override: Optional[str] = None
