@@ -807,6 +807,25 @@ def _infer_option_count(entry: "QuestionEntry") -> int:
     当配置中缺少选项数量时，尽可能从已保存的权重/文本推导。
     优先顺序：已有数量 > 自定义权重 > 概率列表长度 > 文本数量 >（量表题兜底为5）。
     """
+    def _nested_length(raw: Any) -> Optional[int]:
+        """用于矩阵题：当传入的是按行拆分的权重列表时，返回其中最长的一行长度。"""
+        if not isinstance(raw, list):
+            return None
+        lengths: List[int] = []
+        for item in raw:
+            if isinstance(item, (list, tuple)):
+                lengths.append(len(item))
+        return max(lengths) if lengths else None
+
+    # 矩阵题优先检查按行拆分的权重，避免把“行数”误当成列数
+    if getattr(entry, "question_type", "") == "matrix":
+        nested_len = _nested_length(getattr(entry, "custom_weights", None))
+        if nested_len:
+            return nested_len
+        nested_len = _nested_length(getattr(entry, "probabilities", None))
+        if nested_len:
+            return nested_len
+
     try:
         if entry.option_count and entry.option_count > 0:
             return int(entry.option_count)
@@ -1052,8 +1071,48 @@ def configure_probabilities(entries: List[QuestionEntry]):
             multiple_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "matrix":
             rows = max(1, entry.rows)
-            if isinstance(probs, list):
-                normalized = normalize_probabilities(probs)
+            option_count = max(1, _infer_option_count(entry))
+
+            def _normalize_row(raw_row: Any) -> Optional[List[float]]:
+                if not isinstance(raw_row, (list, tuple)):
+                    return None
+                cleaned: List[float] = []
+                for value in raw_row:
+                    try:
+                        cleaned.append(max(0.0, float(value)))
+                    except Exception:
+                        continue
+                if not cleaned:
+                    return None
+                if len(cleaned) < option_count:
+                    cleaned = cleaned + [1.0] * (option_count - len(cleaned))
+                elif len(cleaned) > option_count:
+                    cleaned = cleaned[:option_count]
+                try:
+                    return normalize_probabilities(cleaned)
+                except Exception:
+                    return None
+
+            # 支持按行配置的权重（list[list]），否则退化为对所有行复用同一组
+            row_weights_source: Optional[List[Any]] = None
+            if isinstance(probs, list) and any(isinstance(item, (list, tuple)) for item in probs):
+                row_weights_source = probs
+            elif isinstance(entry.custom_weights, list) and any(isinstance(item, (list, tuple)) for item in entry.custom_weights):  # type: ignore[attr-defined]
+                row_weights_source = entry.custom_weights  # type: ignore[attr-defined]
+
+            if row_weights_source is not None:
+                last_row: Optional[Any] = None
+                for idx in range(rows):
+                    raw_row = row_weights_source[idx] if idx < len(row_weights_source) else last_row
+                    normalized_row = _normalize_row(raw_row)
+                    if normalized_row is None:
+                        normalized_row = [1.0 / option_count] * option_count
+                    matrix_prob.append(normalized_row)
+                    last_row = raw_row if raw_row is not None else last_row
+            elif isinstance(probs, list):
+                normalized = _normalize_row(probs)
+                if normalized is None:
+                    normalized = [1.0 / option_count] * option_count
                 for _ in range(rows):
                     matrix_prob.append(list(normalized))
             else:
