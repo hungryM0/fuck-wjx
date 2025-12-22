@@ -33,7 +33,8 @@ from .registry_manager import RegistryManager
 
 
 _DEFAULT_RANDOM_IP_FREE_LIMIT = 20
-def _load_random_ip_limit() -> int:
+_PREMIUM_RANDOM_IP_LIMIT = 400
+def get_random_ip_limit() -> int:
     try:
         limit = RegistryManager.read_quota_limit(_DEFAULT_RANDOM_IP_FREE_LIMIT)
         limit = int(limit)
@@ -44,7 +45,9 @@ def _load_random_ip_limit() -> int:
     return _DEFAULT_RANDOM_IP_FREE_LIMIT
 
 
-RANDOM_IP_FREE_LIMIT = _load_random_ip_limit()
+RANDOM_IP_FREE_LIMIT = get_random_ip_limit()  # 兼容旧代码，实际逻辑使用 get_random_ip_limit()
+
+
 CARD_VALIDATION_ENDPOINT = "https://hungrym0.top/password.txt"
 _quota_limit_dialog_shown = False
 _proxy_api_url_override: Optional[str] = None
@@ -478,12 +481,13 @@ def on_random_ip_toggle(gui: Any):
         return
     if not RegistryManager.is_quota_unlimited():
         count = RegistryManager.read_submit_count()
-        if count >= RANDOM_IP_FREE_LIMIT:
+        limit = max(1, get_random_ip_limit())
+        if count >= limit:
             _invoke_popup(
                 gui,
                 "warning",
                 "提示",
-                "随机IP已达20份限制，请通过卡密验证解锁无限额度后再启用。",
+                f"随机IP已达{limit}份限制，请通过卡密验证解锁额度后再启用。",
                 parent=getattr(gui, "root", None),
             )
             _set_random_ip_enabled(gui, False)
@@ -641,15 +645,16 @@ def show_card_validation_dialog(gui: Any) -> bool:
         if _validate_card(card_input):
             RegistryManager.reset_submit_count()
             RegistryManager.write_card_validate_result(True)
-            RegistryManager.set_quota_unlimited(True)
-            logging.info("卡密验证成功，已启用无限额度")
+            RegistryManager.write_quota_limit(_PREMIUM_RANDOM_IP_LIMIT)
+            RegistryManager.set_quota_unlimited(False)
+            logging.info(f"卡密验证成功，已扩容随机IP额度至 {_PREMIUM_RANDOM_IP_LIMIT}")
             refresh_ip_counter_display(gui)
             reset_quota_limit_dialog_flag()
             result_var.set(True)
             _play_success_sound(gui)
             enable_now = log_popup_confirm(
                 "成功",
-                "卡密验证成功！已解锁无限随机IP额度。\n\n是否立即开启随机IP提交？",
+                f"卡密验证成功！已解锁随机IP额度 {_PREMIUM_RANDOM_IP_LIMIT} 份。\n\n是否立即开启随机IP提交？",
                 parent=dialog,
                 icon="question",
             )
@@ -682,6 +687,7 @@ def refresh_ip_counter_display(gui: Any):
     if gui is None:
         return
     try:
+        limit = max(1, get_random_ip_limit())
         label = getattr(gui, "_ip_counter_label", None)
         button = getattr(gui, "_ip_reset_button", None)
         pack_opts = getattr(gui, "_ip_reset_button_pack_opts", None) or {"side": tk.LEFT, "padx": 2}
@@ -696,11 +702,11 @@ def refresh_ip_counter_display(gui: Any):
                     button.config(text="恢复限制")
             else:
                 count = RegistryManager.read_submit_count()
-                percentage = min(100, int((count / RANDOM_IP_FREE_LIMIT) * 100)) if count < RANDOM_IP_FREE_LIMIT else 100
-                if count >= RANDOM_IP_FREE_LIMIT:
-                    label.config(text=f"{count}/{RANDOM_IP_FREE_LIMIT} (已达上限)", foreground="red")
+                percentage = min(100, int((count / limit) * 100)) if count < limit else 100
+                if count >= limit:
+                    label.config(text=f"{count}/{limit} (已达上限)", foreground="red")
                 else:
-                    label.config(text=f"{count}/{RANDOM_IP_FREE_LIMIT} ({percentage}%)", foreground="blue")
+                    label.config(text=f"{count}/{limit} ({percentage}%)", foreground="blue")
                 if button and button.winfo_exists():
                     button.config(text="解锁无限IP")
         if button and button.winfo_exists():
@@ -722,6 +728,7 @@ def reset_ip_counter(gui: Any):
     if gui is None:
         return
     if RegistryManager.is_quota_unlimited():
+        limit = max(1, get_random_ip_limit())
         result = _invoke_popup(
             gui,
             "confirm",
@@ -733,7 +740,7 @@ def reset_ip_counter(gui: Any):
             RegistryManager.reset_submit_count()
             logging.info("已禁用无限额度，恢复计数限制")
             refresh_ip_counter_display(gui)
-            _invoke_popup(gui, "info", "成功", "已禁用无限额度，恢复为20份限制。")
+            _invoke_popup(gui, "info", "成功", f"已禁用无限额度，恢复为{limit}份限制。")
     else:
         result = _invoke_popup(
             gui,
@@ -765,15 +772,16 @@ def handle_random_ip_submission(gui: Any, stop_signal: Optional[threading.Event]
     if RegistryManager.is_quota_unlimited():
         logging.info("已启用无限额度，无需验证")
         return
+    limit = max(1, get_random_ip_limit())
     ip_count = RegistryManager.increment_submit_count()
-    logging.info(f"随机IP提交计数: {ip_count}/{RANDOM_IP_FREE_LIMIT}")
+    logging.info(f"随机IP提交计数: {ip_count}/{limit}")
     # 计数发生在工作线程中，这里主动把 UI 刷新调度到 Tk 主线程，避免主界面计数不更新
     try:
         _schedule_on_gui_thread(gui, lambda: refresh_ip_counter_display(gui))
     except Exception:
         pass
-    if ip_count >= RANDOM_IP_FREE_LIMIT:
-        logging.warning("随机IP提交已达20份，停止任务并弹出卡密验证窗口")
+    if ip_count >= limit:
+        logging.warning(f"随机IP提交已达{limit}份，停止任务并弹出卡密验证窗口")
         if stop_signal:
             stop_signal.set()
         _disable_random_ip_and_show_dialog(gui)
@@ -788,8 +796,9 @@ def normalize_random_ip_enabled_value(desired_enabled: bool) -> bool:
         return False
     if RegistryManager.is_quota_unlimited():
         return True
+    limit = max(1, get_random_ip_limit())
     count = RegistryManager.read_submit_count()
-    if count >= RANDOM_IP_FREE_LIMIT:
-        logging.warning("配置中启用了随机IP，但已达到20份限制，已禁用此选项")
+    if count >= limit:
+        logging.warning(f"配置中启用了随机IP，但已达到{limit}份限制，已禁用此选项")
         return False
     return True
