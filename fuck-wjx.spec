@@ -21,9 +21,19 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        "numpy",
+        "cryptography",
+        "OpenSSL",
+        "urllib3.contrib.pyopenssl",
+        "lxml",
+        "PIL._avif",
+        "PIL.AvifImagePlugin",
+        "PIL._webp",
+        "PIL.WebPImagePlugin",
+    ],
     noarchive=False,
-    optimize=0,
+    optimize=2,
 )
 pyz = PYZ(a.pure)
 

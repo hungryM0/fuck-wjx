@@ -60,7 +60,6 @@ from wjx.full_simulation_mode import FULL_SIM_STATE as _FULL_SIM_STATE
 import wjx.full_simulation_ui as full_simulation_ui
 import wjx.timed_mode as timed_mode
 
-import numpy
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
 from PIL import Image, ImageTk
 from pyzbar.pyzbar import decode as pyzbar_decode
@@ -139,6 +138,33 @@ _LOCATION_GEOCODE_FAILURES: Set[str] = set()
 _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
 _DETECTED_MULTI_LIMIT_RANGES: Dict[Tuple[str, int], Tuple[Optional[int], Optional[int]]] = {}
 _REPORTED_MULTI_LIMITS: Set[Tuple[str, int]] = set()
+
+
+def _weighted_index(probabilities: List[float]) -> int:
+    if not probabilities:
+        raise ValueError("probabilities cannot be empty")
+    weights: List[float] = []
+    total = 0.0
+    for value in probabilities:
+        try:
+            weight = float(value)
+        except Exception:
+            weight = 0.0
+        if math.isnan(weight) or math.isinf(weight) or weight < 0.0:
+            weight = 0.0
+        weights.append(weight)
+        total += weight
+
+    if total <= 0.0:
+        return random.randrange(len(weights))
+
+    pivot = random.random() * total
+    running = 0.0
+    for index, weight in enumerate(weights):
+        running += weight
+        if pivot <= running:
+            return index
+    return len(weights) - 1
 
 
 def _generate_random_chinese_name_value() -> str:
@@ -2525,7 +2551,7 @@ def vacant(driver: BrowserDriver, current, index):
     if len(selection_probabilities) != len(resolved_candidates):
         selection_probabilities = normalize_probabilities([1.0] * len(resolved_candidates))
 
-    selected_index = numpy.random.choice(a=numpy.arange(0, len(selection_probabilities)), p=selection_probabilities)
+    selected_index = _weighted_index(selection_probabilities)
     selected_answer = resolved_candidates[selected_index] if resolved_candidates else DEFAULT_FILL_TEXT
 
     if entry_kind != "multi_text":
@@ -2850,11 +2876,8 @@ def single(driver: BrowserDriver, current, index):
             config_len,
             len(option_elements),
         )
-    selected_option = numpy.random.choice(
-        a=numpy.arange(1, len(probabilities) + 1),
-        p=probabilities,
-    )
-    target_index = selected_option - 1
+    target_index = _weighted_index(probabilities)
+    selected_option = target_index + 1
     target_elem = option_elements[target_index] if target_index < len(option_elements) else None
     clicked = False
     if target_elem:
@@ -3031,7 +3054,7 @@ def _fill_droplist_via_click(
     if option_count <= 0:
         return
     probabilities = _normalize_droplist_probs(prob_config, option_count)
-    selected_idx = numpy.random.choice(a=numpy.arange(0, len(probabilities)), p=probabilities)
+    selected_idx = _weighted_index(probabilities)
     _, selected_option, _ = filtered_options[selected_idx]
     try:
         selected_option.click()
@@ -3048,7 +3071,7 @@ def droplist(driver: BrowserDriver, current, index):
     select_element, select_options = _extract_select_options(driver, current)
     if select_options:
         probabilities = _normalize_droplist_probs(prob_config, len(select_options))
-        selected_idx = numpy.random.choice(a=numpy.arange(0, len(probabilities)), p=probabilities)
+        selected_idx = _weighted_index(probabilities)
         selected_value, selected_text = select_options[selected_idx]
         if _select_dropdown_option_via_js(driver, select_element, selected_value, selected_text):
             fill_value = _get_fill_text_from_config(fill_entries, selected_idx)
@@ -3112,10 +3135,7 @@ def multiple(driver: BrowserDriver, current, index):
     attempts = 0
     max_attempts = 32
     while sum(selection_mask) == 0 and attempts < max_attempts:
-        selection_mask = [
-            numpy.random.choice(a=numpy.arange(0, 2), p=[1 - (prob / 100), prob / 100])
-            for prob in selection_probabilities
-        ]
+        selection_mask = [1 if random.random() < (prob / 100.0) else 0 for prob in selection_probabilities]
         attempts += 1
     if sum(selection_mask) == 0:
         selection_mask = [0] * len(option_elements)
@@ -3171,7 +3191,7 @@ def matrix(driver: BrowserDriver, current, index):
                 normalized_probs = normalize_probabilities(probs)
             except Exception:
                 normalized_probs = [1.0 / len(candidate_columns)] * len(candidate_columns)
-            selected_column = numpy.random.choice(a=numpy.array(candidate_columns), p=normalized_probs)
+            selected_column = candidate_columns[_weighted_index(normalized_probs)]
         else:
             selected_column = random.choice(candidate_columns)
         driver.find_element(
@@ -3378,7 +3398,7 @@ def scale(driver: BrowserDriver, current, index):
     if probabilities == -1:
         selected_index = random.randrange(len(scale_options))
     else:
-        selected_index = numpy.random.choice(a=numpy.arange(0, len(scale_options)), p=probabilities)
+        selected_index = _weighted_index(probabilities)
     scale_options[selected_index].click()
 
 
