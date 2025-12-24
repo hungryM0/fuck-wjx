@@ -11,4 +11,4 @@ build/
 dist/
 control/
 control.py
-status.py
+status/
