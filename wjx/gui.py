@@ -5694,7 +5694,10 @@ class SurveyGUI(ConfigPersistenceMixin):
     def _on_run_finished(self):
         self.running = False
         self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED, text="停止")
+        if self.stop_requested_by_user:
+            self.stop_button.config(state=tk.NORMAL, text="再次点击退出")
+        else:
+            self.stop_button.config(state=tk.DISABLED, text="停止")
         if self.status_job:
             self.root.after_cancel(self.status_job)
             self.status_job = None
@@ -5887,22 +5890,26 @@ class SurveyGUI(ConfigPersistenceMixin):
                 ).start(),
             )
 
-    def stop_run(self):
+    def _stop_run_impl(self, *, allow_exit: bool) -> None:
         # 允许从后台线程触发：把 UI 操作切回主线程，避免 Tk 在多线程下卡死/异常卡顿
         if threading.current_thread() is not threading.main_thread():
             try:
-                self._post_to_ui_thread(self.stop_run)
+                self._post_to_ui_thread(lambda: self._stop_run_impl(allow_exit=allow_exit))
             except Exception:
                 pass
             return
+        # 二次点击“停止”才退出：第一次点击只发停止请求并清理；第二次点击直接退出程序。
         if not self.running:
+            if allow_exit and self.stop_requested_by_user:
+                self._exit_app()
             return
         self.stop_requested_by_user = True
         self.stop_request_ts = time.time()
         stop_event.set()
         self.running = False
-        self.stop_button.config(state=tk.DISABLED, text="停止中...")
-        self.status_var.set("已发送停止请求，正在清理浏览器进程...")
+        # 保持按钮可点，作为“确认退出”的第二次点击入口
+        self.stop_button.config(state=tk.NORMAL, text="再次点击退出")
+        self.status_var.set("已发送停止请求，正在清理浏览器进程...（再次点击“停止”退出程序）")
         if self.status_job:
             try:
                 self.root.after_cancel(self.status_job)
@@ -5940,30 +5947,12 @@ class SurveyGUI(ConfigPersistenceMixin):
                 10,
                 lambda ds=drivers_snapshot, ws=worker_threads_snapshot, ps=browser_pids_snapshot: self._start_stop_cleanup_with_grace(ds, ws, ps),
             )
-        auto_exit_now = False
-        if self._auto_exit_on_stop:
-            if self._auto_exit_delay_once:
-                # 首次点击后自动开启的场景，本次不退出，下一次生效
-                self._auto_exit_delay_once = False
-            else:
-                auto_exit_now = True
-        else:
-            # 第一次点击停止后自动开启一次“停止后退出”，下次点击停止时直接退出
-            self._auto_exit_on_stop = True
-            self._auto_exit_delay_once = True
-            try:
-                if not bool(self.auto_exit_on_stop_var.get()):
-                    self.auto_exit_on_stop_var.set(True)
-            except Exception:
-                pass
-            logging.info("[Action Log] 首次停止后已开启“停止后自动退出”，下次停止将直接退出程序。")
-
-        if auto_exit_now:
-            # 清理线程启动后快速退出，规避 Tk 主线程后续卡顿
-            self.root.after(150, self._exit_app)
         
         logging.info("收到停止请求，等待当前提交线程完成")
         print("已暂停新的问卷提交，等待现有流程退出")
+
+    def stop_run(self):
+        self._stop_run_impl(allow_exit=True)
 
     def on_close(self):
         self._closing = True
@@ -5987,7 +5976,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                 pass
             self._ip_counter_refresh_job = None
         
-        self.stop_run()
+        self._stop_run_impl(allow_exit=False)
         
         # 只有在配置有实质性改动时才提示保存
         if not self._has_config_changed():
