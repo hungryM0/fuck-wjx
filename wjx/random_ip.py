@@ -49,9 +49,32 @@ RANDOM_IP_FREE_LIMIT = get_random_ip_limit()  # 兼容旧代码，实际逻辑�
 
 
 CARD_VALIDATION_ENDPOINT = "https://hungrym0.top/password.txt"
+STATUS_ENDPOINT = "https://wjx.hungrym0.top/status"
+STATUS_TIMEOUT_SECONDS = 5
 _quota_limit_dialog_shown = False
 _proxy_api_url_override: Optional[str] = None
 _CUSTOM_PROXY_CONFIG_FILENAME = "custom_ip.json"
+
+
+def get_status() -> Any:
+    """
+    获取在线状态。
+    期望返回 JSON: {"online": true, "message": "...", "updated_at": "..."}。
+    """
+    if requests is None:
+        raise RuntimeError("requests 模块未安装，无法获取在线状态")
+    response = requests.get(STATUS_ENDPOINT, timeout=STATUS_TIMEOUT_SECONDS, headers=DEFAULT_HTTP_HEADERS)
+    response.raise_for_status()
+    return response.json()
+
+
+def _format_status_payload(payload: Any) -> tuple[str, str]:
+    if not isinstance(payload, dict):
+        return "作者当前在线状态：返回数据格式异常", "#cc0000"
+    online = payload.get("online", None)
+    online_text = "在线" if online is True else ("离线" if online is False else "未知")
+    color = "#228B22" if online is True else ("#cc0000" if online is False else "#666666")
+    return f"作者当前在线状态：{online_text}", color
 
 
 def _validate_proxy_api_url(api_url: Optional[str]) -> str:
@@ -606,6 +629,58 @@ def show_card_validation_dialog(gui: Any) -> bool:
     text_widget.insert(tk.END, "\n\n感谢您的支持与理解！🙏")
     text_widget.config(state=tk.DISABLED)
 
+    status_frame = ttk.Frame(container)
+    status_frame.pack(fill=tk.X, pady=(6, 10))
+    status_var = tk.StringVar(value="作者当前在线状态：获取中...")
+    status_label = ttk.Label(status_frame, textvariable=status_var, font=("Segoe UI", 9), foreground="#666666")
+    status_label.pack(side=tk.LEFT, anchor=tk.W)
+
+    can_background_fetch = callable(getattr(gui, "_post_to_ui_thread", None))
+    _last_status: Dict[str, Optional[str]] = {"text": None, "color": None}
+
+    def _set_status_text(text: str, color: Optional[str] = None) -> None:
+        current_color = color or status_label.cget("foreground")
+        if text == _last_status.get("text") and current_color == _last_status.get("color"):
+            return
+        try:
+            if dialog.winfo_exists():
+                status_var.set(text)
+                if status_label.winfo_exists():
+                    status_label.configure(foreground=current_color)
+                _last_status["text"] = text
+                _last_status["color"] = current_color
+        except Exception:
+            pass
+
+    def _refresh_status_sync() -> None:
+        try:
+            payload = get_status()
+            text, color = _format_status_payload(payload)
+            _set_status_text(text, color)
+        except Exception as exc:
+            logging.debug(f"获取在线状态失败: {exc}", exc_info=True)
+            _set_status_text("作者当前在线状态：获取失败", "#cc0000")
+
+    def _refresh_status_async() -> None:
+        if not can_background_fetch:
+            _refresh_status_sync()
+            return
+
+        def _worker():
+            try:
+                payload = get_status()
+                text, color = _format_status_payload(payload)
+            except Exception as exc:
+                logging.debug(f"获取在线状态失败: {exc}", exc_info=True)
+                text = "作者当前在线状态：获取失败"
+                color = "#cc0000"
+            try:
+                _schedule_on_gui_thread(gui, lambda: _set_status_text(text, color))
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     thanks_button_frame = ttk.Frame(container)
     thanks_button_frame.pack(fill=tk.X, pady=(10, 15), anchor=tk.W)
 
@@ -670,6 +745,23 @@ def show_card_validation_dialog(gui: Any) -> bool:
 
     ttk.Button(button_frame, text="验证", command=on_validate).pack(side=tk.RIGHT, padx=(5, 0))
     ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.RIGHT, padx=(5, 0))
+
+    def _poll_status() -> None:
+        try:
+            if not dialog.winfo_exists():
+                return
+        except Exception:
+            return
+        _refresh_status_async()
+        try:
+            dialog.after(5_000, _poll_status)
+        except Exception:
+            pass
+
+    try:
+        dialog.after(100, _poll_status)
+    except Exception:
+        _refresh_status_async()
 
     apply_scaling = getattr(gui, "_apply_window_scaling", None)
     if callable(apply_scaling):
