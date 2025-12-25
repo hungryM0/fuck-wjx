@@ -5696,10 +5696,7 @@ class SurveyGUI(ConfigPersistenceMixin):
     def _on_run_finished(self):
         self.running = False
         self.start_button.config(state=tk.NORMAL)
-        if self.stop_requested_by_user:
-            self.stop_button.config(state=tk.NORMAL, text="再次点击退出")
-        else:
-            self.stop_button.config(state=tk.DISABLED, text="停止")
+        self.stop_button.config(state=tk.DISABLED, text="停止")
         if self.status_job:
             self.root.after_cancel(self.status_job)
             self.status_job = None
@@ -5948,11 +5945,11 @@ class SurveyGUI(ConfigPersistenceMixin):
             return
 
         # 未启用时：只停止并清理，本次不退出；仍保留“二次点击退出”入口
-        self.stop_button.config(state=tk.NORMAL, text="再次点击退出")
+        self.stop_button.config(state=tk.DISABLED, text="停止")
         if armed_auto_exit_for_next_stop:
             self.status_var.set("已发送停止请求，已启用“停止时直接退出程序”（仅本次会话有效），下次执行点击“停止”将直接退出")
         else:
-            self.status_var.set("已发送停止请求，正在清理浏览器进程...（再次点击“停止”退出程序）")
+            self.status_var.set("已发送停止请求，正在清理浏览器进程...")
         if self.status_job:
             try:
                 self.root.after_cancel(self.status_job)
