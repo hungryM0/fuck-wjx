@@ -131,10 +131,8 @@ FULL_SIM_STATE = FullSimulationState()
 
 def simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = None, answer_duration_range_seconds: Tuple[int, int] = (0, 0)) -> bool:
     """在提交前模拟答题时长等待。返回 True 表示在等待过程中被中断。
-    仅当未启用全真模拟时才会生效；启用全真模拟时忽略等待以便由全真计划控制。
+    注意：即使启用了全真模拟，也应遵循用户在主界面手动设置的“作答时长”范围，避免单次作答过快。
     """
-    if FULL_SIM_STATE.active():
-        return False
     min_delay, max_delay = answer_duration_range_seconds
     min_delay = max(0, min_delay)
     max_delay = max(min_delay, max(0, max_delay))
