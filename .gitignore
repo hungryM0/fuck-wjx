@@ -3,12 +3,11 @@ configs/
 .env
 logs/
 *.code-workspace
-*.ico
 __pycache__/
 desktop.ini
-ips.txt
 build/
 dist/
 control/
 control.py
-status/
+.venv/
+cert/
