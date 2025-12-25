@@ -160,6 +160,9 @@ SUBMIT_CLICK_SETTLE_DELAY = 0.25
 POST_SUBMIT_URL_MAX_WAIT = 0.5
 # 提交后 URL 变化检测轮询间隔（秒）
 POST_SUBMIT_URL_POLL_INTERVAL = 0.1
+# 提交后若按选项跳转到“下一份问卷”，最多自动跟随的问卷数量
+# 说明：部分问卷会在最后一题按选项分流到新的问卷链接；此处限制用于防止异常循环跳转。
+POST_SUBMIT_FOLLOWUP_MAX_HOPS = 5
 # 判定提交成功后，关闭浏览器实例前的缓冲等待（秒）
 # 目的：避免过早关闭页面导致提交请求尚未发送/尚未完成就被中断。
 POST_SUBMIT_CLOSE_GRACE_SECONDS = 1.2
