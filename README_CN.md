@@ -56,7 +56,6 @@
 **Python 依赖**
 
 - playwright
-- numpy
 - pyzbar
 - Pillow
 - requests

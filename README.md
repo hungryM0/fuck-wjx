@@ -57,7 +57,6 @@ A mysterious QQ group, feel free to ask questions there~
 **Python Dependencies**
 
 - playwright
-- numpy
 - pyzbar
 - Pillow
 - requests
