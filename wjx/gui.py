@@ -366,6 +366,8 @@ class SurveyGUI(ConfigPersistenceMixin):
         window.resizable(True, True)
         window.transient(self.root)
 
+        from wjx.random_ip import get_status as _get_author_status, _format_status_payload as _format_author_status_payload
+
         container = ttk.Frame(window, padding=15)
         container.pack(fill=tk.BOTH, expand=True)
 
@@ -458,6 +460,22 @@ class SurveyGUI(ConfigPersistenceMixin):
         button_frame = ttk.Frame(container)
         button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(8, 0))
 
+        left_status_frame = ttk.Frame(button_frame)
+        left_status_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        online_status_var = tk.StringVar(value="作者当前在线状态：获取中...")
+        online_status_label = ttk.Label(
+            left_status_frame,
+            textvariable=online_status_var,
+            font=("Microsoft YaHei", 9),
+            foreground="#BA8303",
+        )
+        online_status_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        send_status_var = tk.StringVar(value="")
+        send_status_label = ttk.Label(left_status_frame, textvariable=send_status_var, foreground="blue")
+        send_status_label.pack(side=tk.LEFT, padx=(12, 0), anchor=tk.W)
+
         def send_message():
             """发送消息到API"""
             message_content = text_widget.get("1.0", tk.END).strip()
@@ -498,13 +516,13 @@ class SurveyGUI(ConfigPersistenceMixin):
 
             # 禁用发送按钮，防止重复点击
             send_btn.config(state=tk.DISABLED)
-            status_label.config(text="正在发送...")
+            send_status_var.set("正在发送...")
 
             def send_request():
                 try:
                     if requests is None:
                         def update_ui_no_requests():
-                            status_label.config(text="")
+                            send_status_var.set("")
                             send_btn.config(state=tk.NORMAL)
                             log_popup_error("错误", "requests 模块未安装", parent=window)
                         window.after(0, update_ui_no_requests)
@@ -524,7 +542,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                     )
                     
                     def update_ui_success():
-                        status_label.config(text="")
+                        send_status_var.set("")
                         send_btn.config(state=tk.NORMAL)
                         if response.status_code == 200:
                             # 根据消息类型显示不同的成功提示
@@ -541,7 +559,7 @@ class SurveyGUI(ConfigPersistenceMixin):
                     
                 except Exception as exc:
                     def update_ui_error():
-                        status_label.config(text="")
+                        send_status_var.set("")
                         send_btn.config(state=tk.NORMAL)
                         logging.error(f"发送联系消息失败: {exc}")
                         log_popup_error("错误", f"发送失败：\n{str(exc)}", parent=window)
@@ -557,8 +575,53 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         ttk.Button(button_frame, text="取消", command=window.destroy).pack(side=tk.RIGHT, padx=(0, 8))
 
-        status_label = ttk.Label(button_frame, text="", foreground="blue")
-        status_label.pack(side=tk.LEFT, padx=(12, 0))
+        _last_online: Dict[str, Optional[str]] = {"text": None, "color": None}
+
+        def _set_online_status(text: str, color: Optional[str] = None) -> None:
+            current_color = color or online_status_label.cget("foreground")
+            if text == _last_online.get("text") and current_color == _last_online.get("color"):
+                return
+            try:
+                if window.winfo_exists():
+                    online_status_var.set(text)
+                    online_status_label.configure(foreground=current_color)
+                    _last_online["text"] = text
+                    _last_online["color"] = current_color
+            except Exception:
+                pass
+
+        def _refresh_online_status_async() -> None:
+            def _worker():
+                try:
+                    payload = _get_author_status()
+                    text, color = _format_author_status_payload(payload)
+                except Exception as exc:
+                    logging.debug(f"获取在线状态失败: {exc}", exc_info=True)
+                    text = "作者当前在线状态：获取失败"
+                    color = "#cc0000"
+                try:
+                    window.after(0, lambda: _set_online_status(text, color))
+                except Exception:
+                    pass
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def _poll_online_status() -> None:
+            try:
+                if not window.winfo_exists():
+                    return
+            except Exception:
+                return
+            _refresh_online_status_async()
+            try:
+                window.after(5_000, _poll_online_status)
+            except Exception:
+                pass
+
+        try:
+            window.after(100, _poll_online_status)
+        except Exception:
+            _refresh_online_status_async()
 
         self._apply_window_scaling(window, base_width=520, base_height=440, min_height=380)
         self._center_child_window(window)
@@ -590,7 +653,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             try:
                 window.destroy()
             finally:
-                if stayed_seconds > 5:
+                if stayed_seconds > 2:
                     try:
                         if self.root and self.root.winfo_exists():
                             self.root.after(0, lambda: self._open_contact_dialog(default_type="卡密获取"))
