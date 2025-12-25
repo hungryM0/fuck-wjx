@@ -169,6 +169,11 @@ def on_full_sim_target_changed(gui: Any, *_: Any) -> None:
 
 def on_main_target_changed(gui: Any, *_: Any) -> None:
     gui._mark_config_changed()
+    if gui.full_simulation_enabled_var.get():
+        main_target = str(gui.target_var.get()).strip()
+        full_sim_target = str(gui.full_sim_target_var.get()).strip()
+        if main_target != full_sim_target:
+            gui.full_sim_target_var.set(main_target)
     auto_update_full_simulation_times(gui)
 
 

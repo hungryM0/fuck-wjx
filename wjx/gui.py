@@ -949,6 +949,7 @@ class SurveyGUI(ConfigPersistenceMixin):
     def _build_ui(self):
         self.root.geometry("950x750")
         self.root.resizable(True, True)
+        self._ensure_locked_widget_styles()
 
         # 创建菜单栏
         menubar = tk.Menu(self.root)
@@ -1150,6 +1151,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         target_entry = ttk.Entry(settings_grid, textvariable=self.target_var, width=10)
         target_entry.grid(row=0, column=1, sticky="w", padx=5)
         self._main_parameter_widgets.append(target_entry)
+        self._target_entry = target_entry
 
         ttk.Label(
             settings_grid,
@@ -1220,6 +1222,9 @@ class SurveyGUI(ConfigPersistenceMixin):
         thread_inc_button.grid(row=0, column=2, padx=(2, 0))
         self._main_parameter_widgets.extend([thread_dec_button, thread_entry, thread_inc_button])
         self._timed_mode_locked_widgets.extend([target_entry, thread_dec_button, thread_entry, thread_inc_button])
+        self._thread_entry = thread_entry
+        self._thread_dec_button = thread_dec_button
+        self._thread_inc_button = thread_inc_button
 
         # 随机 IP 开关单独一行，放在微信弹窗开关下方
         random_ip_frame = ttk.Frame(step3_frame)
@@ -1500,25 +1505,161 @@ class SurveyGUI(ConfigPersistenceMixin):
                     getattr(self, "_random_ip_toggle_widget", None),
                     getattr(self, "_fail_stop_toggle_widget", None),
                     getattr(self, "_auto_exit_toggle_widget", None),
+                    getattr(self, "_ip_api_entry", None),
+                    getattr(self, "_ip_api_save_btn", None),
+                    getattr(self, "_ip_api_reset_btn", None),
                 ]
             )
             allowed_when_locked.extend(getattr(self, "_random_ua_option_widgets", []))
             allowed_when_locked = [w for w in allowed_when_locked if w is not None]
+
+        def _apply_state(widget: tk.Widget, desired: str) -> None:
+            if widget is None:
+                return
+            try:
+                if hasattr(widget, "state"):
+                    try:
+                        if desired == tk.DISABLED:
+                            widget.state(["disabled"])
+                        else:
+                            widget.state(["!disabled"])
+                        return
+                    except Exception:
+                        pass
+                widget.configure(state=desired)
+            except Exception:
+                try:
+                    widget["state"] = desired
+                except Exception:
+                    pass
+
         for widget in targets:
             desired_state = state
             if locking and widget in allowed_when_locked:
                 desired_state = tk.NORMAL
             try:
                 if widget.winfo_exists():
-                    widget.configure(state=desired_state)
+                    _apply_state(widget, desired_state)
             except Exception:
-                try:
-                    if widget.winfo_exists():
-                        widget["state"] = desired_state
-                except Exception:
-                    continue
+                continue
+
+        self._apply_locked_entries_state(locking)
         self._apply_random_ua_widgets_state()
         self._apply_timed_mode_widgets_state()
+
+    def _apply_locked_entries_state(self, locking: bool) -> None:
+        entries = [
+            getattr(self, "_target_entry", None),
+            getattr(self, "_thread_entry", None),
+        ]
+        for entry in entries:
+            if entry is None:
+                continue
+            try:
+                if not entry.winfo_exists():
+                    continue
+            except Exception:
+                continue
+            self._set_entry_lock_state(entry, locking)
+
+    def _set_entry_lock_state(self, entry: tk.Widget, locking: bool) -> None:
+        try:
+            previous_style = getattr(entry, "_wjx_prev_style", None)
+            if previous_style is None:
+                try:
+                    previous_style = entry.cget("style") or "TEntry"
+                except Exception:
+                    previous_style = "TEntry"
+                setattr(entry, "_wjx_prev_style", previous_style)
+        except Exception:
+            previous_style = "TEntry"
+
+        if locking:
+            try:
+                entry.configure(style="WJX.Locked.TEntry")
+            except Exception:
+                pass
+            try:
+                if hasattr(entry, "state"):
+                    entry.state(["readonly"])
+                else:
+                    entry.configure(state=tk.DISABLED)
+            except Exception:
+                pass
+            self._block_entry_interaction(entry, True)
+        else:
+            try:
+                entry.configure(style=previous_style or "TEntry")
+            except Exception:
+                pass
+            try:
+                if hasattr(entry, "state"):
+                    entry.state(["!readonly", "!disabled"])
+                else:
+                    entry.configure(state=tk.NORMAL)
+            except Exception:
+                pass
+            self._block_entry_interaction(entry, False)
+
+    def _block_entry_interaction(self, entry: tk.Widget, block: bool) -> None:
+        if entry is None:
+            return
+        sequences = ("<Button-1>", "<B1-Motion>", "<ButtonRelease-1>", "<Double-Button-1>", "<Key>")
+        if block:
+            try:
+                setattr(entry, "_wjx_prev_takefocus", entry.cget("takefocus"))
+            except Exception:
+                setattr(entry, "_wjx_prev_takefocus", None)
+            try:
+                entry.configure(takefocus=0, cursor="arrow")
+            except Exception:
+                pass
+
+            def _break(_event=None):
+                return "break"
+
+            for seq in sequences:
+                try:
+                    entry.bind(seq, _break)
+                except Exception:
+                    pass
+            try:
+                entry.selection_clear()
+            except Exception:
+                pass
+        else:
+            for seq in sequences:
+                try:
+                    entry.bind(seq, "")
+                except Exception:
+                    pass
+            try:
+                prev_takefocus = getattr(entry, "_wjx_prev_takefocus", None)
+                if prev_takefocus is None:
+                    entry.configure(takefocus=1, cursor="")
+                else:
+                    entry.configure(takefocus=prev_takefocus, cursor="")
+            except Exception:
+                pass
+            try:
+                entry.selection_clear()
+            except Exception:
+                pass
+
+    def _ensure_locked_widget_styles(self) -> None:
+        if getattr(self, "_locked_widget_styles_ready", False):
+            return
+        try:
+            style = ttk.Style(self.root)
+            style.configure("WJX.Locked.TEntry", foreground="#6b6b6b", fieldbackground="#f0f0f0")
+            style.map(
+                "WJX.Locked.TEntry",
+                foreground=[("readonly", "#6b6b6b"), ("disabled", "#6b6b6b")],
+                fieldbackground=[("readonly", "#f0f0f0"), ("disabled", "#f0f0f0")],
+            )
+        except Exception:
+            pass
+        self._locked_widget_styles_ready = True
 
     def _apply_random_ua_widgets_state(self):
         option_widgets = getattr(self, "_random_ua_option_widgets", [])
@@ -2021,6 +2162,9 @@ class SurveyGUI(ConfigPersistenceMixin):
         ip_api_save_btn.pack(fill=tk.X)
         ip_api_reset_btn = ttk.Button(ip_buttons, text="重置", command=_on_ip_api_reset, width=10)
         ip_api_reset_btn.pack(fill=tk.X, pady=(6, 0))
+        self._ip_api_entry = ip_api_entry
+        self._ip_api_save_btn = ip_api_save_btn
+        self._ip_api_reset_btn = ip_api_reset_btn
         self._settings_window_widgets.extend([ip_api_entry, ip_api_save_btn, ip_api_reset_btn])
 
         button_frame = ttk.Frame(content)
