@@ -118,6 +118,16 @@ class ConfigPersistenceMixin:
     def _get_config_path(self) -> str:
         return os.path.join(get_runtime_directory(), "config.json")
 
+    def _get_persisted_auto_exit_on_stop(self) -> bool:
+        """返回需要写入配置的“停止时直接退出程序”值（会话内临时启用不持久化）。"""
+        try:
+            enabled = bool(self.auto_exit_on_stop_var.get())
+        except Exception:
+            enabled = False
+        if getattr(self, "_auto_exit_on_stop_session_only", False):
+            return False
+        return enabled
+
     def _get_configs_directory(self) -> str:
         """返回多配置保存目录，并在需要时创建。"""
         configs_dir = os.path.join(get_runtime_directory(), "configs")
@@ -158,7 +168,7 @@ class ConfigPersistenceMixin:
             "wechat_login_bypass_enabled": wechat_login_bypass_enabled,
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "fail_stop_enabled": bool(self.fail_stop_enabled_var.get()),
-            "auto_exit_on_stop": bool(self.auto_exit_on_stop_var.get()),
+            "auto_exit_on_stop": self._get_persisted_auto_exit_on_stop(),
             "paned_position": paned_sash_pos,
             "questions": [
                 {
@@ -451,6 +461,7 @@ class ConfigPersistenceMixin:
             self.auto_exit_on_stop_var.set(auto_exit_flag)
             try:
                 self._auto_exit_on_stop = auto_exit_flag
+                self._auto_exit_on_stop_session_only = False
             except Exception:
                 pass
             wechat_login_bypass_var = getattr(self, "wechat_login_bypass_enabled_var", None)
@@ -646,7 +657,7 @@ class ConfigPersistenceMixin:
             "random_user_agent": self._serialize_random_ua_config(),
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "fail_stop_enabled": bool(self.fail_stop_enabled_var.get()),
-            "auto_exit_on_stop": bool(self.auto_exit_on_stop_var.get()),
+            "auto_exit_on_stop": self._get_persisted_auto_exit_on_stop(),
             "questions": [
                 {
                     "question_type": entry.question_type,
@@ -682,7 +693,7 @@ class ConfigPersistenceMixin:
             "random_user_agent": self._serialize_random_ua_config(),
             "random_proxy_enabled": bool(self.random_ip_enabled_var.get()),
             "fail_stop_enabled": bool(self.fail_stop_enabled_var.get()),
-            "auto_exit_on_stop": bool(self.auto_exit_on_stop_var.get()),
+            "auto_exit_on_stop": self._get_persisted_auto_exit_on_stop(),
             "questions": [
                 {
                     "question_type": entry.question_type,

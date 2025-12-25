@@ -619,7 +619,7 @@ def show_card_validation_dialog(gui: Any) -> bool:
 
     text_widget.insert(tk.END, "（多少都行♥）\n")
     text_widget.insert(tk.END, "2.在“联系”中找到开发者，并留下联系邮箱\n")
-    text_widget.insert(tk.END, "3.开发者会发送卡密到你的邮箱，输入卡密后即可解锁大额随机IP提交额度\n")
+    text_widget.insert(tk.END, "3.开发者会发送卡密到你的邮箱，输入卡密后即可解锁大额随机IP提交额度，不够用可以继续免费申请\n")
 
     gray_start = text_widget.index(tk.END + "-1c")
     text_widget.insert(tk.END, "4.你也可以通过自己的口才白嫖卡密（误）")
@@ -632,7 +632,7 @@ def show_card_validation_dialog(gui: Any) -> bool:
     status_frame = ttk.Frame(container)
     status_frame.pack(fill=tk.X, pady=(6, 10))
     status_var = tk.StringVar(value="作者当前在线状态：获取中...")
-    status_label = ttk.Label(status_frame, textvariable=status_var, font=("Segoe UI", 9), foreground="#666666")
+    status_label = ttk.Label(status_frame, textvariable=status_var, font=("Segoe UI", 9), foreground="#BA8303")
     status_label.pack(side=tk.LEFT, anchor=tk.W)
 
     can_background_fetch = callable(getattr(gui, "_post_to_ui_thread", None))

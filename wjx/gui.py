@@ -763,8 +763,9 @@ class SurveyGUI(ConfigPersistenceMixin):
         # 是否在点击停止后自动退出；可用环境变量 AUTO_EXIT_ON_STOP 控制，默认关闭
         _auto_exit_env = str(os.getenv("AUTO_EXIT_ON_STOP", "")).strip().lower()
         self._auto_exit_on_stop = _auto_exit_env in ("1", "true", "yes", "on")
-        # 当首次点击“停止”时自动开启一次“停止后退出”，仅对下一次停止生效
-        self._auto_exit_delay_once = False
+        # 由“点击停止后自动启用”触发的临时开关：仅本次会话有效，不写入配置文件
+        self._auto_exit_on_stop_session_only = False
+        self._suppress_auto_exit_toggle_callback = False
         self.auto_exit_on_stop_var = tk.BooleanVar(value=self._auto_exit_on_stop)
         self.stop_requested_by_user: bool = False
         self.stop_request_ts: Optional[float] = None
@@ -1308,7 +1309,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             style="Accent.TButton"
         )
         self.start_button.pack(side=tk.LEFT, padx=5)
-        self.stop_button = ttk.Button(button_frame, text="🚫 停止", command=self.stop_run, state=tk.DISABLED)
+        self.stop_button = ttk.Button(button_frame, text="停止", command=self.stop_run, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
 
         self.status_var = tk.StringVar(value="等待配置...")
@@ -1485,9 +1486,10 @@ class SurveyGUI(ConfigPersistenceMixin):
             self._auto_exit_on_stop = bool(self.auto_exit_on_stop_var.get())
         except Exception:
             self._auto_exit_on_stop = False
-        # 手动切换时清除一次性延迟标记，避免状态错乱
-        self._auto_exit_delay_once = False
-        self._mark_config_changed()
+        # 仅当用户手动切换时才允许持久化并标记配置变更；程序内部“临时启用”不写入配置。
+        if not getattr(self, "_suppress_auto_exit_toggle_callback", False):
+            self._auto_exit_on_stop_session_only = False
+            self._mark_config_changed()
 
     def _apply_timed_mode_widgets_state(self):
         enabled = bool(self.timed_mode_enabled_var.get())
@@ -5467,7 +5469,7 @@ class SurveyGUI(ConfigPersistenceMixin):
         if getattr(self, "_closing", False):
             return
         self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED, text="🚫 停止")
+        self.stop_button.config(state=tk.DISABLED, text="停止")
         self.status_var.set("准备就绪")
         self._log_popup_error("代理IP错误", message)
 
@@ -5488,7 +5490,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             configure_probabilities(self.question_entries)
         except ValueError as exc:
             self.start_button.config(state=tk.NORMAL)
-            self.stop_button.config(state=tk.DISABLED, text="🚫 停止")
+            self.stop_button.config(state=tk.DISABLED, text="停止")
             self.status_var.set("准备就绪")
             self._log_popup_error("配置错误", str(exc))
             return
@@ -5573,7 +5575,7 @@ class SurveyGUI(ConfigPersistenceMixin):
             schedule = _prepare_full_simulation_schedule(target, full_sim_total_seconds)
             if not schedule:
                 self.start_button.config(state=tk.NORMAL)
-                self.stop_button.config(state=tk.DISABLED, text="🚫 停止")
+                self.stop_button.config(state=tk.DISABLED, text="停止")
                 self.status_var.set("准备就绪")
                 self._log_popup_error("参数错误", "模拟时间设置无效")
                 return
@@ -5621,7 +5623,7 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         self.running = True
         self.start_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.NORMAL, text="🚫 停止")
+        self.stop_button.config(state=tk.NORMAL, text="停止")
         if timed_mode_enabled:
             self.status_var.set("定时模式：等待问卷开放...")
         elif resume_allowed:
@@ -5903,13 +5905,54 @@ class SurveyGUI(ConfigPersistenceMixin):
             if allow_exit and self.stop_requested_by_user:
                 self._exit_app()
             return
+
+        auto_exit_enabled = False
+        armed_auto_exit_for_next_stop = False
+        if allow_exit:
+            if self._auto_exit_on_stop:
+                auto_exit_enabled = True
+            else:
+                # 首次点击停止时自动“启用设置里的开关”，但本次不退出；下一次执行时点击停止才直接退出。
+                self._auto_exit_on_stop_session_only = True
+                try:
+                    self._suppress_auto_exit_toggle_callback = True
+                    self.auto_exit_on_stop_var.set(True)
+                    self._auto_exit_on_stop = True
+                except Exception:
+                    pass
+                finally:
+                    self._suppress_auto_exit_toggle_callback = False
+                armed_auto_exit_for_next_stop = True
         self.stop_requested_by_user = True
         self.stop_request_ts = time.time()
         stop_event.set()
         self.running = False
-        # 保持按钮可点，作为“确认退出”的第二次点击入口
+        if auto_exit_enabled and not armed_auto_exit_for_next_stop:
+            # 已启用“停止时直接退出程序”：点击停止直接退出（不等待清理完成）
+            try:
+                self.stop_button.config(state=tk.DISABLED, text="🚫 正在退出")
+                self.status_var.set("已发送停止请求，正在退出程序...")
+            except Exception:
+                pass
+            try:
+                pids_snapshot = set(getattr(self, "_launched_browser_pids", set()) or set())
+                try:
+                    self._launched_browser_pids.clear()
+                except Exception:
+                    pass
+                if pids_snapshot:
+                    _kill_processes_by_pid(pids_snapshot)
+            except Exception:
+                pass
+            self._exit_app()
+            return
+
+        # 未启用时：只停止并清理，本次不退出；仍保留“二次点击退出”入口
         self.stop_button.config(state=tk.NORMAL, text="再次点击退出")
-        self.status_var.set("已发送停止请求，正在清理浏览器进程...（再次点击“停止”退出程序）")
+        if armed_auto_exit_for_next_stop:
+            self.status_var.set("已发送停止请求，已启用“停止时直接退出程序”（仅本次会话有效），下次执行点击“停止”将直接退出")
+        else:
+            self.status_var.set("已发送停止请求，正在清理浏览器进程...（再次点击“停止”退出程序）")
         if self.status_job:
             try:
                 self.root.after_cancel(self.status_job)
