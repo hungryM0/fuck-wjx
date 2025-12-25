@@ -2169,7 +2169,7 @@ class SurveyGUI(ConfigPersistenceMixin):
 
         button_frame = ttk.Frame(content)
         button_frame.pack(fill=tk.X, pady=(18, 0))
-        ttk.Button(button_frame, text="关闭", command=_on_close, width=10).pack(anchor="e")
+        ttk.Button(button_frame, text="确认", command=_on_close, width=10).pack(anchor="e")
 
         self._update_parameter_widgets_state()
         window.update_idletasks()
@@ -6154,9 +6154,9 @@ class SurveyGUI(ConfigPersistenceMixin):
         # 未启用时：只停止并清理，本次不退出；仍保留“二次点击退出”入口
         self.stop_button.config(state=tk.DISABLED, text="停止")
         if armed_auto_exit_for_next_stop:
-            self.status_var.set("已发送停止请求，已启用“停止时直接退出程序”（仅本次会话有效），下次执行点击“停止”将直接退出")
+            self.status_var.set("已发送停止请求")
         else:
-            self.status_var.set("已发送停止请求，正在清理浏览器进程...")
+            self.status_var.set("已发送停止请求")
         if self.status_job:
             try:
                 self.root.after_cancel(self.status_job)

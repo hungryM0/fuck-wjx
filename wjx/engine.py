@@ -3277,29 +3277,150 @@ def reorder(driver: BrowserDriver, current):
 
     def _click_item(option_idx: int, item) -> bool:
         selector = f"#div{current} > ul > li:nth-child({option_idx + 1})"
-        for _ in range(3):
+
+        def _safe_dom_click(target) -> None:
+            driver.execute_script(
+                r"""
+                const el = arguments[0];
+                if (!el) return;
+                const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+                const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+                const inView = !!(rect && rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= vh);
+                const y = window.scrollY || document.documentElement.scrollTop || 0;
+                try { if (!inView) el.scrollIntoView({block:'nearest', inline:'nearest'}); } catch(e) {}
+                try { el.focus({preventScroll:true}); } catch(e) {}
+                try { el.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, composed:true})); } catch(e) {}
+                try { el.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, composed:true})); } catch(e) {}
+                try { el.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, composed:true})); } catch(e) {}
+                try { el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, composed:true})); } catch(e) {}
+                try { el.click(); } catch(e) {}
+                try { if (inView) window.scrollTo(0, y); } catch(e) {}
+                """,
+                target,
+            )
+
+        def _mouse_click_center(target) -> bool:
+            page = getattr(driver, "page", None)
+            if not page:
+                return False
             try:
-                _smooth_scroll_to_element(driver, item, 'center')
+                payload = driver.execute_script(
+                    r"""
+                    const el = arguments[0];
+                    if (!el || !el.getBoundingClientRect) return null;
+                    const rect = el.getBoundingClientRect();
+                    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+                    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+                    if (rect.bottom < 0 || rect.top > vh) {
+                        try { el.scrollIntoView({block:'nearest', inline:'nearest'}); } catch(e) {}
+                    }
+                    const r2 = el.getBoundingClientRect();
+                    return {x: r2.left + r2.width / 2, y: r2.top + r2.height / 2, w: r2.width, h: r2.height};
+                    """,
+                    target,
+                )
             except Exception:
-                pass
+                payload = None
+            if not isinstance(payload, dict):
+                return False
             try:
-                item.click()
+                x = float(payload.get("x", 0))
+                y = float(payload.get("y", 0))
             except Exception:
-                pass
-            time.sleep(0.05)
-            if _is_item_selected(item):
+                return False
+            if x <= 0 or y <= 0:
+                return False
+            try:
+                page.mouse.click(x, y)
                 return True
-            try:
-                driver.find_element(By.CSS_SELECTOR, selector).click()
             except Exception:
+                return False
+
+        def _click_targets(base_item) -> List[Any]:
+            targets: List[Any] = []
+            if base_item:
+                targets.append(base_item)
+                for css in (
+                    "input[type='checkbox']",
+                    "input[type='radio']",
+                    "label",
+                    "a",
+                    ".option",
+                    ".item",
+                    "span",
+                    "div",
+                ):
+                    try:
+                        found = base_item.find_elements(By.CSS_SELECTOR, css)
+                    except Exception:
+                        found = []
+                    for el in found[:3]:
+                        targets.append(el)
+            return targets
+
+        def _get_item_fresh() -> Any:
+            try:
+                items_now = driver.find_elements(By.XPATH, items_xpath)
+            except Exception:
+                items_now = []
+            if 0 <= option_idx < len(items_now):
+                return items_now[option_idx]
+            try:
+                return driver.find_element(By.CSS_SELECTOR, selector)
+            except Exception:
+                return item
+
+        if _is_item_selected(item):
+            return True
+
+        count_before = _count_selected()
+        for _ in range(6):
+            base_item = _get_item_fresh()
+            if base_item and _is_item_selected(base_item):
+                return True
+
+            for target in _click_targets(base_item):
                 try:
-                    driver.execute_script("arguments[0].click();", item)
+                    _safe_dom_click(target)
                 except Exception:
                     pass
-            time.sleep(0.05)
-            if _is_item_selected(item):
-                return True
-        return _is_item_selected(item)
+
+                # 选择状态有时会延迟更新，轮询一小段时间比“狂点”更稳定
+                deadline = time.time() + 0.45
+                while time.time() < deadline:
+                    try:
+                        if _count_selected() > count_before:
+                            return True
+                    except Exception:
+                        pass
+                    try:
+                        fresh_check = _get_item_fresh()
+                        if fresh_check and _is_item_selected(fresh_check):
+                            return True
+                    except Exception:
+                        pass
+                    time.sleep(0.05)
+
+                # 最后再尝试一次鼠标坐标点击（对某些覆盖层/事件绑定更友好）
+                try:
+                    if _mouse_click_center(target):
+                        deadline = time.time() + 0.45
+                        while time.time() < deadline:
+                            try:
+                                if _count_selected() > count_before:
+                                    return True
+                            except Exception:
+                                pass
+                            time.sleep(0.05)
+                except Exception:
+                    pass
+
+            time.sleep(0.06)
+
+        try:
+            return _is_item_selected(_get_item_fresh())
+        except Exception:
+            return False
 
     def _ensure_reorder_complete(target_count: int) -> None:
         target_count = max(1, min(target_count, total_options))
