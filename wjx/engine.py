@@ -94,6 +94,7 @@ from wjx.config import (
     SUBMIT_CLICK_SETTLE_DELAY,
     POST_SUBMIT_URL_MAX_WAIT,
     POST_SUBMIT_URL_POLL_INTERVAL,
+    POST_SUBMIT_FOLLOWUP_MAX_HOPS,
     POST_SUBMIT_CLOSE_GRACE_SECONDS,
     PROXY_REMOTE_URL,
     STOP_FORCE_WAIT_SECONDS,
@@ -3986,6 +3987,138 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
         pass
 
 
+def _normalize_url_for_compare(value: str) -> str:
+    """用于比较的 URL 归一化：去掉 fragment，去掉首尾空白。"""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return text
+    try:
+        if parsed.fragment:
+            parsed = parsed._replace(fragment="")
+        return parsed.geturl()
+    except Exception:
+        return text
+
+
+def _is_wjx_domain(url_value: str) -> bool:
+    try:
+        parsed = urlparse(str(url_value))
+    except Exception:
+        return False
+    host = (parsed.netloc or "").split(":", 1)[0].lower()
+    return bool(host == "wjx.cn" or host.endswith(".wjx.cn"))
+
+
+def _looks_like_wjx_survey_url(url_value: str) -> bool:
+    """粗略判断是否像问卷星问卷链接（用于“提交后分流到下一问卷”的识别）。"""
+    if not url_value:
+        return False
+    text = str(url_value).strip()
+    if not text:
+        return False
+    if not _is_wjx_domain(text):
+        return False
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return False
+    path = (parsed.path or "").lower()
+    if "complete" in path:
+        return False
+    if not path.endswith(".aspx"):
+        return False
+    # 常见路径：/vm/xxxxx.aspx、/jq/xxxxx.aspx、/vj/xxxxx.aspx
+    if any(segment in path for segment in ("/vm/", "/jq/", "/vj/")):
+        return True
+    return True
+
+
+def _page_looks_like_wjx_questionnaire(driver: BrowserDriver) -> bool:
+    """用 DOM 特征判断当前页是否为可作答的问卷页。"""
+    script = r"""
+        return (() => {
+            const bodyText = (document.body?.innerText || '').replace(/\s+/g, '');
+            const completeMarkers = ['答卷已经提交', '感谢您的参与', '感谢参与'];
+            if (completeMarkers.some(m => bodyText.includes(m))) return false;
+
+            // 开屏“开始作答”页（还未展示题目）
+            if (bodyText.includes('开始作答') || bodyText.includes('开始答题') || bodyText.includes('开始填写')) {
+                const startLike = Array.from(document.querySelectorAll('div, a, button, span')).some(el => {
+                    const t = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+                    return t === '开始作答' || t === '开始答题' || t === '开始填写';
+                });
+                if (startLike) return true;
+            }
+
+            const questionLike = document.querySelector(
+                '#div1, #divQuestion, [id^="divquestion"], .div_question, .question, .wjx_question, [topic]'
+            );
+
+            const actionLike = document.querySelector(
+                '#submit_button, #divSubmit, #ctlNext, #divNext, #btnNext, #next, ' +
+                '.next, .next-btn, .next-button, .btn-next, button[type="submit"], a.button.mainBgColor'
+            );
+
+            return !!(questionLike && actionLike);
+        })();
+    """
+    try:
+        return bool(driver.execute_script(script))
+    except Exception:
+        return False
+
+
+def _wait_for_post_submit_outcome(
+    driver: BrowserDriver,
+    initial_url: str,
+    max_wait: float,
+    poll_interval: float,
+    stop_signal: Optional[threading.Event] = None,
+) -> Tuple[Literal["complete", "followup", "unknown"], str]:
+    """
+    等待提交后的结果：
+    - complete：进入完成页
+    - followup：按选项分流跳转到下一份问卷
+    - unknown：未识别
+    """
+    deadline = time.time() + max(0.0, float(max_wait or 0.0))
+    initial_norm = _normalize_url_for_compare(initial_url)
+    while time.time() < deadline:
+        if stop_signal and stop_signal.is_set():
+            break
+        try:
+            current_url = driver.current_url
+        except Exception:
+            current_url = ""
+        current_lower = str(current_url).lower()
+        if "complete" in current_lower:
+            return "complete", str(current_url)
+        try:
+            if full_simulation_mode.is_survey_completion_page(driver):
+                return "complete", str(current_url)
+        except Exception:
+            pass
+
+        current_norm = _normalize_url_for_compare(str(current_url))
+        if current_norm and current_norm != initial_norm:
+            if _looks_like_wjx_survey_url(current_norm) and _page_looks_like_wjx_questionnaire(driver):
+                return "followup", str(current_url)
+
+        time.sleep(max(0.02, float(poll_interval or 0.1)))
+
+    try:
+        final_url = str(driver.current_url)
+    except Exception:
+        final_url = ""
+    return "unknown", final_url
+
+
 def _select_proxy_for_session() -> Optional[str]:
     if not random_proxy_ip_enabled:
         return None
@@ -4222,60 +4355,107 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         break
                 _dispose_driver()
                 continue
-            initial_url = driver.current_url
-            if stop_signal.is_set():
-                break
-            finished = brush(driver, stop_signal=stop_signal)
-            if stop_signal.is_set() or not finished:
-                break
-            need_watch_submit = bool(last_submit_had_captcha)
-            max_wait, poll_interval = full_simulation_mode.get_post_submit_wait_params(need_watch_submit, fast_mode)
-            wait_deadline = time.time() + max_wait
-            completion_detected = False
-            while time.time() < wait_deadline:
+            followup_hops = 0
+            visited_urls: Set[str] = set()
+            try:
+                visited_urls.add(_normalize_url_for_compare(driver.current_url))
+            except Exception:
+                visited_urls.add(_normalize_url_for_compare(url))
+
+            while True:
+                initial_url = driver.current_url
                 if stop_signal.is_set():
                     break
-                current_url = driver.current_url
-                current_url_lower = str(current_url).lower()
-                if "complete" in current_url_lower:
-                    completion_detected = True
+                finished = brush(driver, stop_signal=stop_signal)
+                if stop_signal.is_set() or not finished:
                     break
-                try:
-                    if full_simulation_mode.is_survey_completion_page(driver):
-                        completion_detected = True
-                        break
-                except Exception:
-                    pass
-                time.sleep(poll_interval)
-            final_url = driver.current_url
-            if stop_signal.is_set():
-                break
-            final_url_lower = str(final_url).lower()
-            success_detected = bool(completion_detected or ("complete" in final_url_lower))
-            if not success_detected:
-                raise TimeoutException("提交后未检测到完成页")
-            if success_detected:
-                with lock:
-                    if target_num <= 0 or cur_num < target_num:
-                        cur_num += 1
-                        logging.info(
-                            f"[OK] 已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
+
+                need_watch_submit = bool(last_submit_had_captcha)
+                max_wait, poll_interval = full_simulation_mode.get_post_submit_wait_params(need_watch_submit, fast_mode)
+                outcome, outcome_url = _wait_for_post_submit_outcome(
+                    driver,
+                    str(initial_url),
+                    max_wait=max_wait,
+                    poll_interval=poll_interval,
+                    stop_signal=stop_signal,
+                )
+
+                if outcome == "unknown" and not stop_signal.is_set():
+                    extra_wait_seconds = max(1.0, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 3.0)
+                    extra_poll = max(0.05, float(POST_SUBMIT_URL_POLL_INTERVAL or 0.1))
+                    outcome, outcome_url = _wait_for_post_submit_outcome(
+                        driver,
+                        str(initial_url),
+                        max_wait=extra_wait_seconds,
+                        poll_interval=extra_poll,
+                        stop_signal=stop_signal,
+                    )
+
+                if outcome == "unknown" and not stop_signal.is_set():
+                    aliyun_detected = False
+                    try:
+                        aliyun_detected = handle_aliyun_captcha(
+                            driver,
+                            timeout=3,
+                            stop_signal=stop_signal,
+                            raise_on_detect=False,
                         )
-                        # 检查是否启用了随机IP提交，如果是，更新计数
-                        if random_proxy_ip_enabled:
-                            handle_random_ip_submission(gui_instance, stop_signal)
-                         
-                        if target_num > 0 and cur_num >= target_num:
-                            stop_signal.set()
-                            _trigger_target_reached_stop(gui_instance, stop_signal)
-                    else:
-                        stop_signal.set()
+                    except Exception:
+                        aliyun_detected = False
+                    if aliyun_detected:
+                        driver_had_error = True
+                        _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
                         break
-                # 成功判定后增加缓冲等待，避免过早关闭导致提交请求被中断
-                grace_seconds = float(POST_SUBMIT_CLOSE_GRACE_SECONDS or 0.0)
-                if grace_seconds > 0 and not stop_signal.is_set():
-                    time.sleep(grace_seconds)
-                _dispose_driver()
+
+                if outcome == "complete":
+                    with lock:
+                        if target_num <= 0 or cur_num < target_num:
+                            cur_num += 1
+                            logging.info(
+                                f"[OK] 已填写{cur_num}份 - 失败{cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
+                            )
+                            if random_proxy_ip_enabled:
+                                handle_random_ip_submission(gui_instance, stop_signal)
+                            if target_num > 0 and cur_num >= target_num:
+                                stop_signal.set()
+                                _trigger_target_reached_stop(gui_instance, stop_signal)
+                        else:
+                            stop_signal.set()
+                            break
+                    grace_seconds = float(POST_SUBMIT_CLOSE_GRACE_SECONDS or 0.0)
+                    if grace_seconds > 0 and not stop_signal.is_set():
+                        time.sleep(grace_seconds)
+                    _dispose_driver()
+                    break
+
+                if outcome == "followup":
+                    followup_hops += 1
+                    if POST_SUBMIT_FOLLOWUP_MAX_HOPS and followup_hops > int(POST_SUBMIT_FOLLOWUP_MAX_HOPS):
+                        logging.warning(
+                            "提交后检测到连续跳转问卷次数过多（>%s），视为失败：%s",
+                            POST_SUBMIT_FOLLOWUP_MAX_HOPS,
+                            outcome_url,
+                        )
+                        driver_had_error = True
+                        if _handle_submission_failure(stop_signal):
+                            break
+                        break
+                    next_norm = _normalize_url_for_compare(outcome_url)
+                    if next_norm and next_norm in visited_urls:
+                        logging.warning("提交后跳转问卷出现循环，视为失败：%s", outcome_url)
+                        driver_had_error = True
+                        if _handle_submission_failure(stop_signal):
+                            break
+                        break
+                    if next_norm:
+                        visited_urls.add(next_norm)
+                    logging.info("[Action Log] 检测到分流：提交后跳转到下一份问卷：%s", outcome_url)
+                    continue
+
+                driver_had_error = True
+                if _handle_submission_failure(stop_signal):
+                    break
+                break
         except AliyunCaptchaBypassError:
             driver_had_error = True
             _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
