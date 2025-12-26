@@ -154,7 +154,7 @@ Before tweaking these controls make sure the survey has been parsed via the conf
 
 **Donate**
 
-<img width="400" height="300" alt="payment" src="https://github.com/user-attachments/assets/62b6518f-97bb-4010-971a-3b89efb8359d" />
+<img width="400" height="300" alt="payment" src="assets/payment.png" />
 
 ---
 
