@@ -152,7 +152,7 @@ python fuck-wjx.py
 
 **捐助**
 
-<img width="400" height="650" alt="payment" src="assets/payment.png" />
+<img width="250" height="500" alt="payment" src="assets/payment.png" />
 
 ---
 
