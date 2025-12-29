@@ -3632,7 +3632,8 @@ def reorder(driver: BrowserDriver, current):
         max_select_limit = required_count
     if min_select_limit is not None or max_select_limit is not None:
         _log_multi_limit_once(driver, current, min_select_limit, max_select_limit)
-    if force_select_all:
+    # 点击顺序排序题重复点击可能会取消选择/扰乱序号，避免走“补点两轮”的逻辑
+    if force_select_all and not rank_mode:
         candidate_indices = list(range(len(order_items)))
         random.shuffle(candidate_indices)
         for option_idx in candidate_indices:
@@ -3662,6 +3663,97 @@ def reorder(driver: BrowserDriver, current):
     if min_select_limit is not None:
         effective_limit = max(effective_limit, min_select_limit)
     effective_limit = max(1, min(effective_limit, len(order_items)))
+
+    # 点击顺序排序题：默认全排序（每个选项最多点击一次），除非题目明确限制需选择/排序的数量
+    if rank_mode:
+        plan_count = effective_limit
+        if required_count is None and min_select_limit is None and max_select_limit is None:
+            plan_count = total_options
+        plan_count = max(1, min(int(plan_count), total_options))
+
+        if _count_selected() >= plan_count:
+            return
+
+        def _force_mark_rank_selected(li, rank: int) -> None:
+            if not li or not container:
+                return
+            try:
+                driver.execute_script(
+                    r"""
+                    const li = arguments[0];
+                    const rank = Number(arguments[1] || 0);
+                    if (!li || !rank) return;
+                    li.classList.add('check', 'selected', 'jqchecked', 'on');
+                    li.setAttribute('aria-checked', 'true');
+                    li.setAttribute('data-checked', 'true');
+                    const badge = li.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                    if (badge) {
+                        badge.textContent = String(rank);
+                        badge.style.display = '';
+                    }
+                    const hidden = li.querySelector("input.custom[type='hidden'][name^='q'], input[type='hidden'][name^='q']");
+                    if (hidden) {
+                        hidden.setAttribute('data-forced', '1');
+                        hidden.setAttribute('data-checked', 'true');
+                        hidden.setAttribute('aria-checked', 'true');
+                    }
+                    """,
+                    li,
+                    int(rank),
+                )
+            except Exception:
+                pass
+
+        def _get_item_badge_text(li) -> str:
+            if not li:
+                return ""
+            try:
+                badge = li.find_element(By.CSS_SELECTOR, ".sortnum, .sortnum-sel, .order-number, .order-index")
+            except Exception:
+                badge = None
+            if not badge:
+                return ""
+            try:
+                return _extract_text_from_element(badge).strip()
+            except Exception:
+                return ""
+
+        click_plan = list(range(total_options))
+        random.shuffle(click_plan)
+        click_plan = click_plan[:plan_count]
+
+        for option_idx in click_plan:
+            item = order_items[option_idx]
+            if _is_item_selected(item) or _get_item_badge_text(item):
+                continue
+            before = _count_selected()
+            expected_rank = max(1, min(before + 1, plan_count))
+            try:
+                item.click()
+            except Exception:
+                pass
+
+            deadline = time.time() + 0.65
+            while time.time() < deadline:
+                if _get_item_badge_text(item):
+                    break
+                if _count_selected() > before:
+                    break
+                time.sleep(0.05)
+
+            if _count_selected() <= before and not _get_item_badge_text(item):
+                _force_mark_rank_selected(item, expected_rank)
+
+            if _count_selected() >= plan_count:
+                break
+
+        # 仅等待状态稳定，不再补点，保证不重复点击
+        deadline = time.time() + 1.2
+        while time.time() < deadline:
+            if _count_selected() >= plan_count:
+                break
+            time.sleep(0.05)
+        return
 
     candidate_indices = list(range(len(order_items)))
     random.shuffle(candidate_indices)
