@@ -4995,10 +4995,16 @@ class SurveyGUI(ConfigPersistenceMixin):
             ttk.Label(config_frame, text=answer_header, font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=5, fill=tk.X)
 
             answer_vars: List[tk.StringVar] = []
-            normalized_title = re.sub(r"\s+", "", str(q.get("title") or "").lower())
-            name_keywords = ("姓名", "名字", "称呼", "联系人", "收件人", "监护人", "学生", "家长", "name")
-            phone_keywords = ("手机号", "手机号码", "电话", "联系电话", "联系方式", "mobile", "phone")
+            raw_title = str(q.get("title") or "")
+            normalized_title = re.sub(r"\s+", "", raw_title.lower())
+            name_keywords = ("姓名", "名字", "称呼", "联系人", "收件人", "监护人", "name", "realname")
+            loose_name_context = ("学生", "家长")
+            compact_title = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", normalized_title)
             has_name_hint = any(keyword in normalized_title for keyword in name_keywords)
+            if not has_name_hint and len(compact_title) <= 6:
+                # 避免长句包含“学生”等泛词就误判为姓名题，仅对极短标题做兜底匹配
+                has_name_hint = any(keyword in compact_title for keyword in loose_name_context)
+            phone_keywords = ("手机号", "手机号码", "电话", "联系电话", "联系方式", "mobile", "phone")
             has_phone_hint = any(keyword in normalized_title for keyword in phone_keywords)
             allow_random_fill = has_name_hint or has_phone_hint
 
