@@ -1484,6 +1484,26 @@ def _driver_question_is_location(question_div) -> bool:
     return False
 
 
+def _driver_question_looks_like_reorder(question_div) -> bool:
+    """兜底判断：当 type 属性异常/缺失时，尝试通过 DOM 特征识别排序题。"""
+    if question_div is None:
+        return False
+    try:
+        if question_div.find_elements(By.CSS_SELECTOR, ".sortnum, .sortnum-sel"):
+            return True
+    except Exception:
+        pass
+    try:
+        # 仅作为兜底：需要同时满足“存在列表项”与“具备排序/拖拽特征”，避免误判普通题型
+        has_list_items = bool(question_div.find_elements(By.CSS_SELECTOR, "ul li, ol li"))
+        has_sort_signature = bool(
+            question_div.find_elements(By.CSS_SELECTOR, ".ui-sortable, .ui-sortable-handle, [class*='sort']")
+        )
+        return has_list_items and has_sort_signature
+    except Exception:
+        return False
+
+
 def _soup_question_is_location(question_div) -> bool:
     if question_div is None:
         return False
@@ -3202,15 +3222,45 @@ def matrix(driver: BrowserDriver, current, index):
 
 
 def reorder(driver: BrowserDriver, current):
-    items_xpath = f'//*[@id="div{current}"]/ul/li'
-    order_items = driver.find_elements(By.XPATH, items_xpath)
-    if not order_items:
-        return
     try:
         container = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
     except Exception:
         container = None
-
+    # 排序题 DOM 在不同模板下差异较大：ul 可能不是 div 的直接子节点，甚至会使用 ol。
+    # 旧逻辑使用 "/ul/li" 会导致找不到选项，从而整题被“跳过”。
+    items_xpath_candidates = [
+        # 优先：li 内存在 name 以 q{题号} 开头的输入框（隐藏/勾选框等），更不易误匹配题干里的列表
+        f"//*[@id='div{current}']//li[.//input[starts-with(@name,'q{current}')]]",
+        # 兜底：常见 ul/ol 结构（允许嵌套）
+        f"//*[@id='div{current}']//ul/li",
+        f"//*[@id='div{current}']//ol/li",
+    ]
+    items_xpath = items_xpath_candidates[-1]
+    order_items: List[Any] = []
+    for candidate_xpath in items_xpath_candidates:
+        try:
+            order_items = driver.find_elements(By.XPATH, candidate_xpath)
+        except Exception:
+            order_items = []
+        if order_items:
+            items_xpath = candidate_xpath
+            break
+    if not order_items:
+        return
+    if container:
+        try:
+            _smooth_scroll_to_element(driver, container, block="center")
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", container)
+            except Exception:
+                pass
+    rank_mode = False
+    if container:
+        try:
+            rank_mode = bool(container.find_elements(By.CSS_SELECTOR, ".sortnum, .sortnum-sel"))
+        except Exception:
+            rank_mode = False
     def _is_item_selected(item) -> bool:
         try:
             inputs = item.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
@@ -3225,7 +3275,11 @@ def reorder(driver: BrowserDriver, current):
         try:
             cls = (item.get_attribute("class") or "").lower()
             # 部分排序题点击后会给 li 添加 check 类或数字类名
-            if any(token in cls for token in ("selected", "checked", "jqchecked", "active", "on", "check")):
+            if any(token in cls for token in ("selected", "checked", "jqchecked", "active", "on", "check", "cur", "sel")):
+                return True
+            data_checked = (item.get_attribute("data-checked") or "").lower()
+            aria_checked = (item.get_attribute("aria-checked") or "").lower()
+            if data_checked in ("true", "checked") or aria_checked == "true":
                 return True
         except Exception:
             pass
@@ -3267,6 +3321,26 @@ def reorder(driver: BrowserDriver, current):
                         badge_count += 1
                 if badge_count:
                     return badge_count
+            # 一些排序题会把“已选”写入 data-checked 或 aria-checked
+            candidates = container.find_elements(By.CSS_SELECTOR, "li[aria-checked='true'], li[data-checked='true']")
+            if candidates:
+                return len(candidates)
+            hidden_inputs = container.find_elements(By.CSS_SELECTOR, "input[type='hidden'][name^='q'][value]")
+            forced_inputs = [h for h in hidden_inputs if (h.get_attribute("data-forced") or "") == "1"]
+            if forced_inputs:
+                return len(forced_inputs)
+            selected_hidden = 0
+            for hidden in hidden_inputs:
+                try:
+                    checked_attr = (hidden.get_attribute("checked") or "").lower()
+                    data_checked = (hidden.get_attribute("data-checked") or "").lower()
+                    aria_checked = (hidden.get_attribute("aria-checked") or "").lower()
+                except Exception:
+                    checked_attr = data_checked = aria_checked = ""
+                if checked_attr in ("true", "checked") or data_checked in ("true", "checked") or aria_checked == "true":
+                    selected_hidden += 1
+            if selected_hidden:
+                return selected_hidden
         except Exception:
             pass
         count = 0
@@ -3276,7 +3350,33 @@ def reorder(driver: BrowserDriver, current):
         return count
 
     def _click_item(option_idx: int, item) -> bool:
-        selector = f"#div{current} > ul > li:nth-child({option_idx + 1})"
+        selector = (
+            f"#div{current} ul > li:nth-child({option_idx + 1}), "
+            f"#div{current} ol > li:nth-child({option_idx + 1})"
+        )
+
+        def _after_rank_click(changed: bool) -> None:
+            if changed and rank_mode:
+                time.sleep(0.28)
+
+        def _playwright_click_selector(css_selector: str) -> bool:
+            page = getattr(driver, "page", None)
+            if not page:
+                return False
+            try:
+                page.click(css_selector, timeout=1200)
+                return True
+            except Exception:
+                return False
+
+        def _native_click(target) -> None:
+            # Playwright 的 element.click() 会触发更完整的鼠标事件链；
+            # 部分模板（点击顺序排序）不会响应 JS 触发的 el.click()/dispatchEvent。
+            try:
+                if target is not None and hasattr(target, "click"):
+                    target.click()
+            except Exception:
+                pass
 
         def _safe_dom_click(target) -> None:
             driver.execute_script(
@@ -3343,10 +3443,13 @@ def reorder(driver: BrowserDriver, current):
                 for css in (
                     "input[type='checkbox']",
                     "input[type='radio']",
+                    "input[type='hidden']",
                     "label",
                     "a",
                     ".option",
                     ".item",
+                    ".ui-state-default",
+                    ".ui-sortable-handle",
                     "span",
                     "div",
                 ):
@@ -3374,6 +3477,33 @@ def reorder(driver: BrowserDriver, current):
             return True
 
         count_before = _count_selected()
+        # 点击顺序排序题：优先使用 Playwright 原生 click，确保触发 jQuery Mobile 的 vclick/tap 绑定
+        if rank_mode:
+            clicked = False
+            for css in (
+                f"#div{current} ul > li:nth-child({option_idx + 1})",
+                f"#div{current} ol > li:nth-child({option_idx + 1})",
+            ):
+                if _playwright_click_selector(css):
+                    clicked = True
+                    break
+            if clicked:
+                deadline = time.time() + 0.55
+                while time.time() < deadline:
+                    try:
+                        if _count_selected() > count_before:
+                            _after_rank_click(True)
+                            return True
+                    except Exception:
+                        pass
+                    try:
+                        fresh_check = _get_item_fresh()
+                        if fresh_check and _is_item_selected(fresh_check):
+                            _after_rank_click(True)
+                            return True
+                    except Exception:
+                        pass
+                    time.sleep(0.05)
         for _ in range(6):
             base_item = _get_item_fresh()
             if base_item and _is_item_selected(base_item):
@@ -3381,7 +3511,7 @@ def reorder(driver: BrowserDriver, current):
 
             for target in _click_targets(base_item):
                 try:
-                    _safe_dom_click(target)
+                    _native_click(target)
                 except Exception:
                     pass
 
@@ -3390,12 +3520,36 @@ def reorder(driver: BrowserDriver, current):
                 while time.time() < deadline:
                     try:
                         if _count_selected() > count_before:
+                            _after_rank_click(True)
                             return True
                     except Exception:
                         pass
                     try:
                         fresh_check = _get_item_fresh()
                         if fresh_check and _is_item_selected(fresh_check):
+                            _after_rank_click(True)
+                            return True
+                    except Exception:
+                        pass
+                    time.sleep(0.05)
+
+                # 未生效时再用 JS 事件触发一次（对少数覆盖层/事件绑定更友好）
+                try:
+                    _safe_dom_click(target)
+                except Exception:
+                    pass
+                deadline = time.time() + 0.45
+                while time.time() < deadline:
+                    try:
+                        if _count_selected() > count_before:
+                            _after_rank_click(True)
+                            return True
+                    except Exception:
+                        pass
+                    try:
+                        fresh_check = _get_item_fresh()
+                        if fresh_check and _is_item_selected(fresh_check):
+                            _after_rank_click(True)
                             return True
                     except Exception:
                         pass
@@ -3408,6 +3562,7 @@ def reorder(driver: BrowserDriver, current):
                         while time.time() < deadline:
                             try:
                                 if _count_selected() > count_before:
+                                    _after_rank_click(True)
                                     return True
                             except Exception:
                                 pass
@@ -3440,9 +3595,12 @@ def reorder(driver: BrowserDriver, current):
                         return
             time.sleep(0.12)
 
-    def _wait_until_reorder_done(target_count: int, max_wait: float = 1.5) -> None:
+    def _wait_until_reorder_done(target_count: int, max_wait: Optional[float] = None) -> None:
         target_count = max(1, min(target_count, total_options))
-        deadline = time.time() + max_wait
+        wait_window = max_wait
+        if wait_window is None:
+            wait_window = 2.8 if rank_mode else 1.5
+        deadline = time.time() + wait_window
         while time.time() < deadline:
             current_count = _count_selected()
             if current_count >= target_count:
@@ -3453,6 +3611,22 @@ def reorder(driver: BrowserDriver, current):
     total_options = len(order_items)
     required_count = detect_reorder_required_count(driver, current, total_options)
     min_select_limit, max_select_limit = detect_multiple_choice_limit_range(driver, current)
+    # 排序题 DOM 中常包含大量数字（例如 hidden input 的 value/serial），会干扰通用“至多/至少”解析；
+    # 若题干未出现“至少/最多/选择”等关键词，则默认视为无限制，按“填满”处理。
+    if rank_mode and container:
+        fragments: List[str] = []
+        for selector in (".qtypetip", ".topichtml", ".field-label"):
+            try:
+                fragments.append(container.find_element(By.CSS_SELECTOR, selector).text)
+            except Exception:
+                continue
+        cand_min, cand_max = _extract_multi_limit_range_from_text("\n".join(fragments))
+        if cand_min is None and cand_max is None:
+            min_select_limit = None
+            max_select_limit = None
+        else:
+            min_select_limit = cand_min
+            max_select_limit = cand_max
     force_select_all = required_count is not None and required_count == total_options
     if force_select_all and max_select_limit is not None and required_count is not None and max_select_limit < required_count:
         max_select_limit = required_count
@@ -3508,6 +3682,82 @@ def reorder(driver: BrowserDriver, current):
                 continue
             if _click_item(option_idx, item):
                 selected_count += 1
+    selected_count = _count_selected()
+    if selected_count < effective_limit and container:
+        try:
+            # 兜底：直接写入排序序号并标记为已选（仅最后兜底，优先依赖真实点击）
+            order = list(range(len(order_items)))
+            random.shuffle(order)
+            driver.execute_script(
+                r"""
+                const container = arguments[0];
+                const order = arguments[1];
+                const limit = arguments[2];
+                if (!container || !Array.isArray(order)) return;
+                const items = Array.from(container.querySelectorAll('ul > li, ol > li'));
+                const maxCount = Math.max(1, Math.min(Number(limit || items.length) || items.length, items.length));
+                const chosen = order.slice(0, maxCount);
+                const chosenSet = new Set(chosen);
+
+                chosen.forEach((idx, pos) => {
+                    const li = items[idx];
+                    if (!li) return;
+                    const rank = pos + 1;
+                    li.classList.add('selected', 'jqchecked', 'on', 'check');
+                    li.setAttribute('aria-checked', 'true');
+                    li.setAttribute('data-checked', 'true');
+                    const badge = li.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                    if (badge) {
+                        badge.textContent = String(rank);
+                        badge.style.display = '';
+                    }
+                    const hidden = li.querySelector("input.custom[type='hidden'][name^='q'], input[type='hidden'][name^='q']");
+                    if (hidden) {
+                        hidden.value = String(rank);
+                        hidden.setAttribute('data-forced', '1');
+                        hidden.setAttribute('data-checked', 'true');
+                        hidden.setAttribute('aria-checked', 'true');
+                    }
+                    const box = li.querySelector("input[type='checkbox'], input[type='radio']");
+                    if (box) {
+                        box.checked = true;
+                        box.value = String(rank);
+                        box.setAttribute('checked', 'checked');
+                        box.setAttribute('data-checked', 'true');
+                        box.setAttribute('aria-checked', 'true');
+                        try { box.dispatchEvent(new Event('change', {bubbles:true})); } catch (err) {}
+                    }
+                });
+
+                items.forEach((li, idx) => {
+                    if (chosenSet.has(idx)) return;
+                    li.classList.remove('selected', 'jqchecked', 'on', 'check');
+                    li.removeAttribute('aria-checked');
+                    li.removeAttribute('data-checked');
+                    const badge = li.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                    if (badge) badge.textContent = '';
+                    const hidden = li.querySelector("input.custom[type='hidden'][name^='q'], input[type='hidden'][name^='q']");
+                    if (hidden) {
+                        hidden.value = '';
+                        hidden.removeAttribute('data-forced');
+                        hidden.removeAttribute('data-checked');
+                        hidden.removeAttribute('aria-checked');
+                    }
+                    const box = li.querySelector("input[type='checkbox'], input[type='radio']");
+                    if (box) {
+                        box.checked = false;
+                        box.removeAttribute('checked');
+                        box.removeAttribute('data-checked');
+                        box.removeAttribute('aria-checked');
+                    }
+                });
+                """,
+                container,
+                order,
+                effective_limit,
+            )
+        except Exception:
+            pass
     _wait_until_reorder_done(effective_limit)
 
 
@@ -3524,7 +3774,7 @@ def scale(driver: BrowserDriver, current, index):
     scale_options[selected_index].click()
 
 
-def _set_slider_input_value(driver: BrowserDriver, current: int, value: int):
+def _set_slider_input_value(driver: BrowserDriver, current: int, value: Union[int, float]):
     try:
         slider_input = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
     except NoSuchElementException:
@@ -3533,6 +3783,7 @@ def _set_slider_input_value(driver: BrowserDriver, current: int, value: int):
         "const input = arguments[0];"
         "const target = String(arguments[1]);"
         "input.value = target;"
+        "try { input.setAttribute('value', target); } catch (err) {}"
         "['input','change'].forEach(evt => input.dispatchEvent(new Event(evt, { bubbles: true })));"
     )
     try:
@@ -3543,7 +3794,7 @@ def _set_slider_input_value(driver: BrowserDriver, current: int, value: int):
 
 def _click_slider_track(driver: BrowserDriver, container, ratio: float) -> bool:
     xpath_candidates = [
-        ".//div[contains(@class,'wjx-slider') or contains(@class,'slider-track') or contains(@class,'range-slider') or contains(@class,'ui-slider') or contains(@class,'scale-slider') or contains(@class,'slider-container')]",
+        ".//div[contains(@class,'wjx-slider') or contains(@class,'slider-track') or contains(@class,'range-slider') or contains(@class,'rangeslider') or contains(@class,'ui-slider') or contains(@class,'scale-slider') or contains(@class,'slider-container')]",
         ".//div[@role='slider']",
     ]
     page = getattr(driver, "page", None)
@@ -3574,15 +3825,98 @@ def _click_slider_track(driver: BrowserDriver, container, ratio: float) -> bool:
     return False
 
 
-def slider_question(driver: BrowserDriver, current: int, score: int):
-    ratio = max(0.0, min(score / 100.0, 1.0))
+def slider_question(driver: BrowserDriver, current: int, score: Optional[float] = None):
     try:
-        container = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
+        question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
     except NoSuchElementException:
-        container = None
+        question_div = None
+    if question_div:
+        try:
+            _smooth_scroll_to_element(driver, question_div, block="center")
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", question_div)
+            except Exception:
+                pass
+
+    slider_input = None
+    min_value = 0.0
+    max_value = 100.0
+    step_value = 1.0
+
+    def _parse_number(raw, default):
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        slider_input = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
+    except NoSuchElementException:
+        slider_input = None
+
+    if slider_input:
+        min_value = _parse_number(slider_input.get_attribute("min"), min_value)
+        max_value = _parse_number(slider_input.get_attribute("max"), max_value)
+        step_value = abs(_parse_number(slider_input.get_attribute("step"), step_value))
+        if step_value == 0:
+            step_value = 1.0
+        if max_value <= min_value:
+            max_value = min_value + 100.0
+
+    target_value = _parse_number(score, None)
+    if target_value is None:
+        target_value = random.uniform(min_value, max_value)
+    if target_value < min_value or target_value > max_value:
+        if max_value > min_value:
+            target_value = random.uniform(min_value, max_value)
+        else:
+            target_value = min_value
+    if step_value > 0 and max_value > min_value:
+        step_count = round((target_value - min_value) / step_value)
+        target_value = min_value + step_count * step_value
+        target_value = max(min_value, min(target_value, max_value))
+    if abs(target_value - round(target_value)) < 1e-6:
+        target_value = int(round(target_value))
+
+    ratio = 0.0 if max_value == min_value else (target_value - min_value) / (max_value - min_value)
+    ratio = max(0.0, min(ratio, 1.0))
+    container = question_div
     if container:
-        _click_slider_track(driver, container, ratio)
-    _set_slider_input_value(driver, current, score)
+        try:
+            _click_slider_track(driver, container, ratio)
+        except Exception:
+            pass
+        try:
+            driver.execute_script(
+                r"""
+                const container = arguments[0];
+                const ratio = arguments[1];
+                if (!container) return;
+                const track = container.querySelector(
+                    '.rangeslider, .range-slider, .slider-track, .wjx-slider, .ui-slider, .scale-slider, .slider-container'
+                );
+                if (!track) return;
+                const width = track.clientWidth || track.offsetWidth || 0;
+                if (!width) return;
+                const pos = Math.max(0, Math.min(width, ratio * width));
+                const handle = track.querySelector('.rangeslider__handle, .slider-handle, .ui-slider-handle, .handle');
+                const fill = track.querySelector('.rangeslider__fill, .slider-selection, .ui-slider-range, .fill');
+                if (fill) {
+                    fill.style.width = pos + 'px';
+                    if (!fill.style.left) { fill.style.left = '0px'; }
+                }
+                if (handle) {
+                    handle.style.left = pos + 'px';
+                }
+                try { track.setAttribute('data-answered', '1'); } catch (err) {}
+                """,
+                container,
+                ratio,
+            )
+        except Exception:
+            pass
+    _set_slider_input_value(driver, current, target_value)
 
 
 def _full_simulation_active() -> bool:
@@ -3945,6 +4279,7 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 logging.debug("跳过第%d题（未显示）", current_question_number)
                 continue
             question_type = question_div.get_attribute("type")
+            is_reorder_question = (question_type == "11") or _driver_question_looks_like_reorder(question_div)
 
             if question_type in ("1", "2"):
                 vacant(driver, current_question_number, vacant_question_index)
@@ -3966,7 +4301,7 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
             elif question_type == "8":
                 slider_score = random.randint(1, 100)
                 slider_question(driver, current_question_number, slider_score)
-            elif question_type == "11":
+            elif is_reorder_question:
                 reorder(driver, current_question_number)
             else:
                 # 兜底：尝试把未知类型当成填空题/多项填空题处理，避免直接跳过

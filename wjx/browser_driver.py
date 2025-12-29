@@ -163,7 +163,17 @@ class PlaywrightDriver:
     def execute_script(self, script: str, *args):
         processed_args = [arg._handle if isinstance(arg, PlaywrightElement) else arg for arg in args]
         try:
-            return self._page.evaluate(f"function(){{{script}}}", *processed_args)
+            # Playwright 的 page.evaluate 仅允许传入一个 arg；这里把所有参数打包成数组，
+            # 再通过 apply 将其展开成 function(){...} 的 arguments[0..n]，以兼容历史脚本写法。
+            wrapper = (
+                "(args) => {"
+                "  const fn = function(){"
+                + script
+                + "  };"
+                "  return fn.apply(null, Array.isArray(args) ? args : []);"
+                "}"
+            )
+            return self._page.evaluate(wrapper, processed_args)
         except Exception as exc:
             logging.debug("execute_script failed: %s", exc)
             return None
