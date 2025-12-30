@@ -4325,13 +4325,54 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     current_question_number = 0
     active_stop = stop_signal or stop_event
     question_delay_plan: Optional[List[float]] = None
-    if _full_simulation_active() and total_question_count > 0:
-        target_seconds = _calculate_full_simulation_run_target(total_question_count)
-        question_delay_plan = _build_per_question_delay_plan(total_question_count, target_seconds)
-        planned_total = sum(question_delay_plan)
+    full_sim_enabled = _full_simulation_active()
+    full_sim_start_monotonic: Optional[float] = None
+    full_sim_milestones: Optional[List[float]] = None
+    reserved_submit_wait_seconds = 0.0
+
+    def _pick_answer_wait_seconds() -> float:
+        try:
+            min_delay, max_delay = answer_duration_range_seconds
+        except Exception:
+            min_delay, max_delay = 0, 0
+        try:
+            min_delay = max(0, int(min_delay))
+        except Exception:
+            min_delay = 0
+        try:
+            max_delay = max(0, int(max_delay))
+        except Exception:
+            max_delay = 0
+        if max_delay < min_delay:
+            max_delay = min_delay
+        if max_delay <= 0:
+            return 0.0
+        return float(random.uniform(min_delay, max_delay))
+
+    if full_sim_enabled and total_question_count > 0:
+        target_total_seconds = float(getattr(_FULL_SIM_STATE, "estimated_seconds", 0) or 0)
+        if target_total_seconds <= 0:
+            target_total_seconds = float(_calculate_full_simulation_run_target(total_question_count))
+
+        reserved_submit_wait_seconds = _pick_answer_wait_seconds()
+        if reserved_submit_wait_seconds > target_total_seconds > 0:
+            reserved_submit_wait_seconds = target_total_seconds
+
+        question_budget_seconds = max(0.0, target_total_seconds - reserved_submit_wait_seconds)
+        question_delay_plan = _build_per_question_delay_plan(total_question_count, question_budget_seconds)
+
+        milestones: List[float] = []
+        acc = 0.0
+        for delay in question_delay_plan or []:
+            acc += float(delay or 0.0)
+            milestones.append(acc)
+        full_sim_milestones = milestones
+        full_sim_start_monotonic = time.monotonic()
+
         logging.info(
-            "[Action Log] 全真模拟：本次计划总耗时约 %.1f 秒，共 %d 题",
-            planned_total,
+            "[Action Log] 全真模拟：题目节奏预算 %.1f 秒（提交前等待 %.1f 秒），共 %d 题",
+            float(sum(question_delay_plan or [])),
+            float(reserved_submit_wait_seconds or 0.0),
             total_question_count,
         )
 
@@ -4347,111 +4388,109 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
             if _abort_requested():
                 return False
             current_question_number += 1
-            if _full_simulation_active():
+            if full_sim_enabled:
                 if _sleep_with_stop(active_stop, random.uniform(0.8, 1.5)):
                     return False
-            question_selector = f"#div{current_question_number}"
             try:
-                question_div = driver.find_element(By.CSS_SELECTOR, question_selector)
-            except Exception:
-                question_div = None
-            if question_div is None:
-                continue
-            question_visible = False
-            for attempt in range(5):
+                question_selector = f"#div{current_question_number}"
                 try:
-                    if question_div.is_displayed():
-                        question_visible = True
-                        break
+                    question_div = driver.find_element(By.CSS_SELECTOR, question_selector)
                 except Exception:
-                    break
-                if attempt < 4:
-                    time.sleep(0.1)
-            if not question_visible:
-                logging.debug("跳过第%d题（未显示）", current_question_number)
-                continue
-            question_type = question_div.get_attribute("type")
-            is_reorder_question = (question_type == "11") or _driver_question_looks_like_reorder(question_div)
+                    question_div = None
+                if question_div is None:
+                    continue
+                question_visible = False
+                for attempt in range(5):
+                    try:
+                        if question_div.is_displayed():
+                            question_visible = True
+                            break
+                    except Exception:
+                        break
+                    if attempt < 4:
+                        time.sleep(0.1)
+                if not question_visible:
+                    logging.debug("跳过第%d题（未显示）", current_question_number)
+                    continue
+                question_type = question_div.get_attribute("type")
+                is_reorder_question = (question_type == "11") or _driver_question_looks_like_reorder(question_div)
 
-            if question_type in ("1", "2"):
-                vacant(driver, current_question_number, vacant_question_index)
-                vacant_question_index += 1
-            elif question_type == "3":
-                single(driver, current_question_number, single_question_index)
-                single_question_index += 1
-            elif question_type == "4":
-                multiple(driver, current_question_number, multiple_question_index)
-                multiple_question_index += 1
-            elif question_type == "5":
-                scale(driver, current_question_number, scale_question_index)
-                scale_question_index += 1
-            elif question_type == "6":
-                matrix_question_index = matrix(driver, current_question_number, matrix_question_index)
-            elif question_type == "7":
-                droplist(driver, current_question_number, droplist_question_index)
-                droplist_question_index += 1
-            elif question_type == "8":
-                slider_score = random.randint(1, 100)
-                slider_question(driver, current_question_number, slider_score)
-            elif is_reorder_question:
-                reorder(driver, current_question_number)
-            else:
-                # 兜底：尝试把未知类型当成填空题/多项填空题处理，避免直接跳过
-                handled = False
-                if question_div is not None:
-                    checkbox_count, radio_count = _count_choice_inputs_driver(question_div)
-                    if checkbox_count or radio_count:
-                        if checkbox_count >= radio_count:
-                            multiple(driver, current_question_number, multiple_question_index)
-                            multiple_question_index += 1
-                        else:
-                            single(driver, current_question_number, single_question_index)
-                            single_question_index += 1
-                        handled = True
-
-                if not handled:
-                    option_count = 0
-                    if question_div is not None:
-                        try:
-                            option_elements = question_div.find_elements(By.CSS_SELECTOR, ".ui-controlgroup > div")
-                            option_count = len(option_elements)
-                        except Exception:
-                            option_count = 0
-                    text_input_count = _count_visible_text_inputs_driver(question_div) if question_div is not None else 0
-                    is_location_question = _driver_question_is_location(question_div) if question_div is not None else False
-                    is_multi_text_question = _should_mark_as_multi_text(
-                        question_type, option_count, text_input_count, is_location_question
-                    )
-                    is_text_like_question = _should_treat_question_as_text_like(
-                        question_type, option_count, text_input_count
-                    )
-
-                    if is_text_like_question:
-                        vacant(driver, current_question_number, vacant_question_index)
-                        vacant_question_index += 1
-                        print(
-                            f"第{current_question_number}题识别为"
-                            f"{'多项填空' if is_multi_text_question else '填空'}，已按填空题处理"
-                        )
-                    else:
-                        print(f"第{current_question_number}题为不支持类型(type={question_type})")
-        if _full_simulation_active():
-            _human_scroll_after_question(driver)
-        if (
-            question_delay_plan
-            and current_question_number < total_question_count
-        ):
-            plan_index = min(current_question_number - 1, len(question_delay_plan) - 1)
-            delay_seconds = question_delay_plan[plan_index] if plan_index >= 0 else 0.0
-            if delay_seconds > 0.01:
-                if active_stop:
-                    if active_stop.wait(delay_seconds):
-                        return False
+                if question_type in ("1", "2"):
+                    vacant(driver, current_question_number, vacant_question_index)
+                    vacant_question_index += 1
+                elif question_type == "3":
+                    single(driver, current_question_number, single_question_index)
+                    single_question_index += 1
+                elif question_type == "4":
+                    multiple(driver, current_question_number, multiple_question_index)
+                    multiple_question_index += 1
+                elif question_type == "5":
+                    scale(driver, current_question_number, scale_question_index)
+                    scale_question_index += 1
+                elif question_type == "6":
+                    matrix_question_index = matrix(driver, current_question_number, matrix_question_index)
+                elif question_type == "7":
+                    droplist(driver, current_question_number, droplist_question_index)
+                    droplist_question_index += 1
+                elif question_type == "8":
+                    slider_score = random.randint(1, 100)
+                    slider_question(driver, current_question_number, slider_score)
+                elif is_reorder_question:
+                    reorder(driver, current_question_number)
                 else:
-                    time.sleep(delay_seconds)
+                    # 兜底：尝试把未知类型当成填空题/多项填空题处理，避免直接跳过
+                    handled = False
+                    if question_div is not None:
+                        checkbox_count, radio_count = _count_choice_inputs_driver(question_div)
+                        if checkbox_count or radio_count:
+                            if checkbox_count >= radio_count:
+                                multiple(driver, current_question_number, multiple_question_index)
+                                multiple_question_index += 1
+                            else:
+                                single(driver, current_question_number, single_question_index)
+                                single_question_index += 1
+                            handled = True
+
+                    if not handled:
+                        option_count = 0
+                        if question_div is not None:
+                            try:
+                                option_elements = question_div.find_elements(By.CSS_SELECTOR, ".ui-controlgroup > div")
+                                option_count = len(option_elements)
+                            except Exception:
+                                option_count = 0
+                        text_input_count = _count_visible_text_inputs_driver(question_div) if question_div is not None else 0
+                        is_location_question = _driver_question_is_location(question_div) if question_div is not None else False
+                        is_multi_text_question = _should_mark_as_multi_text(
+                            question_type, option_count, text_input_count, is_location_question
+                        )
+                        is_text_like_question = _should_treat_question_as_text_like(
+                            question_type, option_count, text_input_count
+                        )
+
+                        if is_text_like_question:
+                            vacant(driver, current_question_number, vacant_question_index)
+                            vacant_question_index += 1
+                            print(
+                                f"第{current_question_number}题识别为"
+                                f"{'多项填空' if is_multi_text_question else '填空'}，已按填空题处理"
+                            )
+                        else:
+                            print(f"第{current_question_number}题为不支持类型(type={question_type})")
+            finally:
+                if full_sim_enabled and full_sim_milestones and full_sim_start_monotonic is not None:
+                    idx = min(max(0, current_question_number - 1), len(full_sim_milestones) - 1)
+                    target_elapsed = float(full_sim_milestones[idx] or 0.0)
+                    deadline = float(full_sim_start_monotonic) + target_elapsed
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0.01:
+                        if _sleep_with_stop(active_stop, remaining):
+                            return False
+        if full_sim_enabled:
+            _human_scroll_after_question(driver)
         if _abort_requested():
             return False
-        buffer_delay = 0.0 if fast_mode else 0.5
+        buffer_delay = 0.0 if (fast_mode or full_sim_enabled) else 0.5
         if buffer_delay > 0:
             if active_stop:
                 if active_stop.wait(buffer_delay):
@@ -4460,8 +4499,17 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 time.sleep(buffer_delay)
         is_last_page = (page_index == total_pages - 1)
         if is_last_page:
-            if _simulate_answer_duration_delay(active_stop):
-                return False
+            if full_sim_enabled:
+                if reserved_submit_wait_seconds > 0.01:
+                    logging.info(
+                        "[Action Log] 全真模拟：提交前等待 %.1f 秒（计入单次作答时长预算）",
+                        float(reserved_submit_wait_seconds),
+                    )
+                    if _sleep_with_stop(active_stop, float(reserved_submit_wait_seconds)):
+                        return False
+            else:
+                if _simulate_answer_duration_delay(active_stop):
+                    return False
             if _abort_requested():
                 return False
             # 最后一页直接跳出循环，由后续的 submit() 处理提交
@@ -4469,7 +4517,7 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
         clicked = _click_next_page_button(driver)
         if not clicked:
             raise NoSuchElementException("Next page button not found")
-        click_delay = 0.0 if fast_mode else 0.5
+        click_delay = 0.0 if (fast_mode or full_sim_enabled) else 0.5
         if click_delay > 0:
             if active_stop:
                 if active_stop.wait(click_delay):
