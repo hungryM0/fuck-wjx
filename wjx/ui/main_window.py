@@ -629,6 +629,18 @@ class SettingsPage(ScrollArea):
         feature_row.addStretch(1)
         feature_layout.addLayout(feature_row)
 
+        # 代理源选择
+        proxy_source_row = QHBoxLayout()
+        proxy_source_row.setSpacing(8)
+        proxy_source_row.addWidget(BodyLabel("代理源：", self.view))
+        self.proxy_source_combo = ComboBox(self.view)
+        self.proxy_source_combo.addItem("默认", "default")
+        self.proxy_source_combo.addItem("皮卡丘代理站 (中国大陆)", "pikachu")
+        self.proxy_source_combo.setMinimumWidth(200)
+        proxy_source_row.addWidget(self.proxy_source_combo)
+        proxy_source_row.addStretch(1)
+        feature_layout.addLayout(proxy_source_row)
+
         ua_group = CardWidget(self.view)
         ua_layout = QVBoxLayout(ua_group)
         ua_layout.setContentsMargins(12, 12, 12, 12)
@@ -662,6 +674,7 @@ class SettingsPage(ScrollArea):
         self.interval_max_btn.clicked.connect(lambda: self._show_time_picker("interval_max"))
         self.answer_min_btn.clicked.connect(lambda: self._show_time_picker("answer_min"))
         self.answer_max_btn.clicked.connect(lambda: self._show_time_picker("answer_max"))
+        self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
 
     def _on_random_ip_toggled(self, enabled: bool):
         """参数页随机IP开关切换时，同步到主页并显示弹窗"""
@@ -674,6 +687,15 @@ class SettingsPage(ScrollArea):
                 main_win.dashboard._on_random_ip_toggled(2 if enabled else 0)  # type: ignore[union-attr]
             finally:
                 self.random_ip_switch.blockSignals(False)
+
+    def _on_proxy_source_changed(self, index: int):
+        """代理源选择变化时更新设置"""
+        try:
+            from wjx.network.random_ip import set_proxy_source
+            source = self.proxy_source_combo.currentData() or "default"
+            set_proxy_source(source)
+        except Exception:
+            pass
 
     def request_card_code(self) -> Optional[str]:
         """为解锁弹窗提供卡密输入。"""
@@ -863,6 +885,12 @@ class SettingsPage(ScrollArea):
         cfg.random_ua_enabled = self.random_ua_switch.isChecked()
         cfg.random_ua_keys = [k for k, cb in self.ua_checkboxes.items() if cb.isChecked()] if cfg.random_ua_enabled else []
         cfg.fail_stop_enabled = self.fail_stop_switch.isChecked()
+        
+        # 保存代理源设置
+        try:
+            cfg.proxy_source = self.proxy_source_combo.currentData() or "default"
+        except Exception:
+            cfg.proxy_source = "default"
 
     def apply_config(self, cfg: RuntimeConfig):
         self.target_spin.setValue(max(1, cfg.target))
@@ -887,7 +915,10 @@ class SettingsPage(ScrollArea):
         
         self.timed_switch.setChecked(cfg.timed_mode_enabled)
         self._sync_timed_mode(cfg.timed_mode_enabled)
+        # 阻塞信号避免加载配置时触发弹窗
+        self.random_ip_switch.blockSignals(True)
         self.random_ip_switch.setChecked(cfg.random_ip_enabled)
+        self.random_ip_switch.blockSignals(False)
         self.random_ua_switch.setChecked(cfg.random_ua_enabled)
         # 应用 UA 选项
         active = set(cfg.random_ua_keys or [])
@@ -895,6 +926,17 @@ class SettingsPage(ScrollArea):
             cb.setChecked((not active and key == "pc_web") or key in active)
             cb.setEnabled(self.random_ua_switch.isChecked())
         self.fail_stop_switch.setChecked(cfg.fail_stop_enabled)
+        
+        # 应用代理源设置
+        try:
+            proxy_source = getattr(cfg, "proxy_source", "default")
+            idx = self.proxy_source_combo.findData(proxy_source)
+            if idx >= 0:
+                self.proxy_source_combo.setCurrentIndex(idx)
+            from wjx.network.random_ip import set_proxy_source
+            set_proxy_source(proxy_source)
+        except Exception:
+            pass
 
     def _show_timed_mode_help(self):
         """显示定时模式说明对话框"""
@@ -1730,7 +1772,10 @@ class DashboardPage(QWidget):
         self.url_edit.setText(cfg.url)
         self.target_spin.setValue(max(1, int(cfg.target or 1)))
         self.thread_spin.setValue(max(1, int(cfg.threads or 1)))
+        # 阻塞信号避免加载配置时触发弹窗
+        self.random_ip_cb.blockSignals(True)
         self.random_ip_cb.setChecked(bool(cfg.random_ip_enabled))
+        self.random_ip_cb.blockSignals(False)
         self._refresh_entry_table()
         self._sync_start_button_state()
 

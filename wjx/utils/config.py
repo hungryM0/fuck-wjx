@@ -148,8 +148,8 @@ STOP_FORCE_WAIT_SECONDS = 1.5
 # ==================== 代理配置 ====================
 PROXY_LIST_FILENAME = "ips.txt"
 PROXY_MAX_PROXIES = 80
-PROXY_HEALTH_CHECK_URL = "https://bilibili.com/"
-PROXY_HEALTH_CHECK_TIMEOUT = 5
+PROXY_HEALTH_CHECK_URL = "http://www.baidu.com"
+PROXY_HEALTH_CHECK_TIMEOUT = 15
 PROXY_HEALTH_CHECK_MAX_DURATION = 45
 _PROXY_REMOTE_URL_DEFAULT = "https://service.ipzan.com/core-extract?num=1&no=20251209063007602516&minute=1&format=json&protocol=1&pool=quality&mode=auth&secret=reuoen35jvep3go"
 _RANDOM_IP_API_ENV_KEY = "RANDOM_IP_API_URL"

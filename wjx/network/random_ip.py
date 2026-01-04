@@ -36,6 +36,78 @@ _quota_limit_dialog_shown = False
 _proxy_api_url_override: Optional[str] = None
 _CUSTOM_PROXY_CONFIG_FILENAME = "custom_ip.json"
 
+# 代理源常量
+PROXY_SOURCE_DEFAULT = "default"  # 默认代理源
+PROXY_SOURCE_PIKACHU = "pikachu"  # 皮卡丘代理站
+
+PIKACHU_PROXY_API = "https://raw.githubusercontent.com/CharlesPikachu/freeproxy/master/proxies.json"
+
+# 当前选择的代理源
+_current_proxy_source: str = PROXY_SOURCE_DEFAULT
+
+
+def set_proxy_source(source: str) -> None:
+    """设置代理源"""
+    global _current_proxy_source
+    _current_proxy_source = source
+    logging.info(f"代理源已切换为: {source}")
+
+
+def get_proxy_source() -> str:
+    """获取当前代理源"""
+    return _current_proxy_source
+
+
+def _fetch_cn_http_proxies_from_pikachu() -> List[str]:
+    """从皮卡丘代理站获取中国大陆 HTTP 代理"""
+    if not requests:
+        raise RuntimeError("缺少 requests 模块，无法获取代理")
+    
+    try:
+        resp = requests.get(PIKACHU_PROXY_API, timeout=15, headers=DEFAULT_HTTP_HEADERS)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logging.error(f"从皮卡丘代理站获取代理失败: {exc}")
+        raise RuntimeError(f"获取皮卡丘代理失败: {exc}")
+    
+    cn_http_proxies: List[str] = []
+    
+    # 增强解析：支持多种格式
+    proxy_data = data.get("data", [])
+    if isinstance(proxy_data, dict):
+        # 如果 data 是 dict，尝试获取 list 字段
+        proxy_data = proxy_data.get("list", [])
+    if not isinstance(proxy_data, list):
+        proxy_data = []
+    
+    for proxy in proxy_data:
+        if not isinstance(proxy, dict):
+            continue
+        # 筛选：国家是 CN 且协议包含 Http
+        country = proxy.get("country", "")
+        protocol = proxy.get("protocol", "")
+        
+        if country == "CN" and "Http" in protocol:
+            ip = proxy.get("ip", "")
+            port = proxy.get("port", "")
+            if ip and port:
+                # 处理认证信息
+                username = str(proxy.get("account") or proxy.get("username") or "").strip()
+                password = str(proxy.get("password") or proxy.get("pwd") or "").strip()
+                if username and password:
+                    addr = f"http://{username}:{password}@{ip}:{port}"
+                else:
+                    addr = f"http://{ip}:{port}"
+                cn_http_proxies.append(addr)
+    
+    if not cn_http_proxies:
+        logging.warning("皮卡丘代理站未找到中国大陆 HTTP 代理")
+    else:
+        logging.info(f"从皮卡丘代理站获取到 {len(cn_http_proxies)} 个中国大陆 HTTP 代理")
+    
+    return cn_http_proxies
+
 
 def get_random_ip_limit() -> int:
     """Read quota from registry with sane defaults."""
@@ -193,6 +265,28 @@ def _parse_proxy_payload(text: str) -> List[str]:
         data = json.loads(text)
         if isinstance(data, dict):
             candidates: List[str] = []
+            
+            # 处理嵌套结构：data.data.list (如 {"code":0, "data":{"list":[{"ip":"x.x.x.x","port":"8080"}]}})
+            data_section = data.get("data")
+            if isinstance(data_section, dict):
+                nested_list = data_section.get("list")
+                if isinstance(nested_list, list):
+                    for item in nested_list:
+                        if isinstance(item, dict):
+                            ip = str(item.get("ip") or item.get("host") or "").strip()
+                            port = str(item.get("port") or "").strip()
+                            if ip and port:
+                                # 处理认证信息
+                                username = str(item.get("account") or item.get("username") or "").strip()
+                                password = str(item.get("password") or item.get("pwd") or "").strip()
+                                if username and password:
+                                    candidates.append(f"http://{username}:{password}@{ip}:{port}")
+                                else:
+                                    candidates.append(f"{ip}:{port}")
+                    if candidates:
+                        return candidates
+            
+            # 原有逻辑：处理其他格式
             for key in ("data", "list", "proxy", "proxies"):
                 value = data.get(key)
                 if isinstance(value, list):
@@ -256,6 +350,25 @@ def _fetch_new_proxy_batch(expected_count: int = 1, proxy_url: Optional[str] = N
     """Fetch a batch of proxy addresses."""
     if not requests:
         raise RuntimeError("缺少 requests 模块，无法获取随机IP")
+    
+    # 根据代理源选择不同的获取方式
+    current_source = get_proxy_source()
+    
+    if current_source == PROXY_SOURCE_PIKACHU:
+        # 使用皮卡丘代理站
+        try:
+            all_proxies = _fetch_cn_http_proxies_from_pikachu()
+            if not all_proxies:
+                raise RuntimeError("皮卡丘代理站未返回任何中国大陆 HTTP 代理")
+            # 随机选择指定数量的代理
+            count = min(expected_count, len(all_proxies))
+            selected = random.sample(all_proxies, count)
+            return selected
+        except Exception as exc:
+            logging.error(f"从皮卡丘代理站获取代理失败: {exc}")
+            raise RuntimeError(f"获取皮卡丘代理失败: {exc}")
+    
+    # 默认代理源：使用原有逻辑
     candidates: List[str] = []
     errors: List[str] = []
     for url in _proxy_api_candidates(expected_count, proxy_url):
