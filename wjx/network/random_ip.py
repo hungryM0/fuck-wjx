@@ -29,8 +29,23 @@ from wjx.utils.registry_manager import RegistryManager
 
 _DEFAULT_RANDOM_IP_FREE_LIMIT = 20
 _PREMIUM_RANDOM_IP_LIMIT = 400
-CARD_VALIDATION_ENDPOINT = "https://hungrym0.top/password.txt"
-STATUS_ENDPOINT = "https://wjx.hungrym0.top/status"
+
+# 从环境变量读取敏感URL（必须在.env中配置）
+_card_endpoint = os.getenv("CARD_VALIDATION_ENDPOINT")
+_status_endpoint = os.getenv("STATUS_ENDPOINT")
+_pikachu_api = os.getenv("PIKACHU_PROXY_API")
+
+if not _card_endpoint:
+    raise RuntimeError("CARD_VALIDATION_ENDPOINT 未在环境变量中配置，请检查 .env 文件")
+if not _status_endpoint:
+    raise RuntimeError("STATUS_ENDPOINT 未在环境变量中配置，请检查 .env 文件")
+if not _pikachu_api:
+    raise RuntimeError("PIKACHU_PROXY_API 未在环境变量中配置，请检查 .env 文件")
+
+CARD_VALIDATION_ENDPOINT: str = _card_endpoint
+STATUS_ENDPOINT: str = _status_endpoint
+PIKACHU_PROXY_API: str = _pikachu_api
+
 STATUS_TIMEOUT_SECONDS = 5
 _quota_limit_dialog_shown = False
 _proxy_api_url_override: Optional[str] = None
@@ -39,8 +54,6 @@ _CUSTOM_PROXY_CONFIG_FILENAME = "custom_ip.json"
 # 代理源常量
 PROXY_SOURCE_DEFAULT = "default"  # 默认代理源
 PROXY_SOURCE_PIKACHU = "pikachu"  # 皮卡丘代理站
-
-PIKACHU_PROXY_API = "https://raw.githubusercontent.com/CharlesPikachu/freeproxy/master/proxies.json"
 
 # 当前选择的代理源
 _current_proxy_source: str = PROXY_SOURCE_DEFAULT

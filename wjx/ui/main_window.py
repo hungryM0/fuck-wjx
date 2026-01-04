@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 import re
 import threading
+import weakref
 import webbrowser
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal, QEvent
+from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal, QEvent, QMetaObject
 from PySide6.QtGui import QIcon, QGuiApplication, QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,7 +19,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QMessageBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -112,18 +112,67 @@ def _question_summary(entry: QuestionEntry) -> str:
         return f"{entry.question_type} / {entry.option_count} 个选项"
 
 
+class StatusFetchWorker(QObject):
+    """状态查询 Worker，运行在独立 QThread 中，确保线程安全。"""
+    finished = Signal(str, str)  # text, color
+    
+    def __init__(self, fetcher, formatter):
+        super().__init__()
+        self.fetcher = fetcher
+        self.formatter = formatter
+        self._stopped = False
+    
+    def stop(self):
+        """标记停止，防止后续操作"""
+        self._stopped = True
+    
+    def fetch(self):
+        """执行状态查询，完成后发送 finished 信号"""
+        if self._stopped:
+            return
+        text = "作者当前在线状态：未知"
+        color = "#666666"
+        try:
+            if self._stopped:
+                return
+            result = self.fetcher()
+            if self._stopped:
+                return
+            if callable(self.formatter):
+                fmt_result = self.formatter(result)
+                if isinstance(fmt_result, tuple) and len(fmt_result) >= 2:
+                    text, color = str(fmt_result[0]), str(fmt_result[1])
+            else:
+                online = bool(result.get("online")) if isinstance(result, dict) else True
+                text = f"作者当前在线状态：{'在线' if online else '离线'}"
+                color = "#228B22" if online else "#cc0000"
+        except Exception:
+            text = "作者当前在线状态：未知"
+            color = "#666666"
+        
+        if not self._stopped:
+            self.finished.emit(text, color)
+
+
 class CardUnlockDialog(QDialog):
-    """解锁大额随机 IP 的说明/输入弹窗。"""
+    """解锁大额随机 IP 的说明/输入弹窗。使用 QThread + Worker 模式确保线程安全。"""
 
     _statusLoaded = Signal(str, str)  # text, color
 
     def __init__(self, parent=None, status_fetcher=None, status_formatter=None, contact_handler=None):
         super().__init__(parent)
-        # 防止对话框关闭时退出整个应用
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self._statusLoaded.connect(self._on_status_loaded)
         self.setWindowTitle("随机IP额度限制")
         self.resize(820, 600)
+        
+        # QThread + Worker 相关
+        self._worker_thread: Optional[QThread] = None
+        self._worker: Optional[StatusFetchWorker] = None
+        self._status_timer: Optional[QTimer] = None
+        self._status_fetcher = status_fetcher
+        self._status_formatter = status_formatter
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
@@ -158,9 +207,6 @@ class CardUnlockDialog(QDialog):
         )
         layout.addWidget(steps)
 
-        thanks = BodyLabel("", self)
-        thanks.hide()
-
         # 在线状态行（带加载动画）
         status_row = QHBoxLayout()
         status_row.setSpacing(8)
@@ -185,7 +231,7 @@ class CardUnlockDialog(QDialog):
 
         layout.addWidget(BodyLabel("请输入卡密：", self))
         self.card_edit = LineEdit(self)
-        self.card_edit.setPlaceholderText("输入卡密后点击“验证”")
+        self.card_edit.setPlaceholderText("输入卡密后点击「验证」")
         try:
             self.card_edit.setEchoMode(QLineEdit.EchoMode.Password)
         except Exception:
@@ -205,26 +251,93 @@ class CardUnlockDialog(QDialog):
         self.contact_btn.clicked.connect(contact_handler if callable(contact_handler) else self._open_contact)
         self.donate_btn.clicked.connect(self._open_donate)
 
-        self._status_fetcher = status_fetcher
-        self._status_formatter = status_formatter
-        self._load_status_async()
-
-        # 定时刷新状态（每3秒）
-        self._status_timer = QTimer(self)
-        self._status_timer.setInterval(3000)
-        self._status_timer.timeout.connect(self._load_status_async)
-        self._status_timer.start()
+        # 启动状态查询和定时刷新
+        self._start_status_polling()
 
         try:
             self.card_edit.setFocus()
         except Exception:
             pass
 
+    def _start_status_polling(self):
+        """启动状态轮询"""
+        if not callable(self._status_fetcher):
+            self.status_label.setText("作者当前在线状态：未知")
+            self.status_spinner.hide()
+            return
+        
+        # 立即执行一次查询
+        self._fetch_status_once()
+        
+        # 设置定时器，每 5 秒刷新一次
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(5000)
+        self._status_timer.timeout.connect(self._fetch_status_once)
+        self._status_timer.start()
+
+    def _fetch_status_once(self):
+        """执行一次状态查询（使用 QThread）"""
+        # 如果上一次查询还在进行，跳过
+        if self._worker_thread is not None and self._worker_thread.isRunning():
+            return
+        
+        # 创建新的 Worker 和 Thread
+        self._worker_thread = QThread(self)
+        self._worker = StatusFetchWorker(self._status_fetcher, self._status_formatter)
+        self._worker.moveToThread(self._worker_thread)
+        
+        # 连接信号
+        self._worker.finished.connect(self._on_status_loaded)
+        self._worker.finished.connect(self._worker_thread.quit)
+        self._worker_thread.started.connect(self._worker.fetch)
+        
+        # 启动线程
+        self._worker_thread.start()
+
+    def _stop_status_polling(self):
+        """停止状态轮询并安全清理线程"""
+        # 停止定时器
+        if self._status_timer is not None:
+            self._status_timer.stop()
+            self._status_timer = None
+        
+        # 停止 Worker
+        if self._worker is not None:
+            self._worker.stop()
+        
+        # 等待线程结束
+        if self._worker_thread is not None and self._worker_thread.isRunning():
+            self._worker_thread.quit()
+            self._worker_thread.wait(1000)  # 最多等待 1 秒
+            if self._worker_thread.isRunning():
+                self._worker_thread.terminate()
+        
+        self._worker = None
+        self._worker_thread = None
+
+    def closeEvent(self, event):
+        """对话框关闭时安全停止线程"""
+        self._stop_status_polling()
+        super().closeEvent(event)
+
+    def reject(self):
+        """取消时安全停止线程"""
+        self._stop_status_polling()
+        super().reject()
+
+    def accept(self):
+        """确认时安全停止线程"""
+        self._stop_status_polling()
+        super().accept()
+
     def _on_status_loaded(self, text: str, color: str):
         """信号槽：在主线程更新状态标签"""
-        self.status_spinner.hide()
-        self.status_label.setText(text)
-        self.status_label.setStyleSheet(f"color:{color};")
+        try:
+            self.status_spinner.hide()
+            self.status_label.setText(text)
+            self.status_label.setStyleSheet(f"color:{color};")
+        except RuntimeError:
+            pass
 
     def _open_contact(self):
         try:
@@ -248,51 +361,29 @@ class CardUnlockDialog(QDialog):
             pass
         webbrowser.open("https://github.com/hungryM0/fuck-wjx")
 
-    def _load_status_async(self):
-        fetcher = self._status_fetcher
-        formatter = self._status_formatter
-        if not callable(fetcher):
-            self.status_label.setText("作者当前在线状态：未知")
-            self.status_spinner.hide()
-            return
-
-        def _worker():
-            status_text = "作者当前在线状态：在线"
-            status_color = "#228B22"
-            try:
-                result = fetcher()
-                if callable(formatter):
-                    fmt_result = formatter(result)
-                    if isinstance(fmt_result, tuple) and len(fmt_result) >= 2:
-                        status_text, status_color = str(fmt_result[0]), str(fmt_result[1])
-                else:
-                    online = bool(result.get("online")) if isinstance(result, dict) else True
-                    status_text = f"作者当前在线状态：{'在线' if online else '离线'}"
-                    status_color = "#228B22" if online else "#cc0000"
-            except Exception:
-                status_text = "作者当前在线状态：未知"
-                status_color = "#666666"
-            self._statusLoaded.emit(status_text, status_color)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
     def get_card_code(self) -> Optional[str]:
         return self.card_edit.text().strip() or None
 
 
 class ContactDialog(QDialog):
-    """联系开发者（Qt 版本）。"""
+    """联系开发者（Qt 版本）。使用 QThread + Worker 模式确保线程安全。"""
 
     _statusLoaded = Signal(str, str)  # text, color
 
     def __init__(self, parent=None, default_type: str = "报错反馈", status_fetcher=None, status_formatter=None):
         super().__init__(parent)
-        # 防止对话框关闭时退出整个应用
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self._statusLoaded.connect(self._on_status_loaded)
-        self._status_loaded_once = False
         self.setWindowTitle("联系开发者")
         self.resize(720, 520)
+        
+        # QThread + Worker 相关
+        self._worker_thread: Optional[QThread] = None
+        self._worker: Optional[StatusFetchWorker] = None
+        self._status_timer: Optional[QTimer] = None
+        self._status_fetcher = status_fetcher
+        self._status_formatter = status_formatter
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
@@ -349,23 +440,86 @@ class ContactDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         self.send_btn.clicked.connect(self._on_send_clicked)
 
-        self._status_fetcher = status_fetcher
-        self._status_formatter = status_formatter
-
-        # 定时刷新状态（每3秒）
-        self._status_timer = QTimer(self)
-        self._status_timer.setInterval(3000)
-        self._status_timer.timeout.connect(self._load_status_async)
-        self._status_timer.start()
-
-        # set default type - 先设置类型，再触发更新
+        # set default type
         idx = self.type_combo.findData(default_type)
         if idx >= 0:
             self.type_combo.setCurrentIndex(idx)
         
-        # 使用延迟调用确保 ComboBox 状态完全更新后再触发
         QTimer.singleShot(0, self._on_type_changed)
-        self._load_status_async()
+        
+        # 启动状态查询和定时刷新
+        self._start_status_polling()
+
+    def _start_status_polling(self):
+        """启动状态轮询"""
+        if not callable(self._status_fetcher):
+            self.online_label.setText("作者当前在线状态：未知")
+            self.status_spinner.hide()
+            return
+        
+        # 立即执行一次查询
+        self._fetch_status_once()
+        
+        # 设置定时器，每 5 秒刷新一次
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(5000)
+        self._status_timer.timeout.connect(self._fetch_status_once)
+        self._status_timer.start()
+
+    def _fetch_status_once(self):
+        """执行一次状态查询（使用 QThread）"""
+        # 如果上一次查询还在进行，跳过
+        if self._worker_thread is not None and self._worker_thread.isRunning():
+            return
+        
+        # 创建新的 Worker 和 Thread
+        self._worker_thread = QThread(self)
+        self._worker = StatusFetchWorker(self._status_fetcher, self._status_formatter)
+        self._worker.moveToThread(self._worker_thread)
+        
+        # 连接信号
+        self._worker.finished.connect(self._on_status_loaded)
+        self._worker.finished.connect(self._worker_thread.quit)
+        self._worker_thread.started.connect(self._worker.fetch)
+        
+        # 启动线程
+        self._worker_thread.start()
+
+    def _stop_status_polling(self):
+        """停止状态轮询并安全清理线程"""
+        # 停止定时器
+        if self._status_timer is not None:
+            self._status_timer.stop()
+            self._status_timer = None
+        
+        # 停止 Worker
+        if self._worker is not None:
+            self._worker.stop()
+        
+        # 等待线程结束
+        if self._worker_thread is not None and self._worker_thread.isRunning():
+            self._worker_thread.quit()
+            self._worker_thread.wait(1000)
+            if self._worker_thread.isRunning():
+                self._worker_thread.terminate()
+        
+        self._worker = None
+        self._worker_thread = None
+
+    def closeEvent(self, event):
+        """对话框关闭时安全停止线程"""
+        self._stop_status_polling()
+        super().closeEvent(event)
+
+    def reject(self):
+        """取消时安全停止线程"""
+        self._stop_status_polling()
+        super().reject()
+
+    def accept(self):
+        """确认时安全停止线程"""
+        self._stop_status_polling()
+        super().accept()
 
     def _on_type_changed(self):
         current_type = self.type_combo.currentData()
@@ -399,30 +553,12 @@ class ContactDialog(QDialog):
 
     def _on_status_loaded(self, text: str, color: str):
         """信号槽：在主线程更新状态标签"""
-        self.status_spinner.hide()
-        self.online_label.setText(text)
-        self.online_label.setStyleSheet(f"color:{color};")
-
-    def _load_status_async(self):
-        fetcher = self._status_fetcher
-        formatter = self._status_formatter
-        if not callable(fetcher):
-            return
-
-        def _worker():
-            text = "作者当前在线状态：未知"
-            color = "#666666"
-            try:
-                payload = fetcher()
-                if callable(formatter):
-                    fmt_result = formatter(payload)
-                    if isinstance(fmt_result, tuple) and len(fmt_result) >= 2:
-                        text, color = str(fmt_result[0]), str(fmt_result[1])
-            except Exception:
-                pass
-            self._statusLoaded.emit(text, color)
-
-        threading.Thread(target=_worker, daemon=True).start()
+        try:
+            self.status_spinner.hide()
+            self.online_label.setText(text)
+            self.online_label.setStyleSheet(f"color:{color};")
+        except RuntimeError:
+            pass
 
     def _validate_email(self, email: str) -> bool:
         if not email:
@@ -456,7 +592,13 @@ class ContactDialog(QDialog):
             full_message += f"联系邮箱： {email}\n"
         full_message += f"消息：{message}"
 
-        api_url = "https://bot.hungrym0.top"
+        # 从环境变量读取联系API地址（必须在.env中配置）
+        api_url = os.getenv("CONTACT_API_URL")
+        if not api_url:
+            InfoBar.error("", "联系API未配置，请检查 .env 文件", parent=self, position=InfoBarPosition.TOP, duration=3000)
+            self.send_btn.setEnabled(True)
+            self.send_status_label.setText("")
+            return
         payload = {"message": full_message, "timestamp": datetime.now().isoformat()}
 
         self.send_btn.setEnabled(False)
@@ -2685,21 +2827,10 @@ class AboutPage(ScrollArea):
     def _restart_program(self):
         """重启程序"""
         import sys
-        box = QMessageBox(self.window() or self)
-        box.setWindowTitle("重启程序")
-        box.setText("确定要重新启动程序吗？\n未保存的配置将会丢失。")
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        try:
-            if box.button(QMessageBox.StandardButton.Yes):
-                box.button(QMessageBox.StandardButton.Yes).setText("确定")
-            if box.button(QMessageBox.StandardButton.No):
-                box.button(QMessageBox.StandardButton.No).setText("取消")
-        except Exception:
-            pass
-        reply = box.exec()
-        if reply == QMessageBox.StandardButton.Yes:
+        box = MessageBox("重启程序", "确定要重新启动程序吗？\n未保存的配置将会丢失。", self.window() or self)
+        box.yesButton.setText("确定")
+        box.cancelButton.setText("取消")
+        if box.exec():
             try:
                 win = self.window()
                 if hasattr(win, '_skip_save_on_close'):
@@ -2979,31 +3110,94 @@ class MainWindow(FluentWindow):
                 pass
 
     def closeEvent(self, e):
-        """窗口关闭时自动保存配置和日志"""
+        """窗口关闭时询问用户是否保存配置"""
+        # 先停止所有定时器，防止在关闭过程中触发回调
+        try:
+            if hasattr(self.log_page, '_refresh_timer'):
+                self.log_page._refresh_timer.stop()
+            if hasattr(self.help_page, '_status_timer'):
+                self.help_page._status_timer.stop()
+        except Exception:
+            pass
+        
         if not self._skip_save_on_close:
-            try:
-                # 自动保存当前配置
-                cfg = self.dashboard._build_config()
-                cfg.question_entries = list(self.question_page.get_entries())
-                self.controller.config = cfg
-                from wjx.utils.load_save import save_config
-                saved_path = save_config(cfg)
-                import logging
-                logging.info(f"配置已自动保存到: {saved_path}")
-                
-                # 自动保存日志到固定文件
+            # 询问用户是否保存配置
+            box = MessageBox("保存配置", "是否保存当前配置？", self)
+            box.yesButton.setText("保存")
+            box.cancelButton.setText("取消")
+            
+            # 添加"不保存"按钮
+            no_btn = PushButton("不保存", self)
+            box.buttonLayout.insertWidget(1, no_btn)
+            no_btn.clicked.connect(lambda: box.done(2))  # 2 表示"不保存"
+            
+            reply = box.exec()
+            
+            if reply == 0 or not reply:  # 取消
+                # 用户取消关闭
+                e.ignore()
+                return
+            elif reply == 1 or reply == True:  # 保存
+                # 用户选择保存
                 try:
-                    log_path = os.path.join(get_runtime_directory(), "logs", "last_session.log")
-                    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-                    records = LOG_BUFFER_HANDLER.get_records()
-                    with open(log_path, "w", encoding="utf-8") as f:
-                        f.write("\n".join([entry.text for entry in records]))
-                except Exception as log_exc:
+                    cfg = self.dashboard._build_config()
+                    cfg.question_entries = list(self.question_page.get_entries())
+                    self.controller.config = cfg
+                    
+                    # 弹出文件保存对话框，默认位置在 configs 目录
+                    configs_dir = os.path.join(get_runtime_directory(), "configs")
+                    os.makedirs(configs_dir, exist_ok=True)
+                    
+                    # 使用问卷标题作为默认文件名
+                    from wjx.utils.load_save import _sanitize_filename
+                    survey_title = self.dashboard.title_label.text()
+                    if survey_title and survey_title != "题目清单与操作" and survey_title != "已配置的题目":
+                        default_filename = f"{_sanitize_filename(survey_title)}.json"
+                    else:
+                        default_filename = f"config_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    default_path = os.path.join(configs_dir, default_filename)
+                    
+                    path, _ = QFileDialog.getSaveFileName(
+                        self,
+                        "保存配置",
+                        default_path,
+                        "JSON 文件 (*.json);;所有文件 (*.*)"
+                    )
+                    
+                    if path:
+                        from wjx.utils.load_save import save_config
+                        save_config(cfg, path)
+                        import logging
+                        logging.info(f"配置已保存到: {path}")
+                    else:
+                        # 用户取消了保存对话框，询问是否继续退出
+                        continue_box = MessageBox("确认", "未保存配置，是否继续退出？", self)
+                        continue_box.yesButton.setText("退出")
+                        continue_box.cancelButton.setText("取消")
+                        if not continue_box.exec():
+                            e.ignore()
+                            return
+                except Exception as exc:
                     import logging
-                    logging.warning(f"保存日志失败: {log_exc}")
-            except Exception as exc:
+                    logging.error(f"保存配置失败: {exc}", exc_info=True)
+                    error_box = MessageBox("错误", f"保存配置失败：{exc}\n\n是否继续退出？", self)
+                    error_box.yesButton.setText("退出")
+                    error_box.cancelButton.setText("取消")
+                    if not error_box.exec():
+                        e.ignore()
+                        return
+            
+            # 自动保存日志到固定文件
+            try:
+                log_path = os.path.join(get_runtime_directory(), "logs", "last_session.log")
+                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                records = LOG_BUFFER_HANDLER.get_records()
+                with open(log_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join([entry.text for entry in records]))
+            except Exception as log_exc:
                 import logging
-                logging.error(f"自动保存配置失败: {exc}", exc_info=True)
+                logging.warning(f"保存日志失败: {log_exc}")
+        
         super().closeEvent(e)
 
     def _open_contact_dialog(self, default_type: str = "报错反馈"):
@@ -3076,13 +3270,10 @@ class MainWindow(FluentWindow):
             "提醒：该网站可能在国内访问较慢或需要额外网络配置。\n"
             "是否继续？"
         )
-        reply = QMessageBox.question(
-            self, 
-            "问题反馈", 
-            message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        box = MessageBox("问题反馈", message, self)
+        box.yesButton.setText("继续")
+        box.cancelButton.setText("取消")
+        if box.exec():
             try:
                 webbrowser.open(ISSUE_FEEDBACK_URL)
             except Exception as exc:
@@ -3098,7 +3289,10 @@ class MainWindow(FluentWindow):
             f"官方网站: https://www.hungrym0.top/fuck-wjx.html\n"
             f"©2025 HUNGRY_M0 版权所有  MIT License"
         )
-        QMessageBox.information(self, "关于", about_text)
+        box = MessageBox("关于", about_text, self)
+        box.yesButton.setText("确定")
+        box.cancelButton.hide()
+        box.exec()
 
     def _open_donation(self):
         """打开捐助窗口"""
@@ -3136,20 +3330,10 @@ class MainWindow(FluentWindow):
         def handler(kind: str, title: str, message: str):
             def _show():
                 if kind == "confirm":
-                    box = QMessageBox(self)
-                    box.setWindowTitle(title)
-                    box.setText(message)
-                    box.setIcon(QMessageBox.Icon.Question)
-                    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                    box.setDefaultButton(QMessageBox.StandardButton.No)
-                    try:
-                        if box.button(QMessageBox.StandardButton.Yes):
-                            box.button(QMessageBox.StandardButton.Yes).setText("确定")
-                        if box.button(QMessageBox.StandardButton.No):
-                            box.button(QMessageBox.StandardButton.No).setText("取消")
-                    except Exception:
-                        pass
-                    return box.exec() == QMessageBox.StandardButton.Yes
+                    box = MessageBox(title, message, self)
+                    box.yesButton.setText("确定")
+                    box.cancelButton.setText("取消")
+                    return bool(box.exec())
                 if kind == "error":
                     InfoBar.error(title, message, parent=self, position=InfoBarPosition.TOP, duration=3000)
                     return False
@@ -3224,26 +3408,24 @@ class MainWindow(FluentWindow):
     # ---------- updater 兼容方法 ----------
     def _log_popup_confirm(self, title: str, message: str) -> bool:
         """显示确认对话框，返回用户是否确认。"""
-        box = QMessageBox(self)
-        box.setWindowTitle(title)
-        box.setText(message)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        try:
-            box.button(QMessageBox.StandardButton.Yes).setText("确定")
-            box.button(QMessageBox.StandardButton.No).setText("取消")
-        except Exception:
-            pass
-        return box.exec() == QMessageBox.StandardButton.Yes
+        box = MessageBox(title, message, self)
+        box.yesButton.setText("确定")
+        box.cancelButton.setText("取消")
+        return bool(box.exec())
 
     def _log_popup_info(self, title: str, message: str):
         """显示信息对话框。"""
-        QMessageBox.information(self, title, message)
+        box = MessageBox(title, message, self)
+        box.yesButton.setText("确定")
+        box.cancelButton.hide()
+        box.exec()
 
     def _log_popup_error(self, title: str, message: str):
         """显示错误对话框。"""
-        QMessageBox.critical(self, title, message)
+        box = MessageBox(title, message, self)
+        box.yesButton.setText("确定")
+        box.cancelButton.hide()
+        box.exec()
 
 
 def create_window() -> MainWindow:
