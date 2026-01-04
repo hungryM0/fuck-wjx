@@ -181,30 +181,32 @@ class CardUnlockDialog(QDialog):
         layout.addWidget(title)
 
         desc = BodyLabel(
-            (
-                "作者只是一个大一小登，但是由于ip池及开发成本较高，用户量大，问卷份数要求多，\n"
-                "加上学业压力，导致长期如此无偿经营困难……"
-            ),
+            "作者只是一个大一小登，但是由于ip池及开发成本较高，用户量大，问卷份数要求多，"
+            "加上学业压力，导致长期如此无偿经营困难……",
             self,
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #BA8303;")
         layout.addWidget(desc)
 
-        # 步骤说明 - 使用 BodyLabel 保持样式一致
-        step1 = BodyLabel("1. 捐助任意金额（多少都行?）", self)
-        step2 = BodyLabel("2. 在「联系」中找到开发者，并留下联系邮箱", self)
-        step3 = BodyLabel("3. 开发者会发送卡密到你的邮箱，输入卡密后即可解锁大额随机IP提交额度，不够用可以继续免费申请", self)
-        step3.setWordWrap(True)
-        step4 = BodyLabel("4. 你也可以通过自己的口才白嫖卡密（误）", self)
-        step4.setStyleSheet("color: #6b7280; text-decoration: line-through;")
-        thanks = BodyLabel("感谢您的支持与理解！🙏", self)
-        thanks.setStyleSheet("color: #ca8a04;")
+        # 步骤说明卡片
+        steps_card = CardWidget(self)
+        steps_layout = QVBoxLayout(steps_card)
+        steps_layout.setContentsMargins(12, 10, 12, 10)
+        steps_layout.setSpacing(4)
         
-        layout.addWidget(step1)
-        layout.addWidget(step2)
-        layout.addWidget(step3)
-        layout.addWidget(step4)
+        step1 = BodyLabel("1. 捐助任意金额（多少都行?）", steps_card)
+        step2 = BodyLabel("2. 在「联系」中找到开发者，并留下联系邮箱", steps_card)
+        step3 = BodyLabel("3. 输入卡密后即可解锁大额随机IP提交额度，不够用可继续免费申请", steps_card)
+        step4 = BodyLabel("4. 你也可以通过自己的口才白嫖卡密（误）", steps_card)
+        step4.setStyleSheet("color: #888; text-decoration: line-through;")
+        
+        steps_layout.addWidget(step1)
+        steps_layout.addWidget(step2)
+        steps_layout.addWidget(step3)
+        steps_layout.addWidget(step4)
+        layout.addWidget(steps_card)
+
+        thanks = BodyLabel("感谢您的支持与理解！🙏", self)
         layout.addWidget(thanks)
 
         # 在线状态行（带加载动画）
@@ -436,7 +438,6 @@ class ContactDialog(QDialog):
         btn_row.addWidget(self.send_btn)
         layout.addLayout(btn_row)
 
-        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         cancel_btn.clicked.connect(self.reject)
         self.send_btn.clicked.connect(self._on_send_clicked)
 
@@ -445,6 +446,8 @@ class ContactDialog(QDialog):
         if idx >= 0:
             self.type_combo.setCurrentIndex(idx)
         
+        # 连接信号并初始化
+        self.type_combo.currentIndexChanged.connect(lambda _: self._on_type_changed())
         QTimer.singleShot(0, self._on_type_changed)
         
         # 启动状态查询和定时刷新
@@ -522,15 +525,30 @@ class ContactDialog(QDialog):
         super().accept()
 
     def _on_type_changed(self):
-        current_type = self.type_combo.currentData()
+        current_type = self.type_combo.currentText()
+        
         # 动态添加/移除"白嫖卡密"选项
-        has_whitepiao = self.type_combo.findData("白嫖卡密（？）") >= 0
-        if current_type == "卡密获取" and not has_whitepiao:
-            self.type_combo.addItem("白嫖卡密（？）", "白嫖卡密（？）")
-        elif current_type != "卡密获取" and current_type != "白嫖卡密（？）" and has_whitepiao:
-            idx = self.type_combo.findData("白嫖卡密（？）")
-            if idx >= 0:
-                self.type_combo.removeItem(idx)
+        # 检查是否已有白嫖卡密选项
+        has_whitepiao = False
+        whitepiao_idx = -1
+        for i in range(self.type_combo.count()):
+            if self.type_combo.itemText(i) == "白嫖卡密（？）":
+                has_whitepiao = True
+                whitepiao_idx = i
+                break
+        
+        # 阻止信号避免递归
+        self.type_combo.blockSignals(True)
+        try:
+            if current_type == "卡密获取" and not has_whitepiao:
+                # 添加白嫖卡密选项
+                self.type_combo.addItem("白嫖卡密（？）")
+            elif current_type not in ("卡密获取", "白嫖卡密（？）") and has_whitepiao:
+                # 移除白嫖卡密选项
+                if whitepiao_idx >= 0:
+                    self.type_combo.removeItem(whitepiao_idx)
+        finally:
+            self.type_combo.blockSignals(False)
 
         if current_type in ("卡密获取", "白嫖卡密（？）"):
             self.email_label.setText("您的邮箱（必填）：")
