@@ -82,6 +82,7 @@ class RuntimeConfig:
     timed_mode_interval: float = 3.0
     random_ip_enabled: bool = False
     random_proxy_api: Optional[str] = None
+    proxy_source: str = "default"  # 代理源选择: "default" 或 "pikachu"
     random_ua_enabled: bool = False
     random_ua_keys: List[str] = field(default_factory=lambda: list(DEFAULT_RANDOM_UA_KEYS))
     fail_stop_enabled: bool = True
@@ -194,6 +195,7 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         bool(raw.get("random_ip_enabled") if "random_ip_enabled" in raw else raw.get("random_proxy_enabled"))
     )
     config.random_proxy_api = raw.get("random_proxy_api") or raw.get("random_proxy_api_url") or None
+    config.proxy_source = str(raw.get("proxy_source") or "default")
 
     # random UA: legacy payload stored under random_user_agent
     legacy_ua = raw.get("random_user_agent") if isinstance(raw.get("random_user_agent"), dict) else {}
