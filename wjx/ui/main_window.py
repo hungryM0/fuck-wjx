@@ -188,24 +188,24 @@ class CardUnlockDialog(QDialog):
             self,
         )
         desc.setWordWrap(True)
+        desc.setStyleSheet("color: #BA8303;")
         layout.addWidget(desc)
 
-        steps = QLabel(self)
-        steps.setWordWrap(True)
-        steps.setTextFormat(Qt.TextFormat.RichText)
-        steps.setOpenExternalLinks(False)
-        steps.setText(
-            """
-            <div style="line-height:1.65;">
-              <p style="margin:0 0 6px 0;">1.捐助 <span style="color:#0066CC;">任意金额</span>（多少都行?）</p>
-              <p style="margin:0 0 6px 0;">2.在「联系」中找到开发者，并留下联系邮箱</p>
-              <p style="margin:0 0 6px 0;">3.开发者会发送卡密到你的邮箱，输入卡密后即可解锁大额随机IP提交额度，不够用可以继续免费申请</p>
-              <p style="margin:0 0 12px 0;"><span style="color:#918A8A; text-decoration:line-through;">4.你也可以通过自己的口才白嫖卡密（误）</span></p>
-              <p style="margin:0;">感谢您的支持与理解！&#128591;</p>
-            </div>
-            """
-        )
-        layout.addWidget(steps)
+        # 步骤说明 - 使用 BodyLabel 保持样式一致
+        step1 = BodyLabel("1. 捐助任意金额（多少都行?）", self)
+        step2 = BodyLabel("2. 在「联系」中找到开发者，并留下联系邮箱", self)
+        step3 = BodyLabel("3. 开发者会发送卡密到你的邮箱，输入卡密后即可解锁大额随机IP提交额度，不够用可以继续免费申请", self)
+        step3.setWordWrap(True)
+        step4 = BodyLabel("4. 你也可以通过自己的口才白嫖卡密（误）", self)
+        step4.setStyleSheet("color: #6b7280; text-decoration: line-through;")
+        thanks = BodyLabel("感谢您的支持与理解！🙏", self)
+        thanks.setStyleSheet("color: #ca8a04;")
+        
+        layout.addWidget(step1)
+        layout.addWidget(step2)
+        layout.addWidget(step3)
+        layout.addWidget(step4)
+        layout.addWidget(thanks)
 
         # 在线状态行（带加载动画）
         status_row = QHBoxLayout()
