@@ -567,7 +567,7 @@ class ContactDialog(QDialog):
         else:
             self.message_label.setText("请输入您的消息：")
             if text.startswith("捐(施)助(舍)的金额：￥"):
-                self.message_edit.setPlainText(text[11:])
+                self.message_edit.setPlainText(text[13:])
 
     def _on_status_loaded(self, text: str, color: str):
         """信号槽：在主线程更新状态标签"""
