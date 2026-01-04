@@ -16,8 +16,8 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from wjx.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
-from wjx.random_ip import _normalize_proxy_address
+from wjx.utils.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
+from wjx.network.random_ip import _normalize_proxy_address
 
 
 class NoSuchElementException(Exception):

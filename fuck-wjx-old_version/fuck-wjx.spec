@@ -1,27 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_all
+from PyInstaller.utils.hooks import collect_dynamic_libs
 import os
 
 binaries = []
 binaries += collect_dynamic_libs('pyzbar')
-qfw_datas, qfw_binaries, qfw_hiddenimports = collect_all('qfluentwidgets')
-pyside_hiddenimports = collect_all('PySide6')[2]
 
 # 使用相对路径，PyInstaller 会正确地将这些文件打包进 EXE
 datas = [
     ('assets', 'assets'),
     ('.env', '.'),
     ('icon.ico', '.'),
-] + qfw_datas
-hiddenimports = qfw_hiddenimports + pyside_hiddenimports
-binaries += qfw_binaries
+]
 
 a = Analysis(
     ['fuck-wjx.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
-    hiddenimports=hiddenimports,
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

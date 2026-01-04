@@ -1,0 +1,406 @@
+from __future__ import annotations
+
+import math
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+try:
+    import requests
+except ImportError:  # pragma: no cover
+    requests = None
+
+from PySide6.QtCore import QObject, Signal, QTimer, QCoreApplication
+
+from wjx import engine
+from wjx.utils.config import DEFAULT_HTTP_HEADERS, DEFAULT_FILL_TEXT
+from wjx.engine import (
+    QuestionEntry,
+    configure_probabilities,
+    create_playwright_driver,
+    parse_survey_questions_from_html,
+    _normalize_question_type_code,
+    _extract_survey_title_from_html,
+    _normalize_html_text,
+)
+from wjx.utils.load_save import RuntimeConfig, load_config, save_config
+from wjx.utils.log_utils import LOG_BUFFER_HANDLER, log_popup_confirm, log_popup_error, log_popup_info, log_popup_warning
+from wjx.network.random_ip import (
+    _fetch_new_proxy_batch,
+    ensure_random_ip_ready,
+    on_random_ip_toggle,
+    get_effective_proxy_api_url,
+)
+
+
+class BoolVar:
+    """Tiny stand-in for tkinter.BooleanVar."""
+
+    def __init__(self, value: bool = False):
+        self._value = bool(value)
+
+    def get(self) -> bool:
+        return self._value
+
+    def set(self, value: bool):
+        self._value = bool(value)
+
+
+class EngineGuiAdapter:
+    """Adapter passed into engine.run to bridge callbacks back to the Qt UI."""
+
+    def __init__(
+        self,
+        dispatcher: Callable[[Callable[[], None]], None],
+        stop_signal: threading.Event,
+        card_code_provider: Optional[Callable[[], Optional[str]]] = None,
+        on_ip_counter: Optional[Callable[[int, int, bool, bool], None]] = None,
+    ):
+        self.random_ip_enabled_var = BoolVar(False)
+        self.active_drivers: List[Any] = []
+        self._launched_browser_pids: set[int] = set()
+        self._dispatcher = dispatcher
+        self._stop_signal = stop_signal
+        self._card_code_provider = card_code_provider
+        self.update_random_ip_counter = on_ip_counter
+
+    def _post_to_ui_thread(self, callback: Callable[[], None]):
+        return self._dispatcher(callback)
+
+    # Popup helpers
+    def _log_popup_confirm(self, title: str, message: str, **kwargs) -> bool:
+        return log_popup_confirm(title, message, **kwargs)
+
+    def _log_popup_info(self, title: str, message: str, **kwargs):
+        return log_popup_info(title, message, **kwargs)
+
+    def _log_popup_error(self, title: str, message: str, **kwargs):
+        return log_popup_error(title, message, **kwargs)
+
+    def _log_popup_warning(self, title: str, message: str, **kwargs):
+        return log_popup_warning(title, message, **kwargs)
+
+    def force_stop_immediately(self, reason: Optional[str] = None):
+        self._stop_signal.set()
+
+    def stop_run(self):
+        self._stop_signal.set()
+
+    def request_card_code(self) -> Optional[str]:
+        if callable(self._card_code_provider):
+            try:
+                return self._card_code_provider()
+            except Exception:
+                return None
+        return None
+
+
+class RunController(QObject):
+    surveyParsed = Signal(list, str)
+    surveyParseFailed = Signal(str)
+    runStateChanged = Signal(bool)
+    runFailed = Signal(str)
+    statusUpdated = Signal(str, int, int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.config = RuntimeConfig()
+        self.questions_info: List[Dict[str, Any]] = []
+        self.question_entries: List[QuestionEntry] = []
+        self.stop_event = threading.Event()
+        self.worker_threads: List[threading.Thread] = []
+        self.adapter = EngineGuiAdapter(self._dispatch_to_ui, self.stop_event)
+        self.running = False
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(600)
+        self._status_timer.timeout.connect(self._emit_status)
+        self.on_ip_counter: Optional[Callable[[int, int, bool, bool], None]] = None
+        self.card_code_provider: Optional[Callable[[], Optional[str]]] = None
+
+    # -------------------- Parsing --------------------
+    def parse_survey(self, url: str):
+        """Parse survey structure in a worker thread."""
+        if not url:
+            self.surveyParseFailed.emit("请填写问卷链接")
+            return
+
+        def _worker():
+            try:
+                info, title = self._parse_questions(url)
+                self.questions_info = info
+                self.question_entries = self._build_default_entries(info)
+                self.config.url = url
+                self.surveyParsed.emit(info, title or "")
+            except Exception as exc:
+                self.surveyParseFailed.emit(str(exc) or "解析失败，请稍后重试")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _parse_questions(self, url: str) -> Tuple[List[Dict[str, Any]], str]:
+        info: Optional[List[Dict[str, Any]]] = None
+        title = ""
+        if requests:
+            try:
+                resp = requests.get(url, timeout=12, headers=DEFAULT_HTTP_HEADERS)
+                resp.raise_for_status()
+                html = resp.text
+                info = parse_survey_questions_from_html(html)
+                title = _extract_survey_title_from_html(html) or title
+            except Exception:
+                info = None
+        if info is None:
+            driver = None
+            try:
+                driver, _ = create_playwright_driver(headless=True, user_agent=None)
+                driver.get(url)
+                time.sleep(2.5)
+                page_source = driver.page_source
+                info = parse_survey_questions_from_html(page_source)
+                title = _extract_survey_title_from_html(page_source) or title
+            finally:
+                try:
+                    if driver:
+                        driver.quit()
+                except Exception:
+                    pass
+        if not info:
+            raise RuntimeError("无法解析问卷，请确认链接是否正确或问卷已开放")
+        normalized_title = _normalize_html_text(title) if title else ""
+        return info, normalized_title
+
+    def _build_default_entries(self, questions_info: List[Dict[str, Any]]) -> List[QuestionEntry]:
+        entries: List[QuestionEntry] = []
+        for q in questions_info:
+            type_code = _normalize_question_type_code(q.get("type_code"))
+            option_count = int(q.get("options") or 0)
+            rows = int(q.get("rows") or 1)
+            is_location = bool(q.get("is_location"))
+            is_multi_text = bool(q.get("is_multi_text"))
+            is_text_like = bool(q.get("is_text_like"))
+            text_inputs = int(q.get("text_inputs") or 0)
+            slider_min = q.get("slider_min")
+            slider_max = q.get("slider_max")
+
+            if is_multi_text or (is_text_like and text_inputs > 1):
+                q_type = "multi_text"
+            elif is_text_like or type_code in ("1", "2"):
+                q_type = "text"
+            elif type_code == "3":
+                q_type = "single"
+            elif type_code == "4":
+                q_type = "multiple"
+            elif type_code == "5":
+                q_type = "scale"
+            elif type_code == "6":
+                q_type = "matrix"
+            elif type_code == "7":
+                q_type = "dropdown"
+            elif type_code == "8":
+                q_type = "slider"
+            else:
+                q_type = "single"
+
+            option_count = max(option_count, text_inputs, 1)
+            if q_type in ("single", "dropdown", "scale"):
+                probabilities: Any = -1
+                distribution = "random"
+                custom_weights = None
+                texts = None
+            elif q_type == "multiple":
+                probabilities = [1.0] * option_count
+                distribution = "random"
+                custom_weights = None
+                texts = None
+            elif q_type == "matrix":
+                probabilities = -1
+                distribution = "random"
+                custom_weights = None
+                texts = None
+            elif q_type == "slider":
+                def _as_float(val, default):
+                    try:
+                        return float(val)
+                    except Exception:
+                        return default
+
+                min_val = _as_float(slider_min, 0.0)
+                max_val = _as_float(slider_max, 100.0 if slider_max is None else slider_max)
+                if max_val <= min_val:
+                    max_val = min_val + 100.0
+                midpoint = min_val + (max_val - min_val) / 2.0
+                probabilities = [midpoint]
+                distribution = "custom"
+                custom_weights = [midpoint]
+                texts = None
+                option_count = 1
+            else:
+                probabilities = [1.0]
+                distribution = "random"
+                custom_weights = None
+                texts = [DEFAULT_FILL_TEXT]
+
+            entry = QuestionEntry(
+                question_type=q_type,
+                probabilities=probabilities,
+                texts=texts,
+                rows=rows,
+                option_count=option_count,
+                distribution_mode=distribution,
+                custom_weights=custom_weights,
+                question_num=q.get("num"),
+                option_fill_texts=None,
+                fillable_option_indices=q.get("fillable_options"),
+                is_location=is_location,
+            )
+            entries.append(entry)
+        return entries
+
+    # -------------------- Run control --------------------
+    def _dispatch_to_ui(self, callback: Callable[[], None]):
+        if QCoreApplication.instance() is None:
+            try:
+                callback()
+            except Exception:
+                pass
+            return
+
+        if threading.current_thread() is threading.main_thread():
+            return callback()
+
+        done = threading.Event()
+        result_container: Dict[str, Any] = {}
+
+        def _run():
+            try:
+                result_container["value"] = callback()
+            finally:
+                done.set()
+
+        # 将回调派发到控制器所属线程（主线程）
+        QTimer.singleShot(0, self, _run)
+        done.wait()
+        return result_container.get("value")
+
+    def _prepare_engine_state(self, config: RuntimeConfig, proxy_pool: List[str]) -> None:
+        fail_threshold = max(1, math.ceil(config.target / 4) + 1)
+        # sync controller copies
+        engine.url = config.url
+        engine.target_num = config.target
+        engine.num_threads = min(config.threads, engine.MAX_THREADS)
+        engine.fail_threshold = fail_threshold
+        engine.cur_num = getattr(engine, "cur_num", 0)
+        engine.cur_fail = getattr(engine, "cur_fail", 0)
+        engine.stop_event = self.stop_event
+        engine.submit_interval_range_seconds = tuple(config.submit_interval)
+        engine.answer_duration_range_seconds = tuple(config.answer_duration)
+        engine.timed_mode_enabled = config.timed_mode_enabled
+        engine.timed_mode_refresh_interval = config.timed_mode_interval
+        engine.random_proxy_ip_enabled = config.random_ip_enabled
+        engine.proxy_ip_pool = proxy_pool if config.random_ip_enabled else []
+        engine.random_user_agent_enabled = config.random_ua_enabled
+        engine.user_agent_pool_keys = config.random_ua_keys
+        engine.stop_on_fail_enabled = config.fail_stop_enabled
+        # sync module-level aliases used elsewhere in this file
+        engine._aliyun_captcha_stop_triggered = False
+        engine._aliyun_captcha_popup_shown = False
+        engine._target_reached_stop_triggered = False
+
+    def start_run(self, config: RuntimeConfig):
+        if self.running:
+            return
+        if not getattr(config, "question_entries", None):
+            self.runFailed.emit("未配置任何题目，无法开始执行（请先在“题目配置”页添加/配置题目）")
+            return
+        self.config = config
+        self.question_entries = list(getattr(config, "question_entries", []) or [])
+        self.stop_event = threading.Event()
+        self.adapter = EngineGuiAdapter(
+            self._dispatch_to_ui,
+            self.stop_event,
+            card_code_provider=getattr(self, "card_code_provider", None),
+            on_ip_counter=getattr(self, "on_ip_counter", None),
+        )
+        self.adapter.random_ip_enabled_var.set(config.random_ip_enabled)
+        try:
+            configure_probabilities(config.question_entries)
+        except Exception as exc:
+            self.runFailed.emit(str(exc))
+            return
+
+        proxy_pool: List[str] = []
+        if config.random_ip_enabled:
+            if not ensure_random_ip_ready(self.adapter):
+                return
+            try:
+                proxy_pool = _fetch_new_proxy_batch(
+                    expected_count=max(1, config.threads),
+                    proxy_url=config.random_proxy_api or get_effective_proxy_api_url(),
+                )
+            except Exception as exc:
+                self.runFailed.emit(str(exc))
+                return
+
+        self._prepare_engine_state(config, proxy_pool)
+        self.running = True
+        self.runStateChanged.emit(True)
+        self._status_timer.start()
+
+        threads: List[threading.Thread] = []
+        for idx in range(config.threads):
+            x = 50 + idx * 60
+            y = 50 + idx * 60
+            t = threading.Thread(
+                target=engine.run,
+                args=(x, y, self.stop_event, self.adapter),
+                daemon=True,
+            )
+            threads.append(t)
+        self.worker_threads = threads
+        for t in threads:
+            t.start()
+
+        monitor = threading.Thread(target=self._wait_for_threads, daemon=True)
+        monitor.start()
+
+    def _wait_for_threads(self):
+        for t in self.worker_threads:
+            t.join()
+        self._on_run_finished()
+
+    def _on_run_finished(self):
+        if threading.current_thread() is not threading.main_thread():
+            QTimer.singleShot(0, self, self._on_run_finished)
+            return
+        self.running = False
+        self.runStateChanged.emit(False)
+        self._status_timer.stop()
+        self._emit_status()
+
+    def stop_run(self):
+        if not self.running:
+            return
+        self.stop_event.set()
+        self.running = False
+        self.runStateChanged.emit(False)
+
+    def _emit_status(self):
+        current = getattr(engine, "cur_num", 0)
+        target = getattr(engine, "target_num", 0)
+        fail = getattr(engine, "cur_fail", 0)
+        status = f"已提交 {current}/{target} 份 | 失败 {fail} 次"
+        self.statusUpdated.emit(status, int(current), int(target or 0))
+
+    # -------------------- Persistence --------------------
+    def load_saved_config(self, path: Optional[str] = None) -> RuntimeConfig:
+        cfg = load_config(path)
+        self.config = cfg
+        self.question_entries = cfg.question_entries
+        return cfg
+
+    def save_current_config(self, path: Optional[str] = None) -> str:
+        entries = getattr(self.config, "question_entries", None)
+        if entries is None:
+            entries = self.question_entries
+        self.question_entries = list(entries or [])
+        self.config.question_entries = self.question_entries
+        return save_config(self.config, path)

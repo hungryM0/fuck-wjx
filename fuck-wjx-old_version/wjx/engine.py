@@ -18,7 +18,7 @@ from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set, Deque
 from urllib.parse import urlparse
 import webbrowser
 
-from wjx.network.random_ip import (
+from wjx.random_ip import (
     _fetch_new_proxy_batch,
     _proxy_is_responsive,
     _normalize_proxy_address,
@@ -35,7 +35,7 @@ from wjx.network.random_ip import (
     reset_custom_proxy_api_config,
 )
 
-from wjx.utils.log_utils import (
+from wjx.log_utils import (
     LOG_BUFFER_HANDLER,
     setup_logging,
     LOG_LIGHT_THEME,
@@ -48,16 +48,17 @@ from wjx.utils.log_utils import (
     log_popup_confirm,
 )
 
-from wjx.utils.updater import (
+from wjx.updater import (
     check_updates_on_startup,
     show_update_notification,
     check_for_updates as _check_for_updates_impl,
     perform_update as _perform_update_impl,
 )
 
-import wjx.modes.timed_mode as timed_mode
-import wjx.modes.duration_control as duration_control
-from wjx.modes.duration_control import DURATION_CONTROL_STATE as _DURATION_CONTROL_STATE
+import wjx.full_simulation_mode as full_simulation_mode
+from wjx.full_simulation_mode import FULL_SIM_STATE as _FULL_SIM_STATE
+import wjx.full_simulation_ui as full_simulation_ui
+import wjx.timed_mode as timed_mode
 
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
 from PIL import Image, ImageTk
@@ -79,9 +80,10 @@ except ImportError:
     BeautifulSoup = None
 
 # 导入版本号及相关常量
-from wjx.utils.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, ISSUE_FEEDBACK_URL
+from wjx.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, ISSUE_FEEDBACK_URL
+# 导入注册表管理器
 # 导入配置常量
-from wjx.utils.config import (
+from wjx.config import (
     DEFAULT_HTTP_HEADERS,
     QQ_GROUP_QR_RELATIVE_PATH,
     PANED_MIN_LEFT_WIDTH,
@@ -96,10 +98,14 @@ from wjx.utils.config import (
     POST_SUBMIT_CLOSE_GRACE_SECONDS,
     PROXY_REMOTE_URL,
     STOP_FORCE_WAIT_SECONDS,
+    _GAODE_GEOCODE_ENDPOINT,
+    _GAODE_GEOCODE_KEY,
+    _LOCATION_GEOCODE_TIMEOUT,
     QUESTION_TYPE_LABELS,
     LOCATION_QUESTION_LABEL,
     DEFAULT_FILL_TEXT,
     _HTML_SPACE_RE,
+    _LNGLAT_PATTERN,
     _MULTI_LIMIT_ATTRIBUTE_NAMES,
     _MULTI_LIMIT_VALUE_KEYSET,
     _MULTI_MIN_LIMIT_ATTRIBUTE_NAMES,
@@ -114,7 +120,7 @@ from wjx.utils.config import (
     _ENGLISH_MULTI_MIN_PATTERNS,
 )
 
-from wjx.network.browser_driver import (
+from wjx.browser_driver import (
     By,
     BrowserDriver,
     NoSuchElementException,
@@ -127,24 +133,9 @@ from wjx.network.browser_driver import (
     list_browser_pids as _list_browser_pids,
 )
 
-# 导入拆分后的模块
-from wjx.core.captcha_handler import (
-    AliyunCaptchaBypassError,
-    EmptySurveySubmissionError,
-    handle_aliyun_captcha,
-    reset_captcha_popup_state,
-)
-from wjx.core.survey_parser import (
-    parse_survey_questions_from_html,
-    extract_survey_title_from_html as _extract_survey_title_from_html,
-    _normalize_html_text,
-    _should_treat_question_as_text_like,
-    _should_mark_as_multi_text,
-    _count_text_inputs_in_soup,
-    _normalize_question_type_code,
-)
-
 # 以下字典/集合需要运行时初始化
+_LOCATION_GEOCODE_CACHE: Dict[str, str] = {}
+_LOCATION_GEOCODE_FAILURES: Set[str] = set()
 _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
 _DETECTED_MULTI_LIMIT_RANGES: Dict[Tuple[str, int], Tuple[Optional[int], Optional[int]]] = {}
 _REPORTED_MULTI_LIMITS: Set[Tuple[str, int]] = set()
@@ -222,6 +213,14 @@ def _resolve_dynamic_text_token_value(token: Any) -> str:
     return text or DEFAULT_FILL_TEXT
 
 
+class AliyunCaptchaBypassError(RuntimeError):
+    """检测到阿里云智能验证（需要人工交互）时抛出，用于触发全局停止。"""
+
+
+class EmptySurveySubmissionError(RuntimeError):
+    """检测到问卷未添加题目导致无法提交时抛出，用于关闭当前实例并继续下一份。"""
+
+
 
 def _get_runtime_directory() -> str:
     if getattr(sys, "frozen", False):
@@ -239,12 +238,215 @@ def _get_resource_path(relative_path: str) -> str:
         # PyInstaller 打包后，资源在 _MEIPASS 目录中
         base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     else:
-        # 开发环境，资源在项目根目录（wjx 目录的上一级）
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # 开发环境，资源在项目根目录
+        base_path = os.path.dirname(os.path.abspath(__file__))
     
     return os.path.join(base_path, relative_path)
 
 
+def _geocode_location_name(place_name: str) -> Optional[str]:
+    """
+    根据地名查询经纬度，返回格式为 '经度,纬度'。
+    """
+    normalized = str(place_name or "").strip()
+    if not normalized:
+        return None
+    cache_key = normalized.lower()
+    if cache_key in _LOCATION_GEOCODE_CACHE:
+        return _LOCATION_GEOCODE_CACHE[cache_key]
+    if cache_key in _LOCATION_GEOCODE_FAILURES:
+        return None
+    if requests is None:
+        logging.debug("requests 模块不可用，无法执行地理编码")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    (
+        env_key,
+        env_key_alt,
+    ) = (os.environ.get("GAODE_WEB_KEY"), os.environ.get("GAODE_GEOCODE_KEY"))
+    api_key = env_key or env_key_alt or _GAODE_GEOCODE_KEY
+    if not api_key:
+        logging.warning("未配置高德 Web 服务 key，无法执行地理编码")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    try:
+        headers = dict(DEFAULT_HTTP_HEADERS)
+        headers.setdefault(
+            "User-Agent",
+            "Mozilla/5.0 (compatible; WJXAuto; +https://www.hungrym0.top/)",
+        )
+        params = {
+            "address": normalized,
+            "key": api_key,
+        }
+        response = requests.get(
+            _GAODE_GEOCODE_ENDPOINT,
+            params=params,
+            headers=headers,
+            timeout=_LOCATION_GEOCODE_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        logging.warning(f"地理编码失败（{normalized}）：{exc}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    if not isinstance(data, dict) or data.get("status") != "1":
+        logging.warning(f"地理编码返回异常数据：{normalized} -> {data}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    geocodes = data.get("geocodes") or []
+    if not geocodes:
+        logging.warning(f"地理编码没有返回任何结果：{normalized}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    location = ""
+    try:
+        location = str(geocodes[0].get("location") or "").strip()
+    except Exception:
+        location = ""
+    if not _LNGLAT_PATTERN.match(location):
+        logging.warning(f"地理编码结果缺失经纬度：{normalized}")
+        _LOCATION_GEOCODE_FAILURES.add(cache_key)
+        return None
+    lnglat_value = location
+    _LOCATION_GEOCODE_CACHE[cache_key] = lnglat_value
+    logging.info(f"地理编码成功：{normalized} -> {lnglat_value}")
+    return lnglat_value
+
+
+def _kill_playwright_browser_processes():
+    """
+    强制终止由 Playwright 启动的浏览器进程。
+    通过检查命令行参数来识别 Playwright 启动的进程，避免误杀用户手动打开的浏览器。
+    """
+    try:
+        import psutil
+    except ImportError:
+        logging.warning("psutil 未安装，无法快速清理浏览器进程")
+        return
+    
+    killed_count = 0
+    
+    # 仅匹配命令行中明确包含 playwright 痕迹的进程，避免误杀用户浏览器。
+    # 说明：仅用 --user-data-dir 等通用参数会导致把用户正常浏览器也当成 Playwright 进程。
+    playwright_indicators = [
+        "playwright",
+        "ms-playwright",
+        "playwright_chromium",
+        "playwright_firefox",
+        "playwright_webkit",
+    ]
+    
+    try:
+        browser_names = {"msedge.exe", "chrome.exe", "chromium.exe"}
+        indicators = [x.lower() for x in playwright_indicators if x]
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                proc_info = proc.info or {}
+                proc_name = (proc_info.get("name") or "").lower()
+                if proc_name not in browser_names:
+                    continue
+                try:
+                    cmdline = proc.cmdline()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+                if not cmdline:
+                    continue
+                cmdline_str = " ".join(cmdline).lower()
+                if not any(ind in cmdline_str for ind in indicators):
+                    continue
+                try:
+                    proc.kill()
+                    killed_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        logging.warning(f"清理浏览器进程时出错: {e}")
+    
+    if killed_count > 0:
+        logging.info(f"共终止 {killed_count} 个 Playwright 浏览器进程")
+
+
+def _list_browser_pids() -> Set[int]:
+    """
+    列出现有 Edge/Chrome/Chromium 进程 PID，便于精确清理。
+    """
+    try:
+        import psutil
+    except ImportError:
+        return set()
+    names = {"msedge.exe", "chrome.exe", "chromium.exe"}
+    pids: Set[int] = set()
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            proc_name = (proc.info.get("name") or "").lower()
+            if proc_name in names:
+                pids.add(int(proc.info["pid"]))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        except Exception:
+            continue
+    return pids
+
+
+def _kill_processes_by_pid(pids: Set[int]) -> int:
+    """
+    按 PID 精确终止一批进程，返回成功杀掉的数量。
+    用于只清理当前会话启动的浏览器，避免全盘扫描导致卡顿。
+    """
+    unique_pids = [int(p) for p in sorted(set(pids or [])) if int(p) > 0]
+    if not unique_pids:
+        return 0
+
+    # 注意：这里返回的是“尝试终止”的数量；Windows 的 taskkill 不容易在静默模式下精确统计成功数。
+    attempted = 0
+
+    def _chunk(seq: List[int], size: int) -> List[List[int]]:
+        return [seq[i : i + size] for i in range(0, len(seq), size)]
+
+    # Windows 下优先用 taskkill，一次性杀多个 PID，避免每个 PID 都启动一个 taskkill 导致卡顿/GIL 抖动
+    if sys.platform.startswith("win"):
+        chunk_size = 24  # 兼顾命令行长度与调用次数
+        for batch in _chunk(unique_pids, chunk_size):
+            if not batch:
+                continue
+            args = ["taskkill", "/T", "/F"]
+            for pid in batch:
+                args.extend(["/PID", str(pid)])
+            try:
+                subprocess.run(
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=6,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                attempted += len(batch)
+            except Exception as exc:
+                logging.debug(f"taskkill 批量清理失败: {exc}", exc_info=True)
+        if attempted:
+            logging.info(f"按 PID 已请求终止 {attempted} 个浏览器进程")
+        return attempted
+
+    # 非 Windows / taskkill 不可用：退化为 psutil 逐个 kill
+    killed = 0
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return 0
+    for pid in unique_pids:
+        try:
+            psutil.Process(pid).kill()
+            killed += 1
+        except Exception as exc:
+            logging.debug(f"按 PID 清理浏览器失败 pid={pid}: {exc}", exc_info=True)
+    if killed:
+        logging.info(f"按 PID 共终止 {killed} 个浏览器进程")
+    return killed
 
 
 def create_playwright_driver(
@@ -264,6 +466,142 @@ def create_playwright_driver(
     )
 
 
+def handle_aliyun_captcha(
+    driver: BrowserDriver,
+    timeout: int = 3,
+    stop_signal: Optional[threading.Event] = None,
+    raise_on_detect: bool = True,
+) -> bool:
+    """检测是否出现阿里云智能验证。
+
+    之前这里会尝试点击“智能验证/开始验证”等按钮做绕过；现在按需求改为：
+    - 未出现：返回 False
+    - 出现：默认抛出 AliyunCaptchaBypassError，让上层触发全局停止
+    """
+    popup_locator = (By.ID, "aliyunCaptcha-window-popup")
+    checkbox_locator = (By.ID, "aliyunCaptcha-checkbox-icon")
+    checkbox_left_locator = (By.ID, "aliyunCaptcha-checkbox-left")
+    checkbox_text_locator = (By.ID, "aliyunCaptcha-checkbox-text")
+
+    def _probe_with_js(script: str) -> bool:
+        """确保 JS 片段以 return 返回布尔值，避免 evaluate 丢失返回。"""
+        js = script.strip()
+        if not js.lstrip().startswith("return"):
+            js = "return (" + js + ")"
+        try:
+            return bool(driver.execute_script(js))
+        except Exception:
+            return False
+
+    def _verification_button_text_visible() -> bool:
+        """检测页面/iframe 中是否出现可见的“智能验证/开始验证”按钮或文案。"""
+        script = r"""
+            (() => {
+                const texts = ['智能验证', '开始验证', '点击开始智能验证'];
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const checkDoc = (doc) => {
+                    const nodes = doc.querySelectorAll('button, a, span, div');
+                    for (const el of nodes) {
+                        if (!visible(el)) continue;
+                        const txt = (el.innerText || el.textContent || '').trim();
+                        if (!txt) continue;
+                        for (const t of texts) {
+                            if (txt.includes(t)) return true;
+                        }
+                    }
+                    return false;
+                };
+                if (checkDoc(document)) return true;
+                const frames = Array.from(document.querySelectorAll('iframe'));
+                for (const frame of frames) {
+                    try {
+                        const doc = frame.contentDocument || frame.contentWindow?.document;
+                        if (doc && checkDoc(doc)) return true;
+                    } catch (e) {}
+                }
+                return false;
+            })();
+        """
+        return _probe_with_js(script)
+
+    def _challenge_visible() -> bool:
+        script = r"""
+            (() => {
+                const ids = [
+                    'aliyunCaptcha-window-popup',
+                    'aliyunCaptcha-checkbox',
+                    'aliyunCaptcha-checkbox-icon',
+                    'aliyunCaptcha-checkbox-left',
+                    'aliyunCaptcha-checkbox-text',
+                    'aliyunCaptcha-loading'
+                ];
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (style.display === 'none' || style.visibility === 'hidden') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const checkDoc = (doc) => {
+                    for (const id of ids) {
+                        const el = doc.getElementById(id);
+                        if (visible(el)) return true;
+                    }
+                    return false;
+                };
+                if (checkDoc(document)) return true;
+                const frames = Array.from(document.querySelectorAll('iframe'));
+                for (const frame of frames) {
+                    try {
+                        const doc = frame.contentDocument || frame.contentWindow?.document;
+                        if (doc && checkDoc(doc)) return true;
+                    } catch (e) {}
+                }
+                return false;
+            })();
+        """
+        return _probe_with_js(script)
+
+    def _wait_for_challenge() -> bool:
+        end_time = time.time() + max(timeout, 3)
+        while time.time() < end_time:
+            if stop_signal and stop_signal.is_set():
+                return False
+            if _challenge_visible() or _verification_button_text_visible():
+                return True
+            time.sleep(0.15)
+        return _challenge_visible() or _verification_button_text_visible()
+
+    # 先用简单的元素存在性检测作为补充
+    def _element_exists() -> bool:
+        for locator in (checkbox_locator, checkbox_left_locator, checkbox_text_locator, popup_locator):
+            try:
+                el = driver.find_element(*locator)
+                if el and el.is_displayed():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    challenge_detected = _wait_for_challenge() or _element_exists()
+    if not challenge_detected:
+        logging.debug("未检测到阿里云智能验证弹窗")
+        return False
+    if stop_signal and stop_signal.is_set():
+        return False
+
+    logging.warning("检测到阿里云智能验证（按钮/弹窗）。")
+    if raise_on_detect:
+        raise AliyunCaptchaBypassError("检测到阿里云智能验证，按配置直接放弃")
+    return True
+
+
 url = ""
 
 single_prob: List[Union[List[float], int, float, None]] = []
@@ -271,7 +609,6 @@ droplist_prob: List[Union[List[float], int, float, None]] = []
 multiple_prob: List[List[float]] = []
 matrix_prob: List[Union[List[float], int, float, None]] = []
 scale_prob: List[Union[List[float], int, float, None]] = []
-slider_targets: List[float] = []
 texts: List[List[str]] = []
 texts_prob: List[List[float]] = []
 # 多项填空题：同一题含多个输入框，内部使用 "||" 分隔每个填空项
@@ -295,9 +632,9 @@ submit_interval_range_seconds: Tuple[int, int] = (0, 0)
 answer_duration_range_seconds: Tuple[int, int] = (0, 0)
 lock = threading.Lock()
 stop_event = threading.Event()
-duration_control_enabled = False
-duration_control_estimated_seconds = 0
-duration_control_total_duration_seconds = 0
+full_simulation_enabled = False
+full_simulation_estimated_seconds = 0
+full_simulation_total_duration_seconds = 0
 timed_mode_enabled = False
 timed_mode_refresh_interval = timed_mode.DEFAULT_REFRESH_INTERVAL
 random_proxy_ip_enabled = False
@@ -307,28 +644,15 @@ user_agent_pool_keys: List[str] = []
 last_submit_had_captcha = False
 _aliyun_captcha_stop_triggered = False
 _aliyun_captcha_stop_lock = threading.Lock()
-_aliyun_captcha_popup_shown = False
 _target_reached_stop_triggered = False
 _target_reached_stop_lock = threading.Lock()
 _resume_after_aliyun_captcha_stop = False
 _resume_snapshot: Dict[str, Any] = {}
 
-def _show_aliyun_captcha_popup(message: str) -> None:
-    """在首次检测到阿里云智能验证时弹窗提醒用户。"""
-    global _aliyun_captcha_popup_shown
-    with _aliyun_captcha_stop_lock:
-        if _aliyun_captcha_popup_shown:
-            return
-        _aliyun_captcha_popup_shown = True
-    try:
-        log_popup_warning("智能验证提示", message)
-    except Exception:
-        logging.warning("弹窗提示阿里云智能验证失败", exc_info=True)
-
-# 极速模式：时长控制/随机IP关闭且时间间隔为0时自动启用
+# 极速模式：全真模拟/随机IP关闭且时间间隔为0时自动启用
 def _is_fast_mode() -> bool:
     return (
-        not duration_control_enabled
+        not full_simulation_enabled
         and not random_proxy_ip_enabled
         and submit_interval_range_seconds == (0, 0)
         and answer_duration_range_seconds == (0, 0)
@@ -480,10 +804,10 @@ def _trigger_target_reached_stop(
 
 
 def _sync_full_sim_state_from_globals() -> None:
-    """确保时长控制全局变量与模块状态保持一致（主要在 GUI/运行线程之间传递配置时使用）。"""
-    _DURATION_CONTROL_STATE.enabled = bool(duration_control_enabled)
-    _DURATION_CONTROL_STATE.estimated_seconds = int(duration_control_estimated_seconds or 0)
-    _DURATION_CONTROL_STATE.total_duration_seconds = int(duration_control_total_duration_seconds or 0)
+    """确保全真模拟全局变量与模块状态保持一致（主要在 GUI/运行线程之间传递配置时使用）。"""
+    _FULL_SIM_STATE.enabled = bool(full_simulation_enabled)
+    _FULL_SIM_STATE.estimated_seconds = int(full_simulation_estimated_seconds or 0)
+    _FULL_SIM_STATE.total_duration_seconds = int(full_simulation_total_duration_seconds or 0)
 
 def normalize_probabilities(values: List[float]) -> List[float]:
     if not values:
@@ -561,7 +885,7 @@ class QuestionEntry:
     texts: Optional[List[str]] = None
     rows: int = 1
     option_count: int = 0
-    distribution_mode: str = "random"  # random, custom
+    distribution_mode: str = "random"  # random, equal, custom
     custom_weights: Optional[List[float]] = None
     question_num: Optional[str] = None
     option_fill_texts: Optional[List[Optional[str]]] = None
@@ -572,8 +896,9 @@ class QuestionEntry:
         def _mode_text(mode: Optional[str]) -> str:
             return {
                 "random": "完全随机",
+                "equal": "平均分配",
                 "custom": "自定义配比",
-            }.get(mode or "", "完全随机")
+            }.get(mode or "", "平均分配")
 
         if self.question_type in ("text", "multi_text"):
             raw_samples = self.texts or []
@@ -644,7 +969,7 @@ class QuestionEntry:
         return f"{self.option_count} 个选项 - {mode_text}{fillable_hint}"
 
 
-from wjx.utils.load_save import ConfigPersistenceMixin, _select_user_agent_from_keys
+from wjx.load_save import ConfigPersistenceMixin, _select_user_agent_from_keys
 
 
 def _get_entry_type_label(entry: QuestionEntry) -> str:
@@ -740,14 +1065,13 @@ def _fill_option_additional_text(driver: BrowserDriver, question_number: int, op
             continue
 
 def configure_probabilities(entries: List[QuestionEntry]):
-    global single_prob, droplist_prob, multiple_prob, matrix_prob, scale_prob, slider_targets, texts, texts_prob, text_entry_types
+    global single_prob, droplist_prob, multiple_prob, matrix_prob, scale_prob, texts, texts_prob, text_entry_types
     global single_option_fill_texts, droplist_option_fill_texts, multiple_option_fill_texts
     single_prob = []
     droplist_prob = []
     multiple_prob = []
     matrix_prob = []
     scale_prob = []
-    slider_targets = []
     texts = []
     texts_prob = []
     text_entry_types = []
@@ -823,24 +1147,6 @@ def configure_probabilities(entries: List[QuestionEntry]):
                     matrix_prob.append(-1)
         elif entry.question_type == "scale":
             scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
-        elif entry.question_type == "slider":
-            target_value: Optional[float] = None
-            if isinstance(entry.custom_weights, (list, tuple)) and entry.custom_weights:
-                try:
-                    target_value = float(entry.custom_weights[0])
-                except Exception:
-                    target_value = None
-            if target_value is None:
-                if isinstance(probs, (int, float)):
-                    target_value = float(probs)
-                elif isinstance(probs, list) and probs:
-                    try:
-                        target_value = float(probs[0])
-                    except Exception:
-                        target_value = None
-            if target_value is None:
-                target_value = 50.0
-            slider_targets.append(target_value)
         elif entry.question_type in ("text", "multi_text"):
             raw_values = entry.texts or []
             normalized_values: List[str] = []
@@ -1178,26 +1484,6 @@ def _driver_question_is_location(question_div) -> bool:
     return False
 
 
-def _driver_question_looks_like_reorder(question_div) -> bool:
-    """兜底判断：当 type 属性异常/缺失时，尝试通过 DOM 特征识别排序题。"""
-    if question_div is None:
-        return False
-    try:
-        if question_div.find_elements(By.CSS_SELECTOR, ".sortnum, .sortnum-sel"):
-            return True
-    except Exception:
-        pass
-    try:
-        # 仅作为兜底：需要同时满足“存在列表项”与“具备排序/拖拽特征”，避免误判普通题型
-        has_list_items = bool(question_div.find_elements(By.CSS_SELECTOR, "ul li, ol li"))
-        has_sort_signature = bool(
-            question_div.find_elements(By.CSS_SELECTOR, ".ui-sortable, .ui-sortable-handle, [class*='sort']")
-        )
-        return has_list_items and has_sort_signature
-    except Exception:
-        return False
-
-
 def _soup_question_is_location(question_div) -> bool:
     if question_div is None:
         return False
@@ -1289,8 +1575,6 @@ def _extract_question_metadata_from_html(soup, question_div, question_number: in
     elif type_code == "6":
         matrix_rows, option_texts = _collect_matrix_option_texts(soup, question_number)
         option_count = len(option_texts)
-    elif type_code == "8":
-        option_count = 1
     return option_texts, option_count, matrix_rows, fillable_indices
 
 
@@ -1331,32 +1615,6 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
             })
         option_idx += 1
     return has_jump_attr or bool(jump_rules), jump_rules
-
-
-def _extract_slider_range(question_div, question_number: int) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """
-    尝试解析滑块题的最小值、最大值和步长，未找到时返回 (None, None, None)。
-    """
-    try:
-        slider_input = question_div.find("input", id=f"q{question_number}")
-        if not slider_input:
-            slider_input = question_div.find("input", attrs={"type": "range"})
-    except Exception:
-        slider_input = None
-
-    def _parse(raw: Any) -> Optional[float]:
-        try:
-            return float(raw)
-        except Exception:
-            return None
-
-    if slider_input:
-        return (
-            _parse(slider_input.get("min")),
-            _parse(slider_input.get("max")),
-            _parse(slider_input.get("step")),
-        )
-    return None, None, None
 
 
 _TEXT_INPUT_ALLOWED_TYPES = {"", "text", "search", "tel", "number"}
@@ -1527,8 +1785,7 @@ def _should_treat_question_as_text_like(type_code: Any, option_count: int, text_
         return text_input_count > 0
     if normalized in _KNOWN_NON_TEXT_QUESTION_TYPES:
         return False
-    # 未知类型：若没有选项或仅1个伪选项，但存在输入框，则视作填空题
-    return (option_count or 0) <= 1 and text_input_count > 0
+    return (option_count or 0) == 0 and text_input_count > 0
 
 
 def _should_mark_as_multi_text(type_code: Any, option_count: int, text_input_count: int, is_location: bool) -> bool:
@@ -1570,9 +1827,6 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 soup, question_div, question_number, type_code
             )
             has_jump, jump_rules = _extract_jump_rules_from_html(question_div, question_number, option_texts)
-            slider_min, slider_max, slider_step = (None, None, None)
-            if type_code == "8":
-                slider_min, slider_max, slider_step = _extract_slider_range(question_div, question_number)
             text_input_count = _count_text_inputs_in_soup(question_div)
             is_text_like_question = _should_treat_question_as_text_like(type_code, option_count, text_input_count)
             is_multi_text = _should_mark_as_multi_text(type_code, option_count, text_input_count, is_location)
@@ -1591,9 +1845,6 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "is_text_like": is_text_like_question,
                 "has_jump": has_jump,
                 "jump_rules": jump_rules,
-                "slider_min": slider_min,
-                "slider_max": slider_max,
-                "slider_step": slider_step,
             })
     return questions_info
 
@@ -2098,33 +2349,63 @@ def detect(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
 
 def _fill_text_question_input(driver: BrowserDriver, element, value: Optional[Any]) -> None:
     """
-    填充单/多行文本题。
+    Safely填充单/多行文本题，包括带地图组件的题目。
+    支持“答案|经度,纬度”格式设置地图坐标。
     """
     raw_text = "" if value is None else str(value)
+    lnglat_value: Optional[str] = None
+    if "|" in raw_text:
+        candidate_text, candidate_lnglat = raw_text.rsplit("|", 1)
+        if _LNGLAT_PATTERN.match(candidate_lnglat):
+            raw_text = candidate_text
+            lnglat_value = candidate_lnglat.strip()
     try:
         read_only_attr = element.get_attribute("readonly") or ""
     except Exception:
         read_only_attr = ""
+    try:
+        verify_value = element.get_attribute("verify") or ""
+    except Exception:
+        verify_value = ""
     is_readonly = bool(read_only_attr)
+    verify_value_lower = verify_value.lower()
+    is_location_field = ("地图" in verify_value) or ("map" in verify_value_lower)
+    if is_location_field and not lnglat_value and raw_text:
+        geocoded_value = _geocode_location_name(raw_text)
+        if geocoded_value:
+            lnglat_value = geocoded_value
 
-    if not is_readonly:
+    if not is_readonly and not is_location_field:
         try:
             element.clear()
         except Exception:
             pass
         element.send_keys(raw_text)
+        if lnglat_value:
+            driver.execute_script(
+                "arguments[0].setAttribute('lnglat', arguments[1]); arguments[0].lnglat = arguments[1];",
+                element,
+                lnglat_value,
+            )
         return
 
     driver.execute_script(
         """
         const input = arguments[0];
         const value = arguments[1];
+        const lnglat = arguments[2];
         if (!input) {
             return;
         }
         try {
             input.value = value;
         } catch (err) {}
+        if (lnglat) {
+            try {
+                input.setAttribute('lnglat', lnglat);
+                input.lnglat = lnglat;
+            } catch (err) {}
+        }
         const eventOptions = { bubbles: true };
         try {
             input.dispatchEvent(new Event('input', eventOptions));
@@ -2132,9 +2413,22 @@ def _fill_text_question_input(driver: BrowserDriver, element, value: Optional[An
         try {
             input.dispatchEvent(new Event('change', eventOptions));
         } catch (err) {}
+        const localBox = input.closest('.get_Local');
+        if (localBox) {
+            const display = localBox.querySelector('.res_local');
+            if (display) {
+                display.textContent = value || '';
+                display.style.display = value ? '' : 'none';
+            }
+            const button = localBox.querySelector('.getLocalBtn');
+            if (button && button.classList && value) {
+                button.classList.add('selected');
+            }
+        }
         """,
         element,
         raw_text,
+        lnglat_value,
     )
 
 
@@ -2622,7 +2916,7 @@ def _normalize_droplist_probs(prob_config: Union[List[float], int, float, None],
         except Exception:
             return [1.0 / option_count] * option_count
     try:
-        # 尽量保留用户配置的配比，即便选项数量有变化也不强制重置
+        # 尽量保留用户配置的配比，即便选项数量有变化也不直接退回平均分配
         if isinstance(prob_config, (list, tuple)):
             base = list(prob_config)
         else:
@@ -2908,45 +3202,15 @@ def matrix(driver: BrowserDriver, current, index):
 
 
 def reorder(driver: BrowserDriver, current):
+    items_xpath = f'//*[@id="div{current}"]/ul/li'
+    order_items = driver.find_elements(By.XPATH, items_xpath)
+    if not order_items:
+        return
     try:
         container = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
     except Exception:
         container = None
-    # 排序题 DOM 在不同模板下差异较大：ul 可能不是 div 的直接子节点，甚至会使用 ol。
-    # 旧逻辑使用 "/ul/li" 会导致找不到选项，从而整题被“跳过”。
-    items_xpath_candidates = [
-        # 优先：li 内存在 name 以 q{题号} 开头的输入框（隐藏/勾选框等），更不易误匹配题干里的列表
-        f"//*[@id='div{current}']//li[.//input[starts-with(@name,'q{current}')]]",
-        # 兜底：常见 ul/ol 结构（允许嵌套）
-        f"//*[@id='div{current}']//ul/li",
-        f"//*[@id='div{current}']//ol/li",
-    ]
-    items_xpath = items_xpath_candidates[-1]
-    order_items: List[Any] = []
-    for candidate_xpath in items_xpath_candidates:
-        try:
-            order_items = driver.find_elements(By.XPATH, candidate_xpath)
-        except Exception:
-            order_items = []
-        if order_items:
-            items_xpath = candidate_xpath
-            break
-    if not order_items:
-        return
-    if container:
-        try:
-            _smooth_scroll_to_element(driver, container, block="center")
-        except Exception:
-            try:
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", container)
-            except Exception:
-                pass
-    rank_mode = False
-    if container:
-        try:
-            rank_mode = bool(container.find_elements(By.CSS_SELECTOR, ".sortnum, .sortnum-sel"))
-        except Exception:
-            rank_mode = False
+
     def _is_item_selected(item) -> bool:
         try:
             inputs = item.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")
@@ -2961,11 +3225,7 @@ def reorder(driver: BrowserDriver, current):
         try:
             cls = (item.get_attribute("class") or "").lower()
             # 部分排序题点击后会给 li 添加 check 类或数字类名
-            if any(token in cls for token in ("selected", "checked", "jqchecked", "active", "on", "check", "cur", "sel")):
-                return True
-            data_checked = (item.get_attribute("data-checked") or "").lower()
-            aria_checked = (item.get_attribute("aria-checked") or "").lower()
-            if data_checked in ("true", "checked") or aria_checked == "true":
+            if any(token in cls for token in ("selected", "checked", "jqchecked", "active", "on", "check")):
                 return True
         except Exception:
             pass
@@ -2986,7 +3246,7 @@ def reorder(driver: BrowserDriver, current):
 
     def _count_selected() -> int:
         try:
-            if container is not None:
+            if container:
                 count = len(
                     container.find_elements(
                         By.CSS_SELECTOR,
@@ -3007,26 +3267,6 @@ def reorder(driver: BrowserDriver, current):
                         badge_count += 1
                 if badge_count:
                     return badge_count
-                # 一些排序题会把"已选"写入 data-checked 或 aria-checked
-                candidates = container.find_elements(By.CSS_SELECTOR, "li[aria-checked='true'], li[data-checked='true']")
-                if candidates:
-                    return len(candidates)
-                hidden_inputs = container.find_elements(By.CSS_SELECTOR, "input[type='hidden'][name^='q'][value]")
-                forced_inputs = [h for h in hidden_inputs if (h.get_attribute("data-forced") or "") == "1"]
-                if forced_inputs:
-                    return len(forced_inputs)
-                selected_hidden = 0
-                for hidden in hidden_inputs:
-                    try:
-                        checked_attr = (hidden.get_attribute("checked") or "").lower()
-                        data_checked = (hidden.get_attribute("data-checked") or "").lower()
-                        aria_checked = (hidden.get_attribute("aria-checked") or "").lower()
-                    except Exception:
-                        checked_attr = data_checked = aria_checked = ""
-                    if checked_attr in ("true", "checked") or data_checked in ("true", "checked") or aria_checked == "true":
-                        selected_hidden += 1
-                if selected_hidden:
-                    return selected_hidden
         except Exception:
             pass
         count = 0
@@ -3036,33 +3276,7 @@ def reorder(driver: BrowserDriver, current):
         return count
 
     def _click_item(option_idx: int, item) -> bool:
-        selector = (
-            f"#div{current} ul > li:nth-child({option_idx + 1}), "
-            f"#div{current} ol > li:nth-child({option_idx + 1})"
-        )
-
-        def _after_rank_click(changed: bool) -> None:
-            if changed and rank_mode:
-                time.sleep(0.28)
-
-        def _playwright_click_selector(css_selector: str) -> bool:
-            page = getattr(driver, "page", None)
-            if not page:
-                return False
-            try:
-                page.click(css_selector, timeout=1200)
-                return True
-            except Exception:
-                return False
-
-        def _native_click(target) -> None:
-            # Playwright 的 element.click() 会触发更完整的鼠标事件链；
-            # 部分模板（点击顺序排序）不会响应 JS 触发的 el.click()/dispatchEvent。
-            try:
-                if target is not None and hasattr(target, "click"):
-                    target.click()
-            except Exception:
-                pass
+        selector = f"#div{current} > ul > li:nth-child({option_idx + 1})"
 
         def _safe_dom_click(target) -> None:
             driver.execute_script(
@@ -3129,13 +3343,10 @@ def reorder(driver: BrowserDriver, current):
                 for css in (
                     "input[type='checkbox']",
                     "input[type='radio']",
-                    "input[type='hidden']",
                     "label",
                     "a",
                     ".option",
                     ".item",
-                    ".ui-state-default",
-                    ".ui-sortable-handle",
                     "span",
                     "div",
                 ):
@@ -3163,33 +3374,6 @@ def reorder(driver: BrowserDriver, current):
             return True
 
         count_before = _count_selected()
-        # 点击顺序排序题：优先使用 Playwright 原生 click，确保触发 jQuery Mobile 的 vclick/tap 绑定
-        if rank_mode:
-            clicked = False
-            for css in (
-                f"#div{current} ul > li:nth-child({option_idx + 1})",
-                f"#div{current} ol > li:nth-child({option_idx + 1})",
-            ):
-                if _playwright_click_selector(css):
-                    clicked = True
-                    break
-            if clicked:
-                deadline = time.time() + 0.55
-                while time.time() < deadline:
-                    try:
-                        if _count_selected() > count_before:
-                            _after_rank_click(True)
-                            return True
-                    except Exception:
-                        pass
-                    try:
-                        fresh_check = _get_item_fresh()
-                        if fresh_check and _is_item_selected(fresh_check):
-                            _after_rank_click(True)
-                            return True
-                    except Exception:
-                        pass
-                    time.sleep(0.05)
         for _ in range(6):
             base_item = _get_item_fresh()
             if base_item and _is_item_selected(base_item):
@@ -3197,7 +3381,7 @@ def reorder(driver: BrowserDriver, current):
 
             for target in _click_targets(base_item):
                 try:
-                    _native_click(target)
+                    _safe_dom_click(target)
                 except Exception:
                     pass
 
@@ -3206,36 +3390,12 @@ def reorder(driver: BrowserDriver, current):
                 while time.time() < deadline:
                     try:
                         if _count_selected() > count_before:
-                            _after_rank_click(True)
                             return True
                     except Exception:
                         pass
                     try:
                         fresh_check = _get_item_fresh()
                         if fresh_check and _is_item_selected(fresh_check):
-                            _after_rank_click(True)
-                            return True
-                    except Exception:
-                        pass
-                    time.sleep(0.05)
-
-                # 未生效时再用 JS 事件触发一次（对少数覆盖层/事件绑定更友好）
-                try:
-                    _safe_dom_click(target)
-                except Exception:
-                    pass
-                deadline = time.time() + 0.45
-                while time.time() < deadline:
-                    try:
-                        if _count_selected() > count_before:
-                            _after_rank_click(True)
-                            return True
-                    except Exception:
-                        pass
-                    try:
-                        fresh_check = _get_item_fresh()
-                        if fresh_check and _is_item_selected(fresh_check):
-                            _after_rank_click(True)
                             return True
                     except Exception:
                         pass
@@ -3248,7 +3408,6 @@ def reorder(driver: BrowserDriver, current):
                         while time.time() < deadline:
                             try:
                                 if _count_selected() > count_before:
-                                    _after_rank_click(True)
                                     return True
                             except Exception:
                                 pass
@@ -3281,12 +3440,9 @@ def reorder(driver: BrowserDriver, current):
                         return
             time.sleep(0.12)
 
-    def _wait_until_reorder_done(target_count: int, max_wait: Optional[float] = None) -> None:
+    def _wait_until_reorder_done(target_count: int, max_wait: float = 1.5) -> None:
         target_count = max(1, min(target_count, total_options))
-        wait_window = max_wait
-        if wait_window is None:
-            wait_window = 2.8 if rank_mode else 1.5
-        deadline = time.time() + wait_window
+        deadline = time.time() + max_wait
         while time.time() < deadline:
             current_count = _count_selected()
             if current_count >= target_count:
@@ -3297,22 +3453,6 @@ def reorder(driver: BrowserDriver, current):
     total_options = len(order_items)
     required_count = detect_reorder_required_count(driver, current, total_options)
     min_select_limit, max_select_limit = detect_multiple_choice_limit_range(driver, current)
-    # 排序题 DOM 中常包含大量数字（例如 hidden input 的 value/serial），会干扰通用“至多/至少”解析；
-    # 若题干未出现“至少/最多/选择”等关键词，则默认视为无限制，按“填满”处理。
-    if rank_mode and container:
-        fragments: List[str] = []
-        for selector in (".qtypetip", ".topichtml", ".field-label"):
-            try:
-                fragments.append(container.find_element(By.CSS_SELECTOR, selector).text)
-            except Exception:
-                continue
-        cand_min, cand_max = _extract_multi_limit_range_from_text("\n".join(fragments))
-        if cand_min is None and cand_max is None:
-            min_select_limit = None
-            max_select_limit = None
-        else:
-            min_select_limit = cand_min
-            max_select_limit = cand_max
     force_select_all = required_count is not None and required_count == total_options
     if force_select_all and max_select_limit is not None and required_count is not None and max_select_limit < required_count:
         max_select_limit = required_count
@@ -3349,106 +3489,6 @@ def reorder(driver: BrowserDriver, current):
         effective_limit = max(effective_limit, min_select_limit)
     effective_limit = max(1, min(effective_limit, len(order_items)))
 
-    # 点击顺序排序题：默认“全排序”（每个选项只点击一次），除非题目明确限制需选择/排序的数量
-    # 说明：该题型重复点击同一选项可能会取消选择或扰乱序号，因此不要做“补点/回填”式重复点击。
-    if rank_mode:
-        plan_count = effective_limit
-        if required_count is None and min_select_limit is None and max_select_limit is None:
-            plan_count = total_options
-        plan_count = max(1, min(int(plan_count), total_options))
-
-        click_plan = list(range(total_options))
-        random.shuffle(click_plan)
-        click_plan = click_plan[:plan_count]
-
-        def _force_mark_rank_selected(li, rank: int) -> None:
-            if not li or not container:
-                return
-            try:
-                driver.execute_script(
-                    r"""
-                    const li = arguments[0];
-                    const rank = Number(arguments[1] || 0);
-                    if (!li || !rank) return;
-                    li.classList.add('check', 'selected', 'jqchecked', 'on');
-                    li.setAttribute('aria-checked', 'true');
-                    li.setAttribute('data-checked', 'true');
-                    const badge = li.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
-                    if (badge) {
-                        badge.textContent = String(rank);
-                        badge.style.display = '';
-                    }
-                    const hidden = li.querySelector("input.custom[type='hidden'][name^='q'], input[type='hidden'][name^='q']");
-                    if (hidden) {
-                        hidden.setAttribute('data-forced', '1');
-                        hidden.setAttribute('data-checked', 'true');
-                        hidden.setAttribute('aria-checked', 'true');
-                    }
-                    """,
-                    li,
-                    int(rank),
-                )
-            except Exception:
-                pass
-
-        def _get_item_badge_text(li) -> str:
-            if not li:
-                return ""
-            try:
-                badge = li.find_element(By.CSS_SELECTOR, ".sortnum, .sortnum-sel, .order-number, .order-index")
-            except Exception:
-                badge = None
-            if not badge:
-                return ""
-            try:
-                return _extract_text_from_element(badge).strip()
-            except Exception:
-                return ""
-
-        selected_count = _count_selected()
-        for option_idx in click_plan:
-            item = order_items[option_idx]
-            if _is_item_selected(item):
-                continue
-            before = _count_selected()
-            expected_rank = max(1, min(before + 1, plan_count))
-            try:
-                item.click()
-            except Exception:
-                pass
-
-            # 等待序号/状态出现，避免因 UI 延迟导致后续逻辑误判并重复点击
-            deadline = time.time() + 0.65
-            while time.time() < deadline:
-                try:
-                    if _get_item_badge_text(item):
-                        break
-                except Exception:
-                    pass
-                try:
-                    if _count_selected() > before:
-                        break
-                except Exception:
-                    pass
-                time.sleep(0.05)
-
-            selected_count = _count_selected()
-            if selected_count <= before:
-                # 不重复点击：若点击未生效，则仅用 JS 强制写入序号作为兜底，保证“全排序/按要求排序”
-                _force_mark_rank_selected(item, expected_rank)
-                selected_count = _count_selected()
-            if selected_count >= plan_count:
-                break
-
-        # 最后仅等待状态稳定，不再额外补点，保持“每项最多一次点击”的行为
-        deadline = time.time() + 1.2
-        while time.time() < deadline:
-            current_count = _count_selected()
-            if current_count >= plan_count:
-                break
-            time.sleep(0.05)
-        return
-
     candidate_indices = list(range(len(order_items)))
     random.shuffle(candidate_indices)
     selected_indices = candidate_indices[:effective_limit]
@@ -3468,82 +3508,6 @@ def reorder(driver: BrowserDriver, current):
                 continue
             if _click_item(option_idx, item):
                 selected_count += 1
-    selected_count = _count_selected()
-    if selected_count < effective_limit and container:
-        try:
-            # 兜底：直接写入排序序号并标记为已选（仅最后兜底，优先依赖真实点击）
-            order = list(range(len(order_items)))
-            random.shuffle(order)
-            driver.execute_script(
-                r"""
-                const container = arguments[0];
-                const order = arguments[1];
-                const limit = arguments[2];
-                if (!container || !Array.isArray(order)) return;
-                const items = Array.from(container.querySelectorAll('ul > li, ol > li'));
-                const maxCount = Math.max(1, Math.min(Number(limit || items.length) || items.length, items.length));
-                const chosen = order.slice(0, maxCount);
-                const chosenSet = new Set(chosen);
-
-                chosen.forEach((idx, pos) => {
-                    const li = items[idx];
-                    if (!li) return;
-                    const rank = pos + 1;
-                    li.classList.add('selected', 'jqchecked', 'on', 'check');
-                    li.setAttribute('aria-checked', 'true');
-                    li.setAttribute('data-checked', 'true');
-                    const badge = li.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
-                    if (badge) {
-                        badge.textContent = String(rank);
-                        badge.style.display = '';
-                    }
-                    const hidden = li.querySelector("input.custom[type='hidden'][name^='q'], input[type='hidden'][name^='q']");
-                    if (hidden) {
-                        hidden.value = String(rank);
-                        hidden.setAttribute('data-forced', '1');
-                        hidden.setAttribute('data-checked', 'true');
-                        hidden.setAttribute('aria-checked', 'true');
-                    }
-                    const box = li.querySelector("input[type='checkbox'], input[type='radio']");
-                    if (box) {
-                        box.checked = true;
-                        box.value = String(rank);
-                        box.setAttribute('checked', 'checked');
-                        box.setAttribute('data-checked', 'true');
-                        box.setAttribute('aria-checked', 'true');
-                        try { box.dispatchEvent(new Event('change', {bubbles:true})); } catch (err) {}
-                    }
-                });
-
-                items.forEach((li, idx) => {
-                    if (chosenSet.has(idx)) return;
-                    li.classList.remove('selected', 'jqchecked', 'on', 'check');
-                    li.removeAttribute('aria-checked');
-                    li.removeAttribute('data-checked');
-                    const badge = li.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
-                    if (badge) badge.textContent = '';
-                    const hidden = li.querySelector("input.custom[type='hidden'][name^='q'], input[type='hidden'][name^='q']");
-                    if (hidden) {
-                        hidden.value = '';
-                        hidden.removeAttribute('data-forced');
-                        hidden.removeAttribute('data-checked');
-                        hidden.removeAttribute('aria-checked');
-                    }
-                    const box = li.querySelector("input[type='checkbox'], input[type='radio']");
-                    if (box) {
-                        box.checked = false;
-                        box.removeAttribute('checked');
-                        box.removeAttribute('data-checked');
-                        box.removeAttribute('aria-checked');
-                    }
-                });
-                """,
-                container,
-                order,
-                effective_limit,
-            )
-        except Exception:
-            pass
     _wait_until_reorder_done(effective_limit)
 
 
@@ -3560,7 +3524,7 @@ def scale(driver: BrowserDriver, current, index):
     scale_options[selected_index].click()
 
 
-def _set_slider_input_value(driver: BrowserDriver, current: int, value: Union[int, float]):
+def _set_slider_input_value(driver: BrowserDriver, current: int, value: int):
     try:
         slider_input = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
     except NoSuchElementException:
@@ -3569,7 +3533,6 @@ def _set_slider_input_value(driver: BrowserDriver, current: int, value: Union[in
         "const input = arguments[0];"
         "const target = String(arguments[1]);"
         "input.value = target;"
-        "try { input.setAttribute('value', target); } catch (err) {}"
         "['input','change'].forEach(evt => input.dispatchEvent(new Event(evt, { bubbles: true })));"
     )
     try:
@@ -3580,7 +3543,7 @@ def _set_slider_input_value(driver: BrowserDriver, current: int, value: Union[in
 
 def _click_slider_track(driver: BrowserDriver, container, ratio: float) -> bool:
     xpath_candidates = [
-        ".//div[contains(@class,'wjx-slider') or contains(@class,'slider-track') or contains(@class,'range-slider') or contains(@class,'rangeslider') or contains(@class,'ui-slider') or contains(@class,'scale-slider') or contains(@class,'slider-container')]",
+        ".//div[contains(@class,'wjx-slider') or contains(@class,'slider-track') or contains(@class,'range-slider') or contains(@class,'ui-slider') or contains(@class,'scale-slider') or contains(@class,'slider-container')]",
         ".//div[@role='slider']",
     ]
     page = getattr(driver, "page", None)
@@ -3611,158 +3574,62 @@ def _click_slider_track(driver: BrowserDriver, container, ratio: float) -> bool:
     return False
 
 
-def _resolve_slider_score(index: int) -> float:
-    base: Optional[float] = None
-    if 0 <= index < len(slider_targets):
-        try:
-            base = float(slider_targets[index])
-        except Exception:
-            base = None
-    if base is None:
-        base = random.uniform(1.0, 100.0)
-    jitter = max(3.0, abs(base) * 0.05)
-    return random.uniform(base - jitter, base + jitter)
-
-
-def slider_question(driver: BrowserDriver, current: int, score: Optional[float] = None):
+def slider_question(driver: BrowserDriver, current: int, score: int):
+    ratio = max(0.0, min(score / 100.0, 1.0))
     try:
-        question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
+        container = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
     except NoSuchElementException:
-        question_div = None
-    if question_div:
-        try:
-            _smooth_scroll_to_element(driver, question_div, block="center")
-        except Exception:
-            try:
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", question_div)
-            except Exception:
-                pass
-
-    slider_input = None
-    min_value = 0.0
-    max_value = 100.0
-    step_value = 1.0
-
-    def _parse_number(raw, default):
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return default
-
-    try:
-        slider_input = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
-    except NoSuchElementException:
-        slider_input = None
-
-    if slider_input:
-        min_value = _parse_number(slider_input.get_attribute("min"), min_value)
-        max_value = _parse_number(slider_input.get_attribute("max"), max_value)
-        step_value = abs(_parse_number(slider_input.get_attribute("step"), step_value))
-        if step_value == 0:
-            step_value = 1.0
-        if max_value <= min_value:
-            max_value = min_value + 100.0
-
-    target_value = _parse_number(score, None)
-    if target_value is None:
-        target_value = random.uniform(min_value, max_value)
-    if target_value < min_value or target_value > max_value:
-        if max_value > min_value:
-            target_value = random.uniform(min_value, max_value)
-        else:
-            target_value = min_value
-    if step_value > 0 and max_value > min_value:
-        step_count = round((target_value - min_value) / step_value)
-        target_value = min_value + step_count * step_value
-        target_value = max(min_value, min(target_value, max_value))
-    if abs(target_value - round(target_value)) < 1e-6:
-        target_value = int(round(target_value))
-
-    ratio = 0.0 if max_value == min_value else (target_value - min_value) / (max_value - min_value)
-    ratio = max(0.0, min(ratio, 1.0))
-    container = question_div
+        container = None
     if container:
-        try:
-            _click_slider_track(driver, container, ratio)
-        except Exception:
-            pass
-        try:
-            driver.execute_script(
-                r"""
-                const container = arguments[0];
-                const ratio = arguments[1];
-                if (!container) return;
-                const track = container.querySelector(
-                    '.rangeslider, .range-slider, .slider-track, .wjx-slider, .ui-slider, .scale-slider, .slider-container'
-                );
-                if (!track) return;
-                const width = track.clientWidth || track.offsetWidth || 0;
-                if (!width) return;
-                const pos = Math.max(0, Math.min(width, ratio * width));
-                const handle = track.querySelector('.rangeslider__handle, .slider-handle, .ui-slider-handle, .handle');
-                const fill = track.querySelector('.rangeslider__fill, .slider-selection, .ui-slider-range, .fill');
-                if (fill) {
-                    fill.style.width = pos + 'px';
-                    if (!fill.style.left) { fill.style.left = '0px'; }
-                }
-                if (handle) {
-                    handle.style.left = pos + 'px';
-                }
-                try { track.setAttribute('data-answered', '1'); } catch (err) {}
-                """,
-                container,
-                ratio,
-            )
-        except Exception:
-            pass
-    _set_slider_input_value(driver, current, target_value)
+        _click_slider_track(driver, container, ratio)
+    _set_slider_input_value(driver, current, score)
 
 
 def _full_simulation_active() -> bool:
     _sync_full_sim_state_from_globals()
-    return bool(_DURATION_CONTROL_STATE.active())
+    return bool(_FULL_SIM_STATE.active())
 
 
 def _reset_full_simulation_runtime_state() -> None:
-    _DURATION_CONTROL_STATE.reset_runtime()
+    _FULL_SIM_STATE.reset_runtime()
 
 
 def _prepare_full_simulation_schedule(run_count: int, total_duration_seconds: int) -> Deque[float]:
-    schedule = _DURATION_CONTROL_STATE.prepare_schedule(run_count, total_duration_seconds)
+    schedule = _FULL_SIM_STATE.prepare_schedule(run_count, total_duration_seconds)
     return schedule
 
 
 def _wait_for_next_full_simulation_slot(stop_signal: threading.Event) -> bool:
-    return _DURATION_CONTROL_STATE.wait_for_next_slot(stop_signal)
+    return _FULL_SIM_STATE.wait_for_next_slot(stop_signal)
 
 
 def _calculate_full_simulation_run_target(question_count: int) -> float:
-    return _DURATION_CONTROL_STATE.calculate_run_target(question_count)
+    return _FULL_SIM_STATE.calculate_run_target(question_count)
 
 
 def _build_per_question_delay_plan(question_count: int, target_seconds: float) -> List[float]:
-    return _DURATION_CONTROL_STATE.build_per_question_delay_plan(question_count, target_seconds)
+    return _FULL_SIM_STATE.build_per_question_delay_plan(question_count, target_seconds)
 
 
 def _simulate_answer_duration_delay(stop_signal: Optional[threading.Event] = None) -> bool:
     # 委托到模块实现，传入当前配置范围以避免模块依赖全局变量
-    return duration_control.simulate_answer_duration_delay(stop_signal, answer_duration_range_seconds)
+    return full_simulation_mode.simulate_answer_duration_delay(stop_signal, answer_duration_range_seconds)
 
 
 def _smooth_scroll_to_element(driver: BrowserDriver, element, block: str = 'center') -> None:
     """
     平滑滚动到指定元素位置，模拟人类滚动行为。
-    仅在启用时长控制时使用平滑滚动，否则使用瞬间滚动。
+    仅在启用全真模拟时使用平滑滚动，否则使用瞬间滚动。
     """
     if not _full_simulation_active():
-        # 未启用时长控制时使用瞬间滚动
+        # 未启用全真模拟时使用瞬间滚动
         try:
             driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}', behavior:'auto'}});", element)
         except Exception:
             pass
         return
     
-    # 启用时长控制时使用平滑滚动
+    # 启用全真模拟时使用平滑滚动
     try:
         # 获取元素位置和当前滚动位置
         element_y = driver.execute_script("return arguments[0].getBoundingClientRect().top + window.pageYOffset;", element)
@@ -4029,7 +3896,6 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     multiple_question_index = 0
     matrix_question_index = 0
     scale_question_index = 0
-    slider_question_index = 0
     current_question_number = 0
     active_stop = stop_signal or stop_event
     question_delay_plan: Optional[List[float]] = None
@@ -4038,7 +3904,7 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
         question_delay_plan = _build_per_question_delay_plan(total_question_count, target_seconds)
         planned_total = sum(question_delay_plan)
         logging.info(
-            "[Action Log] 时长控制：本次计划总耗时约 %.1f 秒，共 %d 题",
+            "[Action Log] 全真模拟：本次计划总耗时约 %.1f 秒，共 %d 题",
             planned_total,
             total_question_count,
         )
@@ -4079,16 +3945,10 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 logging.debug("跳过第%d题（未显示）", current_question_number)
                 continue
             question_type = question_div.get_attribute("type")
-            is_reorder_question = (question_type == "11") or _driver_question_looks_like_reorder(question_div)
 
             if question_type in ("1", "2"):
-                # 检测是否为位置题
-                is_location_question = _driver_question_is_location(question_div) if question_div is not None else False
-                if is_location_question:
-                    print(f"第{current_question_number}题为位置题，暂不支持，已跳过")
-                else:
-                    vacant(driver, current_question_number, vacant_question_index)
-                    vacant_question_index += 1
+                vacant(driver, current_question_number, vacant_question_index)
+                vacant_question_index += 1
             elif question_type == "3":
                 single(driver, current_question_number, single_question_index)
                 single_question_index += 1
@@ -4104,10 +3964,9 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 droplist(driver, current_question_number, droplist_question_index)
                 droplist_question_index += 1
             elif question_type == "8":
-                slider_score = _resolve_slider_score(slider_question_index)
+                slider_score = random.randint(1, 100)
                 slider_question(driver, current_question_number, slider_score)
-                slider_question_index += 1
-            elif is_reorder_question:
+            elif question_type == "11":
                 reorder(driver, current_question_number)
             else:
                 # 兜底：尝试把未知类型当成填空题/多项填空题处理，避免直接跳过
@@ -4362,7 +4221,7 @@ def _wait_for_post_submit_outcome(
         if "complete" in current_lower:
             return "complete", str(current_url)
         try:
-            if duration_control.is_survey_completion_page(driver):
+            if full_simulation_mode.is_survey_completion_page(driver):
                 return "complete", str(current_url)
         except Exception:
             pass
@@ -4424,56 +4283,6 @@ def _discard_unresponsive_proxy(proxy_address: str) -> None:
             pass
 
 
-def _is_device_quota_limit_page(driver: BrowserDriver) -> bool:
-    """检测"设备已达到最大填写次数"提示页。"""
-    script = r"""
-        return (() => {
-            const text = (document.body?.innerText || '').replace(/\s+/g, '');
-            if (!text) return false;
-
-            const limitMarkers = [
-                '设备已达到最大填写次数',
-                '已达到最大填写次数',
-                '达到最大填写次数',
-                '填写次数已达上限',
-                '超过最大填写次数',
-            ];
-            const hasLimit = limitMarkers.some(marker => text.includes(marker));
-            if (!hasLimit) return false;
-
-            const hasThanks = text.includes('感谢参与') || text.includes('感谢参与!');
-            const hasApology = text.includes('很抱歉') || text.includes('提示');
-            if (!(hasThanks || hasApology)) return false;
-
-            const questionLike = document.querySelector(
-                '#divQuestion, [id^="divquestion"], .div_question, .question, .wjx_question, [topic]'
-            );
-            if (questionLike) return false;
-
-            const startHints = ['开始作答', '开始答题', '开始填写', '继续作答', '继续填写'];
-            if (startHints.some(hint => text.includes(hint))) return false;
-
-            const submitSelectors = [
-                '#submit_button',
-                '#divSubmit',
-                '#ctlNext',
-                '#SM_BTN_1',
-                '.submitDiv a',
-                '.btn-submit',
-                'button[type="submit"]',
-                'a.mainBgColor',
-            ];
-            if (submitSelectors.some(sel => document.querySelector(sel))) return false;
-
-            return true;
-        })();
-    """
-    try:
-        return bool(driver.execute_script(script))
-    except Exception:
-        return False
-
-
 def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=None):
     global cur_num, cur_fail
     fast_mode = _is_fast_mode()
@@ -4532,6 +4341,57 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             pass
         driver = None
 
+    def _is_device_quota_limit_page(instance: BrowserDriver) -> bool:
+        """
+        检测“设备已达到最大填写次数”提示页。
+        """
+        script = r"""
+            return (() => {
+                const text = (document.body?.innerText || '').replace(/\s+/g, '');
+                if (!text) return false;
+
+                const limitMarkers = [
+                    '设备已达到最大填写次数',
+                    '已达到最大填写次数',
+                    '达到最大填写次数',
+                    '填写次数已达上限',
+                    '超过最大填写次数',
+                ];
+                const hasLimit = limitMarkers.some(marker => text.includes(marker));
+                if (!hasLimit) return false;
+
+                const hasThanks = text.includes('感谢参与') || text.includes('感谢参与!');
+                const hasApology = text.includes('很抱歉') || text.includes('提示');
+                if (!(hasThanks || hasApology)) return false;
+
+                const questionLike = document.querySelector(
+                    '#divQuestion, [id^="divquestion"], .div_question, .question, .wjx_question, [topic]'
+                );
+                if (questionLike) return false;
+
+                const startHints = ['开始作答', '开始答题', '开始填写', '继续作答', '继续填写'];
+                if (startHints.some(hint => text.includes(hint))) return false;
+
+                const submitSelectors = [
+                    '#submit_button',
+                    '#divSubmit',
+                    '#ctlNext',
+                    '#SM_BTN_1',
+                    '.submitDiv a',
+                    '.btn-submit',
+                    'button[type="submit"]',
+                    'a.mainBgColor',
+                ];
+                if (submitSelectors.some(sel => document.querySelector(sel))) return false;
+
+                return true;
+            })();
+        """
+        try:
+            return bool(instance.execute_script(script))
+        except Exception:
+            return False
+
     while True:
         if stop_signal.is_set():
             break
@@ -4541,12 +4401,12 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         if _full_simulation_active():
             if not _wait_for_next_full_simulation_slot(stop_signal):
                 break
-            logging.info("[Action Log] 时长控制时段管控中，等待编辑区释放...")
+            logging.info("[Action Log] 全真模拟时段管控中，等待编辑区释放...")
         if stop_signal.is_set():
             break
         if driver is None:
             proxy_address = _select_proxy_for_session()
-            if proxy_address and not _proxy_is_responsive(proxy_address):
+            if proxy_address and not _proxy_is_responsive(proxy_address, stop_signal=stop_signal):
                 _discard_unresponsive_proxy(proxy_address)
                 if stop_signal.is_set():
                     break
@@ -4632,7 +4492,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     break
 
                 need_watch_submit = bool(last_submit_had_captcha)
-                max_wait, poll_interval = duration_control.get_post_submit_wait_params(need_watch_submit, fast_mode)
+                max_wait, poll_interval = full_simulation_mode.get_post_submit_wait_params(need_watch_submit, fast_mode)
                 outcome, outcome_url = _wait_for_post_submit_outcome(
                     driver,
                     str(initial_url),
@@ -4744,7 +4604,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     completion_detected = True
                     break
                 try:
-                    if duration_control.is_survey_completion_page(driver):
+                    if full_simulation_mode.is_survey_completion_page(driver):
                         completion_detected = True
                         break
                 except Exception:
@@ -4776,7 +4636,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     completion_detected = True
                 else:
                     try:
-                        completion_detected = bool(duration_control.is_survey_completion_page(driver))
+                        completion_detected = bool(full_simulation_mode.is_survey_completion_page(driver))
                     except Exception:
                         completion_detected = False
 
@@ -4842,10 +4702,10 @@ TYPE_OPTIONS = [
     ("dropdown", "下拉题"),
     ("matrix", "矩阵题"),
     ("scale", "量表题"),
-    ("slider", "滑块题"),
     ("text", "填空题"),
     ("multi_text", "多项填空题"),
     ("location", "位置题"),
 ]
 
 LABEL_TO_TYPE = {label: value for value, label in TYPE_OPTIONS}
+

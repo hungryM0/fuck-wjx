@@ -1,0 +1,476 @@
+from __future__ import annotations
+
+import logging
+import random
+import subprocess
+import sys
+import time
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
+from urllib.parse import urlparse
+
+from playwright.sync_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    TimeoutError as PlaywrightTimeoutError,
+    sync_playwright,
+)
+
+from wjx.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
+from wjx.random_ip import _normalize_proxy_address
+
+
+class NoSuchElementException(Exception):
+    pass
+
+
+class TimeoutException(Exception):
+    pass
+
+
+class By:
+    CSS_SELECTOR = "css"
+    XPATH = "xpath"
+    ID = "id"
+
+
+def _build_selector(by: str, value: str) -> str:
+    if by == By.XPATH:
+        return f"xpath={value}"
+    if by == By.ID:
+        if value.startswith("#") or value.startswith("xpath=") or value.startswith("css="):
+            return value
+        return f"#{value}"
+    return value
+
+
+class PlaywrightElement:
+    def __init__(self, handle, page: Page):
+        self._handle = handle
+        self._page = page
+
+    @property
+    def text(self) -> str:
+        try:
+            return self._handle.inner_text()
+        except Exception:
+            return ""
+
+    def get_attribute(self, name: str):
+        try:
+            return self._handle.get_attribute(name)
+        except Exception:
+            return None
+
+    def is_displayed(self) -> bool:
+        try:
+            return self._handle.bounding_box() is not None
+        except Exception:
+            return False
+
+    @property
+    def size(self) -> Dict[str, float]:
+        try:
+            box = self._handle.bounding_box()
+        except Exception:
+            box = None
+        if not box:
+            return {"width": 0, "height": 0}
+        return {"width": box.get("width") or 0, "height": box.get("height") or 0}
+
+    @property
+    def tag_name(self) -> str:
+        try:
+            value = self._handle.evaluate("el => el.tagName.toLowerCase()")
+            return value or ""
+        except Exception:
+            return ""
+
+    def click(self) -> None:
+        try:
+            self._handle.click()
+        except Exception:
+            try:
+                self._handle.scroll_into_view_if_needed()
+                self._handle.click()
+            except Exception:
+                pass
+
+    def clear(self) -> None:
+        try:
+            self._handle.fill("")
+            return
+        except Exception:
+            pass
+        try:
+            self._handle.evaluate(
+                "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); "
+                "el.dispatchEvent(new Event('change', {bubbles:true})); }"
+            )
+        except Exception:
+            pass
+
+    def send_keys(self, value: str) -> None:
+        text = "" if value is None else str(value)
+        try:
+            self._handle.fill(text)
+            return
+        except Exception:
+            pass
+        try:
+            self._handle.type(text)
+        except Exception:
+            pass
+
+    def find_element(self, by: str, value: str):
+        selector = _build_selector(by, value)
+        handle = self._handle.query_selector(selector)
+        if handle is None:
+            raise NoSuchElementException(f"Element not found: {by} {value}")
+        return PlaywrightElement(handle, self._page)
+
+    def find_elements(self, by: str, value: str):
+        selector = _build_selector(by, value)
+        handles = self._handle.query_selector_all(selector)
+        return [PlaywrightElement(h, self._page) for h in handles]
+
+
+class PlaywrightDriver:
+    def __init__(self, playwright, browser: Browser, context: BrowserContext, page: Page, browser_name: str):
+        self._playwright = playwright
+        self._browser = browser
+        self._context = context
+        self._page = page
+        self.browser_name = browser_name
+        self.session_id = f"pw-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
+        try:
+            proc = getattr(browser, "process", None)
+            self.browser_pid = int(proc.pid) if proc and getattr(proc, "pid", None) else None
+        except Exception:
+            self.browser_pid = None
+        self.browser_pids: Set[int] = set()
+
+    def find_element(self, by: str, value: str):
+        handle = self._page.query_selector(_build_selector(by, value))
+        if handle is None:
+            raise NoSuchElementException(f"Element not found: {by} {value}")
+        return PlaywrightElement(handle, self._page)
+
+    def find_elements(self, by: str, value: str):
+        handles = self._page.query_selector_all(_build_selector(by, value))
+        return [PlaywrightElement(h, self._page) for h in handles]
+
+    def execute_script(self, script: str, *args):
+        processed_args = [arg._handle if isinstance(arg, PlaywrightElement) else arg for arg in args]
+        try:
+            return self._page.evaluate(f"function(){{{script}}}", *processed_args)
+        except Exception as exc:
+            logging.debug("execute_script failed: %s", exc)
+            return None
+
+    def get(
+        self,
+        url: str,
+        timeout: int = 60000,
+        wait_until: Literal["commit", "domcontentloaded", "load", "networkidle"] = "domcontentloaded",
+    ) -> None:
+        try:
+            self._page.set_default_navigation_timeout(timeout)
+            self._page.set_default_timeout(timeout)
+        except Exception:
+            pass
+
+        try:
+            self._page.goto(url, wait_until=wait_until, timeout=timeout)
+            return
+        except PlaywrightTimeoutError as exc:
+            logging.warning("Page.goto timeout after %d ms, retrying with longer wait: %s", timeout, exc)
+
+        self._page.goto(url, wait_until="load", timeout=timeout * 2)
+
+    @property
+    def current_url(self) -> str:
+        return self._page.url
+
+    @property
+    def page(self) -> Page:
+        return self._page
+
+    @property
+    def page_source(self) -> str:
+        try:
+            return self._page.content()
+        except Exception:
+            return ""
+
+    @property
+    def title(self) -> str:
+        try:
+            return self._page.title()
+        except Exception:
+            return ""
+
+    def set_window_size(self, width: int, height: int) -> None:
+        try:
+            self._page.set_viewport_size({"width": width, "height": height})
+        except Exception:
+            pass
+
+    def set_window_position(self, x: int, y: int) -> None:
+        try:
+            self._page.evaluate(f"window.moveTo({x}, {y});")
+        except Exception:
+            pass
+
+    def maximize_window(self) -> None:
+        try:
+            self._page.set_viewport_size({"width": 1280, "height": 900})
+        except Exception:
+            pass
+
+    def refresh(self) -> None:
+        try:
+            self._page.reload(wait_until="domcontentloaded")
+        except Exception:
+            pass
+
+    def execute_cdp_cmd(self, *_args, **_kwargs):
+        return None
+
+    def quit(self) -> None:
+        try:
+            self._page.close()
+        except Exception:
+            pass
+        try:
+            self._context.close()
+        except Exception:
+            pass
+        try:
+            self._browser.close()
+        except Exception:
+            pass
+        try:
+            self._playwright.stop()
+        except Exception:
+            pass
+
+
+BrowserDriver = PlaywrightDriver
+
+
+def list_browser_pids() -> Set[int]:
+    try:
+        import psutil
+    except ImportError:
+        return set()
+    names = {"msedge.exe", "chrome.exe", "chromium.exe"}
+    pids: Set[int] = set()
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            proc_name = (proc.info.get("name") or "").lower()
+            if proc_name in names:
+                pids.add(int(proc.info["pid"]))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        except Exception:
+            continue
+    return pids
+
+
+def kill_processes_by_pid(pids: Set[int]) -> int:
+    unique_pids = [int(p) for p in sorted(set(pids or [])) if int(p) > 0]
+    if not unique_pids:
+        return 0
+
+    attempted = 0
+
+    def _chunk(seq: List[int], size: int) -> List[List[int]]:
+        return [seq[i : i + size] for i in range(0, len(seq), size)]
+
+    if sys.platform.startswith("win"):
+        chunk_size = 24
+        for batch in _chunk(unique_pids, chunk_size):
+            if not batch:
+                continue
+            args = ["taskkill", "/T", "/F"]
+            for pid in batch:
+                args.extend(["/PID", str(pid)])
+            try:
+                subprocess.run(
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=6,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                attempted += len(batch)
+            except Exception as exc:
+                logging.debug("taskkill 批量清理失败: %s", exc, exc_info=True)
+        if attempted:
+            logging.info("按 PID 已请求终止 %d 个浏览器进程", attempted)
+        return attempted
+
+    killed = 0
+    try:
+        import psutil
+    except Exception:
+        return 0
+    for pid in unique_pids:
+        try:
+            psutil.Process(pid).kill()
+            killed += 1
+        except Exception as exc:
+            logging.debug("按 PID 清理浏览器失败 pid=%s: %s", pid, exc, exc_info=True)
+    if killed:
+        logging.info("按 PID 共终止 %d 个浏览器进程", killed)
+    return killed
+
+
+def kill_playwright_browser_processes() -> None:
+    """Kill Playwright-launched browsers by checking cmdline indicators."""
+    try:
+        import psutil
+    except ImportError:
+        logging.warning("psutil 未安装，无法快速清理浏览器进程")
+        return
+
+    killed_count = 0
+    playwright_indicators = [
+        "playwright",
+        "ms-playwright",
+        "playwright_chromium",
+        "playwright_firefox",
+        "playwright_webkit",
+    ]
+    browser_names = {"msedge.exe", "chrome.exe", "chromium.exe"}
+    indicators = [x.lower() for x in playwright_indicators if x]
+
+    try:
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                proc_info = proc.info or {}
+                proc_name = (proc_info.get("name") or "").lower()
+                if proc_name not in browser_names:
+                    continue
+                try:
+                    cmdline = proc.cmdline()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+                if not cmdline:
+                    continue
+                cmdline_str = " ".join(cmdline).lower()
+                if not any(ind in cmdline_str for ind in indicators):
+                    continue
+                try:
+                    proc.kill()
+                    killed_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as exc:
+        logging.warning("清理浏览器进程时出错: %s", exc)
+
+    if killed_count > 0:
+        logging.info("共终止 %d 个 Playwright 浏览器进程", killed_count)
+
+
+def create_playwright_driver(
+    *,
+    headless: bool = False,
+    prefer_browsers: Optional[List[str]] = None,
+    proxy_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    window_position: Optional[Tuple[int, int]] = None,
+) -> Tuple[BrowserDriver, str]:
+    candidates = prefer_browsers or list(BROWSER_PREFERENCE)
+    if not candidates:
+        candidates = list(BROWSER_PREFERENCE)
+
+    normalized_proxy = _normalize_proxy_address(proxy_address)
+    last_exc: Optional[Exception] = None
+
+    for browser in candidates:
+        pre_launch_pids = list_browser_pids()
+        try:
+            pw = sync_playwright().start()
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+        try:
+            launch_args: Dict[str, Any] = {"headless": headless}
+            if browser == "edge":
+                launch_args["channel"] = "msedge"
+            elif browser == "chrome":
+                launch_args["channel"] = "chrome"
+            if window_position and not headless:
+                x, y = window_position
+                launch_args["args"] = [f"--window-position={x},{y}"]
+
+            browser_instance = pw.chromium.launch(**launch_args)
+
+            context_args: Dict[str, Any] = {}
+            proxy_for_logging = normalized_proxy
+            if normalized_proxy:
+                proxy_settings: Dict[str, Any] = {"server": normalized_proxy}
+                try:
+                    parsed = urlparse(normalized_proxy)
+                    if parsed.scheme and parsed.hostname:
+                        server = f"{parsed.scheme}://{parsed.hostname}"
+                        if parsed.port:
+                            server += f":{parsed.port}"
+                        proxy_settings["server"] = server
+                        proxy_for_logging = server
+                    if parsed.username:
+                        proxy_settings["username"] = parsed.username
+                    if parsed.password:
+                        proxy_settings["password"] = parsed.password
+                except Exception:
+                    proxy_for_logging = normalized_proxy
+                context_args["proxy"] = proxy_settings
+            if user_agent:
+                context_args["user_agent"] = user_agent
+            if headless and HEADLESS_WINDOW_SIZE:
+                try:
+                    width, height = [int(x) for x in HEADLESS_WINDOW_SIZE.split(",")]
+                    context_args["viewport"] = {"width": width, "height": height}
+                except Exception:
+                    pass
+
+            context = browser_instance.new_context(**context_args)
+            page = context.new_page()
+            driver = PlaywrightDriver(pw, browser_instance, context, page, browser)
+
+            collected_pids: Set[int] = set()
+            main_pid = getattr(driver, "browser_pid", None)
+            if main_pid:
+                collected_pids.add(int(main_pid))
+            else:
+                try:
+                    time.sleep(0.05)
+                    after = list_browser_pids()
+                    diff = list(after - pre_launch_pids)[:3]
+                    collected_pids.update(diff)
+                    if not collected_pids:
+                        logging.warning("[Action Log] 未捕获浏览器主 PID，回退到差集依然为空")
+                except Exception:
+                    pass
+
+            driver.browser_pids = collected_pids
+            logging.debug("[Action Log] 捕获浏览器 PID: %s", sorted(collected_pids) if collected_pids else "无")
+            logging.info("使用 %s Playwright 浏览器", browser)
+            if normalized_proxy:
+                logging.info("当前浏览器将使用代理：%s", proxy_for_logging)
+            return driver, browser
+        except Exception as exc:
+            last_exc = exc
+            logging.warning("启动 %s 浏览器失败: %s", browser, exc)
+            try:
+                pw.stop()
+            except Exception:
+                pass
+
+    raise RuntimeError(f"无法启动任何浏览器: {last_exc}")

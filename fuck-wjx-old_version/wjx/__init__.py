@@ -3,17 +3,26 @@
 # 导入子模块使其可以通过 wjx.* 访问
 from wjx import (
     boot,
+    browser_driver,
+    config,
     engine,
+    full_simulation_mode,
+    full_simulation_ui,
     gui,
+    load_save,
+    log_utils,
+    random_ip,
+    registry_manager,
+    timed_mode,
+    runtime,
+    updater,
+    version,
 )
-
-# 从新目录结构导入模块
-from wjx.network import browser_driver, random_ip
-from wjx.utils import config, load_save, log_utils, registry_manager, updater, version
-from wjx.modes import timed_mode
 
 __all__ = [
     "config",
+    "full_simulation_mode",
+    "full_simulation_ui",
     "timed_mode",
     "log_utils",
     "random_ip",
@@ -25,4 +34,5 @@ __all__ = [
     "boot",
     "browser_driver",
     "load_save",
+    "runtime",
 ]

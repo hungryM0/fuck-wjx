@@ -19,6 +19,10 @@ select = [
 ignore = [
     "E203",  # Black compatibility
 ]
+per-file-ignores = {
+    "wjx/gui.py" = ["F401", "F403"],  # wildcard re-export for GUI glue
+}
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

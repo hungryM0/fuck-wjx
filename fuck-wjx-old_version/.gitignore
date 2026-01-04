@@ -1,0 +1,13 @@
+push.bat
+configs/
+.env
+logs/
+*.code-workspace
+__pycache__/
+desktop.ini
+build/
+dist/
+control/
+control.py
+.venv/
+cert/
