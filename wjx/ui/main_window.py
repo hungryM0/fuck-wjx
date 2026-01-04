@@ -1988,7 +1988,12 @@ class DashboardPage(QWidget):
                 return win._ask_card_code()  # type: ignore[union-attr]
             except Exception:
                 pass
-        dialog = CardUnlockDialog(self, status_fetcher=get_status)
+        dialog = CardUnlockDialog(
+            self,
+            status_fetcher=get_status,
+            status_formatter=_format_status_payload,
+            contact_handler=lambda: self._open_contact_dialog(default_type="卡密获取"),
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             return dialog.get_card_code()
         return None
@@ -3390,7 +3395,12 @@ class MainWindow(FluentWindow):
         self.dashboard._open_wizard_after_parse = False
 
     def _ask_card_code(self) -> Optional[str]:
-        dialog = CardUnlockDialog(self, status_fetcher=get_status)
+        dialog = CardUnlockDialog(
+            self,
+            status_fetcher=get_status,
+            status_formatter=_format_status_payload,
+            contact_handler=lambda: self._open_contact_dialog(default_type="卡密获取"),
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             return dialog.get_card_code()
         return None
