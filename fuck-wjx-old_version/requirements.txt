@@ -1,7 +1,0 @@
-playwright
-pyzbar
-Pillow
-requests
-packaging
-beautifulsoup4
-psutil
