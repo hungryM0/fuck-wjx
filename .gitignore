@@ -1,16 +1,19 @@
-push.bat
-configs/
-.env
-logs/
+# 开发环境
 *.code-workspace
-__pycache__/
+.clinerules/
 desktop.ini
-ips.txt
-build/
-dist/
+push.bat
+.venv/
 control/
 control.py
-cert/
-status/
-.venv/
 fuck-wjx-old_version/
+
+# 编译环境
+build/
+dist/
+.env
+
+# 运行环境
+__pycache__/
+configs/
+logs/

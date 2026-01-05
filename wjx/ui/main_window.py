@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -50,6 +49,7 @@ from qfluentwidgets import (
     LineEdit,
     MessageBox,
     NavigationItemPosition,
+    PasswordLineEdit,
     PrimaryPushButton,
     ProgressBar,
     PushButton,
@@ -58,12 +58,15 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SubtitleLabel,
     SwitchButton,
+    TableWidget,
     Theme,
     setTheme,
     setThemeColor,
     RoundMenu,
     qconfig,
     TransparentToolButton,
+    TeachingTip,
+    TeachingTipTailPosition,
 )
 
 from wjx.utils.config import APP_ICON_RELATIVE_PATH, DEFAULT_FILL_TEXT, USER_AGENT_PRESETS
@@ -232,12 +235,13 @@ class CardUnlockDialog(QDialog):
         layout.addLayout(btn_row)
 
         layout.addWidget(BodyLabel("请输入卡密：", self))
-        self.card_edit = LineEdit(self)
+        self.card_edit = PasswordLineEdit(self)
         self.card_edit.setPlaceholderText("输入卡密后点击「验证」")
-        try:
-            self.card_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        except Exception:
-            pass
+        # 修改眼睛按钮为点击切换模式（而非按住模式）
+        self._setup_toggle_password_button()
+        # 为卡密输入框添加右键菜单
+        self.card_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.card_edit.customContextMenuRequested.connect(self._show_card_edit_menu)
         layout.addWidget(self.card_edit)
 
         action_row = QHBoxLayout()
@@ -362,6 +366,72 @@ class CardUnlockDialog(QDialog):
         except Exception:
             pass
         webbrowser.open("https://github.com/hungryM0/fuck-wjx")
+
+    def _show_card_edit_menu(self, pos):
+        """显示卡密输入框的右键菜单"""
+        menu = RoundMenu(parent=self)
+        
+        # 剪切
+        cut_action = Action(FluentIcon.CUT, "剪切")
+        cut_action.triggered.connect(self.card_edit.cut)
+        menu.addAction(cut_action)
+        
+        # 复制
+        copy_action = Action(FluentIcon.COPY, "复制")
+        copy_action.triggered.connect(self.card_edit.copy)
+        menu.addAction(copy_action)
+        
+        # 粘贴
+        paste_action = Action(FluentIcon.PASTE, "粘贴")
+        paste_action.triggered.connect(self.card_edit.paste)
+        menu.addAction(paste_action)
+        
+        menu.addSeparator()
+        
+        # 全选
+        select_all_action = Action(FluentIcon.CHECKBOX, "全选")
+        select_all_action.triggered.connect(self.card_edit.selectAll)
+        menu.addAction(select_all_action)
+        
+        # 在鼠标位置显示菜单
+        menu.exec(self.card_edit.mapToGlobal(pos))
+
+    def _setup_toggle_password_button(self):
+        """将密码眼睛按钮从按住模式改为点击切换模式"""
+        try:
+            # 尝试获取内部的密码按钮并修改行为
+            # qfluentwidgets 的 PasswordLineEdit 内部有一个 button 属性
+            btn = getattr(self.card_edit, 'button', None)
+            if btn is None:
+                # 尝试其他可能的属性名
+                for attr in ['passwordButton', '_button', 'viewButton']:
+                    btn = getattr(self.card_edit, attr, None)
+                    if btn is not None:
+                        break
+            
+            if btn is not None:
+                # 断开原有的按住显示信号
+                try:
+                    btn.pressed.disconnect()
+                except Exception:
+                    pass
+                try:
+                    btn.released.disconnect()
+                except Exception:
+                    pass
+                
+                # 使用点击切换模式
+                self._password_visible = False
+                def toggle_password():
+                    self._password_visible = not self._password_visible
+                    if self._password_visible:
+                        self.card_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                    else:
+                        self.card_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                
+                btn.clicked.connect(toggle_password)
+        except Exception:
+            pass
 
     def get_card_code(self) -> Optional[str]:
         return self.card_edit.text().strip() or None
@@ -1099,60 +1169,32 @@ class SettingsPage(ScrollArea):
             pass
 
     def _show_timed_mode_help(self):
-        """显示定时模式说明对话框"""
-        dialog = QDialog(self.window() or self)
-        dialog.setWindowTitle("定时模式说明")
-        dialog.setFixedSize(520, 380)
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        """显示定时模式说明TeachingTip"""
+        # 获取触发按钮
+        sender = self.sender()
+        if not sender or not isinstance(sender, QWidget):
+            return
         
-        # 标题
-        title_label = SubtitleLabel("定时模式", dialog)
-        layout.addWidget(title_label)
-        
-        # 说明卡片
-        card = CardWidget(dialog)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 16, 16, 16)
-        card_layout.setSpacing(12)
-        
-        # 功能说明
-        desc = BodyLabel(
-            "定时模式会在指定时间点自动开始提交问卷，适用于需要精确控制提交时间的场景。\n\n"
-            "启用后，程序会忽略「提交间隔」和「作答时长」设置，改为高频刷新并在指定时间点提交。",
-            dialog
-        )
-        desc.setWordWrap(True)
-        card_layout.addWidget(desc)
-        
-        # 应用场景
-        scenarios = BodyLabel(
+        # 创建内容文本
+        content = (
+            "启用后，程序会忽略「提交间隔」和「作答时长」设置，改为高频刷新并在开放后立即提交。\n\n"
             "典型应用场景：\n"
-            "• 抢志愿填报名额（如高考志愿、研究生调剂）\n"
-            "• 抢课程选课名额（如大学选课系统）\n"
+            "• 抢志愿填报名额\n"
+            "• 抢课程选课名额（如大学选课问卷）\n"
             "• 抢活动报名名额（如讲座、比赛报名）\n"
-            "• 其他需要在特定时间点提交的问卷",
-            dialog
+            "• 其他在特定时间点开放的问卷"
         )
-        scenarios.setWordWrap(True)
-        scenarios.setStyleSheet("color: #555; line-height: 1.6;")
-        card_layout.addWidget(scenarios)
         
-        layout.addWidget(card)
-        
-        layout.addStretch(1)
-        
-        # 关闭按钮
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        close_btn = PushButton("我知道了", dialog)
-        close_btn.setMinimumWidth(100)
-        btn_row.addWidget(close_btn)
-        layout.addLayout(btn_row)
-        
-        close_btn.clicked.connect(dialog.accept)
-        dialog.exec()
+        TeachingTip.create(
+            target=sender,
+            icon=FluentIcon.INFO,
+            title='定时模式说明',
+            content=content,
+            isClosable=True,
+            tailPosition=TeachingTipTailPosition.BOTTOM,
+            duration=-1,
+            parent=self.view
+        )
     
     def _pin_switch_label(self, sw: SwitchButton, text: str):
         """保持开关两侧文本一致，避免切换为 On/Off。"""
@@ -1186,11 +1228,13 @@ class QuestionPage(ScrollArea):
         layout.addWidget(SubtitleLabel("题目配置", self))
         layout.addWidget(BodyLabel("双击单元格即可编辑；自定义权重用逗号分隔，例如 3,2,1", self))
 
-        self.table = QTableWidget(0, 4, self.view)
+        self.table = TableWidget(self.view)
+        self.table.setRowCount(0)
+        self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["题号", "类型", "选项数", "配置详情"])
         self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table, 1)
 
@@ -1742,26 +1786,44 @@ class DashboardPage(QWidget):
         title_row.addStretch(1)
         title_row.addWidget(self.count_label)
         list_layout.addLayout(title_row)
-        action_row = QHBoxLayout()
-        action_row.setSpacing(10)
-        self.select_all_cb = CheckBox("全选", self)
-        self.add_cfg_btn = PrimaryPushButton("新增题目", self)
-        self.edit_cfg_btn = PushButton("编辑选中", self)
-        self.del_cfg_btn = PushButton("删除选中", self)
-        action_row.addWidget(self.select_all_cb)
-        action_row.addStretch(1)
-        action_row.addWidget(self.add_cfg_btn)
-        action_row.addWidget(self.edit_cfg_btn)
-        action_row.addWidget(self.del_cfg_btn)
-        list_layout.addLayout(action_row)
+        # 使用 CommandBar 替代普通按钮布局
+        self.command_bar = CommandBar(self)
+        self.command_bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        
+        # 新增题目
+        self.add_action = Action(FluentIcon.ADD, "新增题目")
+        self.command_bar.addAction(self.add_action)
+        
+        # 编辑选中
+        self.edit_action = Action(FluentIcon.EDIT, "编辑选中")
+        self.command_bar.addAction(self.edit_action)
+        
+        # 删除选中
+        self.del_action = Action(FluentIcon.DELETE, "删除选中")
+        self.command_bar.addAction(self.del_action)
+        
+        # 分隔符
+        self.command_bar.addSeparator()
+        
+        # 全选（可勾选）
+        self.select_all_action = Action(FluentIcon.CHECKBOX, "全选", checkable=True)
+        self.command_bar.addAction(self.select_all_action)
+        
+        # 隐藏操作：配置向导
+        self.wizard_action = Action(FluentIcon.SETTING, "配置向导")
+        self.command_bar.addHiddenAction(self.wizard_action)
+        
+        list_layout.addWidget(self.command_bar)
         hint = BodyLabel("提示：排序题/滑块题会自动随机填写", self)
         hint.setStyleSheet("padding:8px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px;")
         list_layout.addWidget(hint)
-        self.entry_table = QTableWidget(0, 3, self)
+        self.entry_table = TableWidget(self)
+        self.entry_table.setRowCount(0)
+        self.entry_table.setColumnCount(3)
         self.entry_table.setHorizontalHeaderLabels(["选择", "类型", "策略"])
         self.entry_table.verticalHeader().setVisible(False)
-        self.entry_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.entry_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.entry_table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
+        self.entry_table.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.entry_table.setAlternatingRowColors(True)
         self.entry_table.setMinimumHeight(360)
         # 设置列宽策略：前2列固定宽度，最后一列自动拉伸填充剩余空间
@@ -1810,10 +1872,12 @@ class DashboardPage(QWidget):
         self.thread_spin.valueChanged.connect(lambda v: self.settings_page.thread_spin.setValue(int(v)))
         self.random_ip_cb.stateChanged.connect(self._on_random_ip_toggled)
         self.card_btn.clicked.connect(self._on_card_code_clicked)
-        self.select_all_cb.stateChanged.connect(self._toggle_select_all)
-        self.add_cfg_btn.clicked.connect(self._show_add_question_dialog)
-        self.edit_cfg_btn.clicked.connect(self._open_question_editor)
-        self.del_cfg_btn.clicked.connect(self._delete_selected_entries)
+        # CommandBar Actions
+        self.select_all_action.triggered.connect(self._toggle_select_all_action)
+        self.add_action.triggered.connect(self._show_add_question_dialog)
+        self.edit_action.triggered.connect(self._edit_selected_entry)
+        self.del_action.triggered.connect(self._delete_selected_entries)
+        self.wizard_action.triggered.connect(self._open_question_wizard)
         try:
             self.question_page.entriesChanged.connect(self._on_question_entries_changed)
         except Exception:
@@ -2038,6 +2102,285 @@ class DashboardPage(QWidget):
             self._toast("卡密验证通过，已解锁额度", "success")
         else:
             self._toast("卡密验证失败，请重试", "error")
+
+    def _edit_selected_entry(self):
+        """编辑选中的题目"""
+        selected_rows = self._checked_rows()
+        if not selected_rows:
+            self._toast("请先勾选要编辑的题目", "warning")
+            return
+        if len(selected_rows) > 1:
+            self._toast("一次只能编辑一个题目", "warning")
+            return
+        
+        row = selected_rows[0]
+        entries = self.question_page.get_entries()
+        if row >= len(entries):
+            return
+        
+        entry = entries[row]
+        
+        # 获取题目信息
+        info = self.question_page.questions_info
+        qnum = ""
+        title_text = ""
+        option_texts: List[str] = []
+        if row < len(info):
+            qnum = str(info[row].get("num") or "")
+            title_text = str(info[row].get("title") or "")
+            opt_raw = info[row].get("option_texts")
+            if isinstance(opt_raw, list):
+                option_texts = [str(x) for x in opt_raw]
+        
+        # 创建编辑对话框
+        dialog = QDialog(self.window() or self)
+        dialog.setWindowTitle(f"编辑题目 - 第{qnum or row + 1}题")
+        dialog.resize(720, 680)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        layout.addWidget(SubtitleLabel("编辑题目配置", dialog))
+
+        # 显示题目标题
+        if title_text:
+            title_card = CardWidget(dialog)
+            title_card_layout = QVBoxLayout(title_card)
+            title_card_layout.setContentsMargins(12, 12, 12, 12)
+            title_card_layout.setSpacing(4)
+            title_card_layout.addWidget(BodyLabel("题目内容：", dialog))
+            title_label = BodyLabel(QuestionWizardDialog._shorten(title_text, 200), dialog)
+            title_label.setWordWrap(True)
+            title_label.setStyleSheet("color: #444; padding: 4px;")
+            title_card_layout.addWidget(title_label)
+            layout.addWidget(title_card)
+
+        # 题目类型（可编辑）
+        type_row = QHBoxLayout()
+        type_row.addWidget(BodyLabel("题目类型：", dialog))
+        type_combo = ComboBox(dialog)
+        for value, label in TYPE_CHOICES:
+            type_combo.addItem(label, value)
+        # 设置当前题目类型
+        current_type_idx = 0
+        for idx, (value, _) in enumerate(TYPE_CHOICES):
+            if value == entry.question_type:
+                current_type_idx = idx
+                break
+        type_combo.setCurrentIndex(current_type_idx)
+        type_row.addWidget(type_combo, 1)
+        layout.addLayout(type_row)
+
+        # 选项数量（可编辑）
+        option_row = QHBoxLayout()
+        option_row.addWidget(BodyLabel("选项数量：", dialog))
+        option_spin = NoWheelSpinBox(dialog)
+        option_spin.setRange(1, 20)
+        option_spin.setValue(int(entry.option_count or 1))
+        option_row.addWidget(option_spin, 1)
+        layout.addLayout(option_row)
+        
+        # 填空题答案列表编辑
+        text_area_widget = QWidget(dialog)
+        text_area_layout = QVBoxLayout(text_area_widget)
+        text_area_layout.setContentsMargins(0, 8, 0, 0)
+        text_area_layout.setSpacing(6)
+        text_area_layout.addWidget(BodyLabel("答案列表（执行时随机选择一个）：", dialog))
+        
+        text_edits: List[LineEdit] = []
+        text_rows_container = QWidget(dialog)
+        text_rows_layout = QVBoxLayout(text_rows_container)
+        text_rows_layout.setContentsMargins(0, 0, 0, 0)
+        text_rows_layout.setSpacing(4)
+        text_area_layout.addWidget(text_rows_container)
+        
+        def add_text_row(initial_text: str = ""):
+            row_widget = QWidget(text_rows_container)
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            edit = LineEdit(row_widget)
+            edit.setPlaceholderText('输入答案')
+            edit.setText(initial_text)
+            del_btn = PushButton("×", row_widget)
+            del_btn.setFixedWidth(32)
+            row_layout.addWidget(edit, 1)
+            row_layout.addWidget(del_btn)
+            text_rows_layout.addWidget(row_widget)
+            text_edits.append(edit)
+            
+            def remove_row():
+                if len(text_edits) > 1:
+                    text_edits.remove(edit)
+                    row_widget.deleteLater()
+            del_btn.clicked.connect(remove_row)
+        
+        # 预填充答案
+        if entry.question_type in ("text", "multi_text") and entry.texts:
+            for text in entry.texts:
+                add_text_row(text)
+        else:
+            add_text_row()
+        
+        add_text_btn = PushButton("+ 添加", dialog)
+        add_text_btn.setFixedWidth(80)
+        add_text_btn.clicked.connect(lambda: add_text_row())
+        text_area_layout.addWidget(add_text_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(text_area_widget)
+
+        # 策略选择（仅非填空题）
+        strategy_row = QHBoxLayout()
+        strategy_label = BodyLabel("填写策略：", dialog)
+        strategy_row.addWidget(strategy_label)
+        strategy_combo = ComboBox(dialog)
+        for value, label in STRATEGY_CHOICES:
+            strategy_combo.addItem(label, value)
+        # 根据当前条目设置默认策略
+        current_strategy = entry.distribution_mode or "random"
+        if entry.custom_weights:
+            current_strategy = "custom"
+        strategy_idx = 0 if current_strategy == "random" else 1
+        strategy_combo.setCurrentIndex(strategy_idx)
+        strategy_row.addWidget(strategy_combo, 1)
+        layout.addLayout(strategy_row)
+
+        # 自定义配比滑块区域
+        slider_card = CardWidget(dialog)
+        slider_card_layout = QVBoxLayout(slider_card)
+        slider_card_layout.setContentsMargins(12, 12, 12, 12)
+        slider_card_layout.setSpacing(8)
+        slider_hint_label = BodyLabel("", dialog)
+        slider_card_layout.addWidget(slider_hint_label)
+        
+        slider_scroll = ScrollArea(dialog)
+        slider_scroll.setWidgetResizable(True)
+        slider_scroll.setMinimumHeight(180)
+        slider_scroll.setMaximumHeight(300)
+        slider_container = QWidget(dialog)
+        slider_inner_layout = QVBoxLayout(slider_container)
+        slider_inner_layout.setContentsMargins(0, 0, 0, 0)
+        slider_inner_layout.setSpacing(6)
+        slider_scroll.setWidget(slider_container)
+        slider_card_layout.addWidget(slider_scroll)
+        layout.addWidget(slider_card)
+
+        sliders: List[NoWheelSlider] = []
+        
+        # 动态创建滑块的函数
+        def rebuild_sliders():
+            # 清除旧滑块
+            for i in reversed(range(slider_inner_layout.count())):
+                item = slider_inner_layout.itemAt(i)
+                if item.widget():
+                    item.widget().deleteLater()
+            sliders.clear()
+            
+            # 获取当前题目类型
+            current_type = type_combo.currentData() or "single"
+            if current_type not in ("text", "multi_text"):
+                count = option_spin.value()
+                weights = entry.custom_weights or [50] * count
+                
+                for idx in range(count):
+                    row_layout = QHBoxLayout()
+                    row_layout.setSpacing(8)
+                    # 显示选项内容
+                    opt_label_text = option_texts[idx] if idx < len(option_texts) else ""
+                    prefix = f"{idx + 1}. "
+                    display_text = prefix + QuestionWizardDialog._shorten(opt_label_text or "选项", 80)
+                    row_layout.addWidget(BodyLabel(display_text, slider_container))
+                    slider = NoWheelSlider(Qt.Orientation.Horizontal, slider_container)
+                    slider.setRange(0, 100)
+                    slider.setValue(int(weights[idx]) if idx < len(weights) else 50)
+                    value_label = BodyLabel(str(slider.value()), slider_container)
+                    value_label.setMinimumWidth(30)
+                    slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
+                    row_layout.addWidget(slider, 1)
+                    row_layout.addWidget(value_label)
+                    
+                    row_widget = QWidget(slider_container)
+                    row_widget.setLayout(row_layout)
+                    slider_inner_layout.addWidget(row_widget)
+                    sliders.append(slider)
+
+        # 动态显示/隐藏逻辑
+        def update_visibility():
+            # 获取当前题目类型
+            current_type = type_combo.currentData() or "single"
+            is_text = current_type in ("text", "multi_text")
+            strategy_idx = strategy_combo.currentIndex()
+            strategy = STRATEGY_CHOICES[strategy_idx][0] if 0 <= strategy_idx < len(STRATEGY_CHOICES) else "random"
+            is_custom = strategy == "custom"
+            
+            text_area_widget.setVisible(is_text)
+            strategy_label.setVisible(not is_text)
+            strategy_combo.setVisible(not is_text)
+            slider_card.setVisible(not is_text and is_custom)
+            
+            # 根据题目类型更新提示标签
+            if current_type == "multiple":
+                slider_hint_label.setText("拖动滑块设置各选项被选中的概率（数值越大概率越高）：")
+            else:
+                slider_hint_label.setText("拖动滑块设置答案分布比例（数值越大概率越高）：")
+            
+            # 当切换到自定义配比时，总是重建滑块
+            if not is_text and is_custom:
+                rebuild_sliders()
+        
+        type_combo.currentIndexChanged.connect(lambda _: update_visibility())
+        strategy_combo.currentIndexChanged.connect(lambda _: update_visibility())
+        option_spin.valueChanged.connect(lambda _: update_visibility())
+        # 初始化时调用一次 update_visibility 来设置正确的显示状态
+        update_visibility()
+
+        layout.addStretch(1)
+
+        # 按钮
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        cancel_btn = PushButton("取消", dialog)
+        ok_btn = PrimaryPushButton("保存", dialog)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+        cancel_btn.clicked.connect(dialog.reject)
+        ok_btn.clicked.connect(dialog.accept)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 获取新的题目类型和选项数
+            new_type = type_combo.currentData() or entry.question_type
+            new_option_count = option_spin.value()
+            
+            # 更新条目
+            entry.question_type = new_type
+            entry.option_count = new_option_count
+            
+            if new_type in ("text", "multi_text"):
+                texts = [e.text().strip() or "无" for e in text_edits]
+                texts = [t for t in texts if t] or [DEFAULT_FILL_TEXT]
+                entry.texts = texts
+                entry.option_count = max(new_option_count, len(texts))
+            else:
+                strategy = strategy_combo.currentData() or "random"
+                if strategy == "random":
+                    entry.custom_weights = None
+                    entry.distribution_mode = "random"
+                    entry.probabilities = -1
+                else:
+                    custom_weights = [float(max(1, s.value())) for s in sliders]
+                    if all(w == custom_weights[0] for w in custom_weights):
+                        entry.custom_weights = None
+                        entry.distribution_mode = "random"
+                        entry.probabilities = -1
+                    else:
+                        entry.custom_weights = custom_weights
+                        entry.distribution_mode = "custom"
+                        entry.probabilities = [1.0] * len(custom_weights)
+            
+            self.question_page._refresh_table()
+            self._refresh_entry_table()
+            self._toast("已更新题目配置", "success")
 
     def _show_add_question_dialog(self):
         """显示新增题目的交互式弹窗"""
@@ -2316,12 +2659,26 @@ class DashboardPage(QWidget):
         if not selected_rows:
             self._toast("请先勾选要删除的题目", "warning")
             return
+        
+        # 添加确认对话框
+        count = len(selected_rows)
+        box = MessageBox(
+            "确认删除",
+            f"确定要删除选中的 {count} 个题目吗？\n此操作无法撤销。",
+            self.window() or self
+        )
+        box.yesButton.setText("确定")
+        box.cancelButton.setText("取消")
+        if not box.exec():
+            return
+        
         entries = self.question_page.get_entries()
         for row in sorted(selected_rows, reverse=True):
             if 0 <= row < len(entries):
                 entries.pop(row)
         self.question_page.set_entries(entries, self.question_page.questions_info)
         self._refresh_entry_table()
+        self._toast(f"已删除 {count} 个题目", "success")
 
     def _refresh_entry_table(self):
         entries = self.question_page.get_entries()
@@ -2356,11 +2713,13 @@ class DashboardPage(QWidget):
             rows = [idx.row() for idx in self.entry_table.selectionModel().selectedRows()]
         return rows
 
-    def _toggle_select_all(self, state: int):
+    def _toggle_select_all_action(self):
+        """CommandBar 全选 Action 触发时切换所有行的选中状态"""
+        checked = self.select_all_action.isChecked()
         for r in range(self.entry_table.rowCount()):
             item = self.entry_table.item(r, 0)
             if item:
-                item.setCheckState(Qt.CheckState.Checked if state else Qt.CheckState.Unchecked)
+                item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
     def _toast(self, text: str, level: str = "info", duration: int = 2000):
         parent = self.window() or self
