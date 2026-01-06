@@ -11,6 +11,7 @@ fuck-wjx-old_version/
 # 编译环境
 build/
 dist/
+Setup/
 .env
 .gitignore
 
