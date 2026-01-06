@@ -304,7 +304,7 @@ class DashboardPage(QWidget):
         self.controller.parse_survey(url)
 
     def _on_qr_clicked(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择二维码图片", get_runtime_directory(), "Images (*.png *.jpg *.jpeg *.bmp)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择二维码图片", get_runtime_directory(), "含有二维码的图片 (*.png *.jpg *.jpeg *.bmp)")
         if not path:
             return
         url = decode_qrcode(path)

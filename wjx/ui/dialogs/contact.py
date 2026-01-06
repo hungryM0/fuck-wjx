@@ -164,10 +164,10 @@ class ContactDialog(QDialog):
         self._worker = None
         self._worker_thread = None
 
-    def closeEvent(self, event):
+    def closeEvent(self, arg__1):
         """对话框关闭时安全停止线程"""
         self._stop_status_polling()
-        super().closeEvent(event)
+        super().closeEvent(arg__1)
 
     def reject(self):
         """取消时安全停止线程"""
