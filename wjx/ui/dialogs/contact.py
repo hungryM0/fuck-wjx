@@ -1,5 +1,4 @@
 """联系开发者对话框"""
-import os
 import re
 import threading
 from datetime import datetime
@@ -20,6 +19,7 @@ from qfluentwidgets import (
 )
 
 from wjx.ui.widgets import StatusFetchWorker
+from wjx.utils.config import CONTACT_API_URL
 from wjx.utils.version import __VERSION__
 
 
@@ -326,10 +326,10 @@ class ContactDialog(QDialog):
             full_message += f"联系邮箱： {email}\n"
         full_message += f"消息：{message}"
 
-        # 从环境变量读取联系API地址（必须在.env中配置）
-        api_url = os.getenv("CONTACT_API_URL")
+        # 使用配置文件中的联系API地址
+        api_url = CONTACT_API_URL
         if not api_url:
-            InfoBar.error("", "联系API未配置，请检查 .env 文件", parent=self, position=InfoBarPosition.TOP, duration=3000)
+            InfoBar.error("", "联系API未配置", parent=self, position=InfoBarPosition.TOP, duration=3000)
             return
         payload = {"message": full_message, "timestamp": datetime.now().isoformat()}
 

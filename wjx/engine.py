@@ -60,7 +60,7 @@ import wjx.modes.duration_control as duration_control
 from wjx.modes.duration_control import DURATION_CONTROL_STATE as _DURATION_CONTROL_STATE
 
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
-from PIL import Image, ImageTk
+from PIL import Image
 from pyzbar.pyzbar import decode as pyzbar_decode
 
 try:

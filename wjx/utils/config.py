@@ -5,6 +5,7 @@
 集中管理应用的各种配置参数，方便统一修改和维护
 """
 
+import base64
 import os
 import re
 import sys
@@ -73,6 +74,20 @@ _ENV_VARS = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
 
 def _resolve_env_value(key: str, default: str) -> str:
     return os.environ.get(key) or _ENV_VARS.get(key) or default
+
+def _decode_url(encoded: str) -> str:
+    try:
+        return base64.b64decode(encoded).decode("utf-8")
+    except Exception:
+        return ""
+
+_ENCODED_URLS = {
+    "random_ip": "aHR0cHM6Ly9zZXJ2aWNlLmlwemFuLmNvbS9jb3JlLWV4dHJhY3Q/bnVtPTEmbm89MjAyNTEyMDkwNjMwMDc2MDI1MTYmbWludXRlPTEmZm9ybWF0PWpzb24mcmVwZWF0PTEmcHJvdG9jb2w9MSZwb29sPW9yZGluYXJ5Jm1vZGU9YXV0aCZzZWNyZXQ9M3Fub2ltZ3YybWE1Z2tv",
+    "contact": "aHR0cHM6Ly9ib3QuaHVuZ3J5bTAudG9w",
+    "card_validation": "aHR0cHM6Ly9odW5ncnltMC50b3AvcGFzc3dvcmQudHh0",
+    "status": "aHR0cHM6Ly93angुaHVuZ3J5bTAudG9wL3N0YXR1cw==",
+    "pikachu_proxy": "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0NoYXJsZXNQaWthY2h1L2ZyZWVwcm94eS9tYXN0ZXIvcHJveGllcy5qc29u",
+}
 
 # ==================== UI 界面配置 ====================
 # 左右面板最小宽度
@@ -151,9 +166,14 @@ PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "http://www.baidu.com"
 PROXY_HEALTH_CHECK_TIMEOUT = 15
 PROXY_HEALTH_CHECK_MAX_DURATION = 45
-_PROXY_REMOTE_URL_DEFAULT = "https://service.ipzan.com/core-extract?num=1&no=20251209063007602516&minute=1&format=json&protocol=1&pool=quality&mode=auth&secret=reuoen35jvep3go"
 _RANDOM_IP_API_ENV_KEY = "RANDOM_IP_API_URL"
-PROXY_REMOTE_URL = _resolve_env_value(_RANDOM_IP_API_ENV_KEY, _PROXY_REMOTE_URL_DEFAULT)
+PROXY_REMOTE_URL = _resolve_env_value(_RANDOM_IP_API_ENV_KEY, _decode_url(_ENCODED_URLS["random_ip"]))
+
+# ==================== API 端点配置 ====================
+CONTACT_API_URL = _resolve_env_value("CONTACT_API_URL", _decode_url(_ENCODED_URLS["contact"]))
+CARD_VALIDATION_ENDPOINT = _resolve_env_value("CARD_VALIDATION_ENDPOINT", _decode_url(_ENCODED_URLS["card_validation"]))
+STATUS_ENDPOINT = _resolve_env_value("STATUS_ENDPOINT", _decode_url(_ENCODED_URLS["status"]))
+PIKACHU_PROXY_API = _resolve_env_value("PIKACHU_PROXY_API", _decode_url(_ENCODED_URLS["pikachu_proxy"]))
 
 
 # ==================== 时长控制配置 ====================

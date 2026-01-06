@@ -12,6 +12,7 @@ fuck-wjx-old_version/
 build/
 dist/
 .env
+.gitignore
 
 # 运行环境
 __pycache__/

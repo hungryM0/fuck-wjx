@@ -13,11 +13,15 @@ except ImportError:  # pragma: no cover
     requests = None
 
 from wjx.utils.config import (
+    CARD_VALIDATION_ENDPOINT,
+    CONTACT_API_URL,
     DEFAULT_HTTP_HEADERS,
-    PROXY_REMOTE_URL,
-    PROXY_MAX_PROXIES,
-    PROXY_HEALTH_CHECK_URL,
+    PIKACHU_PROXY_API,
     PROXY_HEALTH_CHECK_TIMEOUT,
+    PROXY_HEALTH_CHECK_URL,
+    PROXY_MAX_PROXIES,
+    PROXY_REMOTE_URL,
+    STATUS_ENDPOINT,
 )
 from wjx.utils.log_utils import (
     log_popup_confirm,
@@ -29,22 +33,6 @@ from wjx.utils.registry_manager import RegistryManager
 
 _DEFAULT_RANDOM_IP_FREE_LIMIT = 20
 _PREMIUM_RANDOM_IP_LIMIT = 400
-
-# 从环境变量读取敏感URL（必须在.env中配置）
-_card_endpoint = os.getenv("CARD_VALIDATION_ENDPOINT")
-_status_endpoint = os.getenv("STATUS_ENDPOINT")
-_pikachu_api = os.getenv("PIKACHU_PROXY_API")
-
-if not _card_endpoint:
-    raise RuntimeError("CARD_VALIDATION_ENDPOINT 未在环境变量中配置，请检查 .env 文件")
-if not _status_endpoint:
-    raise RuntimeError("STATUS_ENDPOINT 未在环境变量中配置，请检查 .env 文件")
-if not _pikachu_api:
-    raise RuntimeError("PIKACHU_PROXY_API 未在环境变量中配置，请检查 .env 文件")
-
-CARD_VALIDATION_ENDPOINT: str = _card_endpoint
-STATUS_ENDPOINT: str = _status_endpoint
-PIKACHU_PROXY_API: str = _pikachu_api
 
 STATUS_TIMEOUT_SECONDS = 5
 _quota_limit_dialog_shown = False
