@@ -5,7 +5,11 @@ import os
 binaries = []
 binaries += collect_dynamic_libs('pyzbar')
 qfw_datas, qfw_binaries, qfw_hiddenimports = collect_all('qfluentwidgets')
-pyside_hiddenimports = collect_all('PySide6')[2]
+pyside_hiddenimports = [
+    'PySide6.QtCore',
+    'PySide6.QtGui', 
+    'PySide6.QtWidgets',
+]
 
 # 使用相对路径，PyInstaller 会正确地将这些文件打包进 EXE
 datas = [
@@ -57,6 +61,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    contents_directory='.',
 )
 
 coll = COLLECT(
@@ -66,5 +71,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='fuck-wjx',
+    name='lib',
 )

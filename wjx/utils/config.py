@@ -85,7 +85,7 @@ _ENCODED_URLS = {
     "random_ip": "aHR0cHM6Ly9zZXJ2aWNlLmlwemFuLmNvbS9jb3JlLWV4dHJhY3Q/bnVtPTEmbm89MjAyNTEyMDkwNjMwMDc2MDI1MTYmbWludXRlPTEmZm9ybWF0PWpzb24mcmVwZWF0PTEmcHJvdG9jb2w9MSZwb29sPW9yZGluYXJ5Jm1vZGU9YXV0aCZzZWNyZXQ9M3Fub2ltZ3YybWE1Z2tv",
     "contact": "aHR0cHM6Ly9ib3QuaHVuZ3J5bTAudG9w",
     "card_validation": "aHR0cHM6Ly9odW5ncnltMC50b3AvcGFzc3dvcmQudHh0",
-    "status": "aHR0cHM6Ly93angुaHVuZ3J5bTAudG9wL3N0YXR1cw==",
+    "status": "aHR0cHM6Ly93anguaHVuZ3J5bTAudG9wL3N0YXR1cw==",
     "pikachu_proxy": "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0NoYXJsZXNQaWthY2h1L2ZyZWVwcm94eS9tYXN0ZXIvcHJveGllcy5qc29u",
 }
 

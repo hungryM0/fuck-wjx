@@ -20,7 +20,7 @@ from qfluentwidgets import (
 
 from wjx.ui.widgets import StatusFetchWorker
 from wjx.network.random_ip import get_status, _format_status_payload
-from wjx.utils.load_save import get_runtime_directory
+from wjx.utils.load_save import get_assets_directory
 from wjx.utils.version import ISSUE_FEEDBACK_URL
 
 
@@ -228,7 +228,7 @@ class CardUnlockDialog(QDialog):
 
     def _open_donate(self):
         try:
-            payment_path = os.path.join(get_runtime_directory(), "assets", "payment.png")
+            payment_path = os.path.join(get_assets_directory(), "payment.png")
             if os.path.exists(payment_path):
                 webbrowser.open(payment_path)
                 return

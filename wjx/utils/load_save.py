@@ -19,9 +19,34 @@ if TYPE_CHECKING:
 def get_runtime_directory() -> str:
     """获取运行时目录（项目根目录）"""
     if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
+        exe_dir = os.path.dirname(sys.executable)
+        # 如果 exe 在 lib 目录中，返回上一级目录
+        if os.path.basename(exe_dir) == "lib":
+            return os.path.dirname(exe_dir)
+        return exe_dir
     # __file__ = wjx/utils/load_save.py -> 需要向上三层到项目根目录
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def get_assets_directory() -> str:
+    """获取 assets 资源目录"""
+    if getattr(sys, "frozen", False):
+        # exe 所在目录就是 lib 目录，assets 也在 lib 目录中
+        exe_dir = os.path.dirname(sys.executable)
+        assets_path = os.path.join(exe_dir, "assets")
+        if os.path.isdir(assets_path):
+            return assets_path
+        
+        # 兼容旧的 _internal 结构
+        internal_assets = os.path.join(exe_dir, "_internal", "assets")
+        if os.path.isdir(internal_assets):
+            return internal_assets
+            
+        # 兼容 sys._MEIPASS（单文件模式）
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return os.path.join(meipass, "assets")
+    return os.path.join(get_runtime_directory(), "assets")
 
 __all__ = [
     "_sanitize_filename",
@@ -32,6 +57,8 @@ __all__ = [
     "load_config",
     "save_config",
     "ConfigPersistenceMixin",
+    "get_runtime_directory",
+    "get_assets_directory",
 ]
 
 

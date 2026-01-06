@@ -23,7 +23,7 @@ from qfluentwidgets import (
 )
 
 from wjx.network.random_ip import get_status, _format_status_payload
-from wjx.utils.load_save import get_runtime_directory
+from wjx.utils.load_save import get_assets_directory
 
 
 class HelpPage(ScrollArea):
@@ -156,7 +156,7 @@ class HelpPage(ScrollArea):
     def _on_qq_group_clicked(self, event):
         """点击二维码查看原图"""
         try:
-            qq_group_path = os.path.join(get_runtime_directory(), "assets", "QQ_group.jpg")
+            qq_group_path = os.path.join(get_assets_directory(), "QQ_group.jpg")
             if os.path.exists(qq_group_path):
                 self._show_full_image(qq_group_path)
         except Exception:
@@ -188,7 +188,7 @@ class HelpPage(ScrollArea):
     def _load_qq_group_image(self):
         """加载QQ群二维码图片"""
         try:
-            qq_group_path = os.path.join(get_runtime_directory(), "assets", "QQ_group.jpg")
+            qq_group_path = os.path.join(get_assets_directory(), "QQ_group.jpg")
             if os.path.exists(qq_group_path):
                 pixmap = QPixmap(qq_group_path)
                 scaled = pixmap.scaled(280, 280, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
