@@ -23,7 +23,7 @@ from qfluentwidgets import (
     ComboBox,
     LineEdit,
     FluentIcon,
-    TeachingTip,
+    PopupTeachingTip,
     TeachingTipTailPosition,
 )
 
@@ -544,7 +544,7 @@ class SettingsPage(ScrollArea):
             "• 其他在特定时间点开放的问卷"
         )
         
-        TeachingTip.create(
+        PopupTeachingTip.create(
             target=sender,
             icon=FluentIcon.INFO,
             title='定时模式说明',

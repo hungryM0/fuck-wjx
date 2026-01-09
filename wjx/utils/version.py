@@ -6,7 +6,7 @@
 """
 
 # 版本号
-__VERSION__ = "2.0.0-pre2"
+__VERSION__ = "1.1.0"
 
 # GitHub 仓库配置
 GITHUB_OWNER = "hungryM0"
@@ -14,4 +14,5 @@ GITHUB_REPO = "fuck-wjx"
 
 # 以下常量基于上述配置自动生成，一般无需修改
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+GITHUB_RELEASES_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
 ISSUE_FEEDBACK_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/issues/new"

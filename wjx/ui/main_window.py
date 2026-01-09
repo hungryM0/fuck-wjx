@@ -9,14 +9,18 @@ from typing import Any, Dict, List, Optional
 from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtGui import QIcon, QGuiApplication
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
+from PySide6.QtCore import QSize
+from PySide6.QtWidgets import QLabel
 from qfluentwidgets import (
     FluentIcon,
     FluentWindow,
+    IndeterminateProgressBar,
     InfoBar,
     InfoBarPosition,
     MessageBox,
     NavigationItemPosition,
     PushButton,
+    SplashScreen,
     Theme,
     qconfig,
     setTheme,
@@ -65,6 +69,42 @@ class MainWindow(FluentWindow):
             self.setWindowIcon(QIcon(icon_path))
         self.setMinimumSize(1080, 720)
 
+        # 创建启动页面
+        self.splashScreen = SplashScreen(self.windowIcon(), self)
+        self.splashScreen.setIconSize(QSize(128, 128))
+
+        # 添加应用名称标签（加粗）
+        self._splash_title_label = QLabel("问卷星速填", self.splashScreen)
+        self._splash_title_label.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-size: 20px;
+                font-weight: bold;
+                font-family: 'Microsoft YaHei UI';
+            }
+        """)
+        self._splash_title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._splash_title_label.adjustSize()
+
+        # 添加版本号徽章标签
+        self._splash_version_label = QLabel(f"v{__VERSION__}", self.splashScreen)
+        self._splash_version_label.setStyleSheet("""
+            QLabel {
+                color: #a1a1aa;
+                font-size: 12px;
+                font-family: 'Microsoft YaHei UI';
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 11px;
+                padding: 4px 12px;
+            }
+        """)
+        self._splash_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._splash_version_label.setFixedSize(80, 24)
+
+        # 添加不确定进度条
+        self._splash_progress_bar = IndeterminateProgressBar(self.splashScreen)
+        self._splash_progress_bar.start()
+
         self.controller = RunController(self)
         self.controller.on_ip_counter = None  # will be set after dashboard creation
         self.controller.card_code_provider = self._ask_card_code
@@ -100,6 +140,34 @@ class MainWindow(FluentWindow):
         self._register_popups()
         self._load_saved_config()
         self._center_on_screen()
+
+        QTimer.singleShot(1500, self._finish_splash)
+
+    def _finish_splash(self):
+        """隐藏启动页面并停止进度条"""
+        self._splash_progress_bar.stop()
+        self.splashScreen.finish()
+
+    def resizeEvent(self, e):
+        """调整启动页面组件位置"""
+        super().resizeEvent(e)
+        if hasattr(self, '_splash_version_label') and hasattr(self, '_splash_progress_bar'):
+            # 标题位置：图标下方居中
+            icon_bottom = self.height() // 2 + 64 + 15
+            title_width = self._splash_title_label.width()
+            self._splash_title_label.move((self.width() - title_width) // 2, icon_bottom)
+            # 版本号徽章位置：标题下方居中
+            title_bottom = icon_bottom + self._splash_title_label.height() + 8
+            badge_width = self._splash_version_label.width()
+            self._splash_version_label.move((self.width() - badge_width) // 2, title_bottom)
+            # 进度条位置：底部
+            bar_width = 300
+            self._splash_progress_bar.setGeometry(
+                (self.width() - bar_width) // 2,
+                self.height() - 80,
+                bar_width,
+                4
+            )
 
     def showEvent(self, e):
         """窗口显示时展开侧边栏"""

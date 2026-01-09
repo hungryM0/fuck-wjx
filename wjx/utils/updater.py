@@ -17,7 +17,7 @@ try:
 except ImportError:  # pragma: no cover
     version = None
 
-from .version import __VERSION__, GITHUB_API_URL
+from .version import __VERSION__, GITHUB_API_URL, GITHUB_RELEASES_URL
 
 
 def _get_runtime_directory() -> str:
@@ -99,6 +99,35 @@ class UpdateManager:
         except Exception as exc:
             logging.error(f"检查更新时发生错误: {exc}")
             return None
+
+    @staticmethod
+    def get_all_releases() -> list:
+        """获取所有发行版信息。"""
+        if not requests:
+            logging.warning("获取发行版需要 requests 模块")
+            return []
+
+        try:
+            headers = {"Accept": "application/vnd.github.v3+json"}
+            if GITHUB_TOKEN:
+                headers["Authorization"] = f"token {GITHUB_TOKEN}"
+            response = requests.get(GITHUB_RELEASES_URL, headers=headers, timeout=(10, 30))
+            response.raise_for_status()
+            releases = response.json()
+            
+            result = []
+            for release in releases:
+                result.append({
+                    "version": release.get("tag_name", "").lstrip("v"),
+                    "name": release.get("name", ""),
+                    "body": release.get("body", ""),
+                    "published_at": release.get("published_at", ""),
+                    "prerelease": release.get("prerelease", False),
+                })
+            return result
+        except Exception as exc:
+            logging.warning(f"获取发行版列表失败: {exc}")
+            return []
 
     @staticmethod
     def download_update(
