@@ -4,16 +4,11 @@ from __future__ import annotations
 
 __all__ = ["BootSplash", "create_boot_splash", "get_boot_splash", "finish_boot_splash"]
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtWidgets import QLabel
-from PySide6.QtCore import QSize
-from qfluentwidgets import IndeterminateProgressBar, SplashScreen
-
-if TYPE_CHECKING:
-    from qfluentwidgets import FluentWindow
+from qfluentwidgets import IndeterminateProgressBar, SplashScreen, isDarkTheme, FluentWindow
 
 from wjx.utils.version import __VERSION__
 
@@ -26,30 +21,36 @@ class BootSplash:
         self.splash_screen = SplashScreen(window.windowIcon(), window)
         self.splash_screen.setIconSize(QSize(128, 128))
 
+        # 根据主题设置颜色
+        is_dark = isDarkTheme()
+        title_color = "#ffffff" if is_dark else "#1f2937"
+        version_color = "#a1a1aa" if is_dark else "#6b7280"
+        badge_bg = "rgba(255, 255, 255, 0.1)" if is_dark else "rgba(0, 0, 0, 0.08)"
+
         # 添加应用名称标签（加粗）
         self.title_label = QLabel("问卷星速填", self.splash_screen)
-        self.title_label.setStyleSheet("""
-            QLabel {
-                color: #1f2937;
+        self.title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {title_color};
                 font-size: 20px;
                 font-weight: bold;
                 font-family: 'Microsoft YaHei UI';
-            }
+            }}
         """)
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.adjustSize()
 
         # 添加版本号徽章标签
         self.version_label = QLabel(f"v{__VERSION__}", self.splash_screen)
-        self.version_label.setStyleSheet("""
-            QLabel {
-                color: #6b7280;
+        self.version_label.setStyleSheet(f"""
+            QLabel {{
+                color: {version_color};
                 font-size: 12px;
                 font-family: 'Microsoft YaHei UI';
-                background-color: rgba(0, 0, 0, 0.08);
+                background-color: {badge_bg};
                 border-radius: 11px;
                 padding: 4px 12px;
-            }
+            }}
         """)
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.version_label.adjustSize()
