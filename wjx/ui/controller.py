@@ -24,10 +24,9 @@ from wjx.engine import (
     _normalize_html_text,
 )
 from wjx.utils.load_save import RuntimeConfig, load_config, save_config
-from wjx.utils.log_utils import LOG_BUFFER_HANDLER, log_popup_confirm, log_popup_error, log_popup_info, log_popup_warning
+from wjx.utils.log_utils import log_popup_confirm, log_popup_error, log_popup_info, log_popup_warning
 from wjx.network.random_ip import (
     _fetch_new_proxy_batch,
-    on_random_ip_toggle,
     get_effective_proxy_api_url,
     get_random_ip_limit,
     is_custom_proxy_api_active,
@@ -65,9 +64,6 @@ class EngineGuiAdapter:
         self._stop_signal = stop_signal
         self._card_code_provider = card_code_provider
         self.update_random_ip_counter = on_ip_counter
-
-    def _post_to_ui_thread(self, callback: Callable[[], None]):
-        return self._dispatcher(callback)
 
     # Popup helpers
     def _log_popup_confirm(self, title: str, message: str, **kwargs) -> bool:

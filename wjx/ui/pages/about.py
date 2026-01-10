@@ -5,7 +5,7 @@ import sys
 import threading
 import subprocess
 import webbrowser
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -14,24 +14,18 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QApplication,
-    QSizePolicy,
 )
 from qfluentwidgets import (
     ScrollArea,
     SubtitleLabel,
     BodyLabel,
-    CardWidget,
     PushButton,
     PrimaryPushButton,
-    SwitchButton,
     IndeterminateProgressRing,
     InfoBar,
     InfoBarPosition,
     MessageBox,
-    FluentIcon,
-    TransparentToolButton,
     TextBrowser,
-    Dialog,
     ProgressBar,
 )
 
@@ -208,74 +202,16 @@ class UpdateDialog(MessageBox):
         self.textLayout.addWidget(confirm_label)
 
 
-class ReleaseCard(CardWidget):
-    """单个发行版卡片，支持展开/折叠"""
-    
-    def __init__(self, version: str, date: str, body: str, expanded: bool = False, parent=None):
-        super().__init__(parent)
-        self._expanded = expanded
-        self._body = body
-        self._build_ui(version, date)
-        self.setExpanded(expanded)
-    
-    def _build_ui(self, version: str, date: str):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(8)
-        
-        # 标题行
-        header = QHBoxLayout()
-        header.setSpacing(8)
-        
-        self.expand_btn = TransparentToolButton(FluentIcon.CHEVRON_RIGHT_MED, self)
-        self.expand_btn.setFixedSize(24, 24)
-        self.expand_btn.clicked.connect(self._toggle)
-        header.addWidget(self.expand_btn)
-        
-        title = BodyLabel(f"v{version}", self)
-        title.setStyleSheet("font-weight: bold;")
-        header.addWidget(title)
-        
-        date_label = BodyLabel(date, self)
-        date_label.setStyleSheet("color: #888;")
-        header.addWidget(date_label)
-        header.addStretch(1)
-        
-        layout.addLayout(header)
-        
-        # 内容区域（支持 Markdown）
-        self.content = TextBrowser(self)
-        # 转换 GitHub Flavored Markdown 的 admonition 语法
-        processed_body = _convert_github_admonitions(self._body) if self._body else "暂无更新说明"
-        self.content.setMarkdown(processed_body)
-        self.content.setOpenExternalLinks(True)
-        self.content.setStyleSheet("border: none; background: transparent; padding-left: 32px;")
-        self.content.setMinimumHeight(50)
-        self.content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        layout.addWidget(self.content)
-    
-    def _toggle(self):
-        self.setExpanded(not self._expanded)
-    
-    def setExpanded(self, expanded: bool):
-        self._expanded = expanded
-        self.content.setVisible(expanded)
-        icon = FluentIcon.CHEVRON_DOWN_MED if expanded else FluentIcon.CHEVRON_RIGHT_MED
-        self.expand_btn.setIcon(icon)
-
-
 class AboutPage(ScrollArea):
     """关于页面，包含版本号、链接、检查更新等。"""
 
     _updateCheckFinished = Signal(object)  # update_info or None
     _updateCheckError = Signal(str)  # error message
-    _releasesLoaded = Signal(list)  # releases list
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._updateCheckFinished.connect(self._on_update_result)
         self._updateCheckError.connect(self._on_update_error)
-        self._releasesLoaded.connect(self._on_releases_loaded)
         self.view = QWidget(self)
         self.view.setStyleSheet("background: transparent;")
         self.setWidget(self.view)
@@ -283,7 +219,6 @@ class AboutPage(ScrollArea):
         self._checking_update = False
         self._progress_dlg: Optional[DownloadProgressDialog] = None
         self._build_ui()
-        self._load_releases()
 
     def _build_ui(self):
         layout = QVBoxLayout(self.view)
@@ -309,51 +244,6 @@ class AboutPage(ScrollArea):
         update_row.addStretch(1)
         layout.addLayout(update_row)
 
-        layout.addSpacing(16)
-
-        # 界面设置卡片
-        settings_card = CardWidget(self.view)
-        settings_layout = QVBoxLayout(settings_card)
-        settings_layout.setContentsMargins(16, 16, 16, 16)
-        settings_layout.setSpacing(12)
-        settings_layout.addWidget(SubtitleLabel("界面设置", self))
-        
-        # 侧边栏展开设置
-        sidebar_row = QHBoxLayout()
-        self.sidebar_switch = SwitchButton("始终展开侧边栏", self)
-        self._pin_switch_label(self.sidebar_switch, "始终展开侧边栏")
-        self.sidebar_switch.setChecked(True)
-        sidebar_row.addWidget(self.sidebar_switch)
-        sidebar_row.addStretch(1)
-        settings_layout.addLayout(sidebar_row)
-        
-        # 重启程序按钮
-        restart_row = QHBoxLayout()
-        self.restart_btn = PushButton("重新启动程序", self)
-        restart_row.addWidget(self.restart_btn)
-        restart_row.addStretch(1)
-        settings_layout.addLayout(restart_row)
-        
-        layout.addWidget(settings_card)
-        layout.addSpacing(16)
-
-        # 更新日志区域
-        changelog_header = QHBoxLayout()
-        changelog_header.setSpacing(8)
-        layout.addWidget(SubtitleLabel("更新日志", self))
-        
-        self.changelog_spinner = IndeterminateProgressRing(self)
-        self.changelog_spinner.setFixedSize(18, 18)
-        self.changelog_spinner.setStrokeWidth(2)
-        changelog_header.addWidget(self.changelog_spinner)
-        changelog_header.addStretch(1)
-        layout.addLayout(changelog_header)
-        
-        # 更新日志容器
-        self.changelog_container = QVBoxLayout()
-        self.changelog_container.setSpacing(8)
-        layout.addLayout(self.changelog_container)
-        
         layout.addSpacing(16)
 
         # 相关链接
@@ -385,8 +275,6 @@ class AboutPage(ScrollArea):
 
         # 绑定事件
         self.update_btn.clicked.connect(self._check_updates)
-        self.sidebar_switch.checkedChanged.connect(self._on_sidebar_toggled)
-        self.restart_btn.clicked.connect(self._restart_program)
         self.github_btn.clicked.connect(lambda: webbrowser.open(f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"))
         self.website_btn.clicked.connect(lambda: webbrowser.open("https://www.hungrym0.top/fuck-wjx.html"))
 
@@ -478,81 +366,3 @@ class AboutPage(ScrollArea):
                 self._updateCheckError.emit(str(exc))
         
         threading.Thread(target=_do_check, daemon=True).start()
-
-    def _pin_switch_label(self, sw: SwitchButton, text: str):
-        """保持开关两侧文本一致"""
-        try:
-            sw.setOnText(text)
-            sw.setOffText(text)
-            sw.setText(text)
-        except Exception:
-            sw.setText(text)
-
-    def _on_sidebar_toggled(self, checked: bool):
-        """侧边栏展开切换"""
-        win = self.window()
-        if hasattr(win, "navigationInterface"):
-            try:
-                if checked:
-                    win.navigationInterface.setCollapsible(False)  # type: ignore[union-attr]
-                    win.navigationInterface.expand()  # type: ignore[union-attr]
-                else:
-                    win.navigationInterface.setCollapsible(True)  # type: ignore[union-attr]
-                InfoBar.success("", f"侧边栏已设置为{'始终展开' if checked else '可折叠'}", parent=win, position=InfoBarPosition.TOP, duration=2000)
-            except Exception:
-                pass
-
-    def _restart_program(self):
-        """重启程序"""
-        box = MessageBox("重启程序", "确定要重新启动程序吗？\n未保存的配置将会丢失。", self.window() or self)
-        box.yesButton.setText("确定")
-        box.cancelButton.setText("取消")
-        if box.exec():
-            try:
-                win = self.window()
-                if hasattr(win, '_skip_save_on_close'):
-                    win._skip_save_on_close = True  # type: ignore[attr-defined]
-                subprocess.Popen([sys.executable] + sys.argv)
-                QApplication.quit()
-            except Exception as exc:
-                InfoBar.error("", f"重启失败：{exc}", parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
-
-    def _load_releases(self):
-        """异步加载发行版列表"""
-        def _do_load():
-            try:
-                from wjx.utils.updater import UpdateManager
-                releases = UpdateManager.get_all_releases()
-                self._releasesLoaded.emit(releases)
-            except Exception:
-                self._releasesLoaded.emit([])
-        
-        threading.Thread(target=_do_load, daemon=True).start()
-
-    def _on_releases_loaded(self, releases: list):
-        """处理发行版加载完成"""
-        self.changelog_spinner.hide()
-        
-        if not releases:
-            label = BodyLabel("暂无发行版信息", self)
-            label.setStyleSheet("color: #888;")
-            self.changelog_container.addWidget(label)
-            return
-        
-        for i, release in enumerate(releases):
-            version = release.get("version", "")
-            body = release.get("body", "")
-            published = release.get("published_at", "")
-            
-            # 格式化日期
-            date_str = ""
-            if published:
-                try:
-                    dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
-                    date_str = dt.strftime("%Y-%m-%d")
-                except Exception:
-                    date_str = published[:10] if len(published) >= 10 else published
-            
-            # 第一个版本默认展开
-            card = ReleaseCard(version, date_str, body, expanded=(i == 0), parent=self.view)
-            self.changelog_container.addWidget(card)

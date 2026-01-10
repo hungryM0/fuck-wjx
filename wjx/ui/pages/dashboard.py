@@ -37,7 +37,7 @@ from wjx.ui.controller import RunController
 from wjx.ui.dialogs.card_unlock import CardUnlockDialog
 from wjx.ui.dialogs.contact import ContactDialog
 from wjx.ui.pages.question import QuestionPage, QuestionWizardDialog, TYPE_CHOICES, STRATEGY_CHOICES, _get_entry_type_label
-from wjx.ui.pages.settings import SettingsPage
+from wjx.ui.pages.runtime import RuntimePage
 from wjx.utils.load_save import RuntimeConfig, get_runtime_directory
 from wjx.engine import decode_qrcode, QuestionEntry
 from wjx.utils.config import DEFAULT_FILL_TEXT
@@ -78,11 +78,11 @@ def _question_summary(entry: QuestionEntry) -> str:
 class DashboardPage(QWidget):
     """主页：左侧配置 + 底部状态，不再包含日志。"""
 
-    def __init__(self, controller: RunController, question_page: QuestionPage, settings_page: SettingsPage, parent=None):
+    def __init__(self, controller: RunController, question_page: QuestionPage, runtime_page: RuntimePage, parent=None):
         super().__init__(parent)
         self.controller = controller
         self.question_page = question_page
-        self.settings_page = settings_page
+        self.runtime_page = runtime_page
         self._open_wizard_after_parse = False
         self._build_ui()
         self._bind_events()
@@ -260,8 +260,8 @@ class DashboardPage(QWidget):
         self.qr_btn.clicked.connect(self._on_qr_clicked)
         self.start_btn.clicked.connect(self._on_start_clicked)
         self.stop_btn.clicked.connect(lambda: self.controller.stop_run())
-        self.target_spin.valueChanged.connect(lambda v: self.settings_page.target_spin.setValue(int(v)))
-        self.thread_spin.valueChanged.connect(lambda v: self.settings_page.thread_spin.setValue(int(v)))
+        self.target_spin.valueChanged.connect(lambda v: self.runtime_page.target_spin.setValue(int(v)))
+        self.thread_spin.valueChanged.connect(lambda v: self.runtime_page.thread_spin.setValue(int(v)))
         self.random_ip_cb.stateChanged.connect(self._on_random_ip_toggled)
         self.card_btn.clicked.connect(self._on_card_code_clicked)
         # CommandBar Actions
@@ -327,7 +327,7 @@ class DashboardPage(QWidget):
             self._toast(f"载入失败：{exc}", "error")
             return
         # 应用到界面
-        self.settings_page.apply_config(cfg)
+        self.runtime_page.apply_config(cfg)
         self.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], self.question_page.questions_info)
         self._refresh_entry_table()
@@ -398,7 +398,7 @@ class DashboardPage(QWidget):
     def _build_config(self) -> RuntimeConfig:
         cfg = RuntimeConfig()
         cfg.url = self.url_edit.text().strip()
-        self.settings_page.update_config(cfg)
+        self.runtime_page.update_config(cfg)
         cfg.target = max(1, self.target_spin.value())
         cfg.threads = max(1, self.thread_spin.value())
         cfg.random_ip_enabled = self.random_ip_cb.isChecked()
@@ -435,9 +435,9 @@ class DashboardPage(QWidget):
             self.random_ip_cb.setChecked(False)
             self.random_ip_cb.blockSignals(False)
             try:
-                self.settings_page.random_ip_switch.blockSignals(True)
-                self.settings_page.random_ip_switch.setChecked(False)
-                self.settings_page.random_ip_switch.blockSignals(False)
+                self.runtime_page.random_ip_switch.blockSignals(True)
+                self.runtime_page.random_ip_switch.setChecked(False)
+                self.runtime_page.random_ip_switch.blockSignals(False)
             except Exception:
                 pass
 
@@ -456,9 +456,9 @@ class DashboardPage(QWidget):
                     self.random_ip_cb.setChecked(False)
                     self.random_ip_cb.blockSignals(False)
                     try:
-                        self.settings_page.random_ip_switch.blockSignals(True)
-                        self.settings_page.random_ip_switch.setChecked(False)
-                        self.settings_page.random_ip_switch.blockSignals(False)
+                        self.runtime_page.random_ip_switch.blockSignals(True)
+                        self.runtime_page.random_ip_switch.setChecked(False)
+                        self.runtime_page.random_ip_switch.blockSignals(False)
                     except Exception:
                         pass
                     return
@@ -472,9 +472,9 @@ class DashboardPage(QWidget):
         self.random_ip_cb.setChecked(enabled)
         self.random_ip_cb.blockSignals(False)
         try:
-            self.settings_page.random_ip_switch.blockSignals(True)
-            self.settings_page.random_ip_switch.setChecked(enabled)
-            self.settings_page.random_ip_switch.blockSignals(False)
+            self.runtime_page.random_ip_switch.blockSignals(True)
+            self.runtime_page.random_ip_switch.setChecked(enabled)
+            self.runtime_page.random_ip_switch.blockSignals(False)
         except Exception:
             pass
         # 刷新计数显示
@@ -531,7 +531,7 @@ class DashboardPage(QWidget):
             refresh_ip_counter_display(self.controller.adapter)
             self.random_ip_cb.setChecked(True)
             try:
-                self.settings_page.random_ip_switch.setChecked(True)
+                self.runtime_page.random_ip_switch.setChecked(True)
             except Exception:
                 pass
 

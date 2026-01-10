@@ -27,11 +27,13 @@ class ContactDialog(QDialog):
     """联系开发者（Qt 版本）。使用 QThread + Worker 模式确保线程安全。"""
 
     _statusLoaded = Signal(str, str)  # text, color
+    _sendFinished = Signal(bool, str)  # success, message
 
     def __init__(self, parent=None, default_type: str = "报错反馈", status_fetcher=None, status_formatter=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self._statusLoaded.connect(self._on_status_loaded)
+        self._sendFinished.connect(self._on_send_finished)
         self.setWindowTitle("联系开发者")
         self.resize(720, 520)
         
@@ -291,7 +293,7 @@ class ContactDialog(QDialog):
         QTimer.singleShot(10, lambda: self.email_edit.setSelection(0, 0))
         QTimer.singleShot(10, lambda: self.send_btn.setFocus())
         
-        mtype = self.type_combo.currentData() or "报错反馈"
+        mtype = self.type_combo.currentText() or "报错反馈"
         
         # 直接读取消息框内容
         message = (self.message_edit.toPlainText() or "").strip()
@@ -340,36 +342,30 @@ class ContactDialog(QDialog):
         self.send_btn.setText("发送中...")
         self.send_spinner.show()
 
-        # 捕获 mtype 到局部变量
-        message_type = mtype
+        # 保存消息类型用于回调
+        self._current_message_type = mtype
 
         def _send():
             try:
                 resp = post(api_url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
-                ok = resp.status_code == 200
-                def _done():
-                    try:
-                        self.send_spinner.hide()
-                        self.send_btn.setEnabled(True)
-                        self.send_btn.setText("发送")
-                        if ok:
-                            msg = "发送成功！请留意邮件信息！" if message_type == "卡密获取" else "消息已成功发送！"
-                            InfoBar.success("", msg, parent=self, position=InfoBarPosition.TOP, duration=2500)
-                            QTimer.singleShot(500, self.accept)
-                        else:
-                            InfoBar.error("", f"发送失败：{resp.status_code}", parent=self, position=InfoBarPosition.TOP, duration=2500)
-                    except Exception as e:
-                        print(f"Error in _done: {e}")
-                QTimer.singleShot(0, _done)
+                if resp.status_code == 200:
+                    self._sendFinished.emit(True, "")
+                else:
+                    self._sendFinished.emit(False, f"发送失败：{resp.status_code}")
             except Exception as exc:
-                def _err():
-                    try:
-                        self.send_spinner.hide()
-                        self.send_btn.setEnabled(True)
-                        self.send_btn.setText("发送")
-                        InfoBar.error("", f"发送失败：{exc}", parent=self, position=InfoBarPosition.TOP, duration=3000)
-                    except Exception as e:
-                        print(f"Error in _err: {e}")
-                QTimer.singleShot(0, _err)
+                self._sendFinished.emit(False, f"发送失败：{exc}")
 
         threading.Thread(target=_send, daemon=True).start()
+
+    def _on_send_finished(self, success: bool, error_msg: str):
+        """发送完成回调（在主线程执行）"""
+        self.send_spinner.hide()
+        self.send_btn.setEnabled(True)
+        self.send_btn.setText("发送")
+        
+        if success:
+            msg = "发送成功！请留意邮件信息！" if getattr(self, '_current_message_type', '') == "卡密获取" else "消息已成功发送！"
+            InfoBar.success("", msg, parent=self, position=InfoBarPosition.TOP, duration=2500)
+            QTimer.singleShot(500, self.accept)
+        else:
+            InfoBar.error("", error_msg, parent=self, position=InfoBarPosition.TOP, duration=3000)

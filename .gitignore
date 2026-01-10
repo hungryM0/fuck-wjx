@@ -1,5 +1,6 @@
 # 开发环境
 *.code-workspace
+.github_token
 .clinerules/
 desktop.ini
 push.bat

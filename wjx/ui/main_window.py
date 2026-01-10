@@ -7,29 +7,38 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, QThread, QTimer
-from PySide6.QtGui import QIcon, QGuiApplication
+from PySide6.QtGui import QIcon, QGuiApplication, QPixmap
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from qfluentwidgets import (
+    Action,
+    AvatarWidget,
     FluentIcon,
     FluentWindow,
     InfoBar,
     InfoBarPosition,
     MessageBox,
+    NavigationAvatarWidget,
     NavigationItemPosition,
     PushButton,
+    RoundMenu,
     Theme,
     qconfig,
     setTheme,
     setThemeColor,
+    MenuAnimationType,
 )
 
 # 导入拆分后的页面
 from wjx.ui.pages.dashboard import DashboardPage
+from wjx.ui.pages.runtime import RuntimePage
 from wjx.ui.pages.settings import SettingsPage
 from wjx.ui.pages.question import QuestionPage
 from wjx.ui.pages.log import LogPage
 from wjx.ui.pages.help import HelpPage
 from wjx.ui.pages.about import AboutPage
+from wjx.ui.pages.account import AccountPage
+from wjx.ui.pages.changelog import ChangelogPage
 
 # 导入对话框
 from wjx.ui.dialogs.card_unlock import CardUnlockDialog
@@ -50,6 +59,9 @@ from wjx.engine import _get_resource_path as get_resource_path
 
 # 导入启动画面模块
 from wjx.boot import create_boot_splash, finish_boot_splash
+
+# 导入GitHub认证
+from wjx.utils.github_auth import get_github_auth
 
 
 class MainWindow(FluentWindow):
@@ -75,24 +87,33 @@ class MainWindow(FluentWindow):
         self.controller.on_ip_counter = None  # will be set after dashboard creation
         self.controller.card_code_provider = self._ask_card_code
 
-        self.settings_page = SettingsPage(self.controller, self)
+        self.runtime_page = RuntimePage(self.controller, self)
         self.question_page = QuestionPage(self)
         # QuestionPage 仅用作题目配置的数据载体，不作为主界面子页面展示；
         # 若不隐藏会以默认几何 (0,0,100,30) 叠在窗口左上角，造成标题栏错乱。
         self.question_page.hide()
-        self.dashboard = DashboardPage(self.controller, self.question_page, self.settings_page, self)
+        self.dashboard = DashboardPage(self.controller, self.question_page, self.runtime_page, self)
         self.log_page = LogPage(self)
         self.help_page = HelpPage(self._open_contact_dialog, self)
         self.about_page = AboutPage(self)
+        self.changelog_page = ChangelogPage(self)
+
+        self.login_page = AccountPage(self)
+        self.login_page.loginSuccess.connect(self._update_github_avatar)
+        self.settings_page = SettingsPage(self)
 
         self.dashboard.setObjectName("dashboard")
         self.question_page.setObjectName("question")
-        self.settings_page.setObjectName("settings")
+        self.runtime_page.setObjectName("runtime")
         self.log_page.setObjectName("logs")
         self.help_page.setObjectName("help")
         self.about_page.setObjectName("about")
+        self.changelog_page.setObjectName("changelog")
+        self.login_page.setObjectName("login")
+        self.settings_page.setObjectName("settings")
 
         self._init_navigation()
+        self._init_github_avatar()
         # 设置侧边栏宽度和默认不可折叠
         try:
             self.navigationInterface.setExpandWidth(140)
@@ -223,11 +244,140 @@ class MainWindow(FluentWindow):
     # ---------- init helpers ----------
     def _init_navigation(self):
         self.addSubInterface(self.dashboard, FluentIcon.HOME, "概览", NavigationItemPosition.TOP)
-        self.addSubInterface(self.settings_page, FluentIcon.SETTING, "运行参数", NavigationItemPosition.TOP)
+        self.addSubInterface(self.runtime_page, FluentIcon.DEVELOPER_TOOLS, "运行参数", NavigationItemPosition.TOP)
         self.addSubInterface(self.log_page, FluentIcon.INFO, "日志", NavigationItemPosition.TOP)
-        self.addSubInterface(self.help_page, FluentIcon.HELP, "帮助", NavigationItemPosition.BOTTOM)
-        self.addSubInterface(self.about_page, FluentIcon.INFO, "关于", NavigationItemPosition.BOTTOM)
+        # 登录页面使用自定义导航项（放在帮助上方）
+        self._login_nav_widget = None
+        self._network_manager = QNetworkAccessManager(self)
+        self._add_login_navigation()
+        # 设置页面（账号下方、更多上方）
+        self.addSubInterface(self.settings_page, FluentIcon.SETTING, "设置", NavigationItemPosition.BOTTOM)
+        # "更多"弹出式子菜单
+        self.navigationInterface.addItem(
+            routeKey="about_menu",
+            icon=FluentIcon.MORE,
+            text="更多",
+            onClick=self._show_about_menu,
+            selectable=False,
+            position=NavigationItemPosition.BOTTOM
+        )
+        # 将 help_page、about_page、changelog_page 添加到 stackedWidget 但不显示在导航栏
+        if self.stackedWidget.indexOf(self.help_page) == -1:
+            self.stackedWidget.addWidget(self.help_page)
+        if self.stackedWidget.indexOf(self.about_page) == -1:
+            self.stackedWidget.addWidget(self.about_page)
+        if self.stackedWidget.indexOf(self.changelog_page) == -1:
+            self.stackedWidget.addWidget(self.changelog_page)
         self.navigationInterface.setCurrentItem(self.dashboard.objectName())
+
+    def _show_about_menu(self):
+        """显示关于子菜单"""
+        from wjx.utils.version import __VERSION__
+        
+        menu = RoundMenu(parent=self)
+        
+        # 版本信息（不可点击）
+        version_action = Action(FluentIcon.INFO, f"问卷星速填 v{__VERSION__}")
+        version_action.setEnabled(False)
+        menu.addAction(version_action)
+        
+        menu.addSeparator()
+        
+        # 更新日志
+        changelog_action = Action(FluentIcon.HISTORY, "更新日志")
+        changelog_action.triggered.connect(lambda: self.switchTo(self.changelog_page))
+        menu.addAction(changelog_action)
+        
+        # 帮助
+        help_action = Action(FluentIcon.HELP, "帮助")
+        help_action.triggered.connect(lambda: self.switchTo(self.help_page))
+        menu.addAction(help_action)
+        
+        # 关于
+        about_action = Action(FluentIcon.INFO, "关于")
+        about_action.triggered.connect(lambda: self.switchTo(self.about_page))
+        menu.addAction(about_action)
+        
+        menu.addSeparator()
+        
+        # 退出
+        quit_action = Action(FluentIcon.CLOSE, "退出程序")
+        quit_action.triggered.connect(self.close)
+        menu.addAction(quit_action)
+        
+        # 获取导航项的位置并显示菜单
+        nav_item = self.navigationInterface.widget("about_menu")
+        if nav_item:
+            pos = nav_item.mapToGlobal(nav_item.rect().topRight())
+            menu.exec(pos, aniType=MenuAnimationType.DROP_DOWN)
+
+    def _add_login_navigation(self):
+        """添加登录导航项（根据登录状态显示不同内容）"""
+        auth = get_github_auth()
+        
+        # 移除旧的导航项
+        if self._login_nav_widget:
+            try:
+                self.navigationInterface.removeWidget("login")
+            except Exception:
+                pass
+        
+        # 确保 login_page 在 stackedWidget 中
+        if self.stackedWidget.indexOf(self.login_page) == -1:
+            self.stackedWidget.addWidget(self.login_page)
+        
+        if auth.is_logged_in and auth.user_info:
+            # 已登录：显示头像和用户名
+            avatar_url = auth.user_info.get("avatar_url", "")
+            username = auth.username or "用户"
+            
+            self._login_nav_widget = NavigationAvatarWidget(username, avatar_url, self)
+            self.navigationInterface.addWidget(
+                "login",
+                self._login_nav_widget,
+                lambda: self.switchTo(self.login_page),
+                NavigationItemPosition.BOTTOM
+            )
+            
+            # 异步加载头像
+            if avatar_url:
+                self._load_avatar(avatar_url)
+        else:
+            # 未登录：显示登录按钮
+            self.navigationInterface.addItem(
+                routeKey="login",
+                icon=FluentIcon.GITHUB,
+                text="登录",
+                onClick=lambda: self.switchTo(self.login_page),
+                position=NavigationItemPosition.BOTTOM
+            )
+            self._login_nav_widget = None
+
+    def _load_avatar(self, url: str):
+        """异步加载头像"""
+        from PySide6.QtCore import QUrl
+        request = QNetworkRequest(QUrl(url))
+        reply = self._network_manager.get(request)
+        reply.finished.connect(lambda: self._on_avatar_loaded(reply))
+
+    def _on_avatar_loaded(self, reply: QNetworkReply):
+        """头像加载完成"""
+        if reply.error() == QNetworkReply.NetworkError.NoError:
+            data = reply.readAll()
+            pixmap = QPixmap()
+            pixmap.loadFromData(data.data())
+            if not pixmap.isNull() and self._login_nav_widget:
+                self._login_nav_widget.avatar.setPixmap(pixmap)
+        reply.deleteLater()
+
+    def _init_github_avatar(self):
+        """初始化GitHub认证"""
+        self._github_auth = get_github_auth()
+
+    def _update_github_avatar(self):
+        """更新登录页面状态和导航栏"""
+        self.login_page._update_ui_state()
+        self._add_login_navigation()
 
     def _center_on_screen(self):
         """窗口居中显示，适配多显示器与缩放。"""
@@ -276,7 +426,7 @@ class MainWindow(FluentWindow):
             cfg = self.controller.load_saved_config()
         except Exception:
             cfg = RuntimeConfig()
-        self.settings_page.apply_config(cfg)
+        self.runtime_page.apply_config(cfg)
         self.dashboard.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], self.controller.questions_info)
         # 初始刷新随机 IP 计数
