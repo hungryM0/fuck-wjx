@@ -286,11 +286,11 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.dashboard, FluentIcon.HOME, "概览", NavigationItemPosition.TOP)
         self.addSubInterface(self.runtime_page, FluentIcon.DEVELOPER_TOOLS, "运行参数", NavigationItemPosition.TOP)
         self.addSubInterface(self.log_page, FluentIcon.INFO, "日志", NavigationItemPosition.TOP)
-        # 登录页面使用自定义导航项（放在帮助上方）
+        # 登录页面（动态更新）
         self._login_nav_widget = None
         self._network_manager = QNetworkAccessManager(self)
-        self._add_login_navigation()
-        # 设置页面（账号下方、更多上方）
+        self._add_login_navigation(is_init=True)
+        # 设置页面
         self.addSubInterface(self.settings_page, FluentIcon.SETTING, "设置", NavigationItemPosition.BOTTOM)
         # "更多"弹出式子菜单
         self.navigationInterface.addItem(
@@ -351,14 +351,24 @@ class MainWindow(FluentWindow):
             pos = nav_item.mapToGlobal(nav_item.rect().topRight())
             menu.exec(pos, aniType=MenuAnimationType.DROP_DOWN)
 
-    def _add_login_navigation(self):
+    def _add_login_navigation(self, is_init: bool = False):
         """添加登录导航项（根据登录状态显示不同内容）"""
         auth = get_github_auth()
         
-        # 移除旧的导航项
-        if self._login_nav_widget:
+        # 移除旧的导航项（无论是 widget 还是普通 item）
+        try:
+            self.navigationInterface.removeWidget("login")
+        except Exception:
+            pass
+        
+        # 如果不是初始化，需要先移除设置和更多菜单，然后按顺序重新添加
+        if not is_init:
             try:
-                self.navigationInterface.removeWidget("login")
+                self.navigationInterface.removeWidget("settings")
+            except Exception:
+                pass
+            try:
+                self.navigationInterface.removeWidget("about_menu")
             except Exception:
                 pass
         
@@ -392,6 +402,26 @@ class MainWindow(FluentWindow):
                 position=NavigationItemPosition.BOTTOM
             )
             self._login_nav_widget = None
+        
+        # 如果不是初始化，重新添加设置和更多菜单
+        if not is_init:
+            # 重新添加设置导航项
+            self.navigationInterface.addItem(
+                routeKey="settings",
+                icon=FluentIcon.SETTING,
+                text="设置",
+                onClick=lambda: self.switchTo(self.settings_page),
+                position=NavigationItemPosition.BOTTOM
+            )
+            # 重新添加更多菜单
+            self.navigationInterface.addItem(
+                routeKey="about_menu",
+                icon=FluentIcon.MORE,
+                text="更多",
+                onClick=self._show_about_menu,
+                selectable=False,
+                position=NavigationItemPosition.BOTTOM
+            )
 
     def _load_avatar(self, url: str):
         """异步加载头像"""
@@ -415,9 +445,9 @@ class MainWindow(FluentWindow):
         self._github_auth = get_github_auth()
 
     def _update_github_avatar(self):
-        """更新登录页面状态和导航栏"""
+        """更新登录页面状态和侧边栏导航项"""
         self.login_page._update_ui_state()
-        self._add_login_navigation()
+        self._add_login_navigation(is_init=False)
 
     def _center_on_screen(self):
         """窗口居中显示，适配多显示器与缩放。"""

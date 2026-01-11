@@ -279,14 +279,32 @@ class AccountPage(ScrollArea):
         
         # 未登录状态显示
         self.not_logged_in_widget = QWidget()
-        not_logged_in_layout = QVBoxLayout(self.not_logged_in_widget)
+        not_logged_in_layout = QHBoxLayout(self.not_logged_in_widget)
         not_logged_in_layout.setContentsMargins(0, 0, 0, 0)
-        not_logged_in_layout.setSpacing(16)
+        not_logged_in_layout.setSpacing(20)
         
-        desc = BodyLabel("使用 GitHub 账号登录后可以提交 Issue 反馈问题", self)
-        desc.setWordWrap(True)
-        not_logged_in_layout.addWidget(desc)
+        # 左侧图标
+        github_icon = IconWidget(FluentIcon.GITHUB, self)
+        github_icon.setFixedSize(48, 48)
+        not_logged_in_layout.addWidget(github_icon)
         
+        # 中间文字区域
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(4)
+        
+        login_title = BodyLabel("连接 GitHub 账号", self)
+        login_title.setStyleSheet("font-size: 15px; font-weight: bold;")
+        text_layout.addWidget(login_title)
+        
+        desc = CaptionLabel("登录后享受免费权益", self)
+        desc.setStyleSheet("color: #888;")
+        text_layout.addWidget(desc)
+        
+        not_logged_in_layout.addLayout(text_layout)
+        not_logged_in_layout.addStretch(1)
+        
+        # 右侧登录按钮
         self.start_login_btn = PrimaryPushButton("开始登录", self)
         self.start_login_btn.setIcon(FluentIcon.LINK)
         self.start_login_btn.clicked.connect(self._start_device_flow)
@@ -360,8 +378,8 @@ class AccountPage(ScrollArea):
     
     def _build_issue_card(self, parent_layout: QVBoxLayout):
         """构建Issue提交卡片"""
-        issue_title = SubtitleLabel("提交 Issue", self)
-        parent_layout.addWidget(issue_title)
+        self.issue_title = SubtitleLabel("提交 Issue", self)
+        parent_layout.addWidget(self.issue_title)
         
         self.issue_card = CardWidget(self)
         card_layout = QVBoxLayout(self.issue_card)
@@ -449,12 +467,9 @@ class AccountPage(ScrollArea):
             # 检查 star 状态
             self._check_star_status()
         
-        # 更新Issue提交按钮状态
-        self.submit_btn.setEnabled(is_logged_in)
-        if not is_logged_in:
-            self.submit_btn.setToolTip("请先登录 GitHub")
-        else:
-            self.submit_btn.setToolTip("")
+        # 更新Issue提交部分的可见性
+        self.issue_title.setVisible(is_logged_in)
+        self.issue_card.setVisible(is_logged_in)
     
     def _load_avatar(self, url: str):
         """异步加载头像"""
@@ -525,7 +540,7 @@ class AccountPage(ScrollArea):
         code = self.code_display.text()
         if code and code != "--------":
             QApplication.clipboard().setText(code)
-            InfoBar.success("", "验证码已复制", parent=self, position=InfoBarPosition.TOP, duration=1500)
+            InfoBar.success("", "验证码已复制", parent=self.window(), position=InfoBarPosition.TOP, duration=1500)
     
     def _start_device_flow(self):
         """开始设备码登录流程"""

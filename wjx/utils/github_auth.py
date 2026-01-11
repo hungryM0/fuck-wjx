@@ -178,6 +178,8 @@ class GitHubAuth:
             if "access_token" in data:
                 self._access_token = data["access_token"]
                 # 获取用户信息
+                if on_progress:
+                    on_progress("正在获取用户信息...")
                 self._fetch_user_info()
                 self._save_token()
                 return True

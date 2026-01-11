@@ -45,7 +45,7 @@ class SpinBoxSettingCard(SettingCard):
         self.spinBox = NoWheelSpinBox(self)
         self.spinBox.setRange(min_val, max_val)
         self.spinBox.setValue(default)
-        self.spinBox.setMinimumWidth(110)
+        self.spinBox.setFixedWidth(110)
         self.spinBox.setFixedHeight(36)
         self.hBoxLayout.addWidget(self.spinBox, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
@@ -188,7 +188,7 @@ class RandomUASettingCard(ExpandGroupSettingCard):
     """随机UA设置卡 - 包含UA类型选择"""
 
     def __init__(self, parent=None):
-        super().__init__(FluentIcon.ROBOT, "随机 UA", "随机使用不同的 User-Agent", parent)
+        super().__init__(FluentIcon.ROBOT, "随机 UA", "模拟不同的 User-Agent，例如微信环境或浏览器直链环境", parent)
         self.checkboxes: Dict[str, CheckBox] = {}
 
         # 开关
