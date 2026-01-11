@@ -186,10 +186,6 @@ class DashboardPage(QWidget):
         self.add_action = Action(FluentIcon.ADD, "新增题目")
         self.command_bar.addAction(self.add_action)
         
-        # 编辑选中
-        self.edit_action = Action(FluentIcon.EDIT, "编辑选中")
-        self.command_bar.addAction(self.edit_action)
-        
         # 删除选中
         self.del_action = Action(FluentIcon.DELETE, "删除选中")
         self.command_bar.addAction(self.del_action)
@@ -267,7 +263,6 @@ class DashboardPage(QWidget):
         # CommandBar Actions
         self.select_all_action.triggered.connect(self._toggle_select_all_action)
         self.add_action.triggered.connect(self._show_add_question_dialog)
-        self.edit_action.triggered.connect(self._edit_selected_entry)
         self.del_action.triggered.connect(self._delete_selected_entries)
         self.wizard_action.triggered.connect(self._open_question_wizard)
         try:
@@ -498,9 +493,6 @@ class DashboardPage(QWidget):
             return dialog.get_card_code()
         return None
 
-    def request_card_code(self) -> Optional[str]:
-        return self._ask_card_code()
-
     def _open_contact_dialog(self, default_type: str = "报错反馈"):
         """打开联系对话框"""
         win = self.window()
@@ -534,19 +526,6 @@ class DashboardPage(QWidget):
                 self.runtime_page.random_ip_switch.setChecked(True)
             except Exception:
                 pass
-
-    def _edit_selected_entry(self):
-        """编辑选中的题目 - 由于代码过长，这里简化实现"""
-        selected_rows = self._checked_rows()
-        if not selected_rows:
-            self._toast("请先勾选要编辑的题目", "warning")
-            return
-        if len(selected_rows) > 1:
-            self._toast("一次只能编辑一个题目", "warning")
-            return
-        
-        # 简化版：直接提示用户到题目配置页编辑
-        self._toast("请到'题目配置'页面进行详细编辑", "info")
 
     def _show_add_question_dialog(self):
         """新增题目 - 委托给 QuestionPage"""

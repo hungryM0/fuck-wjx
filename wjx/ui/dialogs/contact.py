@@ -2,9 +2,8 @@
 import re
 import threading
 from datetime import datetime
-from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPlainTextEdit
 from qfluentwidgets import (
@@ -18,13 +17,13 @@ from qfluentwidgets import (
     InfoBarPosition,
 )
 
-from wjx.ui.widgets import StatusFetchWorker
+from wjx.ui.widgets import StatusPollingMixin
 from wjx.utils.config import CONTACT_API_URL
 from wjx.utils.version import __VERSION__
 
 
-class ContactDialog(QDialog):
-    """联系开发者（Qt 版本）。使用 QThread + Worker 模式确保线程安全。"""
+class ContactDialog(StatusPollingMixin, QDialog):
+    """联系开发者（Qt 版本）。使用 StatusPollingMixin 处理状态轮询。"""
 
     _statusLoaded = Signal(str, str)  # text, color
     _sendFinished = Signal(bool, str)  # success, message
@@ -32,17 +31,12 @@ class ContactDialog(QDialog):
     def __init__(self, parent=None, default_type: str = "报错反馈", status_fetcher=None, status_formatter=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
-        self._statusLoaded.connect(self._on_status_loaded)
         self._sendFinished.connect(self._on_send_finished)
         self.setWindowTitle("联系开发者")
         self.resize(720, 520)
         
-        # QThread + Worker 相关
-        self._worker_thread: Optional[QThread] = None
-        self._worker: Optional[StatusFetchWorker] = None
-        self._status_timer: Optional[QTimer] = None
-        self._status_fetcher = status_fetcher
-        self._status_formatter = status_formatter
+        # 初始化状态轮询 Mixin
+        self._init_status_polling(status_fetcher, status_formatter)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -127,64 +121,11 @@ class ContactDialog(QDialog):
         self.type_combo.currentIndexChanged.connect(lambda _: self._on_type_changed())
         QTimer.singleShot(0, self._on_type_changed)
         
+        # 保存消息类型用于回调
+        self._current_message_type: str = ""
+        
         # 启动状态查询和定时刷新
         self._start_status_polling()
-
-    def _start_status_polling(self):
-        """启动状态轮询"""
-        if not callable(self._status_fetcher):
-            self.online_label.setText("作者当前在线状态：未知")
-            self.status_spinner.hide()
-            return
-        
-        # 立即执行一次查询
-        self._fetch_status_once()
-        
-        # 设置定时器，每 5 秒刷新一次
-        self._status_timer = QTimer(self)
-        self._status_timer.setInterval(5000)
-        self._status_timer.timeout.connect(self._fetch_status_once)
-        self._status_timer.start()
-
-    def _fetch_status_once(self):
-        """执行一次状态查询（使用 QThread）"""
-        # 如果上一次查询还在进行，跳过
-        if self._worker_thread is not None and self._worker_thread.isRunning():
-            return
-        
-        # 创建新的 Worker 和 Thread
-        self._worker_thread = QThread(self)
-        self._worker = StatusFetchWorker(self._status_fetcher, self._status_formatter)
-        self._worker.moveToThread(self._worker_thread)
-        
-        # 连接信号
-        self._worker.finished.connect(self._on_status_loaded)
-        self._worker.finished.connect(self._worker_thread.quit)
-        self._worker_thread.started.connect(self._worker.fetch)
-        
-        # 启动线程
-        self._worker_thread.start()
-
-    def _stop_status_polling(self):
-        """停止状态轮询并安全清理线程"""
-        # 停止定时器
-        if self._status_timer is not None:
-            self._status_timer.stop()
-            self._status_timer = None
-        
-        # 停止 Worker
-        if self._worker is not None:
-            self._worker.stop()
-        
-        # 等待线程结束
-        if self._worker_thread is not None and self._worker_thread.isRunning():
-            self._worker_thread.quit()
-            self._worker_thread.wait(1000)
-            if self._worker_thread.isRunning():
-                self._worker_thread.terminate()
-        
-        self._worker = None
-        self._worker_thread = None
 
     def closeEvent(self, arg__1):
         """对话框关闭时安全停止线程"""

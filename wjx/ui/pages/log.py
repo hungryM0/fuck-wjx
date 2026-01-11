@@ -2,7 +2,7 @@
 import os
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit, QApplication
-from PySide6.QtGui import QFont, QTextCharFormat, QColor, QTextCursor
+from PySide6.QtGui import QFont, QTextCursor
 from qfluentwidgets import (
     SubtitleLabel,
     PushButton,

@@ -1,14 +1,11 @@
 """关于页面"""
-import os
-import re
-import sys
 import threading
 import subprocess
 import webbrowser
 from typing import Optional
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -25,49 +22,10 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     MessageBox,
-    TextBrowser,
     ProgressBar,
 )
 
-from wjx.utils.load_save import get_runtime_directory
 from wjx.utils.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO
-
-
-def _convert_github_admonitions(text: str) -> str:
-    """将 GitHub Flavored Markdown 的 admonition 语法转换为标准格式"""
-    # 匹配 > [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING], > [!CAUTION] 等
-    admonition_map = {
-        "NOTE": "**注意：**",
-        "TIP": "**提示：**",
-        "IMPORTANT": "**重要：**",
-        "WARNING": "**警告：**",
-        "CAUTION": "**警告：**",
-    }
-    
-    def replace_admonition(match):
-        admonition_type = match.group(1).upper()
-        content = match.group(2).strip()
-        prefix = admonition_map.get(admonition_type, f"**{admonition_type}：**")
-        return f"{prefix} {content}"
-    
-    # 匹配多行 admonition: > [!TYPE]\n> content
-    pattern = r'>\s*\[!(\w+)\]\s*\n((?:>.*\n?)*)'
-    
-    def replace_multiline(match):
-        admonition_type = match.group(1).upper()
-        content_lines = match.group(2)
-        # 移除每行开头的 > 
-        content = re.sub(r'^>\s?', '', content_lines, flags=re.MULTILINE).strip()
-        prefix = admonition_map.get(admonition_type, f"**{admonition_type}：**")
-        return f"{prefix}\n\n{content}"
-    
-    text = re.sub(pattern, replace_multiline, text)
-    
-    # 匹配单行 admonition: > [!TYPE] content
-    single_pattern = r'>\s*\[!(\w+)\]\s*(.+)'
-    text = re.sub(single_pattern, replace_admonition, text)
-    
-    return text
 
 
 class DownloadProgressDialog(MessageBox):
@@ -184,6 +142,7 @@ class AboutPage(ScrollArea):
         self.setWidgetResizable(True)
         self._checking_update = False
         self._progress_dlg: Optional[DownloadProgressDialog] = None
+        self._downloaded_file_result: Optional[str] = None
         self._build_ui()
 
     def _build_ui(self):

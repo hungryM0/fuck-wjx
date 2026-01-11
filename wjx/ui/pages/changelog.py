@@ -1,5 +1,4 @@
 """更新日志页面"""
-import re
 import threading
 from datetime import datetime
 
@@ -16,37 +15,7 @@ from qfluentwidgets import (
     TextBrowser,
 )
 
-
-def _convert_github_admonitions(text: str) -> str:
-    """将 GitHub Flavored Markdown 的 admonition 语法转换为标准格式"""
-    admonition_map = {
-        "NOTE": "**注意：**",
-        "TIP": "**提示：**",
-        "IMPORTANT": "**重要：**",
-        "WARNING": "**警告：**",
-        "CAUTION": "**警告：**",
-    }
-    
-    def replace_multiline(match):
-        admonition_type = match.group(1).upper()
-        content_lines = match.group(2)
-        content = re.sub(r'^>\s?', '', content_lines, flags=re.MULTILINE).strip()
-        prefix = admonition_map.get(admonition_type, f"**{admonition_type}：**")
-        return f"{prefix}\n\n{content}"
-    
-    pattern = r'>\s*\[!(\w+)\]\s*\n((?:>.*\n?)*)'
-    text = re.sub(pattern, replace_multiline, text)
-    
-    def replace_admonition(match):
-        admonition_type = match.group(1).upper()
-        content = match.group(2).strip()
-        prefix = admonition_map.get(admonition_type, f"**{admonition_type}：**")
-        return f"{prefix} {content}"
-    
-    single_pattern = r'>\s*\[!(\w+)\]\s*(.+)'
-    text = re.sub(single_pattern, replace_admonition, text)
-    
-    return text
+from wjx.utils.markdown_utils import convert_github_admonitions
 
 
 class ReleaseCard(CardWidget):
@@ -84,7 +53,7 @@ class ReleaseCard(CardWidget):
         layout.addLayout(header)
         
         self.content = TextBrowser(self)
-        processed_body = _convert_github_admonitions(self._body) if self._body else "暂无更新说明"
+        processed_body = convert_github_admonitions(self._body) if self._body else "暂无更新说明"
         self.content.setMarkdown(processed_body)
         self.content.setOpenExternalLinks(True)
         self.content.setStyleSheet("border: none; background: transparent; padding-left: 32px;")

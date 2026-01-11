@@ -163,6 +163,7 @@ class MainWindow(FluentWindow):
         self._preview_badge = None
         self._download_infobar = None
         self._download_progress_bar = None
+        self._download_cancelled = False
 
         # 检查是否为预览版本，如果是则显示预览徽章
         self._check_preview_version()
@@ -564,8 +565,8 @@ class MainWindow(FluentWindow):
             return bool(box.exec())
         return bool(self._dispatch_to_ui(_show))
 
-    def _log_popup_info(self, title: str, message: str):
-        """显示信息对话框（线程安全）。"""
+    def _log_popup_message(self, title: str, message: str):
+        """显示消息对话框（线程安全）。"""
         def _show():
             box = MessageBox(title, message, self)
             box.yesButton.setText("确定")
@@ -573,14 +574,12 @@ class MainWindow(FluentWindow):
             box.exec()
         self._dispatch_to_ui(_show)
 
+    # 保留别名以兼容现有调用
+    def _log_popup_info(self, title: str, message: str):
+        self._log_popup_message(title, message)
+
     def _log_popup_error(self, title: str, message: str):
-        """显示错误对话框（线程安全）。"""
-        def _show():
-            box = MessageBox(title, message, self)
-            box.yesButton.setText("确定")
-            box.cancelButton.hide()
-            box.exec()
-        self._dispatch_to_ui(_show)
+        self._log_popup_message(title, message)
 
     def _check_update_on_startup(self):
         """根据设置在启动时检查更新"""

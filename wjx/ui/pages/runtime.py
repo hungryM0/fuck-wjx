@@ -357,7 +357,7 @@ class RuntimePage(ScrollArea):
         self.interval_max_btn.clicked.connect(lambda: self._show_time_picker("interval_max"))
         self.answer_min_btn.clicked.connect(lambda: self._show_time_picker("answer_min"))
         self.answer_max_btn.clicked.connect(lambda: self._show_time_picker("answer_max"))
-        self.proxy_source_combo.currentIndexChanged.connect(lambda idx: self._on_proxy_source_changed())
+        self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
 
     def _show_timed_mode_help(self):
         """显示定时模式说明"""
@@ -391,7 +391,7 @@ class RuntimePage(ScrollArea):
             finally:
                 self.random_ip_switch.blockSignals(False)
 
-    def _on_proxy_source_changed(self, text: str = ""):
+    def _on_proxy_source_changed(self):
         """代理源选择变化时更新设置"""
         idx = self.proxy_source_combo.currentIndex()
         source = str(self.proxy_source_combo.itemData(idx)) if idx >= 0 else "default"

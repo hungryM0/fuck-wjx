@@ -59,21 +59,10 @@ class EngineGuiAdapter:
     ):
         self.random_ip_enabled_var = BoolVar(False)
         self.active_drivers: List[Any] = []
-        self._launched_browser_pids: set[int] = set()
         self._dispatcher = dispatcher
         self._stop_signal = stop_signal
         self._card_code_provider = card_code_provider
         self.update_random_ip_counter = on_ip_counter
-
-    # Popup helpers
-    def _log_popup_confirm(self, title: str, message: str, **kwargs) -> bool:
-        return log_popup_confirm(title, message, **kwargs)
-
-    def _log_popup_info(self, title: str, message: str, **kwargs):
-        return log_popup_info(title, message, **kwargs)
-
-    def _log_popup_error(self, title: str, message: str, **kwargs):
-        return log_popup_error(title, message, **kwargs)
 
     def force_stop_immediately(self, reason: Optional[str] = None):
         self._stop_signal.set()
@@ -163,6 +152,14 @@ class RunController(QObject):
         normalized_title = _normalize_html_text(title) if title else ""
         return info, normalized_title
 
+    @staticmethod
+    def _as_float(val, default):
+        """将值转换为浮点数，失败时返回默认值"""
+        try:
+            return float(val)
+        except Exception:
+            return default
+
     def _build_default_entries(self, questions_info: List[Dict[str, Any]]) -> List[QuestionEntry]:
         entries: List[QuestionEntry] = []
         for q in questions_info:
@@ -212,14 +209,8 @@ class RunController(QObject):
                 custom_weights = None
                 texts = None
             elif q_type == "slider":
-                def _as_float(val, default):
-                    try:
-                        return float(val)
-                    except Exception:
-                        return default
-
-                min_val = _as_float(slider_min, 0.0)
-                max_val = _as_float(slider_max, 100.0 if slider_max is None else slider_max)
+                min_val = self._as_float(slider_min, 0.0)
+                max_val = self._as_float(slider_max, 100.0 if slider_max is None else slider_max)
                 if max_val <= min_val:
                     max_val = min_val + 100.0
                 midpoint = min_val + (max_val - min_val) / 2.0
@@ -272,7 +263,7 @@ class RunController(QObject):
                 done.set()
 
         # 将回调派发到控制器所属线程（主线程）
-        QTimer.singleShot(0, self, _run)
+        QTimer.singleShot(0, _run)
         done.wait()
         return result_container.get("value")
 
@@ -388,7 +379,7 @@ class RunController(QObject):
 
     def _on_run_finished(self):
         if threading.current_thread() is not threading.main_thread():
-            QTimer.singleShot(0, self, self._on_run_finished)
+            QTimer.singleShot(0, self._on_run_finished)
             return
         self.running = False
         self.runStateChanged.emit(False)

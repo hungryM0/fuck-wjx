@@ -2,7 +2,7 @@
 import sys
 import subprocess
 
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication
 from qfluentwidgets import (
     ScrollArea,
