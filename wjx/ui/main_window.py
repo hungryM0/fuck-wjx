@@ -15,12 +15,14 @@ from qfluentwidgets import (
     AvatarWidget,
     FluentIcon,
     FluentWindow,
+    IndeterminateProgressRing,
     InfoBadge,
     InfoBar,
     InfoBarPosition,
     MessageBox,
     NavigationAvatarWidget,
     NavigationItemPosition,
+    ProgressBar,
     PushButton,
     RoundMenu,
     Theme,
@@ -72,6 +74,14 @@ class MainWindow(FluentWindow):
     updateAvailable = Signal()
     # 最新版本信号
     isLatestVersion = Signal()
+    # 下载开始信号（显示转圈动画）
+    downloadStarted = Signal()
+    # 下载进度信号
+    downloadProgress = Signal(int, int, float)  # downloaded, total, speed
+    # 下载完成信号
+    downloadFinished = Signal(str)  # downloaded_file_path
+    # 下载失败信号
+    downloadFailed = Signal(str)  # error_message
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -141,9 +151,18 @@ class MainWindow(FluentWindow):
         self.updateAvailable.connect(self._show_outdated_badge)
         # 连接最新版本信号
         self.isLatestVersion.connect(self._show_latest_version_badge)
+        # 连接下载开始信号（显示转圈动画）
+        self.downloadStarted.connect(self._on_download_started)
+        # 连接下载进度信号
+        self.downloadProgress.connect(self._update_download_progress)
+        # 连接下载完成/失败信号
+        self.downloadFinished.connect(self._on_download_finished)
+        self.downloadFailed.connect(self._on_download_failed)
         self._latest_badge = None
         self._outdated_badge = None
         self._preview_badge = None
+        self._download_infobar = None
+        self._download_progress_bar = None
 
         # 检查是否为预览版本，如果是则显示预览徽章
         self._check_preview_version()
@@ -507,25 +526,31 @@ class MainWindow(FluentWindow):
 
     # ---------- updater 兼容方法 ----------
     def _log_popup_confirm(self, title: str, message: str) -> bool:
-        """显示确认对话框，返回用户是否确认。"""
-        box = MessageBox(title, message, self)
-        box.yesButton.setText("确定")
-        box.cancelButton.setText("取消")
-        return bool(box.exec())
+        """显示确认对话框，返回用户是否确认（线程安全）。"""
+        def _show():
+            box = MessageBox(title, message, self)
+            box.yesButton.setText("确定")
+            box.cancelButton.setText("取消")
+            return bool(box.exec())
+        return bool(self._dispatch_to_ui(_show))
 
     def _log_popup_info(self, title: str, message: str):
-        """显示信息对话框。"""
-        box = MessageBox(title, message, self)
-        box.yesButton.setText("确定")
-        box.cancelButton.hide()
-        box.exec()
+        """显示信息对话框（线程安全）。"""
+        def _show():
+            box = MessageBox(title, message, self)
+            box.yesButton.setText("确定")
+            box.cancelButton.hide()
+            box.exec()
+        self._dispatch_to_ui(_show)
 
     def _log_popup_error(self, title: str, message: str):
-        """显示错误对话框。"""
-        box = MessageBox(title, message, self)
-        box.yesButton.setText("确定")
-        box.cancelButton.hide()
-        box.exec()
+        """显示错误对话框（线程安全）。"""
+        def _show():
+            box = MessageBox(title, message, self)
+            box.yesButton.setText("确定")
+            box.cancelButton.hide()
+            box.exec()
+        self._dispatch_to_ui(_show)
 
     def _check_update_on_startup(self):
         """根据设置在启动时检查更新"""
@@ -539,7 +564,7 @@ class MainWindow(FluentWindow):
         self.updateAvailable.emit()
 
     def _do_show_update_notification(self):
-        """实际显示更新通知"""
+        """实际显示更新通知（使用简单纯文本样式）"""
         if not getattr(self, "update_info", None):
             return
         from wjx.utils.updater import show_update_notification
@@ -615,6 +640,178 @@ class MainWindow(FluentWindow):
     def _notify_latest_version(self):
         """通知已是最新版本（从后台线程安全调用）"""
         self.isLatestVersion.emit()
+
+    def _show_download_toast(self, total_size: int = 0, show_spinner: bool = False):
+        """显示下载进度Toast（右下角）"""
+        if self._download_infobar:
+            return
+        from qfluentwidgets import InfoBarIcon, CaptionLabel, IndeterminateProgressBar
+        from PySide6.QtWidgets import QWidget, QVBoxLayout
+        
+        self._download_total_size = total_size
+        self._download_indeterminate = show_spinner or total_size == 0
+        
+        # 创建右下角InfoBar（使用蓝色主题色）
+        self._download_infobar = InfoBar(
+            icon=InfoBarIcon.INFORMATION,
+            title="",
+            content="正在下载文件中，请稍候...",
+            orient=Qt.Orientation.Vertical,
+            isClosable=True,
+            position=InfoBarPosition.BOTTOM_RIGHT,
+            duration=-1,
+            parent=self
+        )
+        self._download_infobar.closeButton.clicked.connect(self._cancel_download)
+        
+        # 创建容器
+        self._download_container = QWidget()
+        self._download_layout = QVBoxLayout(self._download_container)
+        self._download_layout.setContentsMargins(0, 4, 0, 0)
+        self._download_layout.setSpacing(4)
+        
+        # 进度详情标签
+        self._download_detail_label = CaptionLabel("正在连接服务器...")
+        self._download_detail_label.setStyleSheet("color: gray;")
+        self._download_layout.addWidget(self._download_detail_label)
+        
+        if self._download_indeterminate:
+            # 不确定进度条（加载动画）
+            self._download_indeterminate_bar = IndeterminateProgressBar()
+            self._download_indeterminate_bar.setFixedSize(220, 4)
+            self._download_layout.addWidget(self._download_indeterminate_bar)
+            self._download_progress_bar = None
+        else:
+            # 确定进度条
+            self._download_indeterminate_bar = None
+            self._download_progress_bar = ProgressBar()
+            self._download_progress_bar.setFixedSize(220, 4)
+            self._download_progress_bar.setRange(0, 100)
+            self._download_progress_bar.setValue(0)
+            self._download_progress_bar.setTextVisible(False)
+            self._download_layout.addWidget(self._download_progress_bar)
+        
+        self._download_infobar.addWidget(self._download_container)
+        self._download_infobar.show()
+
+    def _format_size(self, size: int) -> str:
+        """格式化文件大小"""
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        else:
+            return f"{size / (1024 * 1024):.1f} MB"
+
+    def _format_speed(self, speed: float) -> str:
+        """格式化下载速度"""
+        if speed < 1024:
+            return f"{speed:.0f} B/s"
+        elif speed < 1024 * 1024:
+            return f"{speed / 1024:.1f} KB/s"
+        else:
+            return f"{speed / (1024 * 1024):.1f} MB/s"
+
+    def _update_download_progress(self, downloaded: int, total: int, speed: float = 0):
+        """更新下载进度"""
+        if not self._download_infobar:
+            self._show_download_toast(total)
+        
+        # 如果当前是不确定进度条，切换到确定进度条
+        if total > 0 and getattr(self, "_download_indeterminate", False):
+            self._switch_to_determinate_progress()
+        
+        if total > 0 and self._download_progress_bar:
+            percent = int((downloaded / total) * 100)
+            self._download_progress_bar.setValue(percent)
+        
+        # 更新详情标签
+        if hasattr(self, "_download_detail_label") and self._download_detail_label:
+            detail = f"{self._format_size(downloaded)} / {self._format_size(total)}"
+            if speed > 0:
+                detail += f" | {self._format_speed(speed)}"
+            self._download_detail_label.setText(detail)
+        
+        # 下载完成时延迟关闭Toast并显示成功提示
+        if downloaded >= total and total > 0:
+            QTimer.singleShot(100, self._on_download_complete)
+
+    def _on_download_complete(self):
+        """下载完成时关闭进度Toast并显示成功提示"""
+        self._close_download_toast()
+        self._toast("下载完成", "success")
+
+    def _switch_to_determinate_progress(self):
+        """从不确定进度条切换到确定进度条"""
+        self._download_indeterminate = False
+        
+        # 移除不确定进度条
+        if hasattr(self, "_download_indeterminate_bar") and self._download_indeterminate_bar:
+            self._download_layout.removeWidget(self._download_indeterminate_bar)
+            self._download_indeterminate_bar.deleteLater()
+            self._download_indeterminate_bar = None
+        
+        # 添加确定进度条
+        self._download_progress_bar = ProgressBar()
+        self._download_progress_bar.setFixedSize(220, 4)
+        self._download_progress_bar.setRange(0, 100)
+        self._download_progress_bar.setValue(0)
+        self._download_progress_bar.setTextVisible(False)
+        self._download_layout.addWidget(self._download_progress_bar)
+
+    def _on_download_started(self):
+        """下载开始时显示转圈动画"""
+        self._show_download_toast(0, show_spinner=True)
+
+    def _cancel_download(self):
+        """取消下载"""
+        self._download_cancelled = True
+        self._close_download_toast()
+        self._toast("下载已取消", "warning")
+
+    def _close_download_toast(self):
+        """安全关闭下载进度Toast"""
+        if self._download_infobar:
+            try:
+                self._download_infobar.close()
+            except Exception:
+                pass
+            self._download_infobar = None
+            self._download_progress_bar = None
+            self._download_detail_label = None
+            self._download_indeterminate_bar = None
+            self._download_indeterminate = False
+
+    def _emit_download_progress(self, downloaded: int, total: int, speed: float = 0):
+        """从后台线程安全地发送下载进度信号"""
+        self.downloadProgress.emit(downloaded, total, speed)
+
+    def _on_download_finished(self, downloaded_file: str):
+        """下载完成后在主线程显示弹窗"""
+        import subprocess
+        import logging
+        from wjx.utils.updater import UpdateManager
+        
+        should_launch = self._log_popup_confirm(
+            "更新完成",
+            f"新版本已下载到:\n{downloaded_file}\n\n是否立即运行新版本？",
+        )
+        UpdateManager.schedule_running_executable_deletion(downloaded_file)
+        if should_launch:
+            try:
+                subprocess.Popen([downloaded_file])
+                self._skip_save_on_close = True
+                self.close()
+            except Exception as exc:
+                logging.error("[Action Log] Failed to launch downloaded update")
+                self._log_popup_error("启动失败", f"无法启动新版本: {exc}")
+        else:
+            logging.info("[Action Log] Deferred launching downloaded update")
+
+    def _on_download_failed(self, error_msg: str):
+        """下载失败后在主线程显示弹窗"""
+        if not getattr(self, "_download_cancelled", False):
+            self._log_popup_error("更新失败", error_msg)
 
 
 def create_window() -> MainWindow:

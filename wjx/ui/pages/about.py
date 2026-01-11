@@ -168,40 +168,6 @@ class DownloadProgressDialog(MessageBox):
         return self._downloaded_file
 
 
-class UpdateDialog(MessageBox):
-    """支持Markdown显示发行文档的更新对话框"""
-    
-    def __init__(self, current_version: str, new_version: str, release_notes: str, parent=None):
-        super().__init__("检查到更新", "检测到新版本！", parent)
-        self.yesButton.setText("立即更新")
-        self.cancelButton.setText("稍后再说")
-        
-        # 清除默认内容，重新构建
-        self.textLayout.removeWidget(self.contentLabel)
-        self.contentLabel.hide()
-        
-        # 版本信息
-        version_label = BodyLabel(f"当前版本: v{current_version}\n新版本: v{new_version}", self)
-        self.textLayout.addWidget(version_label)
-        
-        # 发行文档（Markdown）
-        notes_label = BodyLabel("发行说明:", self)
-        notes_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
-        self.textLayout.addWidget(notes_label)
-        
-        notes_browser = TextBrowser(self)
-        processed_notes = _convert_github_admonitions(release_notes) if release_notes else "暂无更新说明"
-        notes_browser.setMarkdown(processed_notes)
-        notes_browser.setOpenExternalLinks(True)
-        notes_browser.setFixedSize(450, 250)
-        notes_browser.setStyleSheet("border: 1px solid #444; border-radius: 4px;")
-        self.textLayout.addWidget(notes_browser)
-        
-        # 确认提示
-        confirm_label = BodyLabel("\n是否立即更新？", self)
-        self.textLayout.addWidget(confirm_label)
-
-
 class AboutPage(ScrollArea):
     """关于页面，包含版本号、链接、检查更新等。"""
 
@@ -295,14 +261,9 @@ class AboutPage(ScrollArea):
         if update_info:
             if hasattr(win, 'update_info'):
                 win.update_info = update_info  # type: ignore[union-attr]
-            dlg = UpdateDialog(
-                update_info['current_version'],
-                update_info['version'],
-                update_info.get('release_notes', ''),
-                win
-            )
-            if dlg.exec():
-                self._start_download(update_info)
+            # 使用简单的纯文本弹窗样式
+            from wjx.utils.updater import show_update_notification
+            show_update_notification(win)
         else:
             InfoBar.success("", f"当前已是最新版本 v{__VERSION__}", parent=win, position=InfoBarPosition.TOP, duration=3000)
 

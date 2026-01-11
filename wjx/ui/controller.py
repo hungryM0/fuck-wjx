@@ -75,9 +75,6 @@ class EngineGuiAdapter:
     def _log_popup_error(self, title: str, message: str, **kwargs):
         return log_popup_error(title, message, **kwargs)
 
-    def _log_popup_warning(self, title: str, message: str, **kwargs):
-        return log_popup_warning(title, message, **kwargs)
-
     def force_stop_immediately(self, reason: Optional[str] = None):
         self._stop_signal.set()
 

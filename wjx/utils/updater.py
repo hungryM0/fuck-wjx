@@ -131,9 +131,13 @@ class UpdateManager:
 
     @staticmethod
     def download_update(
-        download_url: str, file_name: str, progress_callback=None
+        download_url: str, file_name: str, progress_callback=None, cancel_check=None
     ) -> Optional[str]:
-        """下载更新文件，成功返回文件路径。"""
+        """下载更新文件，成功返回文件路径。
+        
+        Args:
+            cancel_check: 可调用对象，返回True表示取消下载
+        """
         if not requests:
             logging.error("下载更新需要 requests 模块")
             return None
@@ -149,16 +153,31 @@ class UpdateManager:
             target_file = os.path.join(current_dir, file_name)
             temp_file = target_file + ".tmp"
             downloaded_size = 0
+            start_time = time.time()
+            last_time = start_time
+            last_downloaded = 0
 
             logging.info(f"下载目标目录: {current_dir}")
 
+            last_speed = 0
             with open(temp_file, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
+                    # 检查是否取消
+                    if cancel_check and cancel_check():
+                        logging.info("下载已取消")
+                        raise Exception("下载已取消")
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
+                        # 计算下载速度
+                        now = time.time()
+                        elapsed = now - last_time
+                        if elapsed >= 0.3:  # 每0.3秒更新一次速度
+                            last_speed = (downloaded_size - last_downloaded) / elapsed
+                            last_time = now
+                            last_downloaded = downloaded_size
                         if progress_callback:
-                            progress_callback(downloaded_size, total_size)
+                            progress_callback(downloaded_size, total_size, last_speed)
                         if total_size > 0:
                             progress = (downloaded_size / total_size) * 100
                             logging.debug(f"下载进度: {progress:.1f}%")
@@ -278,8 +297,10 @@ def _preview_release_notes(text: str, limit: int) -> str:
     text = re.sub(r'~~(.+?)~~', r'\1', text)
     # 移除粗体标记 **text** -> text
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    # 移除斜体标记 *text* -> text
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    # 移除斜体标记 *text* -> text（但保留列表项的 * ）
+    text = re.sub(r'(?<!\n)\*(.+?)\*', r'\1', text)
+    # 将列表项 * 或 - 统一为 -
+    text = re.sub(r'^\s*[\*\-]\s+', '- ', text, flags=re.MULTILINE)
     # 移除多余空行
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = text.strip()
@@ -351,18 +372,8 @@ def check_for_updates(gui=None) -> Optional[Dict[str, Any]]:
             return update_info
         if update_info:
             gui.update_info = update_info
-            msg = (
-                f"检测到新版本！\n\n"
-                f"当前版本: v{update_info['current_version']}\n"
-                f"新版本: v{update_info['version']}\n\n"
-                f"发布说明:\n{(update_info.get('release_notes') or '')[:200]}\n\n"
-                f"立即更新？"
-            )
-            if gui._log_popup_confirm("检查到更新", msg):
-                logging.info("[Action Log] User triggered manual update")
-                perform_update(gui)
-            else:
-                logging.info("[Action Log] User postponed manual update")
+            # 使用与启动时检查更新相同的弹窗样式
+            show_update_notification(gui)
         else:
             gui._log_popup_info("检查更新", f"当前已是最新版本 v{__VERSION__}")
         return update_info
@@ -374,19 +385,34 @@ def check_for_updates(gui=None) -> Optional[Dict[str, Any]]:
         return None
 
 
-def perform_update(gui, *, on_progress: Optional[Callable[[int, int], None]] = None) -> None:
+def perform_update(gui, *, on_progress: Optional[Callable[[int, int, float], None]] = None) -> None:
     """执行更新：下载并在完成后询问是否启动新版本。"""
     if not getattr(gui, "update_info", None):
         return
 
     update_info = gui.update_info
+    # 取消标志
+    gui._download_cancelled = False
 
-    def update_progress(downloaded, total):
+    def cancel_check():
+        return getattr(gui, "_download_cancelled", False)
+
+    def update_progress(downloaded, total, speed=0):
+        # 优先使用GUI的进度信号
+        if hasattr(gui, "_emit_download_progress"):
+            try:
+                gui._emit_download_progress(downloaded, total, speed)
+            except Exception:
+                logging.debug("GUI进度回调失败", exc_info=True)
         if on_progress:
             try:
-                on_progress(downloaded, total)
+                on_progress(downloaded, total, speed)
             except Exception:
                 logging.debug("更新进度回调失败", exc_info=True)
+
+    # 立即显示转圈动画（在开始下载前）
+    if hasattr(gui, "downloadStarted"):
+        gui.downloadStarted.emit()
 
     def do_update():
         try:
@@ -394,30 +420,31 @@ def perform_update(gui, *, on_progress: Optional[Callable[[int, int], None]] = N
                 update_info["download_url"],
                 update_info["file_name"],
                 progress_callback=update_progress,
+                cancel_check=cancel_check,
             )
+
+            if gui._download_cancelled:
+                return
 
             if downloaded_file:
                 if on_progress:
-                    on_progress(1, 1)
-                should_launch = gui._log_popup_confirm(
-                    "更新完成",
-                    f"新版本已下载到:\n{downloaded_file}\n\n是否立即运行新版本？",
-                )
-                UpdateManager.schedule_running_executable_deletion(downloaded_file)
-                if should_launch:
-                    try:
-                        subprocess.Popen([downloaded_file])
-                        if hasattr(gui, "on_close"):
-                            gui.on_close()
-                    except Exception as exc:
-                        logging.error("[Action Log] Failed to launch downloaded update")
-                        gui._log_popup_error("启动失败", f"无法启动新版本: {exc}")
+                    on_progress(1, 1, 0)
+                # 使用信号通知主线程显示弹窗
+                if hasattr(gui, "downloadFinished"):
+                    gui.downloadFinished.emit(downloaded_file)
                 else:
-                    logging.info("[Action Log] Deferred launching downloaded update")
+                    # 兼容旧版本
+                    logging.info(f"下载完成: {downloaded_file}")
             else:
-                gui._log_popup_error("更新失败", "下载文件失败，请稍后重试")
+                if not gui._download_cancelled:
+                    if hasattr(gui, "downloadFailed"):
+                        gui.downloadFailed.emit("下载文件失败，请稍后重试")
+                    else:
+                        logging.error("下载文件失败")
         except Exception as exc:
-            logging.error(f"更新过程中出错: {exc}")
-            gui._log_popup_error("更新失败", f"更新过程出错: {str(exc)}")
+            if not gui._download_cancelled:
+                logging.error(f"更新过程中出错: {exc}")
+                if hasattr(gui, "downloadFailed"):
+                    gui.downloadFailed.emit(f"更新过程出错: {str(exc)}")
 
     Thread(target=do_update, daemon=True).start()
