@@ -562,12 +562,11 @@ class QuestionPage(ScrollArea):
             else:
                 custom_weights = None
                 if strategy == "custom" and sliders:
-                    custom_weights = [float(max(1, s.value())) for s in sliders]
-                    if all(w == custom_weights[0] for w in custom_weights):
-                        custom_weights = None
+                    custom_weights = [float(max(0, s.value())) for s in sliders]
+                    # 不再检查是否全部相等，保留用户设置的权重
                 new_entry = QuestionEntry(
                     question_type=q_type,
-                    probabilities=-1 if strategy == "random" else [1.0] * option_count,
+                    probabilities=-1 if strategy == "random" else (custom_weights or [1.0] * option_count),
                     texts=None,
                     rows=1,
                     option_count=option_count,

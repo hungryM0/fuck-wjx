@@ -248,6 +248,27 @@ multiple_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 # 最大线程数限制（确保用户电脑流畅）
 MAX_THREADS = 12
 
+# 浏览器实例并发限制（防止内存爆炸）
+MAX_BROWSER_INSTANCES = 4
+_browser_semaphore: Optional[threading.Semaphore] = None
+_browser_semaphore_lock = threading.Lock()
+
+
+def _get_browser_semaphore(max_instances: int = MAX_BROWSER_INSTANCES) -> threading.Semaphore:
+    """获取或创建浏览器实例信号量，限制同时运行的浏览器数量"""
+    global _browser_semaphore
+    with _browser_semaphore_lock:
+        if _browser_semaphore is None:
+            _browser_semaphore = threading.Semaphore(max_instances)
+        return _browser_semaphore
+
+
+def _reset_browser_semaphore(max_instances: int = MAX_BROWSER_INSTANCES) -> None:
+    """重置信号量（任务开始时调用）"""
+    global _browser_semaphore
+    with _browser_semaphore_lock:
+        _browser_semaphore = threading.Semaphore(max_instances)
+
 target_num = 1
 fail_threshold = 1
 num_threads = 1
@@ -2796,6 +2817,10 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
     preferred_browsers = list(BROWSER_PREFERENCE)
     driver: Optional[BrowserDriver] = None
     
+    # 获取浏览器实例信号量，限制同时运行的浏览器数量
+    browser_sem = _get_browser_semaphore(min(num_threads, MAX_BROWSER_INSTANCES))
+    sem_acquired = False
+    
     logging.info(f"目标份数: {target_num}, 当前进度: {cur_num}/{target_num}")
     if timed_mode_active:
         logging.info("定时模式已启用")
@@ -2839,15 +2864,31 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 pass
 
     def _dispose_driver() -> None:
-        nonlocal driver
+        nonlocal driver, sem_acquired
         if not driver:
             return
+        # 收集浏览器进程 PID 用于强制清理
+        pids_to_kill = set(getattr(driver, 'browser_pids', set()))
         _unregister_driver(driver)
         try:
             driver.quit()
         except Exception:
             pass
         driver = None
+        # 强制清理残留进程
+        if pids_to_kill:
+            try:
+                _kill_processes_by_pid(pids_to_kill)
+            except Exception:
+                pass
+        # 释放信号量
+        if sem_acquired:
+            try:
+                browser_sem.release()
+                sem_acquired = False
+                logging.debug("已释放浏览器信号量")
+            except Exception:
+                pass
 
     while True:
         if stop_signal.is_set():
@@ -2864,6 +2905,12 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             break
         
         if driver is None:
+            # 获取信号量，限制同时运行的浏览器实例数量
+            if not sem_acquired:
+                browser_sem.acquire()
+                sem_acquired = True
+                logging.debug("已获取浏览器信号量")
+            
             proxy_address = _select_proxy_for_session()
             if proxy_address:
                 if not _proxy_is_responsive(proxy_address):

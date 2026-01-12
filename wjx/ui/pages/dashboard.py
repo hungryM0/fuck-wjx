@@ -543,7 +543,13 @@ class DashboardPage(QWidget):
                 if 0 <= idx < len(self.question_page.entries):
                     entry = self.question_page.entries[idx]
                     entry.custom_weights = [float(w) for w in weights]
+                    entry.probabilities = [float(w) for w in weights]  # 同步更新 probabilities
                     entry.distribution_mode = "custom"
+            text_updates = dlg.get_text_results()
+            for idx, texts in text_updates.items():
+                if 0 <= idx < len(self.question_page.entries):
+                    entry = self.question_page.entries[idx]
+                    entry.texts = texts
             self._refresh_entry_table()
 
     def _delete_selected_entries(self):

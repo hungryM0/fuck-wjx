@@ -262,8 +262,9 @@ def _proxy_api_candidates(expected_count: int, proxy_url: Optional[str]) -> List
 
 
 def _parse_proxy_payload(text: str) -> List[str]:
-    """解析代理API返回的JSON数据，仅支持新格式：
-    {"code":200,"data":{"proxy_list":["IP:端口,地区"]}}
+    """解析代理API返回的JSON数据，支持多种格式：
+    格式1: {"code":200,"data":{"proxy_list":["IP:端口,地区"]}}
+    格式2: {"data":{"list":[{"ip":"x.x.x.x","port":"xxx","account":"xxx","password":"xxx"}]},"code":0}
     """
     try:
         data = json.loads(text)
@@ -274,25 +275,44 @@ def _parse_proxy_payload(text: str) -> List[str]:
         if not isinstance(data_section, dict):
             raise ValueError("返回数据缺少data字段")
         
-        proxy_list = data_section.get("proxy_list")
-        if not isinstance(proxy_list, list) or not proxy_list:
-            raise ValueError("返回数据缺少proxy_list或为空")
-        
         candidates: List[str] = []
-        for item in proxy_list:
-            if isinstance(item, str) and item.strip():
-                # 格式如 "171.40.165.28:41138,湖北|孝感"
-                full_info = item.strip()
-                # 分离IP:端口和地区信息
-                parts = full_info.split(",", 1)
-                addr = parts[0].strip()
-                region = parts[1].strip() if len(parts) > 1 else "未知地区"
-                if addr:
-                    logging.info(f"获取到代理: {addr} ({region})")
+        
+        # 尝试格式1: proxy_list 字符串数组
+        proxy_list = data_section.get("proxy_list")
+        if isinstance(proxy_list, list) and proxy_list:
+            for item in proxy_list:
+                if isinstance(item, str) and item.strip():
+                    full_info = item.strip()
+                    parts = full_info.split(",", 1)
+                    addr = parts[0].strip()
+                    region = parts[1].strip() if len(parts) > 1 else "未知地区"
+                    if addr:
+                        logging.info(f"获取到代理: {addr} ({region})")
+                        candidates.append(addr)
+        
+        # 尝试格式2: list 对象数组
+        if not candidates:
+            obj_list = data_section.get("list")
+            if isinstance(obj_list, list) and obj_list:
+                for item in obj_list:
+                    if not isinstance(item, dict):
+                        continue
+                    ip = str(item.get("ip", "")).strip()
+                    port = str(item.get("port", "")).strip()
+                    if not ip or not port:
+                        continue
+                    username = str(item.get("account") or item.get("username") or "").strip()
+                    password = str(item.get("password") or item.get("pwd") or "").strip()
+                    if username and password:
+                        addr = f"{username}:{password}@{ip}:{port}"
+                    else:
+                        addr = f"{ip}:{port}"
+                    region = str(item.get("net") or item.get("region") or "未知地区").strip()
+                    logging.info(f"获取到代理: {ip}:{port} ({region})")
                     candidates.append(addr)
         
         if not candidates:
-            raise ValueError("proxy_list中无有效代理地址")
+            raise ValueError("返回数据中无有效代理地址")
         return candidates
     except json.JSONDecodeError as e:
         raise ValueError(f"JSON解析失败: {e}")
@@ -349,6 +369,8 @@ def _fetch_new_proxy_batch(expected_count: int = 1, proxy_url: Optional[str] = N
     
     # 根据代理源选择不同的获取方式
     current_source = get_proxy_source()
+    # 如果配置了自定义API覆盖，视为自定义代理源
+    is_custom = current_source == PROXY_SOURCE_CUSTOM or is_custom_proxy_api_active()
     
     if current_source == PROXY_SOURCE_PIKACHU:
         # 使用皮卡丘代理站
@@ -364,12 +386,12 @@ def _fetch_new_proxy_batch(expected_count: int = 1, proxy_url: Optional[str] = N
             logging.error(f"从皮卡丘代理站获取代理失败: {exc}")
             raise RuntimeError(f"获取皮卡丘代理失败: {exc}")
     
-    if current_source == PROXY_SOURCE_CUSTOM:
-        # 使用自定义代理API
-        custom_url = get_effective_proxy_api_url()
-        if not custom_url:
-            raise RuntimeError("自定义代理API地址未配置")
-        proxy_url = custom_url
+    if is_custom:
+        # 使用自定义代理API - 必须使用覆盖的URL，不能回退到默认
+        if not is_custom_proxy_api_active():
+            raise RuntimeError("自定义代理API地址未配置，请在设置中填写API地址")
+        proxy_url = _proxy_api_url_override
+        logging.info(f"使用自定义代理API: {proxy_url}")
     
     # 默认代理源或自定义代理源：使用原有逻辑
     candidates: List[str] = []
