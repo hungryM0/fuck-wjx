@@ -20,7 +20,6 @@ A GUI tool for auto-filling WenJuanXing (wjx.cn) surveys with custom answer dist
 | 💻 Zero-barrier GUI | No coding required, just click and go |
 | 📷 QR Code Decode | Upload survey QR code → auto-extract link |
 | 🎯 Smart Config | Auto-parse questions, set weights & probabilities |
-| 🎭 Full Simulation | Human-like typing speed & mouse movements |
 | 🌍 Random IP | Bypass IP restrictions & captcha |
 | ⏸️ Graceful Stop | Stop anytime without losing progress |
 | 📁 Save & Reuse | Export configs for repeated use |
