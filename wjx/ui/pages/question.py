@@ -63,10 +63,10 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
 
 
 class QuestionWizardDialog(QDialog):
-    """配置向导：用滑块快速设置权重。"""
+    """配置向导：用滑块快速设置权重，编辑填空题答案。"""
 
     @staticmethod
-    def _shorten(text: str, limit: int = 120) -> str:
+    def _shorten(text: str, limit: int = 80) -> str:
         if not text:
             return ""
         text = str(text).strip()
@@ -77,37 +77,35 @@ class QuestionWizardDialog(QDialog):
     def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], parent=None):
         super().__init__(parent)
         self.setWindowTitle("配置向导")
-        self.resize(900, 700)
+        self.resize(720, 640)
         self.entries = entries
         self.info = info or []
         self.slider_map: Dict[int, List[NoWheelSlider]] = {}
+        self.text_edit_map: Dict[int, List[LineEdit]] = {}
+        self._has_content = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
 
+        # 顶部说明
+        intro = BodyLabel("配置各题目的选项权重或填空答案", self)
+        intro.setStyleSheet("color: #666; font-size: 13px;")
+        layout.addWidget(intro)
+
+        # 滚动区域
         scroll = ScrollArea(self)
         scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         container = QWidget(self)
+        container.setStyleSheet("background: transparent;")
         scroll.setWidget(container)
         inner = QVBoxLayout(container)
-        inner.setContentsMargins(0, 0, 0, 0)
-        inner.setSpacing(10)
-
-        intro = BodyLabel(
-            "拖动滑块为每个选项设置权重：数值越大，被选中的概率越高；默认均为 1，可根据需要调整。",
-            self,
-        )
-        intro.setWordWrap(True)
-        inner.addWidget(intro)
+        inner.setContentsMargins(4, 4, 12, 4)
+        inner.setSpacing(20)
 
         for idx, entry in enumerate(entries):
-            if entry.question_type in ("text", "multi_text"):
-                continue
-            card = CardWidget(container)
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(12, 12, 12, 12)
-            card_layout.setSpacing(8)
+            # 获取题目信息
             qnum = ""
             title_text = ""
             option_texts: List[str] = []
@@ -117,64 +115,177 @@ class QuestionWizardDialog(QDialog):
                 opt_raw = self.info[idx].get("option_texts")
                 if isinstance(opt_raw, list):
                     option_texts = [str(x) for x in opt_raw]
-            title = SubtitleLabel(f"第{qnum or idx + 1}题 · {_get_entry_type_label(entry)}", card)
-            card_layout.addWidget(title)
+
+            # 题目卡片
+            card = CardWidget(container)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(20, 16, 20, 16)
+            card_layout.setSpacing(12)
+
+            # 题目标题行
+            header = QHBoxLayout()
+            header.setSpacing(12)
+            title = SubtitleLabel(f"第{qnum or idx + 1}题", card)
+            title.setStyleSheet("font-size: 15px; font-weight: 600;")
+            header.addWidget(title)
+            type_label = BodyLabel(f"[{_get_entry_type_label(entry)}]", card)
+            type_label.setStyleSheet("color: #0078d4; font-size: 12px;")
+            header.addWidget(type_label)
+            header.addStretch(1)
+            card_layout.addLayout(header)
+
+            # 题目描述
             if title_text:
-                title_label = BodyLabel(self._shorten(title_text, 200), card)
-                title_label.setWordWrap(True)
-                title_label.setStyleSheet("color:#444;")
-                card_layout.addWidget(title_label)
+                desc = BodyLabel(self._shorten(title_text, 120), card)
+                desc.setWordWrap(True)
+                desc.setStyleSheet("color: #555; font-size: 12px; margin-bottom: 4px;")
+                card_layout.addWidget(desc)
 
-            options = max(1, int(entry.option_count or 1))
-            weights = list(entry.custom_weights or [])
-            if len(weights) < options:
-                weights += [1] * (options - len(weights))
-            if all(w <= 0 for w in weights):
-                weights = [1] * options
+            # 填空题：显示答案编辑区
+            if entry.question_type in ("text", "multi_text"):
+                self._has_content = True
+                hint = BodyLabel("答案列表（随机选择一个填入）：", card)
+                hint.setStyleSheet("color: #666; font-size: 12px;")
+                card_layout.addWidget(hint)
 
-            sliders: List[NoWheelSlider] = []
-            for opt_idx in range(options):
-                row = QHBoxLayout()
-                row.setSpacing(8)
-                opt_label_text = option_texts[opt_idx] if opt_idx < len(option_texts) else ""
-                prefix = f"{opt_idx + 1}. "
-                display_text = prefix + self._shorten(opt_label_text or "选项", 140)
-                row.addWidget(BodyLabel(display_text, card))
-                slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
-                slider.setRange(0, 100)
-                slider.setValue(int(weights[opt_idx]))
-                value_label = BodyLabel(str(slider.value()), card)
-                slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
-                row.addWidget(slider, 1)
-                row.addWidget(value_label)
-                card_layout.addLayout(row)
-                sliders.append(slider)
+                # 答案行容器
+                text_rows_container = QWidget(card)
+                text_rows_layout = QVBoxLayout(text_rows_container)
+                text_rows_layout.setContentsMargins(0, 0, 0, 0)
+                text_rows_layout.setSpacing(4)
+                card_layout.addWidget(text_rows_container)
 
-            self.slider_map[idx] = sliders
+                texts = list(entry.texts or [DEFAULT_FILL_TEXT])
+                edits: List[LineEdit] = []
+
+                def make_add_row_func(container_layout, edit_list, parent_card):
+                    def add_row(initial_text: str = ""):
+                        row_widget = QWidget(parent_card)
+                        row_layout = QHBoxLayout(row_widget)
+                        row_layout.setContentsMargins(0, 2, 0, 2)
+                        row_layout.setSpacing(8)
+                        num_lbl = BodyLabel(f"{len(edit_list) + 1}.", parent_card)
+                        num_lbl.setFixedWidth(24)
+                        num_lbl.setStyleSheet("color: #888;")
+                        row_layout.addWidget(num_lbl)
+                        edit = LineEdit(parent_card)
+                        edit.setText(initial_text)
+                        edit.setPlaceholderText("输入答案")
+                        row_layout.addWidget(edit, 1)
+                        del_btn = PushButton("×", parent_card)
+                        del_btn.setFixedWidth(32)
+                        row_layout.addWidget(del_btn)
+                        container_layout.addWidget(row_widget)
+                        edit_list.append(edit)
+
+                        def remove_row():
+                            if len(edit_list) > 1:
+                                edit_list.remove(edit)
+                                row_widget.deleteLater()
+                        del_btn.clicked.connect(remove_row)
+                    return add_row
+
+                add_row_func = make_add_row_func(text_rows_layout, edits, card)
+                for txt in texts:
+                    add_row_func(txt)
+
+                # 添加按钮
+                add_btn = PushButton("+ 添加答案", card)
+                add_btn.setFixedWidth(100)
+                add_btn.clicked.connect(lambda checked=False, f=add_row_func: f(""))
+                card_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+                self.text_edit_map[idx] = edits
+            else:
+                # 选择题：显示滑块
+                self._has_content = True
+                options = max(1, int(entry.option_count or 1))
+                weights = list(entry.custom_weights or [])
+                if len(weights) < options:
+                    weights += [1] * (options - len(weights))
+                if all(w <= 0 for w in weights):
+                    weights = [1] * options
+
+                sliders: List[NoWheelSlider] = []
+                for opt_idx in range(options):
+                    opt_widget = QWidget(card)
+                    opt_layout = QHBoxLayout(opt_widget)
+                    opt_layout.setContentsMargins(0, 4, 0, 4)
+                    opt_layout.setSpacing(12)
+
+                    num_label = BodyLabel(f"{opt_idx + 1}.", card)
+                    num_label.setFixedWidth(24)
+                    num_label.setStyleSheet("color: #888; font-size: 12px;")
+                    opt_layout.addWidget(num_label)
+
+                    opt_text = option_texts[opt_idx] if opt_idx < len(option_texts) else "选项"
+                    text_label = BodyLabel(self._shorten(opt_text, 50), card)
+                    text_label.setFixedWidth(160)
+                    text_label.setStyleSheet("font-size: 13px;")
+                    opt_layout.addWidget(text_label)
+
+                    slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
+                    slider.setRange(0, 100)
+                    slider.setValue(int(weights[opt_idx]))
+                    slider.setMinimumWidth(200)
+                    opt_layout.addWidget(slider, 1)
+
+                    value_label = BodyLabel(str(slider.value()), card)
+                    value_label.setFixedWidth(36)
+                    value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    value_label.setStyleSheet("color: #0078d4; font-weight: 500; font-size: 13px;")
+                    slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
+                    opt_layout.addWidget(value_label)
+
+                    card_layout.addWidget(opt_widget)
+                    sliders.append(slider)
+
+                self.slider_map[idx] = sliders
+
             inner.addWidget(card)
 
-        if not self.slider_map:
-            inner.addWidget(BodyLabel("当前题目类型无需配置向导。", container))
+        if not self._has_content:
+            empty_label = BodyLabel("当前无题目需要配置", container)
+            empty_label.setStyleSheet("color: #888; font-size: 14px; padding: 40px;")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            inner.addWidget(empty_label)
+
         inner.addStretch(1)
         layout.addWidget(scroll, 1)
 
+        # 底部按钮
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
         btn_row.addStretch(1)
-        ok_btn = PrimaryPushButton("保存", self)
         cancel_btn = PushButton("取消", self)
+        cancel_btn.setFixedWidth(80)
+        ok_btn = PrimaryPushButton("保存", self)
+        ok_btn.setFixedWidth(80)
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(ok_btn)
         layout.addLayout(btn_row)
+
         ok_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
 
     def get_results(self) -> Dict[int, List[int]]:
+        """获取滑块权重结果"""
         result: Dict[int, List[int]] = {}
         for idx, sliders in self.slider_map.items():
             weights = [max(0, s.value()) for s in sliders]
             if all(w <= 0 for w in weights):
                 weights = [1] * len(weights)
             result[idx] = weights
+        return result
+
+    def get_text_results(self) -> Dict[int, List[str]]:
+        """获取填空题答案结果"""
+        result: Dict[int, List[str]] = {}
+        for idx, edits in self.text_edit_map.items():
+            texts = [e.text().strip() for e in edits if e.text().strip()]
+            if not texts:
+                texts = [DEFAULT_FILL_TEXT]
+            result[idx] = texts
         return result
 
 
@@ -355,8 +466,9 @@ class QuestionPage(ScrollArea):
         def rebuild_sliders():
             for i in reversed(range(slider_inner_layout.count())):
                 item = slider_inner_layout.itemAt(i)
-                if item.widget():
-                    item.widget().deleteLater()
+                widget = item.widget() if item else None
+                if widget:
+                    widget.deleteLater()
             sliders.clear()
             slider_labels.clear()
             
