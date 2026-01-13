@@ -15,7 +15,7 @@ from qfluentwidgets import (
     TextBrowser,
 )
 
-from wjx.utils.markdown_utils import convert_github_admonitions
+from wjx.utils.markdown_utils import strip_markdown
 
 
 class ReleaseCard(CardWidget):
@@ -53,7 +53,7 @@ class ReleaseCard(CardWidget):
         layout.addLayout(header)
         
         self.content = TextBrowser(self)
-        processed_body = convert_github_admonitions(self._body) if self._body else "暂无更新说明"
+        processed_body = strip_markdown(self._body)
         self.content.setMarkdown(processed_body)
         self.content.setOpenExternalLinks(True)
         self.content.setStyleSheet("border: none; background: transparent; padding-left: 32px;")

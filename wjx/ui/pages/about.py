@@ -2,30 +2,50 @@
 import threading
 import subprocess
 import webbrowser
+import os
+import sys
 from typing import Optional
 from datetime import datetime
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QTimer, Signal, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QApplication,
+    QSizePolicy,
 )
 from qfluentwidgets import (
     ScrollArea,
     SubtitleLabel,
     BodyLabel,
+    CaptionLabel,
+    TitleLabel,
     PushButton,
     PrimaryPushButton,
+    HyperlinkButton,
     IndeterminateProgressRing,
     InfoBar,
+    InfoBarIcon,
     InfoBarPosition,
     MessageBox,
     ProgressBar,
+    ImageLabel,
+    CardWidget,
+    StrongBodyLabel,
+    FluentIcon
 )
 
 from wjx.utils.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO
+
+
+def get_resource_path(relative_path: str) -> str:
+    """获取资源文件的绝对路径，兼容打包后的环境"""
+    meipass = getattr(sys, '_MEIPASS', None)
+    if meipass:
+        return os.path.join(meipass, relative_path)
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), relative_path)
 
 
 class DownloadProgressDialog(MessageBox):
@@ -131,77 +151,164 @@ class AboutPage(ScrollArea):
 
     _updateCheckFinished = Signal(object)  # update_info or None
     _updateCheckError = Signal(str)  # error message
+    _publishTimeLoaded = Signal(str)  # publish time string
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._updateCheckFinished.connect(self._on_update_result)
         self._updateCheckError.connect(self._on_update_error)
+        
         self.view = QWidget(self)
-        self.view.setStyleSheet("background: transparent;")
+        self.view.setObjectName('view')
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+        self.view.setStyleSheet("QWidget#view { background: transparent; }")
+        
         self._checking_update = False
         self._progress_dlg: Optional[DownloadProgressDialog] = None
         self._downloaded_file_result: Optional[str] = None
+        
         self._build_ui()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self.view)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        main_layout = QVBoxLayout(self.view)
+        main_layout.setContentsMargins(36, 20, 36, 20)
+        main_layout.setSpacing(16)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
-        # 软件信息
-        layout.addWidget(SubtitleLabel("软件信息", self))
-        version_text = BodyLabel(f"fuck-wjx（问卷星速填）\n当前版本：v{__VERSION__}", self)
-        version_text.setWordWrap(True)
-        layout.addWidget(version_text)
+        # 1. 顶部 Hero 区域
+        hero_widget = QWidget()
+        hero_layout = QVBoxLayout(hero_widget)
+        hero_layout.setSpacing(10)
+        hero_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        
+        logo_path = get_resource_path("assets/icon.png")
+        self.logo = ImageLabel(logo_path, self)
+        self.logo.setFixedSize(96, 96)
+        self.logo.scaledToHeight(96) 
+        
+        title = TitleLabel("fuck-wjx", self)
+        
+        desc = BodyLabel("问卷星速填 - 高效的自动化问卷填写工具", self)
+        desc.setStyleSheet("color: #606060;")
+        
+        hero_layout.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignHCenter)
+        hero_layout.addWidget(title, 0, Qt.AlignmentFlag.AlignHCenter)
+        hero_layout.addWidget(desc, 0, Qt.AlignmentFlag.AlignHCenter)
+        
+        main_layout.addWidget(hero_widget)
+        main_layout.addSpacing(10)
 
-        # 检查更新按钮
-        update_row = QHBoxLayout()
-        update_row.setSpacing(8)
-        self.update_btn = PrimaryPushButton("检查更新", self)
+        # 警示声明 - 使用内嵌InfoBar样式
+        disclaimer_bar = InfoBar(
+            icon=InfoBarIcon.WARNING,
+            title="",
+            content="本项目仅供学习交流使用，开源以供研究软件原理，禁止用于任何恶意滥用行为",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=False,
+            position=InfoBarPosition.NONE,
+            duration=-1,  # 永不消失
+            parent=self
+        )
+        disclaimer_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        main_layout.addWidget(disclaimer_bar)
+
+        # 2. 版本信息 + 相关链接（两个卡片并排）
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(16)
+        
+        # 左卡片：版本信息
+        version_card = CardWidget(self)
+        version_layout = QVBoxLayout(version_card)
+        version_layout.setContentsMargins(20, 16, 20, 16)
+        version_layout.setSpacing(8)
+        version_layout.addWidget(StrongBodyLabel("当前版本", self))
+        
+        version_row = QHBoxLayout()
+        v_num = BodyLabel(f"v{__VERSION__}", self)
+        self.publish_time_label = CaptionLabel("", self)
+        self.publish_time_label.setStyleSheet("color: #888;")
+        version_row.addWidget(v_num)
+        version_row.addWidget(self.publish_time_label)
+        version_row.addStretch(1)
         self.update_spinner = IndeterminateProgressRing(self)
-        self.update_spinner.setFixedSize(18, 18)
+        self.update_spinner.setFixedSize(16, 16)
         self.update_spinner.setStrokeWidth(2)
         self.update_spinner.hide()
-        update_row.addWidget(self.update_btn)
-        update_row.addWidget(self.update_spinner)
-        update_row.addStretch(1)
-        layout.addLayout(update_row)
+        self.update_btn = PrimaryPushButton("检查更新", self, FluentIcon.UPDATE)
+        version_row.addWidget(self.update_spinner)
+        version_row.addWidget(self.update_btn)
+        version_layout.addLayout(version_row)
+        
+        # 右卡片：相关链接
+        links_card = CardWidget(self)
+        links_layout = QVBoxLayout(links_card)
+        links_layout.setContentsMargins(20, 16, 20, 16)
+        links_layout.setSpacing(8)
+        links_layout.addWidget(StrongBodyLabel("相关链接", self))
+        
+        self.github_btn = PushButton("GitHub 仓库", self, FluentIcon.GITHUB)
+        icon_path = get_resource_path("icon.ico")
+        self.website_btn = PushButton("项目官网", self, QIcon(icon_path))
+        
+        links_row = QHBoxLayout()
+        links_row.setSpacing(12)
+        links_row.addWidget(self.github_btn)
+        links_row.addWidget(self.website_btn)
+        links_row.addStretch(1)
+        links_layout.addLayout(links_row)
+        links_layout.addStretch(1)
+        
+        cards_row.addWidget(version_card, 1)
+        cards_row.addWidget(links_card, 1)
+        
+        main_layout.addLayout(cards_row)
 
-        layout.addSpacing(16)
+        # 4. 致谢 & 许可
+        credit_card = CardWidget(self)
+        credit_layout = QVBoxLayout(credit_card)
+        credit_layout.setContentsMargins(20, 16, 20, 16)
+        credit_layout.setSpacing(12)
+        
+        credit_layout.addWidget(StrongBodyLabel("致谢与许可", self))
+        
+        inspire_layout = QHBoxLayout()
+        inspire_layout.addWidget(BodyLabel("Inspired by:", self))
+        inspire_link = HyperlinkButton("https://github.com/Zemelee/wjx", "Zemelee/wjx", self)
+        inspire_layout.addWidget(inspire_link)
+        inspire_layout.addStretch(1)
+        credit_layout.addLayout(inspire_layout)
+        
+        license_layout = QHBoxLayout()
+        license_layout.addWidget(BodyLabel("License:", self))
+        license_layout.addWidget(BodyLabel("MIT License", self))
+        license_layout.addStretch(1)
+        credit_layout.addLayout(license_layout)
+        
+        third_party_layout = QHBoxLayout()
+        third_party_layout.addWidget(BodyLabel("Third-party:", self))
+        pyside_link = HyperlinkButton("https://doc.qt.io/qtforpython-6/", "PySide6 (LGPL)", self)
+        qfw_link = HyperlinkButton("https://qfluentwidgets.com", "QFluentWidgets (GPLv3)", self)
+        third_party_layout.addWidget(pyside_link)
+        third_party_layout.addWidget(qfw_link)
+        third_party_layout.addStretch(1)
+        credit_layout.addLayout(third_party_layout)
+        
+        main_layout.addWidget(credit_card)
 
-        # 相关链接
-        layout.addWidget(SubtitleLabel("相关链接", self))
-        links_text = BodyLabel(
-            f"GitHub: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}\n"
-            f"官网: https://www.hungrym0.top/fuck-wjx.html\n"
-            f"邮箱: hungrym0@qq.com",
-            self
-        )
-        links_text.setWordWrap(True)
-        layout.addWidget(links_text)
-
-        link_btn_row = QHBoxLayout()
-        link_btn_row.setSpacing(10)
-        self.github_btn = PushButton("访问 GitHub", self)
-        self.website_btn = PushButton("访问官网", self)
-        link_btn_row.addWidget(self.github_btn)
-        link_btn_row.addWidget(self.website_btn)
-        link_btn_row.addStretch(1)
-        layout.addLayout(link_btn_row)
-
-        layout.addStretch(1)
-
-        # 版权信息
-        copyright_text = BodyLabel("©2026 HUNGRY_M0 版权所有  MIT License", self)
+        # Footer
+        copyright_text = CaptionLabel("© 2026 HUNGRY_M0", self)
         copyright_text.setStyleSheet("color: #888;")
-        layout.addWidget(copyright_text)
+        main_layout.addSpacing(8)
+        main_layout.addWidget(copyright_text, 0, Qt.AlignmentFlag.AlignHCenter)
+        main_layout.addStretch(1)
 
-        # 绑定事件
         self.update_btn.clicked.connect(self._check_updates)
         self.github_btn.clicked.connect(lambda: webbrowser.open(f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"))
         self.website_btn.clicked.connect(lambda: webbrowser.open("https://www.hungrym0.top/fuck-wjx.html"))
+        
+        # 异步获取发布时间
+        self._load_publish_time()
 
     def _set_update_loading(self, loading: bool):
         self._checking_update = loading
@@ -220,7 +327,6 @@ class AboutPage(ScrollArea):
         if update_info:
             if hasattr(win, 'update_info'):
                 win.update_info = update_info  # type: ignore[union-attr]
-            # 使用简单的纯文本弹窗样式
             from wjx.utils.updater import show_update_notification
             show_update_notification(win)
         else:
@@ -241,8 +347,6 @@ class AboutPage(ScrollArea):
         self._downloaded_file_result = self._progress_dlg.get_downloaded_file()
         self._progress_dlg.deleteLater()
         self._progress_dlg = None
-        
-        # 延迟显示下一个对话框
         QTimer.singleShot(200, self._show_download_result_delayed)
 
     def _show_download_result_delayed(self):
@@ -286,3 +390,27 @@ class AboutPage(ScrollArea):
                 self._updateCheckError.emit(str(exc))
         
         threading.Thread(target=_do_check, daemon=True).start()
+
+    def _load_publish_time(self):
+        """异步加载当前版本的发布时间"""
+        self._publishTimeLoaded.connect(self._on_publish_time_loaded)
+        
+        def _do_load():
+            try:
+                from wjx.utils.updater import UpdateManager
+                releases = UpdateManager.get_all_releases()
+                for r in releases:
+                    if r.get("version") == __VERSION__:
+                        published_at = r.get("published_at", "")
+                        if published_at:
+                            dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                            self._publishTimeLoaded.emit(dt.strftime("%Y-%m-%d"))
+                        return
+            except Exception:
+                pass
+        
+        threading.Thread(target=_do_load, daemon=True).start()
+
+    def _on_publish_time_loaded(self, time_str: str):
+        """更新发布时间标签"""
+        self.publish_time_label.setText(f"({time_str})")
