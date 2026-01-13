@@ -114,15 +114,56 @@ class RuntimeConfig:
     random_ua_enabled: bool = False
     random_ua_keys: List[str] = field(default_factory=lambda: list(DEFAULT_RANDOM_UA_KEYS))
     fail_stop_enabled: bool = True
+    pause_on_aliyun_captcha: bool = True
     question_entries: List[QuestionEntry] = field(default_factory=list)
     layout_hint: Optional[int] = None  # e.g. splitter position
 
 
 def serialize_question_entry(entry: QuestionEntry) -> Dict[str, Any]:
     """Convert a QuestionEntry to a JSON-serializable dict."""
+    def _prob_config_is_unset(value: Any) -> bool:
+        if value is None:
+            return True
+        if value == -1:
+            return True
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return True
+            for item in value:
+                try:
+                    if float(item) > 0:
+                        return False
+                except Exception:
+                    continue
+            return True
+        return False
+
+    def _custom_weights_has_positive(weights: Any) -> bool:
+        if not isinstance(weights, list) or not weights:
+            return False
+        stack: List[Any] = list(weights)
+        while stack:
+            item = stack.pop()
+            if isinstance(item, list):
+                stack.extend(item)
+                continue
+            try:
+                if float(item) > 0:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    probabilities = entry.probabilities
+    if (
+        getattr(entry, "distribution_mode", None) == "custom"
+        and _prob_config_is_unset(probabilities)
+        and _custom_weights_has_positive(entry.custom_weights)
+    ):
+        probabilities = entry.custom_weights
     return {
         "question_type": entry.question_type,
-        "probabilities": entry.probabilities,
+        "probabilities": probabilities,
         "texts": entry.texts,
         "rows": entry.rows,
         "option_count": entry.option_count,
@@ -141,14 +182,52 @@ def deserialize_question_entry(data: Dict[str, Any]) -> "QuestionEntry":
     mode_raw = data.get("distribution_mode") or "random"
     if mode_raw == "equal":
         mode_raw = "random"
+
+    def _prob_config_is_unset(value: Any) -> bool:
+        if value is None:
+            return True
+        if value == -1:
+            return True
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return True
+            for item in value:
+                try:
+                    if float(item) > 0:
+                        return False
+                except Exception:
+                    continue
+            return True
+        return False
+
+    def _custom_weights_has_positive(weights: Any) -> bool:
+        if not isinstance(weights, list) or not weights:
+            return False
+        stack: List[Any] = list(weights)
+        while stack:
+            item = stack.pop()
+            if isinstance(item, list):
+                stack.extend(item)
+                continue
+            try:
+                if float(item) > 0:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    probabilities = data.get("probabilities")
+    custom_weights = data.get("custom_weights")
+    if mode_raw == "custom" and _prob_config_is_unset(probabilities) and _custom_weights_has_positive(custom_weights):
+        probabilities = custom_weights
     return QuestionEntry(
         question_type=data.get("question_type") or "text",
-        probabilities=data.get("probabilities"),
+        probabilities=probabilities,
         texts=data.get("texts"),
         rows=int(data.get("rows") or 1),
         option_count=int(data.get("option_count") or 0),
         distribution_mode=mode_raw,
-        custom_weights=data.get("custom_weights"),
+        custom_weights=custom_weights,
         question_num=data.get("question_num"),
         option_fill_texts=data.get("option_fill_texts"),
         fillable_option_indices=data.get("fillable_option_indices"),
@@ -233,6 +312,7 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     selected_ua_keys = raw.get("random_ua_keys") if "random_ua_keys" in raw else legacy_ua.get("selected")
     config.random_ua_keys = _filter_valid_user_agent_keys(selected_ua_keys or [])
     config.fail_stop_enabled = bool(raw.get("fail_stop_enabled", True))
+    config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
     config.layout_hint = raw.get("layout_hint", raw.get("paned_position"))
 
     # question entries: new key question_entries; legacy key questions

@@ -19,7 +19,12 @@ from playwright.sync_api import (
 import base64
 
 from wjx.utils.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
-from wjx.network.random_ip import _normalize_proxy_address, get_proxy_source, PROXY_SOURCE_DEFAULT
+from wjx.network.random_ip import (
+    _normalize_proxy_address,
+    get_proxy_source,
+    PROXY_SOURCE_DEFAULT,
+    PROXY_SOURCE_CUSTOM,
+)
 
 _PA = "MTgxNzAxMTk4MDg6dFdKNWhMRG9Id3JIZ1RraWowelk="
 
@@ -458,15 +463,15 @@ def create_playwright_driver(
                 except Exception:
                     proxy_for_logging = normalized_proxy
                 
-                # 默认代理源需要添加认证信息
-                if get_proxy_source() == PROXY_SOURCE_DEFAULT and "username" not in proxy_settings:
+                # 默认和自定义代理源都注入同一组 Base64 凭据（不暴露明文）
+                if get_proxy_source() in (PROXY_SOURCE_DEFAULT, PROXY_SOURCE_CUSTOM) and "username" not in proxy_settings:
                     try:
                         decoded = base64.b64decode(_PA).decode("utf-8")
                         username, password = decoded.split(":", 1)
                         proxy_settings["username"] = username
                         proxy_settings["password"] = password
                     except Exception:
-                        pass
+                        logging.debug("解码默认代理凭据失败", exc_info=True)
                 
                 context_args["proxy"] = proxy_settings
             if user_agent:

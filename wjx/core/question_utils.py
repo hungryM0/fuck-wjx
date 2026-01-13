@@ -290,3 +290,49 @@ def normalize_option_fill_texts(option_texts: Optional[List[Optional[str]]], opt
     if not any(value for value in normalized):
         return None
     return normalized
+
+
+def _prob_config_is_unset(value: Any) -> bool:
+    if value is None:
+        return True
+    if value == -1:
+        return True
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return True
+        for item in value:
+            try:
+                if float(item) > 0:
+                    return False
+            except Exception:
+                continue
+        return True
+    return False
+
+
+def _custom_weights_has_positive(weights: Any) -> bool:
+    if not isinstance(weights, list) or not weights:
+        return False
+    stack: List[Any] = list(weights)
+    while stack:
+        item = stack.pop()
+        if isinstance(item, list):
+            stack.extend(item)
+            continue
+        try:
+            if float(item) > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def resolve_prob_config(prob_config: Any, custom_weights: Any, prefer_custom: bool = False) -> Any:
+    """
+    运行时兜底：当 UI/旧配置导致 `probabilities` 为空/`-1`/全<=0 时，优先使用 `custom_weights`。
+
+    目的：权重为 0 的选项不应被选中（除非所有权重都为 0，此时只能回退随机）。
+    """
+    if prefer_custom and _prob_config_is_unset(prob_config) and _custom_weights_has_positive(custom_weights):
+        return custom_weights
+    return prob_config

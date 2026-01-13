@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -5,6 +6,7 @@ import random
 import re
 import threading
 import time
+from urllib.parse import urlparse
 from typing import Any, Callable, Dict, List, Optional, Set
 
 try:
@@ -46,6 +48,9 @@ PROXY_SOURCE_CUSTOM = "custom"  # 自定义代理源
 
 # 当前选择的代理源
 _current_proxy_source: str = PROXY_SOURCE_DEFAULT
+
+# 默认/自定义代理源的代理认证（Base64），与浏览器逻辑保持一致
+_PA = "MTgxNzAxMTk4MDg6dFdKNWhMRG9Id3JIZ1RraWowelk="
 
 
 def set_proxy_source(source: str) -> None:
@@ -388,6 +393,36 @@ def test_custom_proxy_api(url: str) -> tuple[bool, str, List[str]]:
         return False, f"解析失败: {e}", []
 
 
+def _inject_default_proxy_auth(proxy_address: str) -> str:
+    """为默认/自定义代理源自动注入认证，避免健康检查 407。"""
+    if not proxy_address:
+        return proxy_address
+    try:
+        addr = proxy_address.strip()
+        if "://" not in addr:
+            addr = f"http://{addr}"
+        # 已包含账号密码则直接返回
+        parsed = urlparse(addr)
+        if parsed.username or parsed.password or "@" in addr:
+            return addr
+
+        decoded = base64.b64decode(_PA).decode("utf-8")
+        if ":" not in decoded:
+            return addr
+        username, password = decoded.split(":", 1)
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        scheme = parsed.scheme or "http"
+        netloc = f"{username}:{password}@{host}{port}" if host or port else f"{username}:{password}"
+        rebuilt = parsed._replace(netloc=netloc).geturl()
+        if not rebuilt:
+            rebuilt = f"{scheme}://{netloc}"
+        return rebuilt
+    except Exception:
+        logging.debug("注入默认代理认证失败，使用原始地址", exc_info=True)
+        return proxy_address
+
+
 def _normalize_proxy_address(proxy_address: Optional[str]) -> Optional[str]:
     if not proxy_address:
         return None
@@ -396,6 +431,9 @@ def _normalize_proxy_address(proxy_address: Optional[str]) -> Optional[str]:
         return None
     if "://" not in normalized:
         normalized = f"http://{normalized}"
+    # 默认或自定义代理源自动补充认证，保证健康检查也带上凭据
+    if get_proxy_source() in (PROXY_SOURCE_DEFAULT, PROXY_SOURCE_CUSTOM):
+        normalized = _inject_default_proxy_auth(normalized)
     return normalized
 
 

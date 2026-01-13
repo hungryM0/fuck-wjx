@@ -63,6 +63,39 @@ class EngineGuiAdapter:
         self._stop_signal = stop_signal
         self._card_code_provider = card_code_provider
         self.update_random_ip_counter = on_ip_counter
+        self._pause_event = threading.Event()
+        self._pause_reason = ""
+
+    def _post_to_ui_thread(self, callback: Callable[[], None]) -> None:
+        """Expose a Tk-style dispatcher hook expected by engine helpers."""
+        try:
+            self._dispatcher(callback)
+        except Exception:
+            try:
+                callback()
+            except Exception:
+                pass
+
+    def pause_run(self, reason: str = "") -> None:
+        """Pause all worker loops until resumed by UI."""
+        self._pause_reason = str(reason or "已暂停")
+        self._pause_event.set()
+
+    def resume_run(self) -> None:
+        self._pause_reason = ""
+        self._pause_event.clear()
+
+    def is_paused(self) -> bool:
+        return bool(self._pause_event.is_set())
+
+    def get_pause_reason(self) -> str:
+        return self._pause_reason or ""
+
+    def wait_if_paused(self, stop_signal: Optional[threading.Event] = None) -> None:
+        """Block worker thread while paused; returns immediately if stop is set."""
+        signal = stop_signal or self._stop_signal
+        while self.is_paused() and signal and not signal.is_set():
+            signal.wait(0.25)
 
     def force_stop_immediately(self, reason: Optional[str] = None):
         self._stop_signal.set()
@@ -85,6 +118,7 @@ class RunController(QObject):
     runStateChanged = Signal(bool)
     runFailed = Signal(str)
     statusUpdated = Signal(str, int, int)
+    pauseStateChanged = Signal(bool, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -95,6 +129,7 @@ class RunController(QObject):
         self.worker_threads: List[threading.Thread] = []
         self.adapter = EngineGuiAdapter(self._dispatch_to_ui, self.stop_event)
         self.running = False
+        self._paused_state = False
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(600)
         self._status_timer.timeout.connect(self._emit_status)
@@ -286,6 +321,7 @@ class RunController(QObject):
         engine.random_user_agent_enabled = config.random_ua_enabled
         engine.user_agent_pool_keys = config.random_ua_keys
         engine.stop_on_fail_enabled = config.fail_stop_enabled
+        engine.pause_on_aliyun_captcha = bool(getattr(config, "pause_on_aliyun_captcha", True))
         # sync module-level aliases used elsewhere in this file
         engine._aliyun_captcha_stop_triggered = False
         engine._aliyun_captcha_popup_shown = False
@@ -315,6 +351,7 @@ class RunController(QObject):
             on_ip_counter=getattr(self, "on_ip_counter", None),
         )
         self.adapter.random_ip_enabled_var.set(config.random_ip_enabled)
+        self._paused_state = False
         
         logging.info(f"配置题目概率分布（共{len(config.question_entries)}题）")
         try:
@@ -390,15 +427,51 @@ class RunController(QObject):
         if not self.running:
             return
         self.stop_event.set()
+        try:
+            if self.adapter:
+                self.adapter.resume_run()
+        except Exception:
+            pass
+        if self._paused_state:
+            self._paused_state = False
+            self.pauseStateChanged.emit(False, "")
         self.running = False
         self.runStateChanged.emit(False)
+
+    def resume_run(self):
+        """Resume execution after a pause (does not restart threads)."""
+        if not self.running:
+            return
+        try:
+            self.adapter.resume_run()
+        except Exception:
+            pass
+        if self._paused_state:
+            self._paused_state = False
+            self.pauseStateChanged.emit(False, "")
 
     def _emit_status(self):
         current = getattr(engine, "cur_num", 0)
         target = getattr(engine, "target_num", 0)
         fail = getattr(engine, "cur_fail", 0)
-        status = f"已提交 {current}/{target} 份 | 失败 {fail} 次"
+        paused = False
+        reason = ""
+        try:
+            paused = bool(self.adapter.is_paused())
+            reason = str(self.adapter.get_pause_reason() or "")
+        except Exception:
+            paused = False
+            reason = ""
+
+        status_prefix = "已暂停" if paused else "已提交"
+        status = f"{status_prefix} {current}/{target} 份 | 失败 {fail} 次"
+        if paused and reason:
+            status = f"{status} | {reason}"
         self.statusUpdated.emit(status, int(current), int(target or 0))
+
+        if paused != self._paused_state:
+            self._paused_state = paused
+            self.pauseStateChanged.emit(bool(paused), str(reason or ""))
 
     # -------------------- Persistence --------------------
     def load_saved_config(self, path: Optional[str] = None) -> RuntimeConfig:

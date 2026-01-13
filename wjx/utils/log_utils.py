@@ -4,9 +4,10 @@ import re
 import sys
 import threading
 import traceback
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Any, Callable
+from typing import Any, Callable, Deque, List, Optional
 
 from .config import LOG_BUFFER_CAPACITY, LOG_FORMAT, LOG_DIR_NAME
 
@@ -87,7 +88,8 @@ class LogBufferHandler(logging.Handler):
     def __init__(self, capacity: int = LOG_BUFFER_CAPACITY):
         super().__init__()
         self.capacity = capacity
-        self.records: List[LogBufferEntry] = []
+        self._lock = threading.Lock()
+        self.records: Deque[LogBufferEntry] = deque(maxlen=capacity if capacity else None)
         self.setFormatter(logging.Formatter(LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
 
     def emit(self, record: logging.LogRecord):
@@ -98,14 +100,15 @@ class LogBufferHandler(logging.Handler):
             message = self._strip_ansi_codes(message)
             category = self._determine_category(record, message)
             display_text = self._apply_category_label(message, original_level, category)
-            self.records.append(LogBufferEntry(text=display_text, category=category))
-            if self.capacity and len(self.records) > self.capacity:
-                self.records.pop(0)
+            entry = LogBufferEntry(text=display_text, category=category)
+            with self._lock:
+                self.records.append(entry)
         except Exception:
             self.handleError(record)
 
     def get_records(self) -> List[LogBufferEntry]:
-        return list(self.records)
+        with self._lock:
+            return list(self.records)
     
     @staticmethod
     def _strip_ansi_codes(text: str) -> str:

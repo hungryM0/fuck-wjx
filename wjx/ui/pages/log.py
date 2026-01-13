@@ -15,6 +15,7 @@ from qfluentwidgets import (
 )
 
 from wjx.utils.log_utils import LOG_BUFFER_HANDLER, save_log_records_to_file
+from wjx.utils.config import LOG_BUFFER_CAPACITY
 from wjx.utils.load_save import get_runtime_directory
 
 
@@ -53,6 +54,8 @@ class LogPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_filter = None
+        self._force_full_refresh = True
+        self._last_seen_record = None
         self._build_ui()
         self._bind_events()
         self._load_last_session_logs()
@@ -104,6 +107,11 @@ class LogPage(QWidget):
         font = QFont("Consolas", 10)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.log_view.setFont(font)
+        try:
+            if LOG_BUFFER_CAPACITY and int(LOG_BUFFER_CAPACITY) > 0:
+                self.log_view.document().setMaximumBlockCount(int(LOG_BUFFER_CAPACITY))
+        except Exception:
+            pass
         
         # 应用主题样式
         self._apply_theme()
@@ -112,7 +120,7 @@ class LogPage(QWidget):
         layout.addWidget(self.log_view, 1)
 
     def _bind_events(self):
-        self.refresh_btn.clicked.connect(self.refresh_logs)
+        self.refresh_btn.clicked.connect(self.force_refresh_logs)
         self.copy_btn.clicked.connect(self._copy_to_clipboard)
         self.save_btn.clicked.connect(self.save_logs)
         self.level_combo.currentIndexChanged.connect(self._on_filter_changed)
@@ -120,6 +128,12 @@ class LogPage(QWidget):
     def _on_filter_changed(self, index):
         """日志级别筛选变化"""
         self._current_filter = LOG_LEVELS[index][1] if index < len(LOG_LEVELS) else None
+        self._force_full_refresh = True
+        self.refresh_logs()
+
+    def force_refresh_logs(self):
+        """强制全量刷新（用户主动点击重载时调用）"""
+        self._force_full_refresh = True
         self.refresh_logs()
 
     def _get_log_level(self, entry):
@@ -145,12 +159,21 @@ class LogPage(QWidget):
         return level_priority >= filter_priority
 
     def refresh_logs(self):
+        # 不在当前可见页面时，跳过自动刷新，避免后台重绘拖慢主窗口
+        if not self.isVisible():
+            return
         # 如果用户正在选择文本，跳过自动刷新
         cursor = self.log_view.textCursor()
         if cursor.hasSelection():
             return
 
         records = LOG_BUFFER_HANDLER.get_records()
+        if not records:
+            if self._force_full_refresh:
+                self.log_view.clear()
+                self._force_full_refresh = False
+            self._last_seen_record = None
+            return
 
         # 保存滚动位置
         scrollbar = self.log_view.verticalScrollBar()
@@ -158,20 +181,37 @@ class LogPage(QWidget):
         old_max = scrollbar.maximum()
         was_at_bottom = old_value >= old_max - 10
 
-        self.log_view.clear()
-        cursor = self.log_view.textCursor()
+        if not self._force_full_refresh and self._last_seen_record is not None:
+            last_index = -1
+            for idx, entry in enumerate(records):
+                if entry is self._last_seen_record:
+                    last_index = idx
+                    break
+            if last_index != -1 and last_index < len(records) - 1:
+                new_entries = records[last_index + 1 :]
+                for entry in new_entries:
+                    level = self._get_log_level(entry)
+                    if not self._should_show(level):
+                        continue
+                    text = entry.text if hasattr(entry, "text") else str(entry)
+                    self.log_view.appendPlainText(text)
+                self._last_seen_record = records[-1]
 
-        colors = LOG_COLORS_DARK if isDarkTheme() else LOG_COLORS_LIGHT
+                if was_at_bottom:
+                    self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+                return
+
+        lines = []
         for entry in records:
             level = self._get_log_level(entry)
             if not self._should_show(level):
                 continue
+            text = entry.text if hasattr(entry, "text") else str(entry)
+            lines.append(text)
 
-            color = colors.get(level, colors["DEFAULT"])
-            
-            # 使用HTML插入带颜色的文本
-            text = entry.text if hasattr(entry, 'text') else str(entry)
-            cursor.insertHtml(f'<span style="color:{color};">{text}</span><br>')
+        self.log_view.setPlainText("\n".join(lines))
+        self._last_seen_record = records[-1]
+        self._force_full_refresh = False
 
         # 恢复滚动位置
         if was_at_bottom:

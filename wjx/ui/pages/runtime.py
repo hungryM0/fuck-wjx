@@ -157,6 +157,8 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
 
         # 代理源变化时显示/隐藏自定义API
         self.proxyCombo.currentIndexChanged.connect(self._on_source_changed)
+        # API地址输入完成时同步到全局变量
+        self.customApiEdit.editingFinished.connect(self._on_api_edit_finished)
 
     def _on_source_changed(self):
         idx = self.proxyCombo.currentIndex()
@@ -235,6 +237,12 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         """重置检测按钮状态"""
         self.testApiStatus.hide()
         self.testApiBtn.show()
+
+    def _on_api_edit_finished(self):
+        """API地址输入完成时同步到全局变量"""
+        from wjx.network.random_ip import set_proxy_api_override
+        api_url = self.customApiEdit.text().strip()
+        set_proxy_api_override(api_url if api_url else None)
 
     def isChecked(self):
         return self.switchButton.isChecked()
@@ -380,9 +388,18 @@ class RuntimePage(ScrollArea):
         )
         self.fail_stop_card.setChecked(True)
 
+        self.pause_on_aliyun_card = SwitchSettingCard(
+            FluentIcon.PAUSE,
+            "触发智能验证自动暂停",
+            "检测到阿里云智能验证时暂停执行（默认开启，建议配合随机 IP）",
+            parent=run_group,
+        )
+        self.pause_on_aliyun_card.setChecked(True)
+
         run_group.addSettingCard(self.target_card)
         run_group.addSettingCard(self.thread_card)
         run_group.addSettingCard(self.fail_stop_card)
+        run_group.addSettingCard(self.pause_on_aliyun_card)
         layout.addWidget(run_group)
 
         # ========== 时间控制组 ==========
@@ -438,6 +455,7 @@ class RuntimePage(ScrollArea):
         self.target_spin = self.target_card.spinBox
         self.thread_spin = self.thread_card.spinBox
         self.fail_stop_switch = self.fail_stop_card.switchButton
+        self.pause_on_aliyun_switch = self.pause_on_aliyun_card.switchButton
         self.interval_min_btn = self.interval_card.minBtn
         self.interval_max_btn = self.interval_card.maxBtn
         self.answer_min_btn = self.answer_card.minBtn
@@ -668,6 +686,7 @@ class RuntimePage(ScrollArea):
         cfg.random_ua_enabled = self.random_ua_switch.isChecked()
         cfg.random_ua_keys = [k for k, cb in self.ua_checkboxes.items() if cb.isChecked()] if cfg.random_ua_enabled else []
         cfg.fail_stop_enabled = self.fail_stop_switch.isChecked()
+        cfg.pause_on_aliyun_captcha = self.pause_on_aliyun_switch.isChecked()
         try:
             idx = self.proxy_source_combo.currentIndex()
             source = str(self.proxy_source_combo.itemData(idx)) if idx >= 0 else "default"
@@ -712,6 +731,7 @@ class RuntimePage(ScrollArea):
             cb.setChecked((not active and key == "pc_web") or key in active)
         self._sync_random_ua(self.random_ua_switch.isChecked())
         self.fail_stop_switch.setChecked(cfg.fail_stop_enabled)
+        self.pause_on_aliyun_switch.setChecked(getattr(cfg, "pause_on_aliyun_captcha", True))
 
         try:
             proxy_source = getattr(cfg, "proxy_source", "default")

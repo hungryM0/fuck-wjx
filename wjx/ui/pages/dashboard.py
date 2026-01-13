@@ -84,6 +84,7 @@ class DashboardPage(QWidget):
         self.question_page = question_page
         self.runtime_page = runtime_page
         self._open_wizard_after_parse = False
+        self._last_pause_reason = ""
         self._build_ui()
         self._bind_events()
         self._sync_start_button_state()
@@ -239,6 +240,9 @@ class DashboardPage(QWidget):
         self.progress_pct.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.progress_pct.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.start_btn = PrimaryPushButton("开始执行", self)
+        self.resume_btn = PrimaryPushButton("继续", self)
+        self.resume_btn.setEnabled(False)
+        self.resume_btn.hide()
         self.stop_btn = PushButton("停止", self)
         self.stop_btn.setEnabled(False)
         self.start_btn.setToolTip("请先配置题目（至少 1 题）")
@@ -246,6 +250,7 @@ class DashboardPage(QWidget):
         bottom_layout.addWidget(self.progress_bar, 1)
         bottom_layout.addWidget(self.progress_pct)
         bottom_layout.addWidget(self.start_btn)
+        bottom_layout.addWidget(self.resume_btn)
         bottom_layout.addWidget(self.stop_btn)
         outer.addWidget(bottom)
 
@@ -255,6 +260,7 @@ class DashboardPage(QWidget):
         self.save_cfg_btn.clicked.connect(self._on_save_config)
         self.qr_btn.clicked.connect(self._on_qr_clicked)
         self.start_btn.clicked.connect(self._on_start_clicked)
+        self.resume_btn.clicked.connect(self._on_resume_clicked)
         self.stop_btn.clicked.connect(lambda: self.controller.stop_run())
         self.target_spin.valueChanged.connect(lambda v: self.runtime_page.target_spin.setValue(int(v)))
         self.thread_spin.valueChanged.connect(lambda v: self.runtime_page.thread_spin.setValue(int(v)))
@@ -368,10 +374,45 @@ class DashboardPage(QWidget):
     def on_run_state_changed(self, running: bool):
         self._sync_start_button_state(running=running)
         self.stop_btn.setEnabled(running)
+        if not running:
+            self.resume_btn.setEnabled(False)
+            self.resume_btn.hide()
         if running:
             self._toast("已启动任务", "success", 1500)
         else:
             self._toast("任务结束", "info", 1500)
+
+    def on_pause_state_changed(self, paused: bool, reason: str = ""):
+        self._last_pause_reason = str(reason or "")
+        if not getattr(self.controller, "running", False):
+            self.resume_btn.setEnabled(False)
+            self.resume_btn.hide()
+            return
+        if paused:
+            self.resume_btn.show()
+            self.resume_btn.setEnabled(True)
+            msg = f"已暂停：{reason}" if reason else "已暂停"
+            self._toast(msg, "warning", 2200)
+        else:
+            self.resume_btn.setEnabled(False)
+            self.resume_btn.hide()
+            self._toast("已继续执行", "success", 1500)
+
+    def _on_resume_clicked(self):
+        if not getattr(self.controller, "running", False):
+            return
+        reason = str(self._last_pause_reason or "")
+        if "扣费" in reason or ("代理" in reason and "连续" in reason):
+            box = MessageBox(
+                "继续执行？",
+                "当前处于“代理不可用保护暂停”状态。\n继续执行会重新请求代理并产生费用，确定继续吗？",
+                self.window() or self,
+            )
+            box.yesButton.setText("继续执行")
+            box.cancelButton.setText("取消")
+            if not box.exec():
+                return
+        self.controller.resume_run()
 
     def update_question_meta(self, title: str, count: int):
         self.count_label.setText(f"{count} 题")

@@ -162,6 +162,7 @@ from wjx.core.question_utils import (
     normalize_droplist_probs as _normalize_droplist_probs,
     normalize_single_like_prob_config as _normalize_single_like_prob_config,
     normalize_option_fill_texts as _normalize_option_fill_texts,
+    resolve_prob_config as _resolve_prob_config,
     smooth_scroll_to_element as _smooth_scroll_to_element,
     fill_option_additional_text as _fill_option_additional_text,
     get_fill_text_from_config as _get_fill_text_from_config,
@@ -308,6 +309,10 @@ _target_reached_stop_triggered = False
 _target_reached_stop_lock = threading.Lock()
 _resume_after_aliyun_captcha_stop = False
 _resume_snapshot: Dict[str, Any] = {}
+pause_on_aliyun_captcha = True
+_consecutive_bad_proxy_count = 0
+MAX_CONSECUTIVE_BAD_PROXIES = 5
+_proxy_fetch_lock = threading.Lock()
 
 def _show_aliyun_captcha_popup(message: str) -> None:
     """在首次检测到阿里云智能验证时弹窗提醒用户。"""
@@ -359,18 +364,13 @@ def _trigger_aliyun_captcha_stop(
     gui_instance: Optional[Any],
     stop_signal: Optional[threading.Event],
 ) -> None:
-    """检测到阿里云智能验证时触发全局停止，并提示用户启用随机 IP。"""
+    """检测到阿里云智能验证时触发全局暂停，并提示用户启用随机 IP。"""
     global _aliyun_captcha_stop_triggered
     global _resume_after_aliyun_captcha_stop, _resume_snapshot
     with _aliyun_captcha_stop_lock:
         if _aliyun_captcha_stop_triggered:
-            if stop_signal:
-                stop_signal.set()
             return
         _aliyun_captcha_stop_triggered = True
-
-    if stop_signal:
-        stop_signal.set()
 
     try:
         _resume_after_aliyun_captcha_stop = True
@@ -384,21 +384,19 @@ def _trigger_aliyun_captcha_stop(
         _resume_after_aliyun_captcha_stop = True
         _resume_snapshot = {}
 
-    logging.warning("检测到阿里云智能验证，已触发全局停止。")
+    logging.warning("检测到阿里云智能验证，已触发全局暂停。")
 
     message = (
-        "检测到阿里云智能验证，为避免失败提交已停止所有任务。\n\n"
-        "是否启用随机 IP 提交以绕过智能验证？\n"
+        "检测到阿里云智能验证，为避免继续失败提交已暂停所有任务。\n\n"
+        "建议开启/保持随机 IP，并在处理完验证后点击主页的“继续”按钮恢复执行。\n"
     )
 
     def _notify():
         try:
-            if gui_instance and hasattr(gui_instance, "force_stop_immediately"):
-                gui_instance.force_stop_immediately(reason="触发智能验证")
-            elif gui_instance and hasattr(gui_instance, "stop_run"):
-                gui_instance.stop_run()
+            if gui_instance and hasattr(gui_instance, "pause_run"):
+                gui_instance.pause_run("触发智能验证")
         except Exception:
-            logging.debug("阿里云智能验证触发停止失败", exc_info=True)
+            logging.debug("阿里云智能验证触发暂停失败", exc_info=True)
         try:
             if threading.current_thread() is not threading.main_thread():
                 return
@@ -433,6 +431,53 @@ def _trigger_aliyun_captcha_stop(
         except Exception:
             logging.debug("root.after 派发阿里云停止事件失败", exc_info=True)
     _notify()
+
+
+def _handle_aliyun_captcha_detected(gui_instance: Optional[Any], stop_signal: Optional[threading.Event]) -> None:
+    """
+    统一处理阿里云智能验证命中后的策略：
+    - 默认（pause_on_aliyun_captcha=True）：全局暂停执行并提示用户启用随机 IP；
+    - 关闭该开关：不全局暂停，仅记录告警（可能会导致后续持续失败）。
+    """
+    if pause_on_aliyun_captcha:
+        _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
+        return
+    logging.warning("检测到阿里云智能验证，但已关闭“触发智能验证自动暂停”，将继续尝试后续提交。")
+
+
+def _wait_if_paused(gui_instance: Optional[Any], stop_signal: Optional[threading.Event]) -> None:
+    try:
+        if gui_instance and hasattr(gui_instance, "wait_if_paused"):
+            gui_instance.wait_if_paused(stop_signal)
+    except Exception:
+        pass
+
+
+def _record_bad_proxy_and_maybe_pause(gui_instance: Optional[Any]) -> bool:
+    """
+    记录连续无效代理次数；达到阈值时暂停执行以避免继续消耗代理 API 额度。
+    返回 True 表示已触发暂停。
+    """
+    global _consecutive_bad_proxy_count
+    with lock:
+        _consecutive_bad_proxy_count += 1
+        streak = int(_consecutive_bad_proxy_count)
+    if streak >= int(MAX_CONSECUTIVE_BAD_PROXIES):
+        reason = f"代理连续{MAX_CONSECUTIVE_BAD_PROXIES}次不可用，已暂停以防继续扣费"
+        logging.warning(reason)
+        try:
+            if gui_instance and hasattr(gui_instance, "pause_run"):
+                gui_instance.pause_run(reason)
+        except Exception:
+            pass
+        return True
+    return False
+
+
+def _reset_bad_proxy_streak() -> None:
+    global _consecutive_bad_proxy_count
+    with lock:
+        _consecutive_bad_proxy_count = 0
 
 
 def _trigger_target_reached_stop(
@@ -653,7 +698,13 @@ def configure_probabilities(entries: List[QuestionEntry]):
         inferred_count = _infer_option_count(entry)
         if inferred_count and inferred_count != entry.option_count:
             entry.option_count = inferred_count
-        probs = entry.probabilities
+        probs = _resolve_prob_config(
+            entry.probabilities,
+            getattr(entry, "custom_weights", None),
+            prefer_custom=(getattr(entry, "distribution_mode", None) == "custom"),
+        )
+        if probs is not entry.probabilities:
+            entry.probabilities = probs
         if entry.question_type == "single":
             single_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
             single_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
@@ -2212,27 +2263,32 @@ def _wait_for_post_submit_outcome(
 def _select_proxy_for_session() -> Optional[str]:
     if not random_proxy_ip_enabled:
         return None
-    candidate: Optional[str] = None
     with lock:
         if proxy_ip_pool:
-            candidate = proxy_ip_pool.pop(0)
-    if candidate:
-        return candidate
-    try:
-        fetched = _fetch_new_proxy_batch(expected_count=1)
-    except Exception as exc:
-        logging.warning(f"获取随机代理失败：{exc}")
-        return None
-    if not fetched:
-        return None
-    # 将多余的缓存起来，避免并发重复调用
-    extra = fetched[1:]
-    if extra:
+            return proxy_ip_pool.pop(0)
+
+    # 代理池为空时，使用全局 fetch 锁避免多线程并发重复请求代理 API（会快速耗尽额度）
+    with _proxy_fetch_lock:
         with lock:
-            for proxy in extra:
-                if proxy not in proxy_ip_pool:
-                    proxy_ip_pool.append(proxy)
-    return fetched[0]
+            if proxy_ip_pool:
+                return proxy_ip_pool.pop(0)
+
+        expected = max(1, int(num_threads or 1))
+        try:
+            fetched = _fetch_new_proxy_batch(expected_count=expected)
+        except Exception as exc:
+            logging.warning(f"获取随机代理失败：{exc}")
+            return None
+        if not fetched:
+            return None
+
+        extra = fetched[1:]
+        if extra:
+            with lock:
+                for proxy in extra:
+                    if proxy not in proxy_ip_pool:
+                        proxy_ip_pool.append(proxy)
+        return fetched[0]
 
 
 def _select_user_agent_for_session() -> Tuple[Optional[str], Optional[str]]:
@@ -2364,22 +2420,21 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
 
     def _dispose_driver() -> None:
         nonlocal driver, sem_acquired
-        if not driver:
-            return
-        # 收集浏览器进程 PID 用于强制清理
-        pids_to_kill = set(getattr(driver, 'browser_pids', set()))
-        _unregister_driver(driver)
-        try:
-            driver.quit()
-        except Exception:
-            pass
-        driver = None
-        # 强制清理残留进程
-        if pids_to_kill:
+        if driver:
+            # 收集浏览器进程 PID 用于强制清理
+            pids_to_kill = set(getattr(driver, "browser_pids", set()))
+            _unregister_driver(driver)
             try:
-                _kill_processes_by_pid(pids_to_kill)
+                driver.quit()
             except Exception:
                 pass
+            driver = None
+            # 强制清理残留进程
+            if pids_to_kill:
+                try:
+                    _kill_processes_by_pid(pids_to_kill)
+                except Exception:
+                    pass
         # 释放信号量
         if sem_acquired:
             try:
@@ -2390,6 +2445,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 pass
 
     while True:
+        _wait_if_paused(gui_instance, stop_signal)
         if stop_signal.is_set():
             break
         with lock:
@@ -2402,6 +2458,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             logging.info("[Action Log] 时长控制时段管控中，等待编辑区释放...")
         if stop_signal.is_set():
             break
+        _wait_if_paused(gui_instance, stop_signal)
         
         if driver is None:
             # 获取信号量，限制同时运行的浏览器实例数量
@@ -2411,13 +2468,23 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 logging.debug("已获取浏览器信号量")
             
             proxy_address = _select_proxy_for_session()
+            if random_proxy_ip_enabled and not proxy_address:
+                if _record_bad_proxy_and_maybe_pause(gui_instance):
+                    continue
             if proxy_address:
                 if not _proxy_is_responsive(proxy_address):
                     logging.warning(f"代理无响应：{proxy_address}")
                     _discard_unresponsive_proxy(proxy_address)
                     if stop_signal.is_set():
                         break
+                    # 避免代理源异常时进入高频死循环（频繁请求代理/健康检查会拖慢整机）
+                    if random_proxy_ip_enabled:
+                        if _record_bad_proxy_and_maybe_pause(gui_instance):
+                            continue
+                    stop_signal.wait(0.8)
                     continue
+                else:
+                    _reset_bad_proxy_streak()
             
             ua_value, ua_label = _select_user_agent_for_session()
             
@@ -2450,6 +2517,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 logging.error("无法启动：问卷链接为空")
                 driver_had_error = True
                 break
+            _wait_if_paused(gui_instance, stop_signal)
             if timed_mode_active:
                 logging.info("[Action Log] 定时模式：开始刷新等待问卷开放")
                 ready = timed_mode.wait_until_open(
@@ -2520,7 +2588,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
 
                 if aliyun_detected:
                     driver_had_error = True
-                    _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
+                    _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
                 # 没有触发验证，直接标记为成功
@@ -2545,7 +2613,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 break
         except AliyunCaptchaBypassError:
             driver_had_error = True
-            _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
+            _handle_aliyun_captcha_detected(gui_instance, stop_signal)
             break
         except TimeoutException as exc:
             if stop_signal.is_set():
@@ -2590,7 +2658,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     aliyun_detected = False
                 if aliyun_detected:
                     driver_had_error = True
-                    _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
+                    _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
             if not completion_detected and not stop_signal.is_set():
