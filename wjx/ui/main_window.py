@@ -41,7 +41,8 @@ from wjx.ui.pages.log import LogPage
 from wjx.ui.pages.help import HelpPage
 from wjx.ui.pages.about import AboutPage
 from wjx.ui.pages.account import AccountPage
-from wjx.ui.pages.changelog import ChangelogPage
+from wjx.ui.pages.changelog import ChangelogPage, ChangelogDetailPage
+from wjx.ui.pages.donate import DonatePage
 
 # 导入对话框
 from wjx.ui.dialogs.card_unlock import CardUnlockDialog
@@ -115,6 +116,8 @@ class MainWindow(FluentWindow):
         self.help_page = HelpPage(self._open_contact_dialog, self)
         self.about_page = AboutPage(self)
         self.changelog_page = ChangelogPage(self)
+        self.changelog_detail_page = ChangelogDetailPage(self)
+        self.donate_page = DonatePage(self)
 
         self.login_page = AccountPage(self)
         self.login_page.loginSuccess.connect(self._update_github_avatar)
@@ -127,10 +130,14 @@ class MainWindow(FluentWindow):
         self.help_page.setObjectName("help")
         self.about_page.setObjectName("about")
         self.changelog_page.setObjectName("changelog")
+        self.changelog_detail_page.setObjectName("changelog_detail")
+        self.donate_page.setObjectName("donate")
         self.login_page.setObjectName("login")
         self.settings_page.setObjectName("settings")
 
         self._init_navigation()
+        self._init_changelog_navigation()
+
         self._init_github_avatar()
         # 设置侧边栏宽度和默认不可折叠
         try:
@@ -313,7 +320,25 @@ class MainWindow(FluentWindow):
             self.stackedWidget.addWidget(self.about_page)
         if self.stackedWidget.indexOf(self.changelog_page) == -1:
             self.stackedWidget.addWidget(self.changelog_page)
+        if self.stackedWidget.indexOf(self.donate_page) == -1:
+            self.stackedWidget.addWidget(self.donate_page)
         self.navigationInterface.setCurrentItem(self.dashboard.objectName())
+
+    def _init_changelog_navigation(self):
+        """初始化更新日志页面导航"""
+        # 将详情页添加到 stackedWidget
+        if self.stackedWidget.indexOf(self.changelog_detail_page) == -1:
+            self.stackedWidget.addWidget(self.changelog_detail_page)
+        
+        # 连接信号：点击列表项时切换到详情页
+        self.changelog_page.detailRequested.connect(self._show_changelog_detail)
+        # 连接信号：点击返回按钮时切换回列表页
+        self.changelog_detail_page.backRequested.connect(lambda: self.switchTo(self.changelog_page))
+    
+    def _show_changelog_detail(self, release: dict):
+        """显示更新日志详情"""
+        self.changelog_detail_page.setRelease(release)
+        self.switchTo(self.changelog_detail_page)
 
     def _show_about_menu(self):
         """显示关于子菜单"""
@@ -332,6 +357,11 @@ class MainWindow(FluentWindow):
         changelog_action = Action(FluentIcon.HISTORY, "更新日志")
         changelog_action.triggered.connect(lambda: self.switchTo(self.changelog_page))
         menu.addAction(changelog_action)
+        
+        # 捐助
+        donate_action = Action(FluentIcon.HEART, "捐助")
+        donate_action.triggered.connect(lambda: self.switchTo(self.donate_page))
+        menu.addAction(donate_action)
         
         # 帮助
         help_action = Action(FluentIcon.HELP, "帮助")

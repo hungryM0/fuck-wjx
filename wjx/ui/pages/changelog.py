@@ -3,7 +3,7 @@ import threading
 from datetime import datetime
 
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from qfluentwidgets import (
     ScrollArea,
     SubtitleLabel,
@@ -18,81 +18,54 @@ from qfluentwidgets import (
 from wjx.utils.markdown_utils import strip_markdown
 
 
-class ReleaseCard(CardWidget):
-    """单个发行版卡片，支持展开/折叠"""
+class ReleaseListItem(CardWidget):
+    """发行版列表项"""
+    itemClicked = Signal(dict)
     
-    def __init__(self, version: str, date: str, body: str, expanded: bool = False, parent=None):
+    def __init__(self, release: dict, parent=None):
         super().__init__(parent)
-        self._expanded = expanded
-        self._body = body
-        self._build_ui(version, date)
-        self.setExpanded(expanded)
+        self.release = release
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._build_ui()
     
-    def _build_ui(self, version: str, date: str):
-        layout = QVBoxLayout(self)
+    def _build_ui(self):
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(8)
         
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        icon = TransparentToolButton(FluentIcon.CHEVRON_RIGHT_MED, self)
+        icon.setFixedSize(24, 24)
+        icon.setEnabled(False)
+        layout.addWidget(icon)
         
-        self.expand_btn = TransparentToolButton(FluentIcon.CHEVRON_RIGHT_MED, self)
-        self.expand_btn.setFixedSize(24, 24)
-        self.expand_btn.clicked.connect(self._toggle)
-        header.addWidget(self.expand_btn)
-        
+        version = self.release.get("version", "")
         title = BodyLabel(f"v{version}", self)
         title.setStyleSheet("font-weight: bold;")
-        header.addWidget(title)
+        layout.addWidget(title)
         
-        date_label = BodyLabel(date, self)
+        published = self.release.get("published_at", "")
+        date_str = ""
+        if published:
+            try:
+                dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
+                date_str = dt.strftime("%Y-%m-%d")
+            except Exception:
+                date_str = published[:10] if len(published) >= 10 else published
+        
+        date_label = BodyLabel(date_str, self)
         date_label.setStyleSheet("color: #888;")
-        header.addWidget(date_label)
-        header.addStretch(1)
-        
-        layout.addLayout(header)
-        
-        self.content = TextBrowser(self)
-        processed_body = strip_markdown(self._body)
-        self.content.setMarkdown(processed_body)
-        self.content.setOpenExternalLinks(True)
-        self.content.setStyleSheet("border: none; background: transparent; padding-left: 32px;")
-        self.content.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        layout.addWidget(self.content)
+        layout.addWidget(date_label)
+        layout.addStretch(1)
     
-    def showEvent(self, event):
-        """显示时调整高度"""
-        super().showEvent(event)
-        self._adjust_content_height()
-    
-    def resizeEvent(self, event):
-        """窗口大小改变时调整高度"""
-        super().resizeEvent(event)
-        if self._expanded:
-            self._adjust_content_height()
-    
-    def _adjust_content_height(self):
-        """根据内容自动调整高度，最大300px"""
-        self.content.document().setTextWidth(self.content.viewport().width())
-        doc_height = self.content.document().size().height()
-        height = min(int(doc_height) + 10, 300)
-        self.content.setFixedHeight(height)
-    
-    def _toggle(self):
-        self.setExpanded(not self._expanded)
-    
-    def setExpanded(self, expanded: bool):
-        self._expanded = expanded
-        self.content.setVisible(expanded)
-        icon = FluentIcon.CHEVRON_DOWN_MED if expanded else FluentIcon.CHEVRON_RIGHT_MED
-        self.expand_btn.setIcon(icon)
+    def mousePressEvent(self, e):
+        super().mousePressEvent(e)
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.itemClicked.emit(self.release)
 
 
 class ChangelogPage(ScrollArea):
-    """更新日志页面"""
-
+    """更新日志列表页"""
     _releasesLoaded = Signal(list)
+    detailRequested = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -148,18 +121,48 @@ class ChangelogPage(ScrollArea):
             self.container.addWidget(label)
             return
         
-        for i, release in enumerate(releases):
-            version = release.get("version", "")
-            body = release.get("body", "")
-            published = release.get("published_at", "")
-            
-            date_str = ""
-            if published:
-                try:
-                    dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
-                    date_str = dt.strftime("%Y-%m-%d")
-                except Exception:
-                    date_str = published[:10] if len(published) >= 10 else published
-            
-            card = ReleaseCard(version, date_str, body, expanded=(i == 0), parent=self.view)
-            self.container.addWidget(card)
+        for release in releases:
+            item = ReleaseListItem(release, self.view)
+            item.itemClicked.connect(self.detailRequested.emit)
+            self.container.addWidget(item)
+
+
+class ChangelogDetailPage(ScrollArea):
+    """更新日志详情页"""
+    backRequested = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.view = QWidget(self)
+        self.view.setStyleSheet("background: transparent;")
+        self.setWidget(self.view)
+        self.setWidgetResizable(True)
+        self._build_ui()
+    
+    def _build_ui(self):
+        layout = QVBoxLayout(self.view)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+        
+        header = QHBoxLayout()
+        back_btn = TransparentToolButton(FluentIcon.RETURN, self)
+        back_btn.setFixedSize(32, 32)
+        back_btn.clicked.connect(self.backRequested.emit)
+        header.addWidget(back_btn)
+        
+        self.title_label = SubtitleLabel("", self)
+        header.addWidget(self.title_label)
+        header.addStretch(1)
+        layout.addLayout(header)
+        
+        self.content_browser = TextBrowser(self)
+        self.content_browser.setOpenExternalLinks(True)
+        self.content_browser.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(self.content_browser)
+    
+    def setRelease(self, release: dict):
+        version = release.get("version", "")
+        body = release.get("body", "")
+        self.title_label.setText(f"v{version}")
+        processed_body = strip_markdown(body)
+        self.content_browser.setMarkdown(processed_body)

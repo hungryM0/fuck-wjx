@@ -4,6 +4,7 @@ import subprocess
 import webbrowser
 import os
 import sys
+import requests
 from typing import Optional
 from datetime import datetime
 
@@ -152,11 +153,13 @@ class AboutPage(ScrollArea):
     _updateCheckFinished = Signal(object)  # update_info or None
     _updateCheckError = Signal(str)  # error message
     _publishTimeLoaded = Signal(str)  # publish time string
+    _ipBalanceLoaded = Signal(int)  # IP balance
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._updateCheckFinished.connect(self._on_update_result)
         self._updateCheckError.connect(self._on_update_error)
+        self._ipBalanceLoaded.connect(self._on_ip_balance_loaded)
         
         self.view = QWidget(self)
         self.view.setObjectName('view')
@@ -207,10 +210,12 @@ class AboutPage(ScrollArea):
             orient=Qt.Orientation.Horizontal,
             isClosable=False,
             position=InfoBarPosition.NONE,
-            duration=-1,  # 永不消失
+            duration=-1,
             parent=self
         )
         disclaimer_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        disclaimer_bar.setMinimumWidth(0)
+        disclaimer_bar.setMaximumWidth(16777215)
         main_layout.addWidget(disclaimer_bar)
 
         # 2. 版本信息 + 相关链接（两个卡片并排）
@@ -297,18 +302,27 @@ class AboutPage(ScrollArea):
         main_layout.addWidget(credit_card)
 
         # Footer
+        footer_layout = QHBoxLayout()
+        footer_layout.setSpacing(8)
         copyright_text = CaptionLabel("© 2026 HUNGRY_M0", self)
         copyright_text.setStyleSheet("color: #888;")
+        self.ip_balance_label = CaptionLabel("", self)
+        self.ip_balance_label.setStyleSheet("color: #888;")
+        footer_layout.addStretch(1)
+        footer_layout.addWidget(copyright_text)
+        footer_layout.addWidget(self.ip_balance_label)
+        footer_layout.addStretch(1)
         main_layout.addSpacing(8)
-        main_layout.addWidget(copyright_text, 0, Qt.AlignmentFlag.AlignHCenter)
+        main_layout.addLayout(footer_layout)
         main_layout.addStretch(1)
 
         self.update_btn.clicked.connect(self._check_updates)
         self.github_btn.clicked.connect(lambda: webbrowser.open(f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"))
         self.website_btn.clicked.connect(lambda: webbrowser.open("https://www.hungrym0.top/fuck-wjx.html"))
         
-        # 异步获取发布时间
+        # 异步获取发布时间和IP余额
         self._load_publish_time()
+        self._load_ip_balance()
 
     def _set_update_loading(self, loading: bool):
         self._checking_update = loading
@@ -414,3 +428,25 @@ class AboutPage(ScrollArea):
     def _on_publish_time_loaded(self, time_str: str):
         """更新发布时间标签"""
         self.publish_time_label.setText(f"({time_str})")
+
+    def _load_ip_balance(self):
+        """异步加载IP余额"""
+        def _do_load():
+            try:
+                response = requests.get(
+                    "http://v2.api.juliangip.com/dynamic/balance",
+                    params={"trade_no": "2981859568469987", "sign": "4b295f4bdbed286696a74fcd7c0ca154"},
+                    timeout=5
+                )
+                data = response.json()
+                if data.get("code") == 200:
+                    balance = data.get("data", {}).get("balance", 0)
+                    self._ipBalanceLoaded.emit(balance)
+            except Exception:
+                pass
+        
+        threading.Thread(target=_do_load, daemon=True).start()
+
+    def _on_ip_balance_loaded(self, balance: int):
+        """更新IP余额标签"""
+        self.ip_balance_label.setText(f"|  剩余 IP 数量: {balance}")
