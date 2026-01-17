@@ -49,7 +49,7 @@ class SettingsPage(ScrollArea):
             "开启后侧边栏将始终保持展开状态",
             self.ui_group
         )
-        self.sidebar_card.setChecked(True)
+        self.sidebar_card.setChecked(settings.value("sidebar_always_expand", True, type=bool))
         self.ui_group.addSettingCard(self.sidebar_card)
 
         # 窗口置顶设置卡片
@@ -62,6 +62,16 @@ class SettingsPage(ScrollArea):
         self.topmost_card.setChecked(settings.value("window_topmost", False, type=bool))
         self.ui_group.addSettingCard(self.topmost_card)
 
+        # 关闭前询问保存设置卡片
+        self.ask_save_card = SwitchSettingCard(
+            FluentIcon.CLOSE,
+            "关闭前询问是否保存",
+            "关闭窗口时提示是否保存当前配置",
+            self.ui_group
+        )
+        self.ask_save_card.setChecked(settings.value("ask_save_on_close", True, type=bool))
+        self.ui_group.addSettingCard(self.ask_save_card)
+
         # 重启程序设置卡片
         self.restart_card = PushSettingCard(
             text="重启",
@@ -71,6 +81,16 @@ class SettingsPage(ScrollArea):
             parent=self.ui_group
         )
         self.ui_group.addSettingCard(self.restart_card)
+
+        # 恢复默认设置卡片
+        self.reset_ui_card = PushSettingCard(
+            text="恢复默认",
+            icon=FluentIcon.BROOM,
+            title="恢复默认设置",
+            content="恢复界面与更新相关的默认选项",
+            parent=self.ui_group
+        )
+        self.ui_group.addSettingCard(self.reset_ui_card)
 
         layout.addWidget(self.ui_group)
 
@@ -116,12 +136,24 @@ class SettingsPage(ScrollArea):
         # 绑定事件
         self.sidebar_card.switchButton.checkedChanged.connect(self._on_sidebar_toggled)
         self.topmost_card.switchButton.checkedChanged.connect(self._on_topmost_toggled)
+        self.ask_save_card.switchButton.checkedChanged.connect(self._on_ask_save_on_close_toggled)
         self.restart_card.clicked.connect(self._restart_program)
+        self.reset_ui_card.clicked.connect(self._on_reset_ui_settings)
         self.auto_update_card.switchButton.checkedChanged.connect(self._on_auto_update_toggled)
         self.mirror_combo.currentIndexChanged.connect(self._on_mirror_changed)
 
-    def _on_sidebar_toggled(self, checked: bool):
-        """侧边栏展开切换"""
+    def _set_switch_state(self, card: SwitchSettingCard, checked: bool):
+        btn = getattr(card, "switchButton", None)
+        if btn is None:
+            return
+        btn.blockSignals(True)
+        card.setChecked(checked)
+        btn.blockSignals(False)
+
+    def _apply_sidebar_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
+        settings = QSettings("FuckWjx", "Settings")
+        if persist:
+            settings.setValue("sidebar_always_expand", checked)
         win = self.window()
         nav = getattr(win, "navigationInterface", None)
         if nav is not None:
@@ -131,15 +163,65 @@ class SettingsPage(ScrollArea):
                     nav.expand()
                 else:
                     nav.setCollapsible(True)
-                InfoBar.success(
-                    "",
-                    f"侧边栏已设置为{'始终展开' if checked else '可折叠'}",
-                    parent=win,
-                    position=InfoBarPosition.TOP,
-                    duration=2000
-                )
+                    if hasattr(nav, "panel"):
+                        nav.panel.collapse()
+                if show_tip:
+                    InfoBar.success(
+                        "",
+                        f"侧边栏已设置为{'始终展开' if checked else '可折叠'}",
+                        parent=win,
+                        position=InfoBarPosition.TOP,
+                        duration=2000
+                    )
             except Exception:
                 pass
+
+    def _apply_topmost_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
+        settings = QSettings("FuckWjx", "Settings")
+        if persist:
+            settings.setValue("window_topmost", checked)
+        win = self.window()
+        if win:
+            win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
+            win.show()
+        if show_tip:
+            InfoBar.success(
+                "",
+                f"窗口置顶已{'开启' if checked else '关闭'}",
+                parent=win,
+                position=InfoBarPosition.TOP,
+                duration=2000
+            )
+
+    def _apply_ask_save_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
+        settings = QSettings("FuckWjx", "Settings")
+        if persist:
+            settings.setValue("ask_save_on_close", checked)
+        if show_tip:
+            InfoBar.success(
+                "",
+                f"关闭前保存询问已{'开启' if checked else '关闭'}",
+                parent=self.window(),
+                position=InfoBarPosition.TOP,
+                duration=2000
+            )
+
+    def _apply_auto_update_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
+        settings = QSettings("FuckWjx", "Settings")
+        if persist:
+            settings.setValue("auto_check_update", checked)
+        if show_tip:
+            InfoBar.success(
+                "",
+                f"启动时检查更新已{'开启' if checked else '关闭'}",
+                parent=self.window(),
+                position=InfoBarPosition.TOP,
+                duration=2000
+            )
+
+    def _on_sidebar_toggled(self, checked: bool):
+        """侧边栏展开切换"""
+        self._apply_sidebar_state(checked)
 
     def _restart_program(self):
         """重启程序"""
@@ -168,29 +250,48 @@ class SettingsPage(ScrollArea):
 
     def _on_auto_update_toggled(self, checked: bool):
         """自动检查更新开关切换"""
-        settings = QSettings("FuckWjx", "Settings")
-        settings.setValue("auto_check_update", checked)
-        InfoBar.success(
-            "",
-            f"启动时检查更新已{'开启' if checked else '关闭'}",
-            parent=self.window(),
-            position=InfoBarPosition.TOP,
-            duration=2000
-        )
+        self._apply_auto_update_state(checked)
 
     def _on_topmost_toggled(self, checked: bool):
         """窗口置顶切换"""
+        self._apply_topmost_state(checked)
+
+    def _on_ask_save_on_close_toggled(self, checked: bool):
+        """关闭前询问保存切换"""
+        self._apply_ask_save_state(checked)
+
+    def _on_reset_ui_settings(self):
+        """恢复默认设置"""
+        box = MessageBox(
+            "恢复默认设置",
+            "确定要恢复默认设置吗？\n这将还原界面与更新相关选项。",
+            self.window() or self
+        )
+        box.yesButton.setText("恢复")
+        box.cancelButton.setText("取消")
+        if not box.exec():
+            return
+
         settings = QSettings("FuckWjx", "Settings")
-        settings.setValue("window_topmost", checked)
-        win = self.window()
-        if win:
-            from PySide6.QtCore import Qt
-            win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
-            win.show()
+        for key in ("sidebar_always_expand", "window_topmost", "ask_save_on_close", "auto_check_update"):
+            settings.remove(key)
+
+        defaults = {
+            "sidebar_always_expand": True,
+            "window_topmost": False,
+            "ask_save_on_close": True,
+            "auto_check_update": True,
+        }
+        self._set_switch_state(self.sidebar_card, defaults["sidebar_always_expand"])
+        self._set_switch_state(self.topmost_card, defaults["window_topmost"])
+        self._set_switch_state(self.ask_save_card, defaults["ask_save_on_close"])
+        self._set_switch_state(self.auto_update_card, defaults["auto_check_update"])
+        self._apply_sidebar_state(defaults["sidebar_always_expand"], persist=False, show_tip=False)
+        self._apply_topmost_state(defaults["window_topmost"], persist=False, show_tip=False)
         InfoBar.success(
             "",
-            f"窗口置顶已{'开启' if checked else '关闭'}",
-            parent=win,
+            "已恢复默认设置",
+            parent=self.window(),
             position=InfoBarPosition.TOP,
             duration=2000
         )

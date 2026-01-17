@@ -296,11 +296,11 @@ class AccountPage(ScrollArea):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(4)
         
-        login_title = BodyLabel("连接 GitHub 账号", self)
+        login_title = BodyLabel("登录 GitHub 账号", self)
         login_title.setStyleSheet("font-size: 15px; font-weight: bold;")
         text_layout.addWidget(login_title)
         
-        desc = CaptionLabel("🎉【限时】登录后享受免费额度", self)
+        desc = CaptionLabel("🔔 登录后可便捷互动仓库", self)
         desc.setStyleSheet("color: #888;")
         text_layout.addWidget(desc)
         

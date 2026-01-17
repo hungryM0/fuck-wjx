@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QDialog,
+    QSizePolicy,
 )
 from qfluentwidgets import (
     ScrollArea,
@@ -34,10 +35,12 @@ from qfluentwidgets import (
     TransparentToolButton,
     IndeterminateProgressRing,
     InfoBar,
+    InfoBarIcon,
     InfoBarPosition,
 )
 
 from wjx.ui.widgets.no_wheel import NoWheelSlider, NoWheelSpinBox
+from wjx.ui.widgets.full_width_infobar import FullWidthInfoBar
 from wjx.ui.controller import RunController
 from wjx.ui.workers.ai_test_worker import AITestWorker
 from wjx.utils.load_save import RuntimeConfig
@@ -462,6 +465,22 @@ class RuntimePage(ScrollArea):
         self.ai_group = SettingCardGroup("AI 填空助手", self.view)
         ai_config = get_ai_settings()
         self._ai_system_prompt = ai_config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
+
+        self.ai_privacy_bar = FullWidthInfoBar(
+            InfoBarIcon.SUCCESS,
+            "隐私声明：不会上传 API Key 等隐私信息，所有配置仅保存在本地。",
+            "",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=False,
+            duration=-1,
+            position=InfoBarPosition.NONE,
+            parent=self.ai_group,
+        )
+        self.ai_privacy_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.ai_privacy_bar.setMinimumWidth(0)
+        self.ai_privacy_bar.setMaximumWidth(16777215)
+        self.ai_privacy_bar.contentLabel.setVisible(False)
+        self.ai_group.addSettingCard(self.ai_privacy_bar)
 
         self.ai_enabled_card = SwitchSettingCard(
             FluentIcon.ROBOT,

@@ -145,10 +145,14 @@ class MainWindow(FluentWindow):
         self._init_changelog_navigation()
 
         self._init_github_avatar()
-        # 设置侧边栏宽度和默认不可折叠
+        # 设置侧边栏宽度和折叠策略
         try:
             self.navigationInterface.setExpandWidth(140)
-            self.navigationInterface.setCollapsible(False)
+            settings = QSettings("FuckWjx", "Settings")
+            always_expand = settings.value("sidebar_always_expand", True, type=bool)
+            self.navigationInterface.setCollapsible(not always_expand)
+            if always_expand:
+                self.navigationInterface.expand(useAni=False)
         except Exception:
             pass
         self._sidebar_expanded = False  # 标记侧边栏是否已展开
@@ -197,12 +201,17 @@ class MainWindow(FluentWindow):
     def showEvent(self, e):
         """窗口显示时展开侧边栏"""
         super().showEvent(e)
-        if not self._sidebar_expanded:
-            self._sidebar_expanded = True
-            try:
-                self.navigationInterface.expand(useAni=False)
-            except Exception:
-                pass
+        if self._sidebar_expanded:
+            return
+        self._sidebar_expanded = True
+        settings = QSettings("FuckWjx", "Settings")
+        always_expand = settings.value("sidebar_always_expand", True, type=bool)
+        if not always_expand:
+            return
+        try:
+            self.navigationInterface.expand(useAni=False)
+        except Exception:
+            pass
 
     def closeEvent(self, e):
         """窗口关闭时询问用户是否保存配置"""
@@ -216,64 +225,67 @@ class MainWindow(FluentWindow):
             pass
         
         if not self._skip_save_on_close:
-            # 询问用户是否保存配置
-            box = MessageBox("保存配置", "是否保存当前配置？", self)
-            box.yesButton.setText("保存")
-            box.cancelButton.setText("取消")
-            
-            # 添加"不保存"按钮
-            no_btn = PushButton("不保存", self)
-            box.buttonLayout.insertWidget(1, no_btn)
-            no_btn.clicked.connect(lambda: box.done(2))  # 2 表示"不保存"
-            
-            reply = box.exec()
-            
-            if reply == 0 or not reply:  # 取消
-                # 用户取消关闭
-                e.ignore()
-                return
-            elif reply == 1 or reply == True:  # 保存
-                # 用户选择保存
-                try:
-                    cfg = self.dashboard._build_config()
-                    cfg.question_entries = list(self.question_page.get_entries())
-                    self.controller.config = cfg
-                    
-                    # 弹出文件保存对话框，默认位置在 configs 目录
-                    configs_dir = os.path.join(get_runtime_directory(), "configs")
-                    os.makedirs(configs_dir, exist_ok=True)
-                    
-                    default_path = configs_dir
-                    
-                    path, _ = QFileDialog.getSaveFileName(
-                        self,
-                        "保存配置",
-                        default_path,
-                        "JSON 文件 (*.json);;所有文件 (*.*)"
-                    )
-                    
-                    if path:
-                        from wjx.utils.load_save import save_config
-                        save_config(cfg, path)
+            settings = QSettings("FuckWjx", "Settings")
+            ask_save = settings.value("ask_save_on_close", True, type=bool)
+            if ask_save:
+                # 询问用户是否保存配置
+                box = MessageBox("保存配置", "是否保存当前配置？", self)
+                box.yesButton.setText("保存")
+                box.cancelButton.setText("取消")
+                
+                # 添加"不保存"按钮
+                no_btn = PushButton("不保存", self)
+                box.buttonLayout.insertWidget(1, no_btn)
+                no_btn.clicked.connect(lambda: box.done(2))  # 2 表示"不保存"
+                
+                reply = box.exec()
+                
+                if reply == 0 or not reply:  # 取消
+                    # 用户取消关闭
+                    e.ignore()
+                    return
+                elif reply == 1 or reply == True:  # 保存
+                    # 用户选择保存
+                    try:
+                        cfg = self.dashboard._build_config()
+                        cfg.question_entries = list(self.question_page.get_entries())
+                        self.controller.config = cfg
+                        
+                        # 弹出文件保存对话框，默认位置在 configs 目录
+                        configs_dir = os.path.join(get_runtime_directory(), "configs")
+                        os.makedirs(configs_dir, exist_ok=True)
+                        
+                        default_path = configs_dir
+                        
+                        path, _ = QFileDialog.getSaveFileName(
+                            self,
+                            "保存配置",
+                            default_path,
+                            "JSON 文件 (*.json);;所有文件 (*.*)"
+                        )
+                        
+                        if path:
+                            from wjx.utils.load_save import save_config
+                            save_config(cfg, path)
+                            import logging
+                            logging.info(f"配置已保存到: {path}")
+                        else:
+                            # 用户取消了保存对话框，询问是否继续退出
+                            continue_box = MessageBox("确认", "未保存配置，是否继续退出？", self)
+                            continue_box.yesButton.setText("退出")
+                            continue_box.cancelButton.setText("取消")
+                            if not continue_box.exec():
+                                e.ignore()
+                                return
+                    except Exception as exc:
                         import logging
-                        logging.info(f"配置已保存到: {path}")
-                    else:
-                        # 用户取消了保存对话框，询问是否继续退出
-                        continue_box = MessageBox("确认", "未保存配置，是否继续退出？", self)
-                        continue_box.yesButton.setText("退出")
-                        continue_box.cancelButton.setText("取消")
-                        if not continue_box.exec():
+                        logging.error(f"保存配置失败: {exc}", exc_info=True)
+                        error_box = MessageBox("错误", f"保存配置失败：{exc}\n\n是否继续退出？", self)
+                        error_box.yesButton.setText("退出")
+                        error_box.cancelButton.setText("取消")
+                        if not error_box.exec():
                             e.ignore()
                             return
-                except Exception as exc:
-                    import logging
-                    logging.error(f"保存配置失败: {exc}", exc_info=True)
-                    error_box = MessageBox("错误", f"保存配置失败：{exc}\n\n是否继续退出？", self)
-                    error_box.yesButton.setText("退出")
-                    error_box.cancelButton.setText("取消")
-                    if not error_box.exec():
-                        e.ignore()
-                        return
             
             # 自动保存日志到固定文件
             try:

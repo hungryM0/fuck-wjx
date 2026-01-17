@@ -94,7 +94,7 @@ def _call_openai_compatible(
     question: str,
     system_prompt: str,
     timeout: int = 30,
-) -> Optional[str]:
+) -> str:
     """调用 OpenAI 兼容接口"""
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
@@ -114,7 +114,10 @@ def _call_openai_compatible(
         resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content")
+        if not content:
+            raise RuntimeError("API 返回内容为空")
+        return str(content).strip()
     except Exception as e:
         raise RuntimeError(f"API 调用失败: {e}")
 
@@ -125,7 +128,7 @@ def _call_gemini(
     question: str,
     system_prompt: str,
     timeout: int = 30,
-) -> Optional[str]:
+) -> str:
     """调用 Google Gemini API"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
@@ -146,7 +149,15 @@ def _call_gemini(
         resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text")
+        )
+        if not text:
+            raise RuntimeError("Gemini API 返回内容为空")
+        return str(text).strip()
     except Exception as e:
         raise RuntimeError(f"Gemini API 调用失败: {e}")
 
