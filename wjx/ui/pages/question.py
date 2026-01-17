@@ -1,4 +1,5 @@
 """题目配置页面和配置向导"""
+import copy
 from typing import List, Dict, Any, Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -19,6 +20,7 @@ from qfluentwidgets import (
     TableWidget,
     ComboBox,
     LineEdit,
+    CheckBox,
     InfoBar,
     InfoBarPosition,
     FluentIcon,
@@ -27,7 +29,8 @@ from qfluentwidgets import (
 from wjx.ui.widgets.no_wheel import NoWheelSlider, NoWheelSpinBox
 from wjx.engine import QuestionEntry
 from wjx.utils.config import DEFAULT_FILL_TEXT
-from wjx.utils.ai_service import get_ai_settings, generate_answer
+from wjx.utils.ai_service import generate_answer
+from wjx.ui.helpers.ai_fill import ensure_ai_ready
 
 # 题目类型选项
 TYPE_CHOICES = [
@@ -84,6 +87,10 @@ class QuestionWizardDialog(QDialog):
         self.info = info or []
         self.slider_map: Dict[int, List[NoWheelSlider]] = {}
         self.text_edit_map: Dict[int, List[LineEdit]] = {}
+        self.ai_check_map: Dict[int, CheckBox] = {}
+        self.text_container_map: Dict[int, QWidget] = {}
+        self.text_add_btn_map: Dict[int, PushButton] = {}
+        self._entry_snapshots: List[QuestionEntry] = [copy.deepcopy(entry) for entry in entries]
         self._has_content = False
 
         layout = QVBoxLayout(self)
@@ -192,10 +199,26 @@ class QuestionWizardDialog(QDialog):
                     add_row_func(txt)
 
                 # 添加按钮
+                btn_row = QHBoxLayout()
+                btn_row.setSpacing(8)
                 add_btn = PushButton("+ 添加答案", card)
                 add_btn.setFixedWidth(100)
                 add_btn.clicked.connect(lambda checked=False, f=add_row_func: f(""))
-                card_layout.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+                btn_row.addWidget(add_btn)
+                self.text_container_map[idx] = text_rows_container
+                self.text_add_btn_map[idx] = add_btn
+
+                if entry.question_type == "text":
+                    ai_cb = CheckBox("启用 AI", card)
+                    ai_cb.setToolTip("运行时每次填空都会调用 AI")
+                    ai_cb.setChecked(bool(getattr(entry, "ai_enabled", False)))
+                    ai_cb.toggled.connect(lambda checked, i=idx: self._on_entry_ai_toggled(i, checked))
+                    btn_row.addWidget(ai_cb)
+                    self.ai_check_map[idx] = ai_cb
+                    self._set_text_answer_enabled(idx, not ai_cb.isChecked())
+
+                btn_row.addStretch(1)
+                card_layout.addLayout(btn_row)
 
                 self.text_edit_map[idx] = edits
             else:
@@ -270,6 +293,35 @@ class QuestionWizardDialog(QDialog):
         ok_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
 
+    def _set_text_answer_enabled(self, idx: int, enabled: bool) -> None:
+        container = self.text_container_map.get(idx)
+        if container:
+            container.setEnabled(enabled)
+        add_btn = self.text_add_btn_map.get(idx)
+        if add_btn:
+            add_btn.setEnabled(enabled)
+
+    def _on_entry_ai_toggled(self, idx: int, checked: bool) -> None:
+        if checked and not ensure_ai_ready(self.window() or self):
+            cb = self.ai_check_map.get(idx)
+            if cb:
+                cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(False)
+            self._set_text_answer_enabled(idx, True)
+            return
+        self._set_text_answer_enabled(idx, not checked)
+
+    def _restore_entries(self) -> None:
+        limit = min(len(self.entries), len(self._entry_snapshots))
+        for idx in range(limit):
+            snapshot = copy.deepcopy(self._entry_snapshots[idx])
+            self.entries[idx].__dict__.update(snapshot.__dict__)
+
+    def reject(self) -> None:
+        self._restore_entries()
+        super().reject()
+
     def get_results(self) -> Dict[int, List[int]]:
         """获取滑块权重结果"""
         result: Dict[int, List[int]] = {}
@@ -289,6 +341,10 @@ class QuestionWizardDialog(QDialog):
                 texts = [DEFAULT_FILL_TEXT]
             result[idx] = texts
         return result
+
+    def get_ai_flags(self) -> Dict[int, bool]:
+        """获取填空题是否启用 AI"""
+        return {idx: cb.isChecked() for idx, cb in self.ai_check_map.items()}
 
 
 class QuestionPage(ScrollArea):
@@ -348,6 +404,14 @@ class QuestionPage(ScrollArea):
     def set_entries(self, entries: List[QuestionEntry], info: Optional[List[Dict[str, Any]]] = None):
         self.questions_info = info or self.questions_info
         self.entries = list(entries or [])
+        if self.questions_info:
+            for idx, entry in enumerate(self.entries):
+                if getattr(entry, "question_title", None):
+                    continue
+                if idx < len(self.questions_info):
+                    title = self.questions_info[idx].get("title")
+                    if title:
+                        entry.question_title = str(title).strip()
         self._refresh_table()
 
     def get_entries(self) -> List[QuestionEntry]:
@@ -445,6 +509,21 @@ class QuestionPage(ScrollArea):
         text_area_layout.addWidget(add_text_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(text_area_widget)
 
+        ai_toggle = CheckBox("启用 AI（运行时每次填空调用）", dialog)
+        ai_toggle.setToolTip("开启后该题每次填写都会调用 AI")
+        layout.addWidget(ai_toggle)
+
+        def set_text_area_enabled(enabled: bool):
+            text_area_widget.setEnabled(enabled)
+
+        def on_ai_toggle(checked: bool):
+            if checked and not ensure_ai_ready(dialog):
+                ai_toggle.blockSignals(True)
+                ai_toggle.setChecked(False)
+                ai_toggle.blockSignals(False)
+                checked = False
+            set_text_area_enabled(not checked)
+
         # 自定义配比滑块区域
         slider_card = CardWidget(dialog)
         slider_card_layout = QVBoxLayout(slider_card)
@@ -504,11 +583,19 @@ class QuestionPage(ScrollArea):
             strategy = STRATEGY_CHOICES[strategy_idx][0] if 0 <= strategy_idx < len(STRATEGY_CHOICES) else "random"
             is_text = q_type in ("text", "multi_text")
             is_custom = strategy == "custom"
+            is_single_text = q_type == "text"
             # 填空题时隐藏策略选择，显示答案列表
             strategy_label.setVisible(not is_text)
             strategy_combo.setVisible(not is_text)
             text_area_widget.setVisible(is_text)
             slider_card.setVisible(not is_text and is_custom)
+            ai_toggle.setVisible(is_single_text)
+            if not is_single_text:
+                ai_toggle.setChecked(False)
+            if is_text:
+                set_text_area_enabled(not ai_toggle.isChecked())
+            else:
+                set_text_area_enabled(True)
             # 根据题目类型更新提示标签
             if q_type == "multiple":
                 slider_hint_label.setText("拖动滑块设置各选项被选中的概率（数值越大概率越高）：")
@@ -524,10 +611,12 @@ class QuestionPage(ScrollArea):
                 rebuild_sliders()
 
         text_area_widget.setVisible(False)
+        ai_toggle.setVisible(False)
         slider_card.setVisible(False)
         type_combo.currentIndexChanged.connect(lambda _: do_update_visibility())
         strategy_combo.currentIndexChanged.connect(lambda _: do_update_visibility())
         option_spin.valueChanged.connect(on_option_changed)
+        ai_toggle.toggled.connect(on_ai_toggle)
         
         # 初始化时调用一次以显示滑块（因为默认是自定义配比）
         do_update_visibility()
@@ -563,6 +652,7 @@ class QuestionPage(ScrollArea):
                     distribution_mode="random",
                     custom_weights=None,
                     question_num=str(len(self.entries) + 1),
+                    ai_enabled=bool(ai_toggle.isChecked()) if q_type == "text" else False,
                 )
             else:
                 custom_weights = None
@@ -595,18 +685,13 @@ class QuestionPage(ScrollArea):
 
     def _generate_ai_answers(self):
         """使用 AI 为填空题生成答案"""
-        ai_config = get_ai_settings()
-        if not ai_config["enabled"]:
-            InfoBar.warning("", "请先在设置中启用 AI 填空功能", parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
-            return
-        if not ai_config["api_key"]:
-            InfoBar.warning("", "请先在设置中配置 API Key", parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+        if not ensure_ai_ready(self.window() or self):
             return
 
         # 找出所有填空题
         text_questions = []
         for idx, entry in enumerate(self.entries):
-            if entry.question_type in ("text", "multi_text"):
+            if entry.question_type == "text":
                 info = self.questions_info[idx] if idx < len(self.questions_info) else {}
                 title = info.get("title", f"第{idx + 1}题")
                 text_questions.append((idx, entry, title))
@@ -673,6 +758,8 @@ class QuestionPage(ScrollArea):
                     detail += f" (+{len(texts)-3})"
             else:
                 detail = "答案: 无"
+            if entry.question_type == "text" and getattr(entry, "ai_enabled", False):
+                detail += " | AI"
         elif entry.custom_weights:
             weights = entry.custom_weights
             detail = f"自定义配比: {','.join(str(int(w)) for w in weights[:5])}"

@@ -14,14 +14,10 @@ from qfluentwidgets import (
     InfoBarPosition,
     MessageBox,
     ComboBox,
-    LineEdit,
-    PasswordLineEdit,
-    TextEdit,
 )
 
 from wjx.ui.pages.runtime import SwitchSettingCard
 from wjx.utils.config import GITHUB_MIRROR_SOURCES, DEFAULT_GITHUB_MIRROR
-from wjx.utils.ai_service import AI_PROVIDERS, get_ai_settings, save_ai_settings, test_connection, DEFAULT_SYSTEM_PROMPT
 
 
 class SettingsPage(ScrollArea):
@@ -115,97 +111,6 @@ class SettingsPage(ScrollArea):
 
         layout.addWidget(self.update_group)
 
-        # AI 配置组
-        self.ai_group = SettingCardGroup("AI 填空助手", self.view)
-        ai_config = get_ai_settings()
-
-        # AI 功能开关
-        self.ai_enabled_card = SwitchSettingCard(
-            FluentIcon.ROBOT,
-            "启用 AI 填空",
-            "开启后可使用 AI 自动生成填空题答案",
-            self.ai_group
-        )
-        self.ai_enabled_card.setChecked(ai_config["enabled"])
-        self.ai_group.addSettingCard(self.ai_enabled_card)
-
-        # AI 服务提供商选择
-        self.ai_provider_card = SettingCard(
-            FluentIcon.CLOUD,
-            "AI 服务提供商",
-            "选择 AI 服务，自定义模式支持任意 OpenAI 兼容接口",
-            self.ai_group
-        )
-        self.ai_provider_combo = ComboBox(self.ai_provider_card)
-        self.ai_provider_combo.setMinimumWidth(200)
-        for key, provider in AI_PROVIDERS.items():
-            self.ai_provider_combo.addItem(provider["label"], userData=key)
-        saved_provider = ai_config["provider"]
-        idx = self.ai_provider_combo.findData(saved_provider)
-        if idx >= 0:
-            self.ai_provider_combo.setCurrentIndex(idx)
-        self.ai_provider_card.hBoxLayout.addWidget(self.ai_provider_combo, 0, Qt.AlignmentFlag.AlignRight)
-        self.ai_provider_card.hBoxLayout.addSpacing(16)
-        self.ai_group.addSettingCard(self.ai_provider_card)
-
-        # API Key 输入
-        self.ai_apikey_card = SettingCard(
-            FluentIcon.FINGERPRINT,
-            "API Key",
-            "输入对应服务的 API 密钥",
-            self.ai_group
-        )
-        self.ai_apikey_edit = PasswordLineEdit(self.ai_apikey_card)
-        self.ai_apikey_edit.setMinimumWidth(280)
-        self.ai_apikey_edit.setPlaceholderText("sk-...")
-        self.ai_apikey_edit.setText(ai_config["api_key"])
-        self.ai_apikey_card.hBoxLayout.addWidget(self.ai_apikey_edit, 0, Qt.AlignmentFlag.AlignRight)
-        self.ai_apikey_card.hBoxLayout.addSpacing(16)
-        self.ai_group.addSettingCard(self.ai_apikey_card)
-
-        # 自定义 Base URL（仅自定义模式显示）
-        self.ai_baseurl_card = SettingCard(
-            FluentIcon.LINK,
-            "Base URL",
-            "自定义模式下的 API 地址（如 https://api.example.com/v1）",
-            self.ai_group
-        )
-        self.ai_baseurl_edit = LineEdit(self.ai_baseurl_card)
-        self.ai_baseurl_edit.setMinimumWidth(280)
-        self.ai_baseurl_edit.setPlaceholderText("https://api.example.com/v1")
-        self.ai_baseurl_edit.setText(ai_config["base_url"])
-        self.ai_baseurl_card.hBoxLayout.addWidget(self.ai_baseurl_edit, 0, Qt.AlignmentFlag.AlignRight)
-        self.ai_baseurl_card.hBoxLayout.addSpacing(16)
-        self.ai_group.addSettingCard(self.ai_baseurl_card)
-
-        # 模型选择
-        self.ai_model_card = SettingCard(
-            FluentIcon.DEVELOPER_TOOLS,
-            "模型",
-            "选择或输入模型名称",
-            self.ai_group
-        )
-        self.ai_model_edit = LineEdit(self.ai_model_card)
-        self.ai_model_edit.setMinimumWidth(200)
-        self.ai_model_edit.setPlaceholderText("gpt-3.5-turbo")
-        self.ai_model_edit.setText(ai_config["model"])
-        self.ai_model_card.hBoxLayout.addWidget(self.ai_model_edit, 0, Qt.AlignmentFlag.AlignRight)
-        self.ai_model_card.hBoxLayout.addSpacing(16)
-        self.ai_group.addSettingCard(self.ai_model_card)
-
-        # 测试连接按钮
-        self.ai_test_card = PushSettingCard(
-            text="测试",
-            icon=FluentIcon.SEND,
-            title="测试 AI 连接",
-            content="验证 API 配置是否正确",
-            parent=self.ai_group
-        )
-        self.ai_group.addSettingCard(self.ai_test_card)
-
-        layout.addWidget(self.ai_group)
-        self._update_ai_visibility()
-
         layout.addStretch(1)
 
         # 绑定事件
@@ -214,13 +119,6 @@ class SettingsPage(ScrollArea):
         self.restart_card.clicked.connect(self._restart_program)
         self.auto_update_card.switchButton.checkedChanged.connect(self._on_auto_update_toggled)
         self.mirror_combo.currentIndexChanged.connect(self._on_mirror_changed)
-        # AI 相关事件
-        self.ai_enabled_card.switchButton.checkedChanged.connect(self._on_ai_enabled_toggled)
-        self.ai_provider_combo.currentIndexChanged.connect(self._on_ai_provider_changed)
-        self.ai_apikey_edit.editingFinished.connect(self._on_ai_apikey_changed)
-        self.ai_baseurl_edit.editingFinished.connect(self._on_ai_baseurl_changed)
-        self.ai_model_edit.editingFinished.connect(self._on_ai_model_changed)
-        self.ai_test_card.clicked.connect(self._on_ai_test_clicked)
 
     def _on_sidebar_toggled(self, checked: bool):
         """侧边栏展开切换"""
@@ -311,78 +209,3 @@ class SettingsPage(ScrollArea):
             position=InfoBarPosition.TOP,
             duration=2000
         )
-
-    def _update_ai_visibility(self):
-        """根据选择的提供商更新 AI 配置项的可见性"""
-        idx = self.ai_provider_combo.currentIndex()
-        provider_key = str(self.ai_provider_combo.itemData(idx)) if idx >= 0 else "openai"
-        is_custom = provider_key == "custom"
-        self.ai_baseurl_card.setVisible(is_custom)
-
-    def _on_ai_enabled_toggled(self, checked: bool):
-        """AI 功能开关切换"""
-        save_ai_settings(enabled=checked)
-        InfoBar.success(
-            "",
-            f"AI 填空功能已{'开启' if checked else '关闭'}",
-            parent=self.window(),
-            position=InfoBarPosition.TOP,
-            duration=2000
-        )
-
-    def _on_ai_provider_changed(self):
-        """AI 提供商选择变化"""
-        idx = self.ai_provider_combo.currentIndex()
-        provider_key = str(self.ai_provider_combo.itemData(idx)) if idx >= 0 else "openai"
-        save_ai_settings(provider=provider_key)
-        self._update_ai_visibility()
-        # 更新模型占位符
-        provider_config = AI_PROVIDERS.get(provider_key, {})
-        default_model = provider_config.get("default_model", "")
-        self.ai_model_edit.setPlaceholderText(default_model or "模型名称")
-        InfoBar.success(
-            "",
-            f"AI 服务已切换为：{provider_config.get('label', provider_key)}",
-            parent=self.window(),
-            position=InfoBarPosition.TOP,
-            duration=2000
-        )
-
-    def _on_ai_apikey_changed(self):
-        """API Key 变化"""
-        save_ai_settings(api_key=self.ai_apikey_edit.text())
-
-    def _on_ai_baseurl_changed(self):
-        """Base URL 变化"""
-        save_ai_settings(base_url=self.ai_baseurl_edit.text())
-
-    def _on_ai_model_changed(self):
-        """模型变化"""
-        save_ai_settings(model=self.ai_model_edit.text())
-
-    def _on_ai_test_clicked(self):
-        """测试 AI 连接"""
-        # 先保存当前配置
-        save_ai_settings(
-            enabled=True,  # 临时启用以测试
-            api_key=self.ai_apikey_edit.text(),
-            base_url=self.ai_baseurl_edit.text(),
-            model=self.ai_model_edit.text(),
-        )
-        InfoBar.info(
-            "",
-            "正在测试连接...",
-            parent=self.window(),
-            position=InfoBarPosition.TOP,
-            duration=1500
-        )
-        try:
-            result = test_connection()
-            if "成功" in result:
-                InfoBar.success("", result, parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
-            else:
-                InfoBar.error("", result, parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
-        except Exception as e:
-            InfoBar.error("", f"测试失败: {e}", parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
-        # 恢复原来的启用状态
-        save_ai_settings(enabled=self.ai_enabled_card.isChecked())

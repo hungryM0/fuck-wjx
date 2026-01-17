@@ -207,6 +207,7 @@ class RunController(QObject):
             text_inputs = int(q.get("text_inputs") or 0)
             slider_min = q.get("slider_min")
             slider_max = q.get("slider_max")
+            title_text = str(q.get("title") or "").strip()
 
             if is_multi_text or (is_text_like and text_inputs > 1):
                 q_type = "multi_text"
@@ -269,6 +270,8 @@ class RunController(QObject):
                 distribution_mode=distribution,
                 custom_weights=custom_weights,
                 question_num=q.get("num"),
+                question_title=title_text or None,
+                ai_enabled=False,
                 option_fill_texts=None,
                 fillable_option_indices=q.get("fillable_options"),
                 is_location=is_location,

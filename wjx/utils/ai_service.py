@@ -3,21 +3,20 @@
 import json
 import requests
 from typing import Optional, Dict, Any
-from PySide6.QtCore import QSettings
 
 # AI 服务提供商配置
 AI_PROVIDERS = {
     "openai": {
         "label": "ChatGPT",
         "base_url": "https://api.openai.com/v1",
-        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
-        "default_model": "gpt-4o-mini",
+        "models": ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano"],
+        "default_model": "gpt-5-mini",
     },
     "gemini": {
         "label": "Gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "models": ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.5-flash-8b"],
-        "default_model": "gemini-2.0-flash-exp",
+        "models": ["gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+        "default_model": "gemini-3-flash-preview",
     },
     "deepseek": {
         "label": "DeepSeek",
@@ -41,18 +40,27 @@ AI_PROVIDERS = {
 
 DEFAULT_SYSTEM_PROMPT = "你是一个问卷填写助手。请根据问题简短回答，答案要自然、合理，不要太长。"
 
+_DEFAULT_AI_SETTINGS: Dict[str, Any] = {
+    "enabled": False,
+    "provider": "openai",
+    "api_key": "",
+    "base_url": "",
+    "model": "",
+    "system_prompt": DEFAULT_SYSTEM_PROMPT,
+}
+_RUNTIME_AI_SETTINGS: Optional[Dict[str, Any]] = None
+
+
+def _ensure_runtime_settings() -> Dict[str, Any]:
+    global _RUNTIME_AI_SETTINGS
+    if _RUNTIME_AI_SETTINGS is None:
+        _RUNTIME_AI_SETTINGS = dict(_DEFAULT_AI_SETTINGS)
+    return _RUNTIME_AI_SETTINGS
+
 
 def get_ai_settings() -> Dict[str, Any]:
     """获取 AI 配置"""
-    settings = QSettings("FuckWjx", "Settings")
-    return {
-        "enabled": settings.value("ai_enabled", False, type=bool),
-        "provider": settings.value("ai_provider", "openai", type=str),
-        "api_key": settings.value("ai_api_key", "", type=str),
-        "base_url": settings.value("ai_base_url", "", type=str),
-        "model": settings.value("ai_model", "", type=str),
-        "system_prompt": settings.value("ai_system_prompt", DEFAULT_SYSTEM_PROMPT, type=str),
-    }
+    return dict(_ensure_runtime_settings())
 
 
 def save_ai_settings(
@@ -64,19 +72,19 @@ def save_ai_settings(
     system_prompt: Optional[str] = None,
 ):
     """保存 AI 配置"""
-    settings = QSettings("FuckWjx", "Settings")
+    settings = _ensure_runtime_settings()
     if enabled is not None:
-        settings.setValue("ai_enabled", enabled)
+        settings["enabled"] = bool(enabled)
     if provider is not None:
-        settings.setValue("ai_provider", provider)
+        settings["provider"] = str(provider)
     if api_key is not None:
-        settings.setValue("ai_api_key", api_key)
+        settings["api_key"] = str(api_key)
     if base_url is not None:
-        settings.setValue("ai_base_url", base_url)
+        settings["base_url"] = str(base_url)
     if model is not None:
-        settings.setValue("ai_model", model)
+        settings["model"] = str(model)
     if system_prompt is not None:
-        settings.setValue("ai_system_prompt", system_prompt)
+        settings["system_prompt"] = str(system_prompt)
 
 
 def _call_openai_compatible(

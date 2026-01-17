@@ -1,6 +1,7 @@
 """主窗口模块 - 精简版，使用拆分后的组件"""
 from __future__ import annotations
 
+import copy
 import os
 import threading
 from datetime import datetime
@@ -242,14 +243,7 @@ class MainWindow(FluentWindow):
                     configs_dir = os.path.join(get_runtime_directory(), "configs")
                     os.makedirs(configs_dir, exist_ok=True)
                     
-                    # 使用问卷标题作为默认文件名
-                    from wjx.utils.load_save import _sanitize_filename
-                    survey_title = self.dashboard.title_label.text()
-                    if survey_title and survey_title != "题目清单与操作" and survey_title != "已配置的题目":
-                        default_filename = f"{_sanitize_filename(survey_title)}.json"
-                    else:
-                        default_filename = f"config_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    default_path = os.path.join(configs_dir, default_filename)
+                    default_path = configs_dir
                     
                     path, _ = QFileDialog.getSaveFileName(
                         self,
@@ -533,10 +527,7 @@ class MainWindow(FluentWindow):
         register_popup_handler(handler)
 
     def _load_saved_config(self):
-        try:
-            cfg = self.controller.load_saved_config()
-        except Exception:
-            cfg = RuntimeConfig()
+        cfg = RuntimeConfig()
         self.runtime_page.apply_config(cfg)
         self.dashboard.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], self.controller.questions_info)
@@ -545,12 +536,24 @@ class MainWindow(FluentWindow):
 
     # ---------- controller callbacks ----------
     def _on_survey_parsed(self, info: List[Dict[str, Any]], title: str):
-        self.question_page.set_questions(info, self.controller.question_entries)
-        self.dashboard.update_question_meta(title or "问卷", len(info))
-        self._toast("解析完成，可在'题目配置'页查看", "success")
+        parsed_title = title or "问卷"
         if getattr(self.dashboard, "_open_wizard_after_parse", False):
             self.dashboard._open_wizard_after_parse = False
-            self.dashboard._open_question_wizard()
+            pending_entries = copy.deepcopy(self.controller.question_entries)
+            accepted = self.dashboard._run_question_wizard(pending_entries, info)
+            if accepted:
+                self.question_page.set_questions(info, pending_entries)
+                self.controller.question_entries = pending_entries
+                self.dashboard.update_question_meta(parsed_title, len(pending_entries))
+                self._toast("解析完成，可在'题目配置'页查看", "success")
+            else:
+                current_entries = self.question_page.get_entries()
+                self.dashboard.update_question_meta(parsed_title, len(current_entries))
+                self._toast("已取消自动配置，保留原有题目设置", "warning")
+            return
+        self.question_page.set_questions(info, self.controller.question_entries)
+        self.dashboard.update_question_meta(parsed_title, len(self.controller.question_entries))
+        self._toast("解析完成，可在'题目配置'页查看", "success")
 
     def _on_survey_parse_failed(self, msg: str):
         self._toast(msg, "error")

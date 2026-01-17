@@ -1,7 +1,8 @@
 """运行参数设置页面 - 使用 SettingCard 组件重构"""
+import logging
 from typing import Dict, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -21,6 +22,8 @@ from qfluentwidgets import (
     CheckBox,
     ComboBox,
     LineEdit,
+    PasswordLineEdit,
+    PushSettingCard,
     FluentIcon,
     PopupTeachingTip,
     TeachingTipTailPosition,
@@ -36,8 +39,10 @@ from qfluentwidgets import (
 
 from wjx.ui.widgets.no_wheel import NoWheelSlider, NoWheelSpinBox
 from wjx.ui.controller import RunController
+from wjx.ui.workers.ai_test_worker import AITestWorker
 from wjx.utils.load_save import RuntimeConfig
 from wjx.utils.config import USER_AGENT_PRESETS
+from wjx.utils.ai_service import AI_PROVIDERS, get_ai_settings, save_ai_settings, DEFAULT_SYSTEM_PROMPT
 
 
 class SpinBoxSettingCard(SettingCard):
@@ -362,6 +367,10 @@ class RuntimePage(ScrollArea):
         self.setWidgetResizable(True)
         self.view.setObjectName("settings_view")
         self.ua_checkboxes: Dict[str, CheckBox] = {}
+        self._ai_loading = False
+        self._ai_test_thread = None
+        self._ai_test_worker = None
+        self._ai_system_prompt = DEFAULT_SYSTEM_PROMPT
         self._build_ui()
         self._bind_events()
         self._sync_random_ua(self.random_ua_card.isChecked())
@@ -449,6 +458,105 @@ class RuntimePage(ScrollArea):
         feature_group.addSettingCard(self.random_ua_card)
         layout.addWidget(feature_group)
 
+        # ========== AI 填空助手组 ==========
+        self.ai_group = SettingCardGroup("AI 填空助手", self.view)
+        ai_config = get_ai_settings()
+        self._ai_system_prompt = ai_config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
+
+        self.ai_enabled_card = SwitchSettingCard(
+            FluentIcon.ROBOT,
+            "启用 AI 填空",
+            "开启后可使用 AI 自动生成填空题答案",
+            parent=self.ai_group,
+        )
+        self.ai_enabled_card.setChecked(bool(ai_config.get("enabled")))
+        self.ai_group.addSettingCard(self.ai_enabled_card)
+
+        self.ai_provider_card = SettingCard(
+            FluentIcon.CLOUD,
+            "AI 服务提供商",
+            "选择 AI 服务，自定义模式支持任意 OpenAI 兼容接口",
+            self.ai_group,
+        )
+        self.ai_provider_combo = ComboBox(self.ai_provider_card)
+        self.ai_provider_combo.setMinimumWidth(200)
+        for key, provider in AI_PROVIDERS.items():
+            self.ai_provider_combo.addItem(provider.get("label", key), userData=key)
+        saved_provider = ai_config.get("provider") or "openai"
+        idx = self.ai_provider_combo.findData(saved_provider)
+        if idx >= 0:
+            self.ai_provider_combo.setCurrentIndex(idx)
+        self.ai_provider_card.hBoxLayout.addWidget(self.ai_provider_combo, 0, Qt.AlignmentFlag.AlignRight)
+        self.ai_provider_card.hBoxLayout.addSpacing(16)
+        self.ai_group.addSettingCard(self.ai_provider_card)
+
+        self.ai_baseurl_card = SettingCard(
+            FluentIcon.LINK,
+            "Base URL",
+            "自定义模式下的 API 地址（如 https://api.example.com/v1）",
+            self.ai_group,
+        )
+        self.ai_baseurl_edit = LineEdit(self.ai_baseurl_card)
+        self.ai_baseurl_edit.setMinimumWidth(280)
+        self.ai_baseurl_edit.setPlaceholderText("https://api.example.com/v1")
+        self.ai_baseurl_edit.setText(ai_config.get("base_url") or "")
+        self.ai_baseurl_card.hBoxLayout.addWidget(self.ai_baseurl_edit, 0, Qt.AlignmentFlag.AlignRight)
+        self.ai_baseurl_card.hBoxLayout.addSpacing(16)
+        self.ai_group.addSettingCard(self.ai_baseurl_card)
+
+        self.ai_apikey_card = SettingCard(
+            FluentIcon.FINGERPRINT,
+            "API Key",
+            "输入对应服务的 API 密钥",
+            self.ai_group,
+        )
+        self.ai_apikey_edit = PasswordLineEdit(self.ai_apikey_card)
+        self.ai_apikey_edit.setMinimumWidth(280)
+        self.ai_apikey_edit.setPlaceholderText("sk-...")
+        self.ai_apikey_edit.setText(ai_config.get("api_key") or "")
+        self.ai_apikey_card.hBoxLayout.addWidget(self.ai_apikey_edit, 0, Qt.AlignmentFlag.AlignRight)
+        self.ai_apikey_card.hBoxLayout.addSpacing(16)
+        self.ai_group.addSettingCard(self.ai_apikey_card)
+
+        self.ai_model_card = SettingCard(
+            FluentIcon.DEVELOPER_TOOLS,
+            "模型",
+            "选择或输入模型名称",
+            self.ai_group,
+        )
+        self.ai_model_edit = LineEdit(self.ai_model_card)
+        self.ai_model_edit.setMinimumWidth(200)
+        self.ai_model_edit.setPlaceholderText("gpt-3.5-turbo")
+        self.ai_model_edit.setText(ai_config.get("model") or "")
+        self.ai_model_card.hBoxLayout.addWidget(self.ai_model_edit, 0, Qt.AlignmentFlag.AlignRight)
+        self.ai_model_card.hBoxLayout.addSpacing(16)
+        self.ai_group.addSettingCard(self.ai_model_card)
+
+        self.ai_test_card = PushSettingCard(
+            text="测试",
+            icon=FluentIcon.SEND,
+            title="测试 AI 连接",
+            content="验证 API 配置是否正确",
+            parent=self.ai_group,
+        )
+        self.ai_group.addSettingCard(self.ai_test_card)
+        self.ai_test_spinner = IndeterminateProgressRing(self.ai_test_card)
+        self.ai_test_spinner.setFixedSize(20, 20)
+        self.ai_test_spinner.setStrokeWidth(2)
+        self.ai_test_spinner.hide()
+        insert_index = self.ai_test_card.hBoxLayout.indexOf(self.ai_test_card.button)
+        if insert_index >= 0:
+            self.ai_test_card.hBoxLayout.insertWidget(
+                insert_index,
+                self.ai_test_spinner,
+                0,
+                Qt.AlignmentFlag.AlignRight,
+            )
+            self.ai_test_card.hBoxLayout.insertSpacing(insert_index + 1, 6)
+
+        layout.addWidget(self.ai_group)
+        self._update_ai_visibility()
+
         layout.addStretch(1)
 
         # 兼容旧代码的属性别名
@@ -482,6 +590,12 @@ class RuntimePage(ScrollArea):
         self.answer_min_btn.clicked.connect(lambda: self._show_time_picker("answer_min"))
         self.answer_max_btn.clicked.connect(lambda: self._show_time_picker("answer_max"))
         self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
+        self.ai_enabled_card.switchButton.checkedChanged.connect(self._on_ai_enabled_toggled)
+        self.ai_provider_combo.currentIndexChanged.connect(self._on_ai_provider_changed)
+        self.ai_apikey_edit.editingFinished.connect(self._on_ai_apikey_changed)
+        self.ai_baseurl_edit.editingFinished.connect(self._on_ai_baseurl_changed)
+        self.ai_model_edit.editingFinished.connect(self._on_ai_model_changed)
+        self.ai_test_card.clicked.connect(self._on_ai_test_clicked)
 
     def _show_timed_mode_help(self):
         """显示定时模式说明"""
@@ -543,6 +657,154 @@ class RuntimePage(ScrollArea):
             self.answer_card.setEnabled(not enabled)
         except Exception:
             pass
+
+    def _set_ai_controls_blocked(self, blocked: bool):
+        try:
+            self.ai_enabled_card.switchButton.blockSignals(blocked)
+            self.ai_provider_combo.blockSignals(blocked)
+        except Exception:
+            pass
+
+    def _set_ai_test_loading(self, loading: bool):
+        self.ai_test_spinner.setVisible(loading)
+        self.ai_test_card.button.setEnabled(not loading)
+
+    def _update_ai_visibility(self):
+        """根据选择的提供商更新 AI 配置项的可见性"""
+        idx = self.ai_provider_combo.currentIndex()
+        provider_key = str(self.ai_provider_combo.itemData(idx)) if idx >= 0 else "openai"
+        is_custom = provider_key == "custom"
+        self.ai_baseurl_card.setVisible(is_custom)
+        provider_config = AI_PROVIDERS.get(provider_key, {})
+        default_model = provider_config.get("default_model", "")
+        self.ai_model_edit.setPlaceholderText(default_model or "模型名称")
+
+    def _apply_ai_config(self, cfg: RuntimeConfig):
+        ai_config_present = getattr(cfg, "_ai_config_present", False)
+        if not ai_config_present:
+            ai_config = get_ai_settings()
+            cfg.ai_enabled = bool(ai_config.get("enabled"))
+            cfg.ai_provider = str(ai_config.get("provider") or "openai")
+            cfg.ai_api_key = str(ai_config.get("api_key") or "")
+            cfg.ai_base_url = str(ai_config.get("base_url") or "")
+            cfg.ai_model = str(ai_config.get("model") or "")
+            cfg.ai_system_prompt = str(ai_config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT)
+        if not getattr(cfg, "ai_provider", ""):
+            cfg.ai_provider = "openai"
+        if not getattr(cfg, "ai_system_prompt", ""):
+            cfg.ai_system_prompt = DEFAULT_SYSTEM_PROMPT
+
+        self._ai_loading = True
+        self._set_ai_controls_blocked(True)
+        self.ai_enabled_card.setChecked(bool(cfg.ai_enabled))
+        idx = self.ai_provider_combo.findData(cfg.ai_provider)
+        if idx >= 0:
+            self.ai_provider_combo.setCurrentIndex(idx)
+        else:
+            self.ai_provider_combo.setCurrentIndex(0)
+        self.ai_apikey_edit.setText(cfg.ai_api_key or "")
+        self.ai_baseurl_edit.setText(cfg.ai_base_url or "")
+        self.ai_model_edit.setText(cfg.ai_model or "")
+        self._update_ai_visibility()
+        self._set_ai_controls_blocked(False)
+        self._ai_loading = False
+        self._ai_system_prompt = cfg.ai_system_prompt or DEFAULT_SYSTEM_PROMPT
+
+        save_ai_settings(
+            enabled=bool(cfg.ai_enabled),
+            provider=cfg.ai_provider,
+            api_key=cfg.ai_api_key or "",
+            base_url=cfg.ai_base_url or "",
+            model=cfg.ai_model or "",
+            system_prompt=self._ai_system_prompt,
+        )
+
+    def _on_ai_enabled_toggled(self, checked: bool):
+        """AI 功能开关切换"""
+        if self._ai_loading:
+            return
+        save_ai_settings(enabled=checked)
+        InfoBar.success(
+            "",
+            f"AI 填空功能已{'开启' if checked else '关闭'}",
+            parent=self.window(),
+            position=InfoBarPosition.TOP,
+            duration=2000,
+        )
+
+    def _on_ai_provider_changed(self):
+        """AI 提供商选择变化"""
+        if self._ai_loading:
+            return
+        idx = self.ai_provider_combo.currentIndex()
+        provider_key = str(self.ai_provider_combo.itemData(idx)) if idx >= 0 else "openai"
+        save_ai_settings(provider=provider_key)
+        self._update_ai_visibility()
+        provider_config = AI_PROVIDERS.get(provider_key, {})
+        InfoBar.success(
+            "",
+            f"AI 服务已切换为：{provider_config.get('label', provider_key)}",
+            parent=self.window(),
+            position=InfoBarPosition.TOP,
+            duration=2000,
+        )
+
+    def _on_ai_apikey_changed(self):
+        """API Key 变化"""
+        if self._ai_loading:
+            return
+        save_ai_settings(api_key=self.ai_apikey_edit.text())
+
+    def _on_ai_baseurl_changed(self):
+        """Base URL 变化"""
+        if self._ai_loading:
+            return
+        save_ai_settings(base_url=self.ai_baseurl_edit.text())
+
+    def _on_ai_model_changed(self):
+        """模型变化"""
+        if self._ai_loading:
+            return
+        save_ai_settings(model=self.ai_model_edit.text())
+
+    def _on_ai_test_clicked(self):
+        """测试 AI 连接"""
+        if self._ai_loading:
+            return
+        if self._ai_test_thread is not None and self._ai_test_thread.isRunning():
+            return
+        save_ai_settings(
+            enabled=True,
+            api_key=self.ai_apikey_edit.text(),
+            base_url=self.ai_baseurl_edit.text(),
+            model=self.ai_model_edit.text(),
+            system_prompt=self._ai_system_prompt,
+        )
+        self._set_ai_test_loading(True)
+        self._ai_test_thread = QThread()
+        self._ai_test_worker = AITestWorker()
+        self._ai_test_worker.moveToThread(self._ai_test_thread)
+        self._ai_test_thread.started.connect(self._ai_test_worker.run)
+        self._ai_test_worker.finished.connect(self._on_ai_test_finished)
+        self._ai_test_worker.finished.connect(self._ai_test_thread.quit)
+        self._ai_test_worker.finished.connect(self._ai_test_worker.deleteLater)
+        self._ai_test_thread.finished.connect(self._ai_test_thread.deleteLater)
+        self._ai_test_thread.finished.connect(self._on_ai_test_thread_finished)
+        self._ai_test_thread.start()
+
+    def _on_ai_test_finished(self, success: bool, message: str):
+        """测试 AI 连接完成"""
+        self._set_ai_test_loading(False)
+        if success:
+            InfoBar.success("", message, parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+        else:
+            logging.error("AI 连接测试失败: %s", message)
+            InfoBar.error("", message, parent=self.window(), position=InfoBarPosition.TOP, duration=5000)
+        save_ai_settings(enabled=self.ai_enabled_card.isChecked())
+
+    def _on_ai_test_thread_finished(self):
+        self._ai_test_thread = None
+        self._ai_test_worker = None
 
     def _show_time_picker(self, field: str):
         """显示时间选择对话框"""
@@ -697,6 +959,13 @@ class RuntimePage(ScrollArea):
         except Exception:
             cfg.proxy_source = "default"
             cfg.custom_proxy_api = ""
+        cfg.ai_enabled = bool(self.ai_enabled_card.isChecked())
+        idx = self.ai_provider_combo.currentIndex()
+        cfg.ai_provider = str(self.ai_provider_combo.itemData(idx)) if idx >= 0 else "openai"
+        cfg.ai_api_key = self.ai_apikey_edit.text().strip()
+        cfg.ai_base_url = self.ai_baseurl_edit.text().strip()
+        cfg.ai_model = self.ai_model_edit.text().strip()
+        cfg.ai_system_prompt = self._ai_system_prompt or DEFAULT_SYSTEM_PROMPT
 
     def apply_config(self, cfg: RuntimeConfig):
         self.target_spin.setValue(max(1, cfg.target))
@@ -747,3 +1016,4 @@ class RuntimePage(ScrollArea):
             set_proxy_source(proxy_source)
         except Exception:
             pass
+        self._apply_ai_config(cfg)

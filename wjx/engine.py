@@ -183,6 +183,7 @@ from wjx.core.question_text import (
     should_mark_as_multi_text as _should_mark_as_multi_text_impl,
     should_treat_as_text_like as _should_treat_question_as_text_like_impl,
 )
+from wjx.core.ai_runtime import AIRuntimeError
 from wjx.core.question_single import single as _single_impl
 from wjx.core.question_multiple import (
     multiple as _multiple_impl,
@@ -260,6 +261,8 @@ texts: List[List[str]] = []
 texts_prob: List[List[float]] = []
 # 与 texts/texts_prob 对齐，记录每道填空题的具体类型（text / multi_text）
 text_entry_types: List[str] = []
+text_ai_flags: List[bool] = []
+text_titles: List[str] = []
 single_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 droplist_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 multiple_option_fill_texts: List[Optional[List[Optional[str]]]] = []
@@ -593,6 +596,8 @@ class QuestionEntry:
     distribution_mode: str = "random"  # random, custom
     custom_weights: Optional[List[float]] = None
     question_num: Optional[str] = None
+    question_title: Optional[str] = None
+    ai_enabled: bool = False
     option_fill_texts: Optional[List[Optional[str]]] = None
     fillable_option_indices: Optional[List[int]] = None
     is_location: bool = False
@@ -685,6 +690,7 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
 
 def configure_probabilities(entries: List[QuestionEntry]):
     global single_prob, droplist_prob, multiple_prob, matrix_prob, scale_prob, slider_targets, texts, texts_prob, text_entry_types
+    global text_ai_flags, text_titles
     global single_option_fill_texts, droplist_option_fill_texts, multiple_option_fill_texts
     single_prob = []
     droplist_prob = []
@@ -695,6 +701,8 @@ def configure_probabilities(entries: List[QuestionEntry]):
     texts = []
     texts_prob = []
     text_entry_types = []
+    text_ai_flags = []
+    text_titles = []
     single_option_fill_texts = []
     droplist_option_fill_texts = []
     multiple_option_fill_texts = []
@@ -801,8 +809,12 @@ def configure_probabilities(entries: List[QuestionEntry]):
                     text_value = ""
                 if text_value:
                     normalized_values.append(text_value)
+            ai_enabled = bool(getattr(entry, "ai_enabled", False)) if entry.question_type == "text" else False
             if not normalized_values:
-                raise ValueError("填空题至少需要一个候选答案")
+                if ai_enabled:
+                    normalized_values = [DEFAULT_FILL_TEXT]
+                else:
+                    raise ValueError("填空题至少需要一个候选答案")
             if isinstance(probs, list) and len(probs) == len(normalized_values):
                 normalized = normalize_probabilities([float(value) for value in probs])
             else:
@@ -810,6 +822,8 @@ def configure_probabilities(entries: List[QuestionEntry]):
             texts.append(normalized_values)
             texts_prob.append(normalized)
             text_entry_types.append(entry.question_type)
+            text_ai_flags.append(ai_enabled)
+            text_titles.append(str(getattr(entry, "question_title", "") or ""))
 
 
 def decode_qrcode(image_source: Union[str, Image.Image]) -> Optional[str]:
@@ -1477,7 +1491,16 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 if is_location_question:
                     print(f"第{current_question_number}题为位置题，暂不支持，已跳过")
                 else:
-                    _vacant_impl(driver, current_question_number, vacant_question_index, texts, texts_prob, text_entry_types)
+                    _vacant_impl(
+                        driver,
+                        current_question_number,
+                        vacant_question_index,
+                        texts,
+                        texts_prob,
+                        text_entry_types,
+                        text_ai_flags,
+                        text_titles,
+                    )
                     vacant_question_index += 1
             elif question_type == "3":
                 _single_impl(driver, current_question_number, single_question_index, single_prob, single_option_fill_texts)
@@ -1531,7 +1554,16 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                     )
 
                     if is_text_like_question:
-                        _vacant_impl(driver, current_question_number, vacant_question_index, texts, texts_prob, text_entry_types)
+                        _vacant_impl(
+                            driver,
+                            current_question_number,
+                            vacant_question_index,
+                            texts,
+                            texts_prob,
+                            text_entry_types,
+                            text_ai_flags,
+                            text_titles,
+                        )
                         vacant_question_index += 1
                         print(
                             f"第{current_question_number}题识别为"
@@ -2137,6 +2169,12 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         except AliyunCaptchaBypassError:
             driver_had_error = True
             _handle_aliyun_captcha_detected(gui_instance, stop_signal)
+            break
+        except AIRuntimeError as exc:
+            driver_had_error = True
+            logging.error("AI 填空失败，已停止任务：%s", exc, exc_info=True)
+            if stop_signal and not stop_signal.is_set():
+                stop_signal.set()
             break
         except TimeoutException as exc:
             if stop_signal.is_set():

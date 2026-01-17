@@ -10,6 +10,7 @@ from wjx.core.question_utils import (
     resolve_dynamic_text_token,
     smooth_scroll_to_element,
 )
+from wjx.core.ai_runtime import AIRuntimeError, generate_ai_answer, resolve_question_title_for_ai
 
 # 多项填空题分隔符
 MULTI_TEXT_DELIMITER = "||"
@@ -286,7 +287,16 @@ def should_treat_as_text_like(type_code: Any, option_count: int, text_input_coun
     return (option_count or 0) <= 1 and text_input_count > 0
 
 
-def vacant(driver: BrowserDriver, current: int, index: int, texts_config: List[List[str]], texts_prob_config: List[List[float]], text_entry_types_config: List[str]) -> None:
+def vacant(
+    driver: BrowserDriver,
+    current: int,
+    index: int,
+    texts_config: List[List[str]],
+    texts_prob_config: List[List[float]],
+    text_entry_types_config: List[str],
+    text_ai_flags: Optional[List[bool]] = None,
+    text_titles: Optional[List[str]] = None,
+) -> None:
     """填空题处理主函数"""
     if index < len(texts_config):
         answer_candidates = texts_config[index]
@@ -311,13 +321,29 @@ def vacant(driver: BrowserDriver, current: int, index: int, texts_config: List[L
     if len(selection_probabilities) != len(resolved_candidates):
         selection_probabilities = normalize_probabilities([1.0] * len(resolved_candidates))
 
-    selected_index = weighted_index(selection_probabilities)
-    selected_answer = resolved_candidates[selected_index] if resolved_candidates else DEFAULT_FILL_TEXT
-
     if entry_kind != "multi_text":
         prefixed_text_count = count_prefixed_text_inputs(driver, current)
         if prefixed_text_count > 0:
             entry_kind = "multi_text"
+
+    ai_enabled = False
+    if text_ai_flags and index < len(text_ai_flags):
+        ai_enabled = bool(text_ai_flags[index])
+    fallback_title = ""
+    if text_titles and index < len(text_titles):
+        fallback_title = str(text_titles[index] or "")
+
+    if entry_kind == "text" and ai_enabled:
+        try:
+            title = resolve_question_title_for_ai(driver, current, fallback_title)
+            selected_answer = generate_ai_answer(title)
+        except AIRuntimeError as exc:
+            raise AIRuntimeError(f"第{current}题 AI 生成失败：{exc}") from exc
+        _handle_single_text(driver, current, selected_answer)
+        return
+
+    selected_index = weighted_index(selection_probabilities)
+    selected_answer = resolved_candidates[selected_index] if resolved_candidates else DEFAULT_FILL_TEXT
 
     if entry_kind == "multi_text":
         _handle_multi_text(driver, current, selected_answer)

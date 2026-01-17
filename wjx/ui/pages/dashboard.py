@@ -60,8 +60,13 @@ def _question_summary(entry: QuestionEntry) -> str:
             summary = f"答案: {' | '.join(texts[:2])}"
             if len(texts) > 2:
                 summary += f" (+{len(texts)-2})"
+            if entry.question_type == "text" and getattr(entry, "ai_enabled", False):
+                summary += " | AI"
             return summary
-        return "答案: 无"
+        summary = "答案: 无"
+        if entry.question_type == "text" and getattr(entry, "ai_enabled", False):
+            summary += " | AI"
+        return summary
     elif entry.custom_weights:
         weights = entry.custom_weights
         summary = f"自定义配比: {','.join(str(int(w)) for w in weights[:4])}"
@@ -574,24 +579,36 @@ class DashboardPage(QWidget):
         self._refresh_entry_table()
 
     def _open_question_wizard(self):
-        if not self.question_page.entries:
-            self._toast("请先解析问卷或手动添加题目", "warning")
-            return
-        dlg = QuestionWizardDialog(self.question_page.entries, self.question_page.questions_info, self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            updates = dlg.get_results()
-            for idx, weights in updates.items():
-                if 0 <= idx < len(self.question_page.entries):
-                    entry = self.question_page.entries[idx]
-                    entry.custom_weights = [float(w) for w in weights]
-                    entry.probabilities = [float(w) for w in weights]  # 同步更新 probabilities
-                    entry.distribution_mode = "custom"
-            text_updates = dlg.get_text_results()
-            for idx, texts in text_updates.items():
-                if 0 <= idx < len(self.question_page.entries):
-                    entry = self.question_page.entries[idx]
-                    entry.texts = texts
+        if self._run_question_wizard(self.question_page.entries, self.question_page.questions_info):
             self._refresh_entry_table()
+
+    def _apply_wizard_results(self, entries: List[QuestionEntry], dlg: QuestionWizardDialog) -> None:
+        updates = dlg.get_results()
+        for idx, weights in updates.items():
+            if 0 <= idx < len(entries):
+                entry = entries[idx]
+                entry.custom_weights = [float(w) for w in weights]
+                entry.probabilities = [float(w) for w in weights]
+                entry.distribution_mode = "custom"
+        text_updates = dlg.get_text_results()
+        for idx, texts in text_updates.items():
+            if 0 <= idx < len(entries):
+                entries[idx].texts = texts
+        ai_updates = dlg.get_ai_flags()
+        for idx, enabled in ai_updates.items():
+            if 0 <= idx < len(entries):
+                entry = entries[idx]
+                entry.ai_enabled = bool(enabled) if entry.question_type == "text" else False
+
+    def _run_question_wizard(self, entries: List[QuestionEntry], info: List[Dict[str, Any]]) -> bool:
+        if not entries:
+            self._toast("请先解析问卷或手动添加题目", "warning")
+            return False
+        dlg = QuestionWizardDialog(entries, info, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._apply_wizard_results(entries, dlg)
+            return True
+        return False
 
     def _delete_selected_entries(self):
         selected_rows = self._checked_rows()

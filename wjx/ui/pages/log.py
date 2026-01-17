@@ -15,7 +15,7 @@ from qfluentwidgets import (
 )
 
 from wjx.utils.log_utils import LOG_BUFFER_HANDLER, save_log_records_to_file
-from wjx.utils.config import LOG_BUFFER_CAPACITY
+from wjx.utils.config import LOG_BUFFER_CAPACITY, LOG_REFRESH_INTERVAL_MS
 from wjx.utils.load_save import get_runtime_directory
 
 
@@ -60,7 +60,7 @@ class LogPage(QWidget):
         self._bind_events()
         self._load_last_session_logs()
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(1200)
+        self._refresh_timer.setInterval(LOG_REFRESH_INTERVAL_MS)
         self._refresh_timer.timeout.connect(self.refresh_logs)
         self._refresh_timer.start()
 
@@ -124,6 +124,12 @@ class LogPage(QWidget):
         self.copy_btn.clicked.connect(self._copy_to_clipboard)
         self.save_btn.clicked.connect(self.save_logs)
         self.level_combo.currentIndexChanged.connect(self._on_filter_changed)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._refresh_timer.isActive():
+            self._refresh_timer.start()
+        QTimer.singleShot(0, self.refresh_logs)
 
     def _on_filter_changed(self, index):
         """日志级别筛选变化"""

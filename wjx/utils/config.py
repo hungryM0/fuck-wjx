@@ -137,6 +137,7 @@ DEFAULT_HTTP_HEADERS = {
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 LOG_BUFFER_CAPACITY = 2000
 LOG_DIR_NAME = "logs"
+LOG_REFRESH_INTERVAL_MS = 1000
 
 # ==================== 资源路径配置 ====================
 APP_ICON_RELATIVE_PATH = "icon.ico"

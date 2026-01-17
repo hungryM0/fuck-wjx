@@ -115,6 +115,12 @@ class RuntimeConfig:
     random_ua_keys: List[str] = field(default_factory=lambda: list(DEFAULT_RANDOM_UA_KEYS))
     fail_stop_enabled: bool = True
     pause_on_aliyun_captcha: bool = True
+    ai_enabled: bool = False
+    ai_provider: str = "openai"
+    ai_api_key: str = ""
+    ai_base_url: str = ""
+    ai_model: str = ""
+    ai_system_prompt: str = ""
     question_entries: List[QuestionEntry] = field(default_factory=list)
     layout_hint: Optional[int] = None  # e.g. splitter position
 
@@ -170,6 +176,8 @@ def serialize_question_entry(entry: QuestionEntry) -> Dict[str, Any]:
         "distribution_mode": entry.distribution_mode,
         "custom_weights": entry.custom_weights,
         "question_num": entry.question_num,
+        "question_title": getattr(entry, "question_title", None),
+        "ai_enabled": bool(getattr(entry, "ai_enabled", False)),
         "option_fill_texts": entry.option_fill_texts,
         "fillable_option_indices": entry.fillable_option_indices,
         "is_location": getattr(entry, "is_location", False),
@@ -229,6 +237,8 @@ def deserialize_question_entry(data: Dict[str, Any]) -> "QuestionEntry":
         distribution_mode=mode_raw,
         custom_weights=custom_weights,
         question_num=data.get("question_num"),
+        question_title=data.get("question_title"),
+        ai_enabled=bool(data.get("ai_enabled", False)),
         option_fill_texts=data.get("option_fill_texts"),
         fillable_option_indices=data.get("fillable_option_indices"),
         is_location=bool(data.get("is_location")),
@@ -314,6 +324,24 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.fail_stop_enabled = bool(raw.get("fail_stop_enabled", True))
     config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
     config.layout_hint = raw.get("layout_hint", raw.get("paned_position"))
+
+    ai_keys = {
+        "ai_enabled",
+        "ai_provider",
+        "ai_api_key",
+        "ai_base_url",
+        "ai_model",
+        "ai_system_prompt",
+    }
+    has_ai_keys = any(key in raw for key in ai_keys)
+    config._ai_config_present = has_ai_keys
+    if has_ai_keys:
+        config.ai_enabled = bool(raw.get("ai_enabled", False))
+        config.ai_provider = str(raw.get("ai_provider") or "openai")
+        config.ai_api_key = str(raw.get("ai_api_key") or "")
+        config.ai_base_url = str(raw.get("ai_base_url") or "")
+        config.ai_model = str(raw.get("ai_model") or "")
+        config.ai_system_prompt = str(raw.get("ai_system_prompt") or "")
 
     # question entries: new key question_entries; legacy key questions
     entries_data = raw.get("question_entries") or raw.get("questions") or []
