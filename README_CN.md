@@ -38,7 +38,21 @@ pip install -r requirements.txt
 python fuck-wjx.py
 ```
 
-**环境要求：** Windows 10/11 或 Linux，Python 3.8+
+**环境要求：** Windows 10/11、macOS 10.15+ 或 Linux，Python 3.8+
+
+### macOS 打包
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+pip install pyinstaller
+
+# 运行打包脚本
+chmod +x build_macos.sh
+./build_macos.sh
+```
+
+打包完成后，应用位于 `dist/问卷星速填.app`
 
 ---
 

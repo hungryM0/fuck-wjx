@@ -4,6 +4,7 @@ from __future__ import annotations
 
 __all__ = ["BootSplash", "create_boot_splash", "get_boot_splash", "finish_boot_splash"]
 
+import sys
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, QSize
@@ -11,6 +12,10 @@ from PySide6.QtWidgets import QLabel
 from qfluentwidgets import IndeterminateProgressBar, SplashScreen, isDarkTheme, FluentWindow
 
 from wjx.utils.version import __VERSION__
+
+# 跨平台字体
+IS_MACOS = sys.platform == "darwin"
+SPLASH_FONT_FAMILY = "PingFang SC" if IS_MACOS else "Microsoft YaHei UI"
 
 
 class BootSplash:
@@ -34,7 +39,7 @@ class BootSplash:
                 color: {title_color};
                 font-size: 20px;
                 font-weight: bold;
-                font-family: 'Microsoft YaHei UI';
+                font-family: '{SPLASH_FONT_FAMILY}';
             }}
         """)
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -46,7 +51,7 @@ class BootSplash:
             QLabel {{
                 color: {version_color};
                 font-size: 12px;
-                font-family: 'Microsoft YaHei UI';
+                font-family: '{SPLASH_FONT_FAMILY}';
                 background-color: {badge_bg};
                 border-radius: 11px;
                 padding: 4px 12px;

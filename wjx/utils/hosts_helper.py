@@ -5,15 +5,26 @@ GitHub Hosts 优化工具
 通过修改 hosts 文件加速 GitHub 访问
 """
 
-import ctypes
 import logging
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from typing import Optional, Tuple
 
 import requests
+
+# 平台检测
+IS_WINDOWS = sys.platform == "win32"
+IS_MACOS = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
+
+# Windows 专用模块
+if IS_WINDOWS:
+    import ctypes
+else:
+    ctypes = None
 
 # GitHub520 hosts API
 GITHUB_HOSTS_API = "https://raw.hellogithub.com/hosts"
@@ -22,19 +33,27 @@ GITHUB_HOSTS_API = "https://raw.hellogithub.com/hosts"
 HOSTS_MARKER_START = "# FuckWjx GitHub Hosts Start"
 HOSTS_MARKER_END = "# FuckWjx GitHub Hosts End"
 
-# Windows hosts 文件路径
-HOSTS_FILE_PATH = r"C:\Windows\System32\drivers\etc\hosts"
+# 根据平台选择 hosts 文件路径
+if IS_WINDOWS:
+    HOSTS_FILE_PATH = r"C:\Windows\System32\drivers\etc\hosts"
+else:
+    # macOS 和 Linux 都使用 /etc/hosts
+    HOSTS_FILE_PATH = "/etc/hosts"
 
 # 需要加速的域名
 GITHUB_DOMAINS = ["github.com", "api.github.com", "raw.githubusercontent.com"]
 
 
 def is_admin() -> bool:
-    """检查当前是否以管理员权限运行"""
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except Exception:
-        return False
+    """检查当前是否以管理员/root权限运行"""
+    if IS_WINDOWS:
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        except Exception:
+            return False
+    else:
+        # macOS/Linux: 检查是否为 root 用户
+        return os.geteuid() == 0
 
 
 def fetch_github_hosts() -> Optional[str]:
@@ -213,7 +232,151 @@ def run_hosts_operation_as_admin(operation: str) -> Tuple[bool, str]:
         else:
             return False, f"未知操作: {operation}"
     
-    # 需要请求管理员权限 - 创建完全独立的临时脚本
+    # 需要请求管理员权限
+    if IS_WINDOWS:
+        return _run_hosts_operation_as_admin_windows(operation)
+    elif IS_MACOS:
+        return _run_hosts_operation_as_admin_macos(operation)
+    else:
+        # Linux: 提示用户使用 sudo 运行
+        return False, "请使用 sudo 运行程序以修改 hosts 文件"
+
+
+def _run_hosts_operation_as_admin_macos(operation: str) -> Tuple[bool, str]:
+    """macOS 以管理员权限执行 hosts 操作"""
+    result_path = os.path.join(tempfile.gettempdir(), "hosts_result.txt")
+    hosts_path = HOSTS_FILE_PATH
+    
+    # 创建临时脚本
+    script_content = f'''# -*- coding: utf-8 -*-
+import re
+import requests
+
+GITHUB_HOSTS_API = "https://raw.hellogithub.com/hosts"
+HOSTS_MARKER_START = "# FuckWjx GitHub Hosts Start"
+HOSTS_MARKER_END = "# FuckWjx GitHub Hosts End"
+HOSTS_FILE_PATH = "{hosts_path}"
+GITHUB_DOMAINS = ["github.com", "api.github.com", "raw.githubusercontent.com"]
+RESULT_PATH = "{result_path}"
+
+def fetch_github_hosts():
+    try:
+        resp = requests.get(GITHUB_HOSTS_API, timeout=15)
+        resp.raise_for_status()
+        lines = []
+        for line in resp.text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for domain in GITHUB_DOMAINS:
+                if domain in line:
+                    lines.append(line)
+                    break
+        return "\\n".join(lines) if lines else None
+    except Exception:
+        return None
+
+def read_hosts():
+    with open(HOSTS_FILE_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+def write_hosts(content):
+    with open(HOSTS_FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(content)
+
+def update_hosts(entries):
+    content = read_hosts()
+    new_block = f"\\n{{HOSTS_MARKER_START}}\\n{{entries}}\\n{{HOSTS_MARKER_END}}\\n"
+    pattern = re.compile(rf"{{re.escape(HOSTS_MARKER_START)}}.*?{{re.escape(HOSTS_MARKER_END)}}\\n?", re.DOTALL)
+    if pattern.search(content):
+        content = pattern.sub(new_block, content)
+    else:
+        content = content.rstrip() + new_block
+    write_hosts(content)
+    return True, "GitHub hosts 配置已更新"
+
+def remove_hosts():
+    content = read_hosts()
+    pattern = re.compile(rf"\\n?{{re.escape(HOSTS_MARKER_START)}}.*?{{re.escape(HOSTS_MARKER_END)}}\\n?", re.DOTALL)
+    if not pattern.search(content):
+        return True, "未找到本程序添加的 hosts 配置"
+    content = pattern.sub("\\n", content)
+    content = re.sub(r"\\n{{3,}}", "\\n\\n", content)
+    write_hosts(content)
+    return True, "已移除 GitHub hosts 配置"
+
+try:
+    operation = "{operation}"
+    if operation == "add":
+        entries = fetch_github_hosts()
+        if entries:
+            success, msg = update_hosts(entries)
+        else:
+            success, msg = False, "无法获取 GitHub hosts 配置"
+    elif operation == "remove":
+        success, msg = remove_hosts()
+    else:
+        success, msg = False, "未知操作"
+except PermissionError:
+    success, msg = False, "没有权限修改 hosts 文件"
+except Exception as e:
+    success, msg = False, str(e)
+
+with open(RESULT_PATH, "w", encoding="utf-8") as f:
+    f.write(f"{{1 if success else 0}}|{{msg}}")
+'''
+    
+    script_path = os.path.join(tempfile.gettempdir(), "hosts_admin_script.py")
+    
+    try:
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(script_content)
+        
+        if os.path.exists(result_path):
+            os.remove(result_path)
+        
+        # macOS: 使用 osascript 请求管理员权限
+        python_path = sys.executable
+        applescript = f'''
+        do shell script "{python_path} '{script_path}'" with administrator privileges
+        '''
+        
+        proc = subprocess.run(
+            ["osascript", "-e", applescript],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if proc.returncode != 0:
+            if "User canceled" in proc.stderr or "canceled" in proc.stderr.lower():
+                return False, "用户取消了管理员权限请求"
+            return False, f"执行失败: {proc.stderr}"
+        
+        # 读取结果
+        if os.path.exists(result_path):
+            with open(result_path, "r", encoding="utf-8") as f:
+                result = f.read().strip()
+            parts = result.split("|", 1)
+            if len(parts) == 2:
+                return parts[0] == "1", parts[1]
+        
+        return False, "操作执行失败"
+    except subprocess.TimeoutExpired:
+        return False, "操作超时"
+    except Exception as exc:
+        return False, f"执行管理员操作失败: {exc}"
+    finally:
+        for path in [script_path, result_path]:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+
+
+def _run_hosts_operation_as_admin_windows(operation: str) -> Tuple[bool, str]:
+    """Windows 以管理员权限执行 hosts 操作"""
     result_path = os.path.join(tempfile.gettempdir(), "hosts_result.txt")
     
     # 内联所有必要的代码，不依赖任何项目模块

@@ -95,8 +95,15 @@ PANED_MIN_LEFT_WIDTH = 360
 PANED_MIN_RIGHT_WIDTH = 280
 
 # ==================== 浏览器配置 ====================
-# 浏览器选择优先级
-BROWSER_PREFERENCE = ["edge"]
+# 浏览器选择优先级 (根据平台自动选择)
+import sys as _sys
+if _sys.platform == "darwin":
+    # macOS: 优先使用 Chromium (通过 playwright install chromium 安装)
+    BROWSER_PREFERENCE = ["chromium", "chrome"]
+else:
+    # Windows: 优先使用 Edge
+    BROWSER_PREFERENCE = ["edge", "chrome", "chromium"]
+del _sys
 # 无头模式窗口尺寸 (宽x高)
 HEADLESS_WINDOW_SIZE = "1920,1080"
 
