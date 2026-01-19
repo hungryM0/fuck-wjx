@@ -208,9 +208,6 @@ class DashboardPage(QWidget):
         self.command_bar.addHiddenAction(self.wizard_action)
         
         list_layout.addWidget(self.command_bar)
-        hint = BodyLabel("提示：排序题/滑块题会自动随机填写", self)
-        hint.setStyleSheet("padding:8px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px;")
-        list_layout.addWidget(hint)
         self.entry_table = TableWidget(self)
         self.entry_table.setRowCount(0)
         self.entry_table.setColumnCount(3)

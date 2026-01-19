@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 try:
     import requests
@@ -23,6 +23,7 @@ from wjx.engine import (
     _extract_survey_title_from_html,
     _normalize_html_text,
 )
+from wjx.network.browser_driver import kill_processes_by_pid
 from wjx.utils.load_save import RuntimeConfig, load_config, save_config
 from wjx.utils.log_utils import log_popup_confirm, log_popup_error, log_popup_info, log_popup_warning
 from wjx.network.random_ip import (
@@ -59,6 +60,7 @@ class EngineGuiAdapter:
     ):
         self.random_ip_enabled_var = BoolVar(False)
         self.active_drivers: List[Any] = []
+        self._launched_browser_pids: Set[int] = set()
         self._dispatcher = dispatcher
         self._stop_signal = stop_signal
         self._card_code_provider = card_code_provider
@@ -110,6 +112,33 @@ class EngineGuiAdapter:
             except Exception:
                 return None
         return None
+
+    def cleanup_browsers(self) -> None:
+        drivers = list(self.active_drivers or [])
+        self.active_drivers.clear()
+        pids_to_kill: Set[int] = set(self._launched_browser_pids or set())
+        self._launched_browser_pids.clear()
+
+        for driver in drivers:
+            try:
+                pid_single = getattr(driver, "browser_pid", None)
+                if pid_single:
+                    pids_to_kill.add(int(pid_single))
+                pid_set = getattr(driver, "browser_pids", None)
+                if pid_set:
+                    pids_to_kill.update(int(p) for p in pid_set)
+            except Exception:
+                pass
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+        if pids_to_kill:
+            try:
+                kill_processes_by_pid(pids_to_kill)
+            except Exception:
+                pass
 
 
 class RunController(QObject):
@@ -421,6 +450,7 @@ class RunController(QObject):
         if threading.current_thread() is not threading.main_thread():
             QTimer.singleShot(0, self._on_run_finished)
             return
+        self._cleanup_browsers()
         self.running = False
         self.runStateChanged.emit(False)
         self._status_timer.stop()
@@ -435,6 +465,7 @@ class RunController(QObject):
                 self.adapter.resume_run()
         except Exception:
             pass
+        self._cleanup_browsers()
         if self._paused_state:
             self._paused_state = False
             self.pauseStateChanged.emit(False, "")
@@ -475,6 +506,13 @@ class RunController(QObject):
         if paused != self._paused_state:
             self._paused_state = paused
             self.pauseStateChanged.emit(bool(paused), str(reason or ""))
+
+    def _cleanup_browsers(self) -> None:
+        try:
+            if self.adapter:
+                self.adapter.cleanup_browsers()
+        except Exception:
+            pass
 
     # -------------------- Persistence --------------------
     def load_saved_config(self, path: Optional[str] = None) -> RuntimeConfig:

@@ -39,6 +39,7 @@ from qfluentwidgets import (
 )
 
 from wjx.utils.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO
+from wjx.ui.widgets.full_width_infobar import FullWidthInfoBar
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -203,7 +204,7 @@ class AboutPage(ScrollArea):
         main_layout.addSpacing(10)
 
         # 警示声明 - 使用内嵌InfoBar样式
-        disclaimer_bar = InfoBar(
+        disclaimer_bar = FullWidthInfoBar(
             icon=InfoBarIcon.WARNING,
             title="",
             content="本项目仅供学习交流使用，开源以供研究软件原理，禁止用于任何恶意滥用行为",

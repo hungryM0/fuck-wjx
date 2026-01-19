@@ -57,7 +57,7 @@ class SpinBoxSettingCard(SettingCard):
         self.spinBox = NoWheelSpinBox(self)
         self.spinBox.setRange(min_val, max_val)
         self.spinBox.setValue(default)
-        self.spinBox.setFixedWidth(110)
+        self.spinBox.setMinimumWidth(90)
         self.spinBox.setFixedHeight(36)
         self.hBoxLayout.addWidget(self.spinBox, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
@@ -67,6 +67,24 @@ class SpinBoxSettingCard(SettingCard):
 
     def setValue(self, value):
         self.spinBox.setValue(value)
+
+    def setSpinBoxWidth(self, width: int) -> None:
+        if width and width > 0:
+            self.spinBox.setFixedWidth(int(width))
+
+    def suggestSpinBoxWidthForDigits(self, digits: int) -> int:
+        digits = max(1, int(digits))
+        metrics = self.spinBox.fontMetrics()
+        sample = "8" * digits
+        target_width = metrics.horizontalAdvance(sample)
+        try:
+            current_text = self.spinBox.text()
+        except Exception:
+            current_text = str(self.spinBox.value())
+        current_width = metrics.horizontalAdvance(current_text or "0")
+        base_width = self.spinBox.sizeHint().width()
+        extra = max(0, target_width - current_width)
+        return int(base_width + extra + 8)
 
 
 class SwitchSettingCard(SettingCard):
@@ -524,12 +542,15 @@ class RuntimePage(ScrollArea):
 
         self.target_card = SpinBoxSettingCard(
             FluentIcon.DOCUMENT, "目标份数", "设置要提交的问卷数量",
-            min_val=1, max_val=99999, default=10, parent=run_group
+            min_val=1, max_val=9999, default=10, parent=run_group
         )
         self.thread_card = SpinBoxSettingCard(
             FluentIcon.APPLICATION, "并发浏览器", "同时运行的浏览器数量 (1-12)",
             min_val=1, max_val=12, default=2, parent=run_group
         )
+        spin_width = self.target_card.suggestSpinBoxWidthForDigits(4)
+        self.target_card.setSpinBoxWidth(spin_width)
+        self.thread_card.setSpinBoxWidth(spin_width)
         self.fail_stop_card = SwitchSettingCard(
             FluentIcon.CANCEL, "失败过多自动停止", "连续失败次数过多时自动停止运行",
             parent=run_group

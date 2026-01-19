@@ -15,6 +15,11 @@ class FullWidthInfoBar(InfoBar):
         if parent is None:
             return False
         width = parent.contentsRect().width()
+        layout = parent.layout()
+        if layout is not None:
+            layout_width = layout.contentsRect().width()
+            if layout_width > 0:
+                width = layout_width
         if width <= 0:
             return False
         if self.width() != width:

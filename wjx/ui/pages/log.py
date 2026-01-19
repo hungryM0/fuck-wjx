@@ -17,6 +17,7 @@ from qfluentwidgets import (
 from wjx.utils.log_utils import LOG_BUFFER_HANDLER, save_log_records_to_file
 from wjx.utils.config import LOG_BUFFER_CAPACITY, LOG_REFRESH_INTERVAL_MS
 from wjx.utils.load_save import get_runtime_directory
+from wjx.ui.widgets.log_highlighter import LogHighlighter
 
 
 # 日志级别颜色配置（深色/浅色主题）
@@ -25,6 +26,7 @@ LOG_COLORS_DARK = {
     "WARN": "#eab308",    # 黄色
     "WARNING": "#eab308", # 黄色
     "INFO": "#d1d5db",    # 浅灰色
+    "OK": "#22c55e",      # 绿色
     "DEBUG": "#6b7280",   # 深灰色
     "DEFAULT": "#9ca3af", # 默认灰色
 }
@@ -34,6 +36,7 @@ LOG_COLORS_LIGHT = {
     "WARN": "#ca8a04",    # 深黄色
     "WARNING": "#ca8a04", # 深黄色
     "INFO": "#374151",    # 深灰色
+    "OK": "#15803d",      # 深绿
     "DEBUG": "#6b7280",   # 中灰色
     "DEFAULT": "#4b5563", # 默认深灰
 }
@@ -112,6 +115,10 @@ class LogPage(QWidget):
                 self.log_view.document().setMaximumBlockCount(int(LOG_BUFFER_CAPACITY))
         except Exception:
             pass
+        self._highlighter = LogHighlighter(
+            self.log_view.document(),
+            colors=self._resolve_log_colors(),
+        )
         
         # 应用主题样式
         self._apply_theme()
@@ -283,6 +290,12 @@ class LogPage(QWidget):
                     selection-background-color: #3b82f6;
                 }
             """)
+        if hasattr(self, "_highlighter"):
+            self._highlighter.set_colors(self._resolve_log_colors())
+
+    @staticmethod
+    def _resolve_log_colors():
+        return LOG_COLORS_DARK if isDarkTheme() else LOG_COLORS_LIGHT
 
     def _load_last_session_logs(self):
         """加载上次会话的日志"""
