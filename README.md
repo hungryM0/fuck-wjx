@@ -38,7 +38,7 @@ pip install -r requirements.txt
 python fuck-wjx.py
 ```
 
-**Requirements:** Windows 10/11 or Linux, Python 3.8+
+**Requirements:** Windows 10/11, macOS 10.15+ or Linux, Python 3.8+
 
 ---
 
