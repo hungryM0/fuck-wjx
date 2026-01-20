@@ -14,7 +14,8 @@ from PySide6.QtCore import QObject, Signal, QTimer, QCoreApplication
 
 from wjx import engine
 from wjx.core import engine_state as state
-from wjx.utils.config import DEFAULT_HTTP_HEADERS, DEFAULT_FILL_TEXT
+from wjx.utils.config import DEFAULT_HTTP_HEADERS, DEFAULT_FILL_TEXT, STOP_FORCE_WAIT_SECONDS
+from wjx.utils.cleanup_runner import CleanupRunner
 from wjx.core.question_config import QuestionEntry, configure_probabilities
 from wjx.engine import (
     create_playwright_driver,
@@ -164,6 +165,7 @@ class RunController(QObject):
         self._status_timer.timeout.connect(self._emit_status)
         self.on_ip_counter: Optional[Callable[[int, int, bool, bool], None]] = None
         self.card_code_provider: Optional[Callable[[], Optional[str]]] = None
+        self._cleanup_runner = CleanupRunner()
 
     # -------------------- Parsing --------------------
     def parse_survey(self, url: str):
@@ -437,24 +439,38 @@ class RunController(QObject):
             t.start()
             logging.info(f"线程 {idx+1}/{len(threads)} 已启动")
 
-        monitor = threading.Thread(target=self._wait_for_threads, daemon=True, name="Monitor")
+        monitor = threading.Thread(
+            target=self._wait_for_threads,
+            args=(self.adapter,),
+            daemon=True,
+            name="Monitor",
+        )
         monitor.start()
         logging.info("任务启动完成，监控线程已启动")
 
-    def _wait_for_threads(self):
+    def _wait_for_threads(self, adapter_snapshot: Optional[EngineGuiAdapter] = None):
         for t in self.worker_threads:
             t.join()
-        self._on_run_finished()
+        self._on_run_finished(adapter_snapshot)
 
-    def _on_run_finished(self):
+    def _on_run_finished(self, adapter_snapshot: Optional[EngineGuiAdapter] = None):
         if threading.current_thread() is not threading.main_thread():
-            QTimer.singleShot(0, self._on_run_finished)
+            QTimer.singleShot(0, lambda: self._on_run_finished(adapter_snapshot))
             return
-        self._cleanup_browsers()
+        self._schedule_cleanup(adapter_snapshot)
         self.running = False
         self.runStateChanged.emit(False)
         self._status_timer.stop()
         self._emit_status()
+
+    def _schedule_cleanup(self, adapter_snapshot: Optional[EngineGuiAdapter] = None) -> None:
+        adapter = adapter_snapshot or self.adapter
+
+        def _cleanup():
+            if adapter:
+                adapter.cleanup_browsers()
+
+        self._cleanup_runner.submit(_cleanup, delay_seconds=STOP_FORCE_WAIT_SECONDS)
 
     def stop_run(self):
         if not self.running:
@@ -465,7 +481,7 @@ class RunController(QObject):
                 self.adapter.resume_run()
         except Exception:
             pass
-        self._cleanup_browsers()
+        self._schedule_cleanup()
         if self._paused_state:
             self._paused_state = False
             self.pauseStateChanged.emit(False, "")
