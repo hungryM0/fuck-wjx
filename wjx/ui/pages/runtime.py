@@ -228,7 +228,10 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         try:
             from wjx.data.area_codes import load_area_codes
             self._area_data = load_area_codes()
-        except Exception:
+            if not self._area_data:
+                logging.warning("地区数据加载为空，可能是数据文件损坏或格式错误")
+        except Exception as e:
+            logging.error(f"加载地区数据失败: {e}", exc_info=True)
             self._area_data = []
         self._cities_by_province = {}
         self._province_index_by_code = {}

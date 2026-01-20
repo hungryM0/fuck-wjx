@@ -14,6 +14,7 @@ pyside_hiddenimports = [
 # 使用相对路径，PyInstaller 会正确地将这些文件打包进 EXE
 datas = [
     ('assets', 'assets'),
+    ('wjx/data', 'wjx/data'),
     ('icon.ico', '.'),
 ] + qfw_datas
 hiddenimports = qfw_hiddenimports + pyside_hiddenimports
