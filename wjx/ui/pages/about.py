@@ -176,9 +176,20 @@ class AboutPage(ScrollArea):
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self.view)
-        main_layout.setContentsMargins(36, 20, 36, 20)
-        main_layout.setSpacing(16)
-        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        content_widget = QWidget(self.view)
+        content_widget.setObjectName("about_content")
+        content_widget.setMaximumWidth(1000)
+        content_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        main_layout.addWidget(content_widget, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(36, 20, 36, 20)
+        content_layout.setSpacing(16)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # 1. 顶部 Hero 区域
         hero_widget = QWidget()
@@ -200,8 +211,8 @@ class AboutPage(ScrollArea):
         hero_layout.addWidget(title, 0, Qt.AlignmentFlag.AlignHCenter)
         hero_layout.addWidget(desc, 0, Qt.AlignmentFlag.AlignHCenter)
         
-        main_layout.addWidget(hero_widget)
-        main_layout.addSpacing(10)
+        content_layout.addWidget(hero_widget)
+        content_layout.addSpacing(10)
 
         # 警示声明 - 使用内嵌InfoBar样式
         disclaimer_bar = FullWidthInfoBar(
@@ -212,12 +223,12 @@ class AboutPage(ScrollArea):
             isClosable=False,
             position=InfoBarPosition.NONE,
             duration=-1,
-            parent=self
+            parent=content_widget
         )
         disclaimer_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         disclaimer_bar.setMinimumWidth(0)
         disclaimer_bar.setMaximumWidth(16777215)
-        main_layout.addWidget(disclaimer_bar)
+        content_layout.addWidget(disclaimer_bar)
 
         # 2. 版本信息 + 相关链接（两个卡片并排）
         cards_row = QHBoxLayout()
@@ -268,7 +279,7 @@ class AboutPage(ScrollArea):
         cards_row.addWidget(version_card, 1)
         cards_row.addWidget(links_card, 1)
         
-        main_layout.addLayout(cards_row)
+        content_layout.addLayout(cards_row)
 
         # 4. 致谢 & 许可
         credit_card = CardWidget(self)
@@ -300,7 +311,7 @@ class AboutPage(ScrollArea):
         third_party_layout.addStretch(1)
         credit_layout.addLayout(third_party_layout)
         
-        main_layout.addWidget(credit_card)
+        content_layout.addWidget(credit_card)
 
         # Footer
         footer_layout = QHBoxLayout()
@@ -313,9 +324,9 @@ class AboutPage(ScrollArea):
         footer_layout.addWidget(copyright_text)
         footer_layout.addWidget(self.ip_balance_label)
         footer_layout.addStretch(1)
-        main_layout.addSpacing(8)
-        main_layout.addLayout(footer_layout)
-        main_layout.addStretch(1)
+        content_layout.addSpacing(8)
+        content_layout.addLayout(footer_layout)
+        content_layout.addStretch(1)
 
         self.update_btn.clicked.connect(self._check_updates)
         self.github_btn.clicked.connect(lambda: webbrowser.open(f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"))
