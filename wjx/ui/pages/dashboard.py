@@ -644,6 +644,8 @@ class DashboardPage(QWidget):
     def _refresh_entry_table(self):
         entries = self.question_page.get_entries()
         self.entry_table.setRowCount(len(entries))
+        # 更新题目数量标签
+        self.count_label.setText(f"{len(entries)} 题")
         for idx, entry in enumerate(entries):
             type_label = _get_entry_type_label(entry)
             summary = _question_summary(entry)
