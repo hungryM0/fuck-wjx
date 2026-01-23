@@ -298,7 +298,7 @@ class AboutPage(ScrollArea):
         
         license_layout = QHBoxLayout()
         license_layout.addWidget(BodyLabel("License:", self))
-        license_layout.addWidget(BodyLabel("MIT License", self))
+        license_layout.addWidget(BodyLabel("GPL-3.0 License", self))
         license_layout.addStretch(1)
         credit_layout.addLayout(license_layout)
         

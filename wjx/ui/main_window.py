@@ -44,6 +44,7 @@ from wjx.ui.pages.about import AboutPage
 from wjx.ui.pages.account import AccountPage
 from wjx.ui.pages.changelog import ChangelogPage, ChangelogDetailPage
 from wjx.ui.pages.donate import DonatePage
+from wjx.ui.pages.qq_group import QQGroupPage
 
 # 导入对话框
 from wjx.ui.dialogs.card_unlock import CardUnlockDialog
@@ -120,6 +121,7 @@ class MainWindow(FluentWindow):
         self.dashboard = DashboardPage(self.controller, self.question_page, self.runtime_page, self)
         self.log_page = LogPage(self)
         self.help_page = HelpPage(self._open_contact_dialog, self)
+        self.qq_group_page = QQGroupPage(self)
         self.about_page = AboutPage(self)
         self.changelog_page = ChangelogPage(self)
         self.changelog_detail_page = ChangelogDetailPage(self)
@@ -134,6 +136,7 @@ class MainWindow(FluentWindow):
         self.runtime_page.setObjectName("runtime")
         self.log_page.setObjectName("logs")
         self.help_page.setObjectName("help")
+        self.qq_group_page.setObjectName("qq_group")
         self.about_page.setObjectName("about")
         self.changelog_page.setObjectName("changelog")
         self.changelog_detail_page.setObjectName("changelog_detail")
@@ -327,6 +330,8 @@ class MainWindow(FluentWindow):
         # 将 help_page、about_page、changelog_page 添加到 stackedWidget 但不显示在导航栏
         if self.stackedWidget.indexOf(self.help_page) == -1:
             self.stackedWidget.addWidget(self.help_page)
+        if self.stackedWidget.indexOf(self.qq_group_page) == -1:
+            self.stackedWidget.addWidget(self.qq_group_page)
         if self.stackedWidget.indexOf(self.about_page) == -1:
             self.stackedWidget.addWidget(self.about_page)
         if self.stackedWidget.indexOf(self.changelog_page) == -1:
@@ -373,6 +378,11 @@ class MainWindow(FluentWindow):
         donate_action = Action(FluentIcon.HEART, "捐助")
         donate_action.triggered.connect(lambda: self.switchTo(self.donate_page))
         menu.addAction(donate_action)
+
+        # QQ群
+        qq_group_action = Action(FluentIcon.CHAT, "QQ群")
+        qq_group_action.triggered.connect(lambda: self.switchTo(self.qq_group_page))
+        menu.addAction(qq_group_action)
         
         # 帮助
         help_action = Action(FluentIcon.HELP, "帮助")

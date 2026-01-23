@@ -1,32 +1,22 @@
 """帮助页面"""
-import os
 import threading
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QDialog,
-)
-from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from qfluentwidgets import (
     ScrollArea,
     SubtitleLabel,
     BodyLabel,
     CardWidget,
-    PushButton,
     PrimaryPushButton,
     IndeterminateProgressRing,
 )
 
 from wjx.network.random_ip import get_status, _format_status_payload
-from wjx.utils.load_save import get_assets_directory
 
 
 class HelpPage(ScrollArea):
-    """帮助页面，包含联系开发者、QQ群等。"""
+    """帮助页面，包含联系开发者信息。"""
 
     _statusLoaded = Signal(str, str)  # text, color
 
@@ -91,36 +81,6 @@ class HelpPage(ScrollArea):
         contact_layout.addWidget(self.contact_btn, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(contact_card)
 
-        # QQ群交流卡片
-        community_card = CardWidget(self.view)
-        community_layout = QVBoxLayout(community_card)
-        community_layout.setContentsMargins(16, 16, 16, 16)
-        community_layout.setSpacing(12)
-        community_layout.addWidget(SubtitleLabel("加入QQ群", self))
-        
-        community_desc = BodyLabel(
-            "扫描下方二维码加入QQ交流群，和其他用户一起交流使用心得！\n"
-            "群里可以获取最新版本、反馈问题、提出建议~",
-            self
-        )
-        community_desc.setWordWrap(True)
-        community_layout.addWidget(community_desc)
-
-        # QQ群二维码图片
-        self.qq_group_label = QLabel(self)
-        self.qq_group_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.qq_group_label.setMinimumSize(280, 280)
-        self.qq_group_label.setStyleSheet("border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px;")
-        self.qq_group_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.qq_group_label.mousePressEvent = lambda ev: self._on_qq_group_clicked(ev)  # type: ignore[method-assign]
-        self._load_qq_group_image()
-        
-        click_hint = BodyLabel("点击图片查看原图", self)
-        click_hint.setStyleSheet("color: #888; font-size: 12px;")
-        community_layout.addWidget(self.qq_group_label, alignment=Qt.AlignmentFlag.AlignLeft)
-        community_layout.addWidget(click_hint, alignment=Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(community_card)
-
         layout.addStretch(1)
 
         # 绑定事件
@@ -152,47 +112,3 @@ class HelpPage(ScrollArea):
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_qq_group_clicked(self, event):
-        """点击二维码查看原图"""
-        try:
-            qq_group_path = os.path.join(get_assets_directory(), "QQ_group.jpg")
-            if os.path.exists(qq_group_path):
-                self._show_full_image(qq_group_path)
-        except Exception:
-            pass
-
-    def _show_full_image(self, image_path: str):
-        """显示原图弹窗"""
-        dialog = QDialog(self.window() or self)
-        dialog.setWindowTitle("QQ群二维码")
-        dialog.setModal(True)
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(16, 16, 16, 16)
-        
-        img_label = QLabel(dialog)
-        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pixmap = QPixmap(image_path)
-        if pixmap.width() > 600 or pixmap.height() > 600:
-            pixmap = pixmap.scaled(600, 600, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        img_label.setPixmap(pixmap)
-        layout.addWidget(img_label)
-        
-        close_btn = PushButton("关闭", dialog)
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        
-        dialog.adjustSize()
-        dialog.exec()
-
-    def _load_qq_group_image(self):
-        """加载QQ群二维码图片"""
-        try:
-            qq_group_path = os.path.join(get_assets_directory(), "QQ_group.jpg")
-            if os.path.exists(qq_group_path):
-                pixmap = QPixmap(qq_group_path)
-                scaled = pixmap.scaled(280, 280, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                self.qq_group_label.setPixmap(scaled)
-            else:
-                self.qq_group_label.setText("QQ群二维码图片未找到\n请检查 assets/QQ_group.jpg")
-        except Exception as e:
-            self.qq_group_label.setText(f"加载图片失败：{e}")
