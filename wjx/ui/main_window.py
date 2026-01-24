@@ -39,7 +39,7 @@ from wjx.ui.pages.runtime import RuntimePage
 from wjx.ui.pages.settings import SettingsPage
 from wjx.ui.pages.question import QuestionPage
 from wjx.ui.pages.log import LogPage
-from wjx.ui.pages.help import HelpPage
+from wjx.ui.pages.support import SupportPage
 from wjx.ui.pages.about import AboutPage
 from wjx.ui.pages.account import AccountPage
 from wjx.ui.pages.changelog import ChangelogPage, ChangelogDetailPage
@@ -120,7 +120,7 @@ class MainWindow(FluentWindow):
         self.question_page.hide()
         self.dashboard = DashboardPage(self.controller, self.question_page, self.runtime_page, self)
         self.log_page = LogPage(self)
-        self.help_page = HelpPage(self._open_contact_dialog, self)
+        self.support_page = SupportPage(self)
         self.qq_group_page = QQGroupPage(self)
         self.about_page = AboutPage(self)
         self.changelog_page = ChangelogPage(self)
@@ -135,7 +135,7 @@ class MainWindow(FluentWindow):
         self.question_page.setObjectName("question")
         self.runtime_page.setObjectName("runtime")
         self.log_page.setObjectName("logs")
-        self.help_page.setObjectName("help")
+        self.support_page.setObjectName("support")
         self.qq_group_page.setObjectName("qq_group")
         self.about_page.setObjectName("about")
         self.changelog_page.setObjectName("changelog")
@@ -222,8 +222,11 @@ class MainWindow(FluentWindow):
         try:
             if hasattr(self.log_page, '_refresh_timer'):
                 self.log_page._refresh_timer.stop()
-            if hasattr(self.help_page, '_status_timer'):
-                self.help_page._status_timer.stop()
+            if hasattr(self.support_page, 'contact_form'):
+                try:
+                    self.support_page.contact_form.stop_status_polling()
+                except Exception:
+                    pass
         except Exception:
             pass
         
@@ -327,9 +330,9 @@ class MainWindow(FluentWindow):
             selectable=False,
             position=NavigationItemPosition.BOTTOM
         )
-        # 将 help_page、about_page、changelog_page 添加到 stackedWidget 但不显示在导航栏
-        if self.stackedWidget.indexOf(self.help_page) == -1:
-            self.stackedWidget.addWidget(self.help_page)
+        # 将 support_page、about_page、changelog_page 添加到 stackedWidget 但不显示在导航栏
+        if self.stackedWidget.indexOf(self.support_page) == -1:
+            self.stackedWidget.addWidget(self.support_page)
         if self.stackedWidget.indexOf(self.qq_group_page) == -1:
             self.stackedWidget.addWidget(self.qq_group_page)
         if self.stackedWidget.indexOf(self.about_page) == -1:
@@ -374,21 +377,21 @@ class MainWindow(FluentWindow):
         changelog_action.triggered.connect(lambda: self.switchTo(self.changelog_page))
         menu.addAction(changelog_action)
         
-        # 捐助
-        donate_action = Action(FluentIcon.HEART, "捐助")
-        donate_action.triggered.connect(lambda: self.switchTo(self.donate_page))
-        menu.addAction(donate_action)
-
         # QQ群
         qq_group_action = Action(FluentIcon.CHAT, "QQ群")
         qq_group_action.triggered.connect(lambda: self.switchTo(self.qq_group_page))
         menu.addAction(qq_group_action)
         
-        # 帮助
-        help_action = Action(FluentIcon.HELP, "帮助")
-        help_action.triggered.connect(lambda: self.switchTo(self.help_page))
-        menu.addAction(help_action)
+        # 客服与支持
+        support_action = Action(FluentIcon.HELP, "客服与支持")
+        support_action.triggered.connect(lambda: self.switchTo(self.support_page))
+        menu.addAction(support_action)
         
+        # 捐助
+        donate_action = Action(FluentIcon.HEART, "捐助")
+        donate_action.triggered.connect(lambda: self.switchTo(self.donate_page))
+        menu.addAction(donate_action)
+
         # 关于
         about_action = Action(FluentIcon.INFO, "关于")
         about_action.triggered.connect(lambda: self.switchTo(self.about_page))

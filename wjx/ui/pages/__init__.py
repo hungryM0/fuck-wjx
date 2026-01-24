@@ -4,7 +4,7 @@ from wjx.ui.pages.runtime import RuntimePage
 from wjx.ui.pages.settings import SettingsPage
 from wjx.ui.pages.question import QuestionPage, QuestionWizardDialog
 from wjx.ui.pages.log import LogPage
-from wjx.ui.pages.help import HelpPage
+from wjx.ui.pages.support import SupportPage
 from wjx.ui.pages.account import AccountPage
 from wjx.ui.pages.changelog import ChangelogPage
 
@@ -15,7 +15,7 @@ __all__ = [
     "QuestionPage",
     "QuestionWizardDialog",
     "LogPage",
-    "HelpPage",
+    "SupportPage",
     "AccountPage",
     "ChangelogPage",
 ]

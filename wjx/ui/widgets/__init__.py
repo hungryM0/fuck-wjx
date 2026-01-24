@@ -2,6 +2,7 @@
 from .no_wheel import NoWheelSlider, NoWheelSpinBox
 from .status_worker import StatusFetchWorker
 from .status_polling_mixin import StatusPollingMixin
+from .contact_form import ContactForm
 from .full_width_infobar import FullWidthInfoBar
 from .log_highlighter import LogHighlighter
 
@@ -12,4 +13,5 @@ __all__ = [
     "StatusPollingMixin",
     "FullWidthInfoBar",
     "LogHighlighter",
+    "ContactForm",
 ]
