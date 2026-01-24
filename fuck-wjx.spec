@@ -40,7 +40,7 @@ a = Analysis(
         "PIL._webp",
         "PIL.WebPImagePlugin",
     ],
-    noarchive=False,
+    noarchive=True,
     optimize=2,
 )
 pyz = PYZ(a.pure)
