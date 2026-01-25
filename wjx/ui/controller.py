@@ -79,6 +79,28 @@ class EngineGuiAdapter:
             except Exception:
                 pass
 
+    def _post_to_ui_thread_async(self, callback: Callable[[], None]) -> None:
+        """Fire-and-forget UI dispatch to avoid blocking worker threads."""
+        if QCoreApplication.instance() is None:
+            try:
+                callback()
+            except Exception:
+                pass
+            return
+        if threading.current_thread() is threading.main_thread():
+            try:
+                callback()
+            except Exception:
+                pass
+            return
+        try:
+            QTimer.singleShot(0, callback)
+        except Exception:
+            try:
+                callback()
+            except Exception:
+                pass
+
     def pause_run(self, reason: str = "") -> None:
         """Pause all worker loops until resumed by UI."""
         self._pause_reason = str(reason or "已暂停")

@@ -703,10 +703,18 @@ def _schedule_on_gui_thread(gui: Any, callback: Callable[[], None]):
     if gui is None:
         callback()
         return
-    dispatcher = getattr(gui, "_post_to_ui_thread", None)
+    dispatcher = getattr(gui, "_post_to_ui_thread_async", None)
     if callable(dispatcher):
         try:
             dispatcher(callback)
+            return
+        except Exception:
+            logging.debug("派发到 GUI 线程失败", exc_info=True)
+    dispatcher = getattr(gui, "_post_to_ui_thread", None)
+    if callable(dispatcher):
+        try:
+            thread = threading.Thread(target=dispatcher, args=(callback,), daemon=True)
+            thread.start()
             return
         except Exception:
             logging.debug("派发到 GUI 线程失败", exc_info=True)
