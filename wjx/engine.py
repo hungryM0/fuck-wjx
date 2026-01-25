@@ -16,9 +16,9 @@ from typing import List, Optional, Union, Dict, Any, Tuple, Callable, Set, Deque
 from urllib.parse import urlparse
 import webbrowser
 
-from wjx.core import engine_state as state
-from wjx.core.captcha_control import _handle_aliyun_captcha_detected
-from wjx.core.question_config import QuestionEntry, configure_probabilities
+import wjx.core.state as state
+from wjx.core.captcha.control import _handle_aliyun_captcha_detected
+from wjx.core.questions.config import QuestionEntry, configure_probabilities
 from wjx.network.random_ip import _mask_proxy_for_log, _proxy_is_responsive, handle_random_ip_submission
 from wjx.network.session_policy import (
     _discard_unresponsive_proxy,
@@ -27,10 +27,10 @@ from wjx.network.session_policy import (
     _select_proxy_for_session,
     _select_user_agent_for_session,
 )
-from wjx.utils.qrcode_utils import decode_qrcode
-from wjx.utils.runtime_paths import _get_resource_path, _get_runtime_directory
+from wjx.utils.io.qrcode_utils import decode_qrcode
+from wjx.utils.app.runtime_paths import _get_resource_path, _get_runtime_directory
 
-from wjx.utils.updater import (
+from wjx.utils.update.updater import (
     check_updates_on_startup,
     show_update_notification,
     check_for_updates as _check_for_updates_impl,
@@ -59,9 +59,9 @@ except ImportError:
     BeautifulSoup = None
 
 # 导入版本号及相关常量
-from wjx.utils.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, ISSUE_FEEDBACK_URL
+from wjx.utils.app.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO, ISSUE_FEEDBACK_URL
 # 导入配置常量
-from wjx.utils.config import (
+from wjx.utils.app.config import (
     DEFAULT_HTTP_HEADERS,
     QQ_GROUP_QR_RELATIVE_PATH,
     PANED_MIN_LEFT_WIDTH,
@@ -108,13 +108,13 @@ from wjx.network.browser_driver import (
 )
 
 # 导入拆分后的模块
-from wjx.core.captcha_handler import (
+from wjx.core.captcha.handler import (
     AliyunCaptchaBypassError,
     EmptySurveySubmissionError,
     handle_aliyun_captcha,
     reset_captcha_popup_state,
 )
-from wjx.core.survey_parser import (
+from wjx.core.survey.parser import (
     parse_survey_questions_from_html,
     extract_survey_title_from_html as _extract_survey_title_from_html,
     _normalize_html_text,
@@ -136,7 +136,7 @@ from wjx.core.survey_parser import (
     _extract_slider_range,
 )
 # 题型处理函数
-from wjx.core.question_utils import (
+from wjx.core.questions.utils import (
     weighted_index as _weighted_index,
     normalize_probabilities,
     normalize_droplist_probs as _normalize_droplist_probs,
@@ -152,7 +152,7 @@ from wjx.core.question_utils import (
     generate_random_mobile as _generate_random_mobile_value,
     generate_random_generic_text as _generate_random_generic_text_value,
 )
-from wjx.core.question_text import (
+from wjx.core.questions.types.text import (
     vacant as _vacant_impl,
     MULTI_TEXT_DELIMITER,
     fill_text_question_input as _fill_text_question_input,
@@ -163,9 +163,9 @@ from wjx.core.question_text import (
     should_mark_as_multi_text as _should_mark_as_multi_text_impl,
     should_treat_as_text_like as _should_treat_question_as_text_like_impl,
 )
-from wjx.core.ai_runtime import AIRuntimeError
-from wjx.core.question_single import single as _single_impl
-from wjx.core.question_multiple import (
+from wjx.core.ai.runtime import AIRuntimeError
+from wjx.core.questions.types.single import single as _single_impl
+from wjx.core.questions.types.multiple import (
     multiple as _multiple_impl,
     detect_multiple_choice_limit,
     detect_multiple_choice_limit_range,
@@ -177,11 +177,11 @@ from wjx.core.question_multiple import (
     _extract_multi_limit_range_from_text,
     _get_driver_session_key,
 )
-from wjx.core.question_dropdown import droplist as _droplist_impl
-from wjx.core.question_matrix import matrix as _matrix_impl
-from wjx.core.question_scale import scale as _scale_impl
-from wjx.core.question_slider import slider_question as _slider_question_impl, _resolve_slider_score
-from wjx.core.question_reorder import reorder as _reorder_impl, detect_reorder_required_count
+from wjx.core.questions.types.dropdown import droplist as _droplist_impl
+from wjx.core.questions.types.matrix import matrix as _matrix_impl
+from wjx.core.questions.types.scale import scale as _scale_impl
+from wjx.core.questions.types.slider import slider_question as _slider_question_impl, _resolve_slider_score
+from wjx.core.questions.types.reorder import reorder as _reorder_impl, detect_reorder_required_count
 
 
 

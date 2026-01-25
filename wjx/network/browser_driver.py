@@ -18,7 +18,7 @@ from playwright.sync_api import (
 
 import base64
 
-from wjx.utils.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
+from wjx.utils.app.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
 from wjx.network.random_ip import (
     _normalize_proxy_address,
     get_proxy_source,

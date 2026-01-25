@@ -12,7 +12,7 @@ try:
     import requests
 except ImportError:  # pragma: no cover
     requests = None
-from wjx.utils.config import (
+from wjx.utils.app.config import (
     CARD_VALIDATION_ENDPOINT,
     CONTACT_API_URL,
     DEFAULT_HTTP_HEADERS,
@@ -23,13 +23,13 @@ from wjx.utils.config import (
     PROXY_REMOTE_URL,
     STATUS_ENDPOINT,
 )
-from wjx.utils.log_utils import (
+from wjx.utils.logging.log_utils import (
     log_popup_confirm,
     log_popup_error,
     log_popup_info,
     log_popup_warning,
 )
-from wjx.utils.registry_manager import RegistryManager
+from wjx.utils.system.registry_manager import RegistryManager
 
 _DEFAULT_RANDOM_IP_FREE_LIMIT = 20
 _PREMIUM_RANDOM_IP_LIMIT = 400

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from qfluentwidgets import InfoBar, InfoBarPosition
 
-from wjx.utils.ai_service import get_ai_settings
+from wjx.utils.integrations.ai_service import get_ai_settings
 
 
 def ensure_ai_ready(parent) -> bool:

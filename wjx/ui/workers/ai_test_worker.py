@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from PySide6.QtCore import QObject, Signal
 
-from wjx.utils.ai_service import test_connection
+from wjx.utils.integrations.ai_service import test_connection
 
 
 class AITestWorker(QObject):

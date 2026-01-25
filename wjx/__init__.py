@@ -13,7 +13,11 @@ from wjx import (
 
 # 从新目录结构导入模块
 from wjx.network import browser_driver, random_ip
-from wjx.utils import config, load_save, log_utils, registry_manager, updater, version
+from wjx.utils.app import config, version
+from wjx.utils.io import load_save
+from wjx.utils.logging import log_utils
+from wjx.utils.system import registry_manager
+from wjx.utils.update import updater
 from wjx.modes import timed_mode
 
 __all__ = [

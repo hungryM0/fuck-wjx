@@ -1,9 +1,9 @@
 import logging
 from typing import Any, Optional, Tuple
 
-from wjx.core import engine_state as state
+import wjx.core.state as state
 from wjx.network.random_ip import _fetch_new_proxy_batch, _mask_proxy_for_log
-from wjx.utils.load_save import _select_user_agent_from_keys
+from wjx.utils.io.load_save import _select_user_agent_from_keys
 
 
 def _record_bad_proxy_and_maybe_pause(gui_instance: Optional[Any]) -> bool:

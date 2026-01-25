@@ -22,8 +22,8 @@ from qfluentwidgets import (
 
 from wjx.ui.widgets import StatusPollingMixin
 from wjx.network.random_ip import get_status, _format_status_payload
-from wjx.utils.load_save import get_assets_directory
-from wjx.utils.version import ISSUE_FEEDBACK_URL
+from wjx.utils.io.load_save import get_assets_directory
+from wjx.utils.app.version import ISSUE_FEEDBACK_URL
 
 
 class CardValidateWorker(QThread):

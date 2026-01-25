@@ -18,7 +18,7 @@ from qfluentwidgets import (
     isDarkTheme,
 )
 
-from wjx.utils.load_save import get_runtime_directory
+from wjx.utils.io.load_save import get_runtime_directory
 
 
 class ConfigDrawer(QWidget):

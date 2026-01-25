@@ -34,17 +34,17 @@ from qfluentwidgets import (
 )
 
 # 导入拆分后的页面
-from wjx.ui.pages.dashboard import DashboardPage
-from wjx.ui.pages.runtime import RuntimePage
-from wjx.ui.pages.settings import SettingsPage
-from wjx.ui.pages.question import QuestionPage
-from wjx.ui.pages.log import LogPage
-from wjx.ui.pages.support import SupportPage
-from wjx.ui.pages.about import AboutPage
-from wjx.ui.pages.account import AccountPage
-from wjx.ui.pages.changelog import ChangelogPage, ChangelogDetailPage
-from wjx.ui.pages.donate import DonatePage
-from wjx.ui.pages.qq_group import QQGroupPage
+from wjx.ui.pages.workbench.dashboard import DashboardPage
+from wjx.ui.pages.workbench.runtime import RuntimePage
+from wjx.ui.pages.account.settings import SettingsPage
+from wjx.ui.pages.workbench.question import QuestionPage
+from wjx.ui.pages.workbench.log import LogPage
+from wjx.ui.pages.support.support import SupportPage
+from wjx.ui.pages.support.about import AboutPage
+from wjx.ui.pages.account.account import AccountPage
+from wjx.ui.pages.support.changelog import ChangelogPage, ChangelogDetailPage
+from wjx.ui.pages.support.donate import DonatePage
+from wjx.ui.pages.support.qq_group import QQGroupPage
 
 # 导入对话框
 from wjx.ui.dialogs.card_unlock import CardUnlockDialog
@@ -52,22 +52,22 @@ from wjx.ui.dialogs.contact import ContactDialog
 
 # 导入控制器和工具
 from wjx.ui.controller import RunController
-from wjx.utils.config import APP_ICON_RELATIVE_PATH
-from wjx.utils.load_save import RuntimeConfig, get_runtime_directory
-from wjx.utils.log_utils import LOG_BUFFER_HANDLER, register_popup_handler
-from wjx.utils.version import __VERSION__, ISSUE_FEEDBACK_URL
+from wjx.utils.app.config import APP_ICON_RELATIVE_PATH
+from wjx.utils.io.load_save import RuntimeConfig, get_runtime_directory
+from wjx.utils.logging.log_utils import LOG_BUFFER_HANDLER, register_popup_handler
+from wjx.utils.app.version import __VERSION__, ISSUE_FEEDBACK_URL
 from wjx.network.random_ip import (
     get_status,
     _format_status_payload,
     refresh_ip_counter_display,
 )
-from wjx.utils.runtime_paths import _get_resource_path as get_resource_path
+from wjx.utils.app.runtime_paths import _get_resource_path as get_resource_path
 
 # 导入启动画面模块
 from wjx.boot import create_boot_splash, finish_boot_splash
 
 # 导入GitHub认证
-from wjx.utils.github_auth import get_github_auth
+from wjx.utils.integrations.github_auth import get_github_auth
 
 
 class MainWindow(FluentWindow):
@@ -271,7 +271,7 @@ class MainWindow(FluentWindow):
                         )
                         
                         if path:
-                            from wjx.utils.load_save import save_config
+                            from wjx.utils.io.load_save import save_config
                             save_config(cfg, path)
                             import logging
                             logging.info(f"配置已保存到: {path}")
@@ -361,7 +361,7 @@ class MainWindow(FluentWindow):
 
     def _show_about_menu(self):
         """显示关于子菜单"""
-        from wjx.utils.version import __VERSION__
+        from wjx.utils.app.version import __VERSION__
         
         menu = RoundMenu(parent=self)
         
@@ -662,7 +662,7 @@ class MainWindow(FluentWindow):
         """根据设置在启动时检查更新"""
         settings = QSettings("FuckWjx", "Settings")
         if settings.value("auto_check_update", True, type=bool):
-            from wjx.utils.updater import check_updates_on_startup
+            from wjx.utils.update.updater import check_updates_on_startup
             check_updates_on_startup(self)
 
     def _show_update_notification(self):
@@ -673,7 +673,7 @@ class MainWindow(FluentWindow):
         """实际显示更新通知（使用简单纯文本样式）"""
         if not getattr(self, "update_info", None):
             return
-        from wjx.utils.updater import show_update_notification
+        from wjx.utils.update.updater import show_update_notification
         show_update_notification(self)
 
     def _show_latest_version_badge(self):
@@ -896,7 +896,7 @@ class MainWindow(FluentWindow):
         """下载完成后在主线程显示弹窗"""
         import subprocess
         import logging
-        from wjx.utils.updater import UpdateManager
+        from wjx.utils.update.updater import UpdateManager
         
         should_launch = self._log_popup_confirm(
             "更新完成",
@@ -921,7 +921,7 @@ class MainWindow(FluentWindow):
 
     def _on_mirror_switched(self, new_mirror_key: str):
         """镜像源切换时更新设置页面的下拉框"""
-        from wjx.utils.config import GITHUB_MIRROR_SOURCES
+        from wjx.utils.app.config import GITHUB_MIRROR_SOURCES
         try:
             # 更新设置页面的下拉框
             if hasattr(self, "settings_page") and hasattr(self.settings_page, "mirror_combo"):

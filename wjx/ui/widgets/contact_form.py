@@ -28,8 +28,8 @@ from qfluentwidgets import (
 
 from wjx.ui.widgets.status_polling_mixin import StatusPollingMixin
 from wjx.ui.helpers.image_attachments import ImageAttachmentManager
-from wjx.utils.config import CONTACT_API_URL
-from wjx.utils.version import __VERSION__
+from wjx.utils.app.config import CONTACT_API_URL
+from wjx.utils.app.version import __VERSION__
 
 
 class ContactForm(StatusPollingMixin, QWidget):

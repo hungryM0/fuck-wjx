@@ -4,7 +4,7 @@ from PySide6.QtCore import qInstallMessageHandler, QtMsgType
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
-from wjx.utils.log_utils import setup_logging
+from wjx.utils.logging.log_utils import setup_logging
 
 
 def _qt_message_handler(mode, context, message):

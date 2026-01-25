@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtWidgets import QLabel
 from qfluentwidgets import IndeterminateProgressBar, SplashScreen, isDarkTheme, FluentWindow
 
-from wjx.utils.version import __VERSION__
+from wjx.utils.app.version import __VERSION__
 
 
 class BootSplash:

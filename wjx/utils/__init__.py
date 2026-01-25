@@ -1,12 +1,12 @@
 """工具类模块"""
-from wjx.utils.config import (
+from wjx.utils.app.config import (
     DEFAULT_HTTP_HEADERS,
     BROWSER_PREFERENCE,
     QUESTION_TYPE_LABELS,
     DEFAULT_FILL_TEXT,
 )
-from wjx.utils.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO
-from wjx.utils.log_utils import (
+from wjx.utils.app.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO
+from wjx.utils.logging.log_utils import (
     setup_logging,
     log_popup_info,
     log_popup_error,
@@ -16,9 +16,9 @@ from wjx.utils.log_utils import (
     register_popup_handler,
     save_log_records_to_file,
 )
-from wjx.utils.load_save import ConfigPersistenceMixin
-from wjx.utils.updater import check_for_updates, perform_update
-from wjx.utils.registry_manager import RegistryManager
+from wjx.utils.io.load_save import ConfigPersistenceMixin
+from wjx.utils.update.updater import check_for_updates, perform_update
+from wjx.utils.system.registry_manager import RegistryManager
 
 __all__ = [
     "DEFAULT_HTTP_HEADERS",

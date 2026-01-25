@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, List, Optional, Tuple
 
-from wjx.utils.config import DURATION_CONTROL_JITTER, DURATION_CONTROL_MIN_DELAY_SECONDS
+from wjx.utils.app.config import DURATION_CONTROL_JITTER, DURATION_CONTROL_MIN_DELAY_SECONDS
 
 DURATION_CONTROL_MIN_QUESTION_SECONDS = 3.0
 
@@ -160,7 +160,7 @@ def simulate_answer_duration_delay(
 def get_post_submit_wait_params(need_watch_submit: bool, fast_mode: bool) -> Tuple[float, float]:
     """计算提交后用于检测页面跳转的最大等待时间与轮询间隔。"""
     try:
-        from wjx.utils.config import POST_SUBMIT_URL_MAX_WAIT, POST_SUBMIT_URL_POLL_INTERVAL
+        from wjx.utils.app.config import POST_SUBMIT_URL_MAX_WAIT, POST_SUBMIT_URL_POLL_INTERVAL
     except Exception:
         POST_SUBMIT_URL_MAX_WAIT = 10.0
         POST_SUBMIT_URL_POLL_INTERVAL = 0.2

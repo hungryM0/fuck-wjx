@@ -13,10 +13,10 @@ except ImportError:  # pragma: no cover
 from PySide6.QtCore import QObject, Signal, QTimer, QCoreApplication
 
 from wjx import engine
-from wjx.core import engine_state as state
-from wjx.utils.config import DEFAULT_HTTP_HEADERS, DEFAULT_FILL_TEXT, STOP_FORCE_WAIT_SECONDS
-from wjx.utils.cleanup_runner import CleanupRunner
-from wjx.core.question_config import QuestionEntry, configure_probabilities
+import wjx.core.state as state
+from wjx.utils.app.config import DEFAULT_HTTP_HEADERS, DEFAULT_FILL_TEXT, STOP_FORCE_WAIT_SECONDS
+from wjx.utils.system.cleanup_runner import CleanupRunner
+from wjx.core.questions.config import QuestionEntry, configure_probabilities
 from wjx.engine import (
     create_playwright_driver,
     parse_survey_questions_from_html,
@@ -24,8 +24,8 @@ from wjx.engine import (
     _extract_survey_title_from_html,
     _normalize_html_text,
 )
-from wjx.utils.load_save import RuntimeConfig, load_config, save_config
-from wjx.utils.log_utils import log_popup_confirm, log_popup_error, log_popup_info, log_popup_warning
+from wjx.utils.io.load_save import RuntimeConfig, load_config, save_config
+from wjx.utils.logging.log_utils import log_popup_confirm, log_popup_error, log_popup_info, log_popup_warning
 from wjx.network.browser_driver import graceful_terminate_process_tree
 from wjx.network.random_ip import (
     _fetch_new_proxy_batch,
@@ -33,7 +33,7 @@ from wjx.network.random_ip import (
     get_random_ip_limit,
     is_custom_proxy_api_active,
 )
-from wjx.utils.registry_manager import RegistryManager
+from wjx.utils.system.registry_manager import RegistryManager
 
 
 class BoolVar:
