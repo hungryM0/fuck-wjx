@@ -3,7 +3,7 @@ import logging
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, QThread, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,6 +24,7 @@ from qfluentwidgets import (
     SwitchButton,
     CheckBox,
     ComboBox,
+    ModelComboBox,
     LineEdit,
     PasswordLineEdit,
     PushSettingCard,
@@ -593,27 +594,31 @@ class RuntimePage(ScrollArea):
             "选择用于自动化的浏览器，Edge 缺失时可改用 Chrome 或内置 Chromium",
             parent=run_group,
         )
-        self.browser_combo = ComboBox(self.browser_card)
+        
+        # 使用 ModelComboBox 以支持图标显示
+        self.browser_combo = ModelComboBox(self.browser_card)
         self.browser_combo.setFixedWidth(170)
         self.browser_combo.setStyleSheet(
             "QPushButton { padding-left: 14px; padding-right: 12px; text-align: left; }"
         )
+        
+        # 创建 Model 并添加带图标的项
+        browser_model = QStandardItemModel()
         for key, option in self.BROWSER_OPTION_MAP.items():
             icon = self._browser_icons.get(key)
             text = option.get("text", key)
-            if icon:
-                # 显式使用命名参数，避免参数顺序差异导致文本被当成 QIcon
-                self.browser_combo.addItem(text, userData=key, icon=icon)
-            else:
-                self.browser_combo.addItem(text, userData=key)
             hint = option.get("hint")
+            
+            item = QStandardItem(text)
+            if icon and not icon.isNull():
+                item.setIcon(icon)
             if hint:
-                idx = self.browser_combo.count() - 1
-                if idx >= 0:
-                    try:
-                        self.browser_combo.setItemData(idx, hint, Qt.ItemDataRole.ToolTipRole)  # PySide6
-                    except TypeError:
-                        self.browser_combo.setItemData(idx, hint)  # 兼容旧版 qfluentwidgets 签名
+                item.setToolTip(hint)
+            item.setData(key, Qt.ItemDataRole.UserRole)
+            browser_model.appendRow(item)
+        
+        self.browser_combo.setModel(browser_model)
+        
         self.browser_card.hBoxLayout.addWidget(
             self.browser_combo,
             0,

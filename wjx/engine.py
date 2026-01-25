@@ -1297,6 +1297,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
     base_browser_preference = list(getattr(state, "browser_preference", []) or BROWSER_PREFERENCE)
     preferred_browsers = list(base_browser_preference)
     driver: Optional[BrowserDriver] = None
+    proxy_address: Optional[str] = None  # 初始化代理地址变量，避免异常处理中未绑定错误
     
     # 获取浏览器实例信号量，限制同时运行的浏览器数量
     browser_sem = state._get_browser_semaphore(min(state.num_threads, state.MAX_BROWSER_INSTANCES))
