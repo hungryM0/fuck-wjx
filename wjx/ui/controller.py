@@ -189,6 +189,7 @@ class RunController(QObject):
         self.card_code_provider: Optional[Callable[[], Optional[str]]] = None
         self._cleanup_runner = CleanupRunner()
         self._completion_cleanup_done = False
+        self._cleanup_scheduled = False
 
     # -------------------- Parsing --------------------
     def parse_survey(self, url: str):
@@ -356,7 +357,13 @@ class RunController(QObject):
 
         # 将回调派发到控制器所属线程（主线程）
         QTimer.singleShot(0, _run)
-        done.wait()
+        if not done.wait(timeout=3):
+            try:
+                import logging
+                logging.warning("UI 调度超时，放弃等待以避免阻塞")
+            except Exception:
+                pass
+            return None
         return result_container.get("value")
 
     def _prepare_engine_state(self, config: RuntimeConfig, proxy_pool: List[str]) -> None:
@@ -411,6 +418,7 @@ class RunController(QObject):
         self.adapter.random_ip_enabled_var.set(config.random_ip_enabled)
         self._paused_state = False
         self._completion_cleanup_done = False
+        self._cleanup_scheduled = False
         
         logging.info(f"配置题目概率分布（共{len(config.question_entries)}题）")
         try:
@@ -508,6 +516,9 @@ class RunController(QObject):
         self._cleanup_runner.submit(_cleanup, delay_seconds=delay_seconds)
 
     def _schedule_cleanup(self, adapter_snapshot: Optional[EngineGuiAdapter] = None) -> None:
+        if self._cleanup_scheduled:
+            return
+        self._cleanup_scheduled = True
         self._submit_cleanup_task(
             adapter_snapshot,
             delay_seconds=STOP_FORCE_WAIT_SECONDS,
@@ -567,7 +578,7 @@ class RunController(QObject):
         should_force_cleanup = target > 0 and current >= target and not self._completion_cleanup_done
         if should_force_cleanup:
             self._completion_cleanup_done = True
-            self._submit_cleanup_task()
+            self._schedule_cleanup()
 
     def _cleanup_browsers(self) -> None:
         try:

@@ -268,6 +268,13 @@ def _trigger_target_reached_stop(
         except Exception:
             logging.debug("达到目标份数时触发强制停止失败", exc_info=True)
 
+    dispatcher = getattr(gui_instance, "_post_to_ui_thread_async", None) if gui_instance else None
+    if callable(dispatcher):
+        try:
+            dispatcher(_notify)
+            return
+        except Exception:
+            logging.debug("派发任务完成事件到主线程失败", exc_info=True)
     dispatcher = getattr(gui_instance, "_post_to_ui_thread", None) if gui_instance else None
     if callable(dispatcher):
         try:
@@ -1471,6 +1478,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 logging.warning("检测到“设备已达到最大填写次数”提示页，直接放弃当前浏览器实例并标记为成功。")
                 should_handle_random_ip = False
                 should_stop_after_quota = False
+                trigger_target_stop = False
+                force_stop = False
                 with state.lock:
                     if state.target_num <= 0 or state.cur_num < state.target_num:
                         state.cur_num += 1
@@ -1479,12 +1488,16 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         )
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
-                            stop_signal.set()
-                            _trigger_target_reached_stop(gui_instance, stop_signal)
+                            trigger_target_stop = True
+                            force_stop = True
                             should_stop_after_quota = True
                     else:
-                        stop_signal.set()
+                        force_stop = True
                         should_stop_after_quota = True
+                if force_stop:
+                    stop_signal.set()
+                if trigger_target_stop:
+                    _trigger_target_reached_stop(gui_instance, stop_signal)
                 _dispose_driver()
                 if should_handle_random_ip:
                     handle_random_ip_submission(gui_instance, stop_signal)
@@ -1531,6 +1544,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
 
                 # 没有触发验证，直接标记为成功
                 should_handle_random_ip = False
+                trigger_target_stop = False
+                should_break = False
                 with state.lock:
                     if state.target_num <= 0 or state.cur_num < state.target_num:
                         state.cur_num += 1
@@ -1539,11 +1554,15 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         )
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
-                            stop_signal.set()
-                            _trigger_target_reached_stop(gui_instance, stop_signal)
+                            trigger_target_stop = True
                     else:
-                        stop_signal.set()
-                        break
+                        should_break = True
+                if should_break:
+                    stop_signal.set()
+                    break
+                if trigger_target_stop:
+                    stop_signal.set()
+                    _trigger_target_reached_stop(gui_instance, stop_signal)
                 grace_seconds = float(POST_SUBMIT_CLOSE_GRACE_SECONDS or 0.0)
                 if grace_seconds > 0 and not stop_signal.is_set():
                     time.sleep(grace_seconds)
@@ -1623,6 +1642,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             if completion_detected:
                 driver_had_error = False
                 should_handle_random_ip = False
+                trigger_target_stop = False
                 with state.lock:
                     if state.target_num <= 0 or state.cur_num < state.target_num:
                         state.cur_num += 1
@@ -1631,10 +1651,12 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         )
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
-                            stop_signal.set()
-                            _trigger_target_reached_stop(gui_instance, stop_signal)
+                            trigger_target_stop = True
                     else:
                         stop_signal.set()
+                if trigger_target_stop:
+                    stop_signal.set()
+                    _trigger_target_reached_stop(gui_instance, stop_signal)
                 grace_seconds = float(POST_SUBMIT_CLOSE_GRACE_SECONDS or 0.0)
                 if grace_seconds > 0 and not stop_signal.is_set():
                     time.sleep(grace_seconds)
