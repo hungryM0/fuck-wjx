@@ -24,6 +24,7 @@ from qfluentwidgets import (
     IndeterminateProgressRing,
     InfoBar,
     InfoBarPosition,
+    MessageBox,
 )
 
 from wjx.ui.widgets.status_polling_mixin import StatusPollingMixin
@@ -374,7 +375,7 @@ class ContactForm(StatusPollingMixin, QWidget):
     def _validate_email(self, email: str) -> bool:
         if not email:
             return True
-        pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+        pattern = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
         return re.match(pattern, email) is not None
 
     def _on_send_clicked(self):
@@ -431,10 +432,14 @@ class ContactForm(StatusPollingMixin, QWidget):
 
         def _send():
             try:
+                multipart_fields = [
+                    ("message", (None, payload["message"])),
+                    ("timestamp", (None, payload["timestamp"])),
+                ]
                 if files_payload:
-                    resp = post(api_url, data=payload, files=files_payload, timeout=20)
-                else:
-                    resp = post(api_url, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+                    multipart_fields.extend(files_payload)
+                timeout = 20 if files_payload else 10
+                resp = post(api_url, files=multipart_fields, timeout=timeout)
                 if resp.status_code == 200:
                     self._sendFinished.emit(True, "")
                 else:
@@ -451,8 +456,16 @@ class ContactForm(StatusPollingMixin, QWidget):
         self.send_btn.setText("发送")
 
         if success:
-            msg = "发送成功！请留意邮件信息！" if getattr(self, "_current_message_type", "") == "卡密获取" else "消息已成功发送！"
+            current_type = getattr(self, "_current_message_type", "")
+            if current_type == "白嫖卡密（？）":
+                msg = "白嫖成功！已自动解锁ip额度"
+            elif current_type == "卡密获取":
+                msg = "发送成功！请留意邮件信息！"
+            else:
+                msg = "消息已成功发送！"
             InfoBar.success("", msg, parent=self, position=InfoBarPosition.TOP, duration=2500)
+            if current_type == "白嫖卡密（？）":
+                self._apply_whitepiao_unlock()
             if self._auto_clear_on_success:
                 self.message_edit.clear()
                 self.amount_edit.clear()
@@ -461,3 +474,85 @@ class ContactForm(StatusPollingMixin, QWidget):
             self.sendSucceeded.emit()
         else:
             InfoBar.error("", error_msg, parent=self, position=InfoBarPosition.TOP, duration=3000)
+
+    def _find_controller_host(self) -> Optional[QWidget]:
+        widget: Optional[QWidget] = self
+        while widget is not None:
+            if hasattr(widget, "controller"):
+                return widget
+            widget = widget.parentWidget()
+        win = self.window()
+        if isinstance(win, QWidget) and hasattr(win, "controller"):
+            return win
+        return None
+
+    def _apply_whitepiao_unlock(self):
+        try:
+            from wjx.network.random_ip import _PREMIUM_RANDOM_IP_LIMIT, refresh_ip_counter_display
+            from wjx.utils.system.registry_manager import RegistryManager
+        except Exception:
+            return
+
+        parent = self.window() or self
+        was_unlimited = False
+        try:
+            was_unlimited = RegistryManager.is_quota_unlimited()
+        except Exception:
+            was_unlimited = False
+
+        if was_unlimited:
+            box = MessageBox(
+                "切换额度上限？",
+                "当前随机IP额度为“无限”。是否切换为白嫖额度（上限400）？",
+                parent,
+            )
+            box.yesButton.setText("切换为400")
+            box.cancelButton.setText("保持无限")
+            if not box.exec():
+                return
+            try:
+                RegistryManager.set_quota_unlimited(False)
+            except Exception:
+                pass
+
+        RegistryManager.write_quota_limit(_PREMIUM_RANDOM_IP_LIMIT)
+
+        host = self._find_controller_host()
+        controller = getattr(host, "controller", None)
+        adapter = getattr(controller, "adapter", None)
+        if adapter:
+            try:
+                adapter.random_ip_enabled_var.set(True)
+            except Exception:
+                pass
+            refresh_ip_counter_display(adapter)
+
+        dashboard = host if hasattr(host, "random_ip_cb") else getattr(host, "dashboard", None)
+        if dashboard and hasattr(dashboard, "random_ip_cb"):
+            try:
+                dashboard.random_ip_cb.blockSignals(True)
+                dashboard.random_ip_cb.setChecked(True)
+            except Exception:
+                pass
+            finally:
+                try:
+                    dashboard.random_ip_cb.blockSignals(False)
+                except Exception:
+                    pass
+
+        runtime_page = None
+        if hasattr(host, "runtime_page"):
+            runtime_page = host.runtime_page
+        elif dashboard is not None and hasattr(dashboard, "runtime_page"):
+            runtime_page = dashboard.runtime_page
+        if runtime_page and hasattr(runtime_page, "random_ip_switch"):
+            try:
+                runtime_page.random_ip_switch.blockSignals(True)
+                runtime_page.random_ip_switch.setChecked(True)
+            except Exception:
+                pass
+            finally:
+                try:
+                    runtime_page.random_ip_switch.blockSignals(False)
+                except Exception:
+                    pass

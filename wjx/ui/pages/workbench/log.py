@@ -1,4 +1,4 @@
-"""日志页面 - 参考UniGetUI设计"""
+"""日志页面"""
 import os
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit, QApplication
