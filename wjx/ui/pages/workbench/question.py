@@ -47,7 +47,6 @@ TYPE_CHOICES = [
 # 填写策略选项
 STRATEGY_CHOICES = [
     ("random", "完全随机"),
-    ("uniform", "均匀分布"),
     ("custom", "自定义配比"),
 ]
 
@@ -462,7 +461,7 @@ class QuestionPage(ScrollArea):
         strategy_combo = ComboBox(dialog)
         for value, label in STRATEGY_CHOICES:
             strategy_combo.addItem(label, value)
-        strategy_combo.setCurrentIndex(1)  # 默认选择"自定义配比"
+        strategy_combo.setCurrentIndex(0)  # 默认“完全随机”
         strategy_row.addWidget(strategy_combo, 1)
         layout.addLayout(strategy_row)
 
@@ -618,7 +617,7 @@ class QuestionPage(ScrollArea):
         option_spin.valueChanged.connect(on_option_changed)
         ai_toggle.toggled.connect(on_ai_toggle)
         
-        # 初始化时调用一次以显示滑块（因为默认是自定义配比）
+        # 初始化时调用一次以同步控件可见性（默认完全随机不显示滑块）
         do_update_visibility()
 
         layout.addStretch(1)
@@ -767,9 +766,11 @@ class QuestionPage(ScrollArea):
                 detail += "..."
         else:
             strategy = entry.distribution_mode or "random"
+            if strategy not in ("random", "custom"):
+                strategy = "random"
             if getattr(entry, "probabilities", None) == -1:
                 strategy = "random"
-            detail = "完全随机" if strategy == "random" else "均匀分布"
+            detail = "完全随机" if strategy == "random" else "自定义配比"
         self.table.setItem(row, 3, QTableWidgetItem(detail))
 
     def _entry_from_row(self, row: int) -> QuestionEntry:

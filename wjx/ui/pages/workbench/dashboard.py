@@ -76,9 +76,11 @@ def _question_summary(entry: QuestionEntry) -> str:
         return summary
     else:
         strategy = entry.distribution_mode or "random"
+        if strategy not in ("random", "custom"):
+            strategy = "random"
         if getattr(entry, "probabilities", None) == -1:
             strategy = "random"
-        return "完全随机" if strategy == "random" else "均匀分布"
+        return "完全随机" if strategy == "random" else "自定义配比"
 
 
 class DashboardPage(QWidget):
@@ -217,9 +219,8 @@ class DashboardPage(QWidget):
         self.select_all_action = Action(FluentIcon.CHECKBOX, "全选", checkable=True)
         self.command_bar.addAction(self.select_all_action)
         
-        # 隐藏操作：配置向导
+        # 隐藏操作：配置向导（移除隐藏按钮，避免出现更多“...”菜单）
         self.wizard_action = Action(FluentIcon.SETTING, "配置向导")
-        self.command_bar.addHiddenAction(self.wizard_action)
         
         list_layout.addWidget(self.command_bar)
         self.entry_table = TableWidget(self)
