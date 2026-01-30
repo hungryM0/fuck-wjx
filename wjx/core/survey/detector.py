@@ -5,7 +5,7 @@ import logging
 import math
 import time
 import threading
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from wjx.network.browser_driver import BrowserDriver, By, NoSuchElementException
 
@@ -154,6 +154,34 @@ def detect(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
     """检测问卷结构，返回每页的题目数量"""
     dismiss_resume_dialog_if_present(driver, stop_signal=stop_signal)
     try_click_start_answer_button(driver, stop_signal=stop_signal)
+    question_counts_per_page = _count_questions_by_fieldset(driver)
+    if sum(question_counts_per_page) > 0:
+        return question_counts_per_page
+
+    fallback_pages, fallback_total, inputs = _count_questions_by_script(driver)
+    if fallback_total > 0:
+        logging.info("题目检测回退：使用宽松规则识别到 %d 题", fallback_total)
+        return fallback_pages
+
+    if stop_signal and stop_signal.is_set():
+        return question_counts_per_page
+    if stop_signal:
+        stop_signal.wait(0.4)
+    else:
+        time.sleep(0.4)
+    fallback_pages, fallback_total, inputs = _count_questions_by_script(driver)
+    if fallback_total > 0:
+        logging.info("题目检测回退（延迟后）：识别到 %d 题", fallback_total)
+        return fallback_pages
+
+    if inputs > 0:
+        logging.warning("题目检测失败但检测到输入控件，保底按 1 题处理")
+        return [1]
+
+    return question_counts_per_page
+
+
+def _count_questions_by_fieldset(driver: BrowserDriver) -> List[int]:
     question_counts_per_page: List[int] = []
     total_pages = len(driver.find_elements(By.XPATH, '//*[@id="divQuestion"]/fieldset'))
     for page_index in range(1, total_pages + 1):
@@ -165,6 +193,65 @@ def detect(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
                 valid_question_count += 1
         question_counts_per_page.append(valid_question_count)
     return question_counts_per_page
+
+
+def _count_questions_by_script(driver: BrowserDriver) -> Tuple[List[int], int, int]:
+    script = r"""
+        return (() => {
+            const container = document.querySelector('#divQuestion') || document;
+            const fieldsets = Array.from(container.querySelectorAll('fieldset[id^="fieldset"]'));
+
+            const countInRoot = (root) => {
+                const ids = new Set();
+                const topicEls = Array.from(root.querySelectorAll('[topic]'));
+                topicEls.forEach(el => {
+                    const t = (el.getAttribute('topic') || '').trim();
+                    if (/^\d+$/.test(t)) ids.add(`t${t}`);
+                });
+                const idEls = Array.from(root.querySelectorAll('div[id^="div"]'));
+                idEls.forEach(el => {
+                    const id = (el.getAttribute('id') || '').trim();
+                    const m = id.match(/^div(\d+)$/);
+                    if (m) ids.add(`d${m[1]}`);
+                });
+                if (!ids.size) {
+                    const clsEls = Array.from(root.querySelectorAll('.div_question, .question, .wjx_question'));
+                    clsEls.forEach((_, idx) => ids.add(`c${idx}`));
+                }
+                return ids.size;
+            };
+
+            if (fieldsets.length) {
+                const counts = fieldsets.map(fs => countInRoot(fs));
+                const total = counts.reduce((a, b) => a + b, 0);
+                return { pages: counts, total, inputs: container.querySelectorAll('input, textarea, select').length };
+            }
+
+            const total = countInRoot(container);
+            const inputs = container.querySelectorAll('input, textarea, select').length;
+            return { pages: total ? [total] : [], total, inputs };
+        })();
+    """
+    try:
+        payload = driver.execute_script(script) or {}
+    except Exception:
+        return [], 0, 0
+    pages = payload.get("pages") or []
+    try:
+        pages = [int(x) for x in pages if int(x) >= 0]
+    except Exception:
+        pages = []
+    total = 0
+    for item in pages:
+        try:
+            total += int(item)
+        except Exception:
+            continue
+    try:
+        inputs = int(payload.get("inputs") or 0)
+    except Exception:
+        inputs = 0
+    return pages, total, inputs
 
 
 def _is_device_quota_limit_page(driver: BrowserDriver) -> bool:
