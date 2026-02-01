@@ -622,12 +622,16 @@ class DashboardPage(QWidget):
         # 验证成功后处理解锁逻辑：设置400份额度上限（不重置已用额度）
         if dialog.get_validation_result():
             from wjx.network.random_ip import _PREMIUM_RANDOM_IP_LIMIT
-            RegistryManager.write_quota_limit(_PREMIUM_RANDOM_IP_LIMIT)
+            quota = dialog.get_validation_quota()
+            limit_val = max(1, int(quota or _PREMIUM_RANDOM_IP_LIMIT))
+            RegistryManager.write_quota_limit(limit_val)
             RegistryManager.set_quota_unlimited(False)
             refresh_ip_counter_display(self.controller.adapter)
             self.random_ip_cb.setChecked(True)
             try:
+                self.runtime_page.random_ip_switch.blockSignals(True)
                 self.runtime_page.random_ip_switch.setChecked(True)
+                self.runtime_page.random_ip_switch.blockSignals(False)
             except Exception:
                 pass
 

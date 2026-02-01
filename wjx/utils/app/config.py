@@ -84,7 +84,7 @@ def _r(s: str) -> str:
 _CFG = {
     "a": "aHR0cHM6Ly9zZXJ2aWNlLmlwemFuLmNvbS9jb3JlLWV4dHJhY3Q/bnVtPTEmbm89MjAyNjAxMTI1NzIzNzY0OTA4NzQmbWludXRlPTEmZm9ybWF0PWpzb24mcmVwZWF0PTEmcHJvdG9jb2w9MSZwb29sPW9yZGluYXJ5Jm1vZGU9YXV0aCZzZWNyZXQ9cGY3MDZ2azc3a2tubG8=",
     "b": "aHR0cHM6Ly9ib3QuaHVuZ3J5bTAudG9w",
-    "c": "aHR0cHM6Ly9odW5ncnltMC50b3AvcGFzc3dvcmQudHh0",
+    "c": "aHR0cHM6Ly9hcGktd2p4Lmh1bmdyeW0wLnRvcC9hcGkvY2FyZC92ZXJpZnk=",
     "d": "aHR0cHM6Ly93anguaHVuZ3J5bTAudG9wL3N0YXR1cw==",
     "e": "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0NoYXJsZXNQaWthY2h1L2ZyZWVwcm94eS9tYXN0ZXIvcHJveGllcy5qc29u",
 }
@@ -175,6 +175,7 @@ CONTACT_API_URL = _resolve_env_value("CONTACT_API_URL", _r(_CFG["b"]))
 CARD_VALIDATION_ENDPOINT = _resolve_env_value("CARD_VALIDATION_ENDPOINT", _r(_CFG["c"]))
 STATUS_ENDPOINT = _resolve_env_value("STATUS_ENDPOINT", _r(_CFG["d"]))
 PIKACHU_PROXY_API = _resolve_env_value("PIKACHU_PROXY_API", _r(_CFG["e"]))
+CARD_TOKEN_SECRET = _resolve_env_value("CARD_TOKEN_SECRET", "")
 
 
 # ==================== 时长控制配置 ====================

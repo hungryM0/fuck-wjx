@@ -1,3 +1,6 @@
+import base64
+import hmac
+import hashlib
 import json
 import logging
 import os
@@ -22,6 +25,7 @@ from wjx.utils.app.config import (
     PROXY_MAX_PROXIES,
     PROXY_REMOTE_URL,
     STATUS_ENDPOINT,
+    CARD_TOKEN_SECRET,
 )
 from wjx.utils.logging.log_utils import (
     log_popup_confirm,
@@ -33,12 +37,14 @@ from wjx.utils.system.registry_manager import RegistryManager
 
 _DEFAULT_RANDOM_IP_FREE_LIMIT = 20
 _PREMIUM_RANDOM_IP_LIMIT = 400
+_CARD_VERIFY_TIMEOUT = 8  # seconds
 
 STATUS_TIMEOUT_SECONDS = 5
 _quota_limit_dialog_shown = False
 _proxy_api_url_override: Optional[str] = None
 _proxy_area_code_override: Optional[str] = None
 _CUSTOM_PROXY_CONFIG_FILENAME = "custom_ip.json"
+_card_token_cache: Optional[str] = None
 
 # 代理源常量
 PROXY_SOURCE_DEFAULT = "default"  # 默认代理源
@@ -526,6 +532,42 @@ def _mask_proxy_for_log(proxy_address: Optional[str]) -> str:
     return raw
 
 
+def _mask_card_code(code: str) -> str:
+    """避免日志泄露完整卡密，只保留首尾数位。"""
+    if not code:
+        return "***"
+    code = str(code).strip()
+    if len(code) <= 4:
+        return "***"
+    if len(code) <= 8:
+        return f"{code[:2]}***{code[-2:]}"
+    return f"{code[:3]}***{code[-3:]}"
+
+
+def _b64url_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode((data + padding).encode("utf-8"))
+
+
+def _verify_jwt_hs256(token: str, secret: str) -> Dict[str, Any]:
+    if not token or token.count(".") != 2:
+        raise ValueError("JWT 格式错误")
+    if not secret:
+        raise ValueError("缺少 JWT 验签密钥")
+    header_b64, payload_b64, signature_b64 = token.split(".")
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    expected_sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    actual_sig = _b64url_decode(signature_b64)
+    if not hmac.compare_digest(expected_sig, actual_sig):
+        raise ValueError("JWT 签名校验失败")
+    payload = json.loads(_b64url_decode(payload_b64))
+    now = int(time.time())
+    exp = int(payload.get("exp") or 0)
+    if exp and exp < now:
+        raise ValueError("JWT 已过期")
+    return payload
+
+
 def _proxy_is_responsive(proxy_address: str, skip_for_default: bool = True) -> bool:
     """检测代理是否可用
     
@@ -794,27 +836,72 @@ def reset_ip_counter(gui: Any = None):
     refresh_ip_counter_display(gui)
 
 
-def _validate_card(card_code: str) -> bool:
+def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
+    """调用远端接口验证卡密并返回额度（分钟/份）。"""
     if not card_code:
         logging.warning("卡密为空")
-        return False
+        return False, None
     if requests is None:
         logging.warning("requests 模块未安装，无法验证卡密")
-        return False
+        return False, None
+    if not CARD_VALIDATION_ENDPOINT:
+        logging.error("未配置 CARD_VALIDATION_ENDPOINT，无法验证卡密")
+        return False, None
+    if not CARD_TOKEN_SECRET:
+        logging.error("未配置 CARD_TOKEN_SECRET，无法验签")
+        return False, None
+
     code = card_code.strip()
+    masked = _mask_card_code(code)
+    payload = {"code": code}
+    headers = {"Content-Type": "application/json", **DEFAULT_HTTP_HEADERS}
     try:
-        response = requests.get(CARD_VALIDATION_ENDPOINT, timeout=10, headers=DEFAULT_HTTP_HEADERS, proxies={})
-        response.raise_for_status()
-        valid_cards = {line.strip() for line in response.text.strip().split("\n") if line.strip()}
-        if code in valid_cards:
-            display = f"{code[:4]}***{code[-4:]}" if len(code) > 8 else "***"
-            logging.info(f"卡密 {display} 验证通过")
-            return True
-        logging.warning("卡密验证失败：输入的卡密不在有效列表中")
-        return False
+        response = requests.post(
+            CARD_VALIDATION_ENDPOINT,
+            json=payload,
+            headers=headers,
+            timeout=_CARD_VERIFY_TIMEOUT,
+            proxies={},
+        )
     except Exception as exc:
-        logging.error(f"卡密验证失败: {exc}")
-        return False
+        logging.error(f"卡密验证请求失败: {exc}")
+        return False, None
+
+    if response.status_code == 400:
+        logging.warning("卡密验证失败：卡密无效或已被使用")
+        return False, None
+    if not response.ok:
+        logging.error(f"卡密验证接口异常: HTTP {response.status_code}")
+        return False, None
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        logging.error(f"解析卡密验证响应失败: {exc}")
+        return False, None
+
+    token = str(data.get("token") or "").strip()
+    quota_raw = data.get("quota")
+    if not token:
+        logging.error("卡密验证响应缺少 token")
+        return False, None
+
+    try:
+        payload_data = _verify_jwt_hs256(token, CARD_TOKEN_SECRET)
+    except Exception as exc:
+        logging.error(f"卡密验证失败：JWT 无效（{exc}）")
+        return False, None
+
+    quota = payload_data.get("quota", quota_raw)
+    try:
+        quota_val = int(quota) if quota is not None else _PREMIUM_RANDOM_IP_LIMIT
+    except Exception:
+        quota_val = _PREMIUM_RANDOM_IP_LIMIT
+
+    global _card_token_cache
+    _card_token_cache = token
+    logging.info(f"卡密 {masked} 验证通过，额度 {quota_val}")
+    return True, quota_val
 
 
 def show_card_validation_dialog(gui: Any = None) -> bool:
@@ -832,10 +919,12 @@ def show_card_validation_dialog(gui: Any = None) -> bool:
         # 无 GUI 交互时直接失败
         log_popup_warning("需要卡密", "请在界面中输入卡密解锁随机IP额度")
         return False
-    if _validate_card(str(card_code) if card_code else ""):
-        RegistryManager.write_quota_limit(_PREMIUM_RANDOM_IP_LIMIT)
+    ok, quota = _validate_card(str(card_code) if card_code else "")
+    if ok:
+        limit_val = max(1, int(quota or _PREMIUM_RANDOM_IP_LIMIT))
+        RegistryManager.write_quota_limit(limit_val)
         RegistryManager.set_quota_unlimited(False)
-        _invoke_popup(gui, "info", "验证成功", f"卡密验证通过，已解锁{_PREMIUM_RANDOM_IP_LIMIT}份随机IP提交额度。")
+        _invoke_popup(gui, "info", "验证成功", f"卡密验证通过，已解锁{limit_val} 额度。")
         return True
     _invoke_popup(gui, "error", "验证失败", "卡密验证失败，请检查后重试。")
     return False

@@ -28,7 +28,7 @@ from wjx.utils.app.version import ISSUE_FEEDBACK_URL
 
 class CardValidateWorker(QThread):
     """卡密验证 Worker"""
-    finished = Signal(bool)  # 验证结果
+    finished = Signal(bool, object)  # 验证结果、额度
 
     def __init__(self, card_code: str, validator: Callable[[str], object]):
         super().__init__()
@@ -36,18 +36,27 @@ class CardValidateWorker(QThread):
         self._validator = validator
 
     def run(self):
+        success = False
+        quota = None
         try:
             result = self._validator(self._card_code)
-            self.finished.emit(result)
+            if isinstance(result, tuple):
+                success = bool(result[0])
+                if len(result) > 1:
+                    quota = result[1]
+            else:
+                success = bool(result)
         except Exception:
-            self.finished.emit(False)
+            success = False
+            quota = None
+        self.finished.emit(success, quota)
 
 
 class CardUnlockDialog(StatusPollingMixin, QDialog):
     """解锁大额随机 IP 的说明/输入弹窗。使用 StatusPollingMixin 处理状态轮询。"""
 
     _statusLoaded = Signal(str, str)  # text, color
-    _validateFinished = Signal(bool)  # 验证结果信号
+    _validateFinished = Signal(bool, object)  # 验证结果信号（携带额度）
 
     def __init__(self, parent=None, status_fetcher=None, status_formatter=None, contact_handler=None, card_validator=None):
         super().__init__(parent)
@@ -63,6 +72,7 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
         self._card_validator = card_validator
         self._validate_thread: Optional[CardValidateWorker] = None
         self._validation_result: Optional[bool] = None
+        self._validation_quota: Optional[int] = None
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -296,17 +306,24 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
         self._validate_thread.finished.connect(self._validateFinished.emit)
         self._validate_thread.start()
 
-    def _on_validate_finished(self, success: bool):
+    def _on_validate_finished(self, success: bool, quota):
         """验证完成后的回调"""
         # 隐藏转圈动画，恢复按钮
         self.validate_spinner.hide()
         self.ok_btn.setEnabled(True)
         self.cancel_btn.setEnabled(True)
-        
+
         self._validation_result = success
-        
+        try:
+            self._validation_quota = None if quota is None else int(quota)
+        except Exception:
+            self._validation_quota = None
+
         if success:
-            InfoBar.success("", "卡密验证通过，已解锁额度", parent=self, position=InfoBarPosition.TOP, duration=2000)
+            extra = ""
+            if self._validation_quota is not None:
+                extra = f"，额度 {self._validation_quota}"
+            InfoBar.success("", f"卡密验证通过{extra}", parent=self, position=InfoBarPosition.TOP, duration=2000)
             # 延迟关闭窗口，让用户看到成功提示
             QTimer.singleShot(1500, self._close_on_success)
         else:
@@ -323,3 +340,7 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
     def get_validation_result(self) -> Optional[bool]:
         """获取验证结果"""
         return self._validation_result
+
+    def get_validation_quota(self) -> Optional[int]:
+        """获取验证额度"""
+        return self._validation_quota
