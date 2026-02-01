@@ -3,6 +3,7 @@ import copy
 from typing import List, Dict, Any, Optional
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -42,6 +43,7 @@ TYPE_CHOICES = [
     ("matrix", "矩阵题"),
     ("scale", "量表题"),
     ("slider", "滑块题"),
+    ("order", "排序题"),
 ]
 
 # 填写策略选项
@@ -62,6 +64,7 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
         "matrix": "矩阵题",
         "scale": "量表题",
         "slider": "滑块题",
+        "order": "排序题",
     }
     return type_map.get(entry.question_type, entry.question_type)
 
@@ -78,6 +81,60 @@ class QuestionWizardDialog(QDialog):
             return text
         return text[: limit - 1].rstrip() + "…"
 
+    @staticmethod
+    def _resolve_matrix_weights(entry: QuestionEntry, rows: int, columns: int) -> List[List[float]]:
+        """解析矩阵题的配比配置，返回按行的默认权重。"""
+        def _clean_row(raw_row: Any) -> Optional[List[float]]:
+            if not isinstance(raw_row, (list, tuple)):
+                return None
+            cleaned: List[float] = []
+            for value in raw_row:
+                try:
+                    cleaned.append(max(0.0, float(value)))
+                except Exception:
+                    cleaned.append(0.0)
+            if not cleaned:
+                return None
+            if len(cleaned) < columns:
+                cleaned = cleaned + [1.0] * (columns - len(cleaned))
+            elif len(cleaned) > columns:
+                cleaned = cleaned[:columns]
+            if all(v <= 0 for v in cleaned):
+                cleaned = [1.0] * columns
+            return cleaned
+
+        raw = entry.custom_weights if entry.custom_weights else entry.probabilities
+        if isinstance(raw, list) and any(isinstance(item, (list, tuple)) for item in raw):
+            per_row: List[List[float]] = []
+            last_row = None
+            for idx in range(rows):
+                row_raw = raw[idx] if idx < len(raw) else last_row
+                row_values = _clean_row(row_raw)
+                if row_values is None:
+                    row_values = [1.0] * columns
+                per_row.append(row_values)
+                if row_raw is not None:
+                    last_row = row_raw
+            return per_row
+        if isinstance(raw, list):
+            uniform = _clean_row(raw)
+            if uniform is None:
+                uniform = [1.0] * columns
+            return [list(uniform) for _ in range(rows)]
+        return [[1.0] * columns for _ in range(rows)]
+
+    @staticmethod
+    def _apply_label_color(label: BodyLabel, light: str, dark: str) -> None:
+        """为标签设置浅色/深色主题颜色。"""
+        try:
+            label.setTextColor(QColor(light), QColor(dark))
+        except Exception:
+            style = label.styleSheet() or ""
+            style = style.strip()
+            if style and not style.endswith(";"):
+                style = f"{style};"
+            label.setStyleSheet(f"{style}color: {light};")
+
     def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], parent=None):
         super().__init__(parent)
         self.setWindowTitle("配置向导")
@@ -85,6 +142,7 @@ class QuestionWizardDialog(QDialog):
         self.entries = entries
         self.info = info or []
         self.slider_map: Dict[int, List[NoWheelSlider]] = {}
+        self.matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]] = {}
         self.text_edit_map: Dict[int, List[LineEdit]] = {}
         self.ai_check_map: Dict[int, CheckBox] = {}
         self.text_container_map: Dict[int, QWidget] = {}
@@ -98,7 +156,8 @@ class QuestionWizardDialog(QDialog):
 
         # 顶部说明
         intro = BodyLabel("配置各题目的选项权重或填空答案", self)
-        intro.setStyleSheet("color: #666; font-size: 13px;")
+        intro.setStyleSheet("font-size: 13px;")
+        self._apply_label_color(intro, "#666666", "#bfbfbf")
         layout.addWidget(intro)
 
         # 滚动区域
@@ -117,12 +176,16 @@ class QuestionWizardDialog(QDialog):
             qnum = ""
             title_text = ""
             option_texts: List[str] = []
+            row_texts: List[str] = []
             if idx < len(self.info):
                 qnum = str(self.info[idx].get("num") or "")
                 title_text = str(self.info[idx].get("title") or "")
                 opt_raw = self.info[idx].get("option_texts")
                 if isinstance(opt_raw, list):
                     option_texts = [str(x) for x in opt_raw]
+                row_raw = self.info[idx].get("row_texts")
+                if isinstance(row_raw, list):
+                    row_texts = [str(x) for x in row_raw]
 
             # 题目卡片
             card = CardWidget(container)
@@ -146,14 +209,16 @@ class QuestionWizardDialog(QDialog):
             if title_text:
                 desc = BodyLabel(self._shorten(title_text, 120), card)
                 desc.setWordWrap(True)
-                desc.setStyleSheet("color: #555; font-size: 12px; margin-bottom: 4px;")
+                desc.setStyleSheet("font-size: 12px; margin-bottom: 4px;")
+                self._apply_label_color(desc, "#555555", "#c8c8c8")
                 card_layout.addWidget(desc)
 
             # 填空题：显示答案编辑区
             if entry.question_type in ("text", "multi_text"):
                 self._has_content = True
                 hint = BodyLabel("答案列表（随机选择一个填入）：", card)
-                hint.setStyleSheet("color: #666; font-size: 12px;")
+                hint.setStyleSheet("font-size: 12px;")
+                self._apply_label_color(hint, "#666666", "#bfbfbf")
                 card_layout.addWidget(hint)
 
                 # 答案行容器
@@ -174,7 +239,8 @@ class QuestionWizardDialog(QDialog):
                         row_layout.setSpacing(8)
                         num_lbl = BodyLabel(f"{len(edit_list) + 1}.", parent_card)
                         num_lbl.setFixedWidth(24)
-                        num_lbl.setStyleSheet("color: #888;")
+                        num_lbl.setStyleSheet("font-size: 12px;")
+                        self._apply_label_color(num_lbl, "#888888", "#a6a6a6")
                         row_layout.addWidget(num_lbl)
                         edit = LineEdit(parent_card)
                         edit.setText(initial_text)
@@ -220,9 +286,123 @@ class QuestionWizardDialog(QDialog):
                 card_layout.addLayout(btn_row)
 
                 self.text_edit_map[idx] = edits
+            elif entry.question_type == "matrix":
+                # 矩阵量表题：支持统一配比或按行配比
+                self._has_content = True
+                info_rows = self.info[idx].get("rows") if idx < len(self.info) else 0
+                try:
+                    info_rows = int(info_rows or 0)
+                except Exception:
+                    info_rows = 0
+                rows = max(1, int(entry.rows or 1), info_rows)
+                columns = max(1, int(entry.option_count or len(option_texts) or 1))
+                if len(row_texts) < rows:
+                    row_texts += [""] * (rows - len(row_texts))
+
+                hint = BodyLabel("矩阵量表：每一行都需要单独设置配比（数值越大概率越高）", card)
+                hint.setStyleSheet("font-size: 12px;")
+                self._apply_label_color(hint, "#666666", "#bfbfbf")
+                card_layout.addWidget(hint)
+
+                per_row_scroll = ScrollArea(card)
+                per_row_scroll.setWidgetResizable(True)
+                per_row_scroll.setMinimumHeight(180)
+                per_row_scroll.setMaximumHeight(320)
+                per_row_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+                per_row_view = QWidget(card)
+                per_row_view.setStyleSheet("background: transparent;")
+                per_row_scroll.setWidget(per_row_view)
+                per_row_layout = QVBoxLayout(per_row_view)
+                per_row_layout.setContentsMargins(0, 0, 0, 0)
+                per_row_layout.setSpacing(10)
+                card_layout.addWidget(per_row_scroll)
+
+                def build_slider_rows(parent_widget: QWidget, target_layout: QVBoxLayout, values: List[float]) -> List[NoWheelSlider]:
+                    sliders: List[NoWheelSlider] = []
+                    for col_idx in range(columns):
+                        opt_widget = QWidget(parent_widget)
+                        opt_layout = QHBoxLayout(opt_widget)
+                        opt_layout.setContentsMargins(0, 2, 0, 2)
+                        opt_layout.setSpacing(12)
+
+                        opt_text = option_texts[col_idx] if col_idx < len(option_texts) else f"列 {col_idx + 1}"
+                        text_label = BodyLabel(self._shorten(opt_text, 50), parent_widget)
+                        text_label.setFixedWidth(160)
+                        text_label.setStyleSheet("font-size: 13px;")
+                        opt_layout.addWidget(text_label)
+
+                        slider = NoWheelSlider(Qt.Orientation.Horizontal, parent_widget)
+                        slider.setRange(0, 100)
+                        try:
+                            slider.setValue(int(values[col_idx]))
+                        except Exception:
+                            slider.setValue(1)
+                        slider.setMinimumWidth(200)
+                        opt_layout.addWidget(slider, 1)
+
+                        value_label = BodyLabel(str(slider.value()), parent_widget)
+                        value_label.setFixedWidth(36)
+                        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                        value_label.setStyleSheet("color: #0078d4; font-weight: 500; font-size: 13px;")
+                        slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
+                        opt_layout.addWidget(value_label)
+
+                        target_layout.addWidget(opt_widget)
+                        sliders.append(slider)
+                    return sliders
+
+                matrix_weights = self._resolve_matrix_weights(entry, rows, columns)
+
+                per_row_sliders: List[List[NoWheelSlider]] = []
+                per_row_values = matrix_weights if matrix_weights else [[1.0] * columns for _ in range(rows)]
+                for row_idx in range(rows):
+                    row_card = CardWidget(per_row_view)
+                    row_card_layout = QVBoxLayout(row_card)
+                    row_card_layout.setContentsMargins(12, 8, 12, 8)
+                    row_card_layout.setSpacing(6)
+                    row_label_text = row_texts[row_idx] if row_idx < len(row_texts) else ""
+                    if row_label_text:
+                        row_label = BodyLabel(self._shorten(f"第{row_idx + 1}行：{row_label_text}", 60), row_card)
+                    else:
+                        row_label = BodyLabel(f"第{row_idx + 1}行", row_card)
+                    row_label.setStyleSheet("font-weight: 500;")
+                    self._apply_label_color(row_label, "#444444", "#e0e0e0")
+                    row_card_layout.addWidget(row_label)
+
+                    row_sliders = build_slider_rows(row_card, row_card_layout, per_row_values[row_idx])
+                    per_row_sliders.append(row_sliders)
+                    per_row_layout.addWidget(row_card)
+
+                self.matrix_row_slider_map[idx] = per_row_sliders
+            elif entry.question_type == "order":
+                # 排序题：无需配置权重
+                self._has_content = True
+                hint = BodyLabel("排序题无需设置配比，执行时会随机排序；如题干要求仅排序前 N 项，将自动识别。", card)
+                hint.setWordWrap(True)
+                hint.setStyleSheet("font-size: 12px;")
+                self._apply_label_color(hint, "#666666", "#bfbfbf")
+                card_layout.addWidget(hint)
+
+                if option_texts:
+                    list_container = QWidget(card)
+                    list_layout = QVBoxLayout(list_container)
+                    list_layout.setContentsMargins(0, 6, 0, 0)
+                    list_layout.setSpacing(4)
+                    for opt_idx, opt_text in enumerate(option_texts, 1):
+                        item = BodyLabel(f"{opt_idx}. {self._shorten(opt_text, 60)}", card)
+                        item.setStyleSheet("font-size: 12px;")
+                        self._apply_label_color(item, "#666666", "#c8c8c8")
+                        list_layout.addWidget(item)
+                    card_layout.addWidget(list_container)
             else:
                 # 选择题：显示滑块
                 self._has_content = True
+                if entry.question_type == "slider":
+                    slider_hint = BodyLabel("滑块题：此处数值代表填写时的目标值（不是概率）", card)
+                    slider_hint.setWordWrap(True)
+                    slider_hint.setStyleSheet("font-size: 12px;")
+                    self._apply_label_color(slider_hint, "#666666", "#bfbfbf")
+                    card_layout.addWidget(slider_hint)
                 options = max(1, int(entry.option_count or 1))
                 weights = list(entry.custom_weights or [])
                 if len(weights) < options:
@@ -239,7 +419,8 @@ class QuestionWizardDialog(QDialog):
 
                     num_label = BodyLabel(f"{opt_idx + 1}.", card)
                     num_label.setFixedWidth(24)
-                    num_label.setStyleSheet("color: #888; font-size: 12px;")
+                    num_label.setStyleSheet("font-size: 12px;")
+                    self._apply_label_color(num_label, "#888888", "#a6a6a6")
                     opt_layout.addWidget(num_label)
 
                     opt_text = option_texts[opt_idx] if opt_idx < len(option_texts) else "选项"
@@ -321,14 +502,23 @@ class QuestionWizardDialog(QDialog):
         self._restore_entries()
         super().reject()
 
-    def get_results(self) -> Dict[int, List[int]]:
+    def get_results(self) -> Dict[int, Any]:
         """获取滑块权重结果"""
-        result: Dict[int, List[int]] = {}
+        result: Dict[int, Any] = {}
         for idx, sliders in self.slider_map.items():
             weights = [max(0, s.value()) for s in sliders]
             if all(w <= 0 for w in weights):
                 weights = [1] * len(weights)
             result[idx] = weights
+
+        for idx, row_sliders in self.matrix_row_slider_map.items():
+            row_weights: List[List[int]] = []
+            for row in row_sliders:
+                weights = [max(0, s.value()) for s in row]
+                if all(w <= 0 for w in weights):
+                    weights = [1] * len(weights)
+                row_weights.append(weights)
+            result[idx] = row_weights
         return result
 
     def get_text_results(self) -> Dict[int, List[str]]:
@@ -447,12 +637,26 @@ class QuestionPage(ScrollArea):
 
         # 选项数量
         option_row = QHBoxLayout()
-        option_row.addWidget(BodyLabel("选项数量：", dialog))
+        option_label = BodyLabel("选项数量：", dialog)
+        option_row.addWidget(option_label)
         option_spin = NoWheelSpinBox(dialog)
         option_spin.setRange(1, 20)
         option_spin.setValue(4)
         option_row.addWidget(option_spin, 1)
         layout.addLayout(option_row)
+
+        # 矩阵题行数
+        row_count_widget = QWidget(dialog)
+        row_count_layout = QHBoxLayout(row_count_widget)
+        row_count_layout.setContentsMargins(0, 0, 0, 0)
+        row_count_layout.setSpacing(6)
+        row_count_label = BodyLabel("行数：", dialog)
+        row_count_spin = NoWheelSpinBox(dialog)
+        row_count_spin.setRange(1, 50)
+        row_count_spin.setValue(2)
+        row_count_layout.addWidget(row_count_label)
+        row_count_layout.addWidget(row_count_spin, 1)
+        layout.addWidget(row_count_widget)
 
         # 策略选择
         strategy_row = QHBoxLayout()
@@ -464,6 +668,14 @@ class QuestionPage(ScrollArea):
         strategy_combo.setCurrentIndex(0)  # 默认“完全随机”
         strategy_row.addWidget(strategy_combo, 1)
         layout.addLayout(strategy_row)
+
+        matrix_hint = BodyLabel("矩阵题配比请在“配置向导”中按行设置", dialog)
+        matrix_hint.setStyleSheet("color: #888; font-size: 12px;")
+        layout.addWidget(matrix_hint)
+        order_hint = BodyLabel("排序题不支持配比设置（执行时自动随机排序）", dialog)
+        order_hint.setStyleSheet("color: #888; font-size: 12px;")
+        order_hint.setVisible(False)
+        layout.addWidget(order_hint)
 
         # 填空题答案列表区域（简洁布局，无卡片）
         text_area_widget = QWidget(dialog)
@@ -583,12 +795,28 @@ class QuestionPage(ScrollArea):
             is_text = q_type in ("text", "multi_text")
             is_custom = strategy == "custom"
             is_single_text = q_type == "text"
+            is_matrix = q_type == "matrix"
+            is_order = q_type == "order"
             # 填空题时隐藏策略选择，显示答案列表
             strategy_label.setVisible(not is_text)
             strategy_combo.setVisible(not is_text)
             text_area_widget.setVisible(is_text)
             slider_card.setVisible(not is_text and is_custom)
             ai_toggle.setVisible(is_single_text)
+            row_count_widget.setVisible(is_matrix)
+            option_label.setText("列数：" if is_matrix else "选项数量：")
+            matrix_hint.setVisible(is_matrix)
+            order_hint.setVisible(False)
+            if is_matrix:
+                slider_card.setVisible(False)
+                strategy_label.setVisible(False)
+                strategy_combo.setVisible(False)
+            if is_order:
+                slider_card.setVisible(False)
+                strategy_label.setVisible(False)
+                strategy_combo.setVisible(False)
+                matrix_hint.setVisible(False)
+            order_hint.setVisible(True)
             if not is_single_text:
                 ai_toggle.setChecked(False)
             if is_text:
@@ -636,7 +864,8 @@ class QuestionPage(ScrollArea):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             q_type = type_combo.currentData() or "single"
             option_count = max(1, option_spin.value())
-            strategy = strategy_combo.currentData() or "random"
+            strategy = "random" if q_type in ("matrix", "order") else (strategy_combo.currentData() or "random")
+            rows = max(1, row_count_spin.value()) if q_type == "matrix" else 1
 
             if q_type in ("text", "multi_text"):
                 # 从答案列表中收集文本
@@ -646,12 +875,23 @@ class QuestionPage(ScrollArea):
                     question_type=q_type,
                     probabilities=[1.0],
                     texts=texts,
-                    rows=1,
+                    rows=rows,
                     option_count=max(option_count, len(texts)),
                     distribution_mode="random",
                     custom_weights=None,
                     question_num=str(len(self.entries) + 1),
                     ai_enabled=bool(ai_toggle.isChecked()) if q_type == "text" else False,
+                )
+            elif q_type == "order":
+                new_entry = QuestionEntry(
+                    question_type=q_type,
+                    probabilities=-1,
+                    texts=None,
+                    rows=rows,
+                    option_count=option_count,
+                    distribution_mode="random",
+                    custom_weights=None,
+                    question_num=str(len(self.entries) + 1),
                 )
             else:
                 custom_weights = None
@@ -662,7 +902,7 @@ class QuestionPage(ScrollArea):
                     question_type=q_type,
                     probabilities=-1 if strategy == "random" else (custom_weights or [1.0] * option_count),
                     texts=None,
-                    rows=1,
+                    rows=rows,
                     option_count=option_count,
                     distribution_mode=strategy,
                     custom_weights=custom_weights,
@@ -749,6 +989,9 @@ class QuestionPage(ScrollArea):
 
         # 配置详情 - 显示有意义的摘要
         detail = ""
+        def _has_nested_weights(raw: Any) -> bool:
+            return isinstance(raw, list) and any(isinstance(item, (list, tuple)) for item in raw)
+
         if entry.question_type in ("text", "multi_text"):
             texts = entry.texts or []
             if texts:
@@ -759,6 +1002,15 @@ class QuestionPage(ScrollArea):
                 detail = "答案: 无"
             if entry.question_type == "text" and getattr(entry, "ai_enabled", False):
                 detail += " | AI"
+        elif entry.question_type == "matrix":
+            rows = max(1, int(entry.rows or 1))
+            cols = max(1, int(entry.option_count or 1))
+            if isinstance(entry.custom_weights, list) or isinstance(entry.probabilities, list):
+                detail = f"{rows} 行 × {cols} 列 | 按行配比"
+            else:
+                detail = f"{rows} 行 × {cols} 列 | 完全随机"
+        elif entry.question_type == "order":
+            detail = "排序题 | 自动随机排序"
         elif entry.custom_weights:
             weights = entry.custom_weights
             detail = f"自定义配比: {','.join(str(int(w)) for w in weights[:5])}"

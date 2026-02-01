@@ -276,15 +276,102 @@ def _collect_select_option_texts(question_div, soup, question_number: int) -> Li
     return options
 
 
-def _collect_matrix_option_texts(soup, question_number: int) -> Tuple[int, List[str]]:
+def _collect_matrix_option_texts(soup, question_div, question_number: int) -> Tuple[int, List[str], List[str]]:
     option_texts: List[str] = []
     matrix_rows = 0
-    table = soup.find(id=f"divRefTab{question_number}") if soup else None
+    row_texts: List[str] = []
+    row_text_map: Dict[int, str] = {}
+    table = None
+    if question_div is not None:
+        try:
+            table = question_div.find(id=f"divRefTab{question_number}")
+        except Exception:
+            table = None
+    if table is None and soup:
+        table = soup.find(id=f"divRefTab{question_number}")
     if table:
         for row in table.find_all("tr"):
             row_index = str(row.get("rowindex") or "").strip()
             if row_index and str(row_index).isdigit():
                 matrix_rows += 1
+                try:
+                    cells = row.find_all(["td", "th"])
+                except Exception:
+                    cells = []
+                if cells:
+                    label_text = _normalize_html_text(cells[0].get_text(" ", strip=True))
+                    if label_text:
+                        try:
+                            row_text_map[int(row_index)] = label_text
+                        except Exception:
+                            pass
+    if matrix_rows > 0:
+        row_texts = [row_text_map.get(idx, "") for idx in range(1, matrix_rows + 1)]
+    elif table:
+        # 兼容没有 rowindex 的矩阵题：用表格行作为兜底
+        data_rows = []
+        header_id = f"drv{question_number}_1"
+        for row in table.find_all("tr"):
+            row_id = str(row.get("id") or "")
+            if row_id == header_id:
+                continue
+            try:
+                cells = row.find_all(["td", "th"])
+            except Exception:
+                cells = []
+            if len(cells) <= 1:
+                continue
+            first_text = _normalize_html_text(cells[0].get_text(" ", strip=True))
+            other_texts = [_normalize_html_text(cell.get_text(" ", strip=True)) for cell in cells[1:]]
+            # 如果首列为空、后面有标题文字，多半是表头行
+            if not first_text and any(other_texts):
+                continue
+            data_rows.append((first_text, cells))
+        matrix_rows = len(data_rows)
+        row_texts = [label for label, _ in data_rows]
+        if not option_texts and data_rows:
+            max_cols = 0
+            for _, cells in data_rows:
+                try:
+                    max_cols = max(max_cols, max(0, len(cells) - 1))
+                except Exception:
+                    continue
+            if max_cols > 0:
+                option_texts = [str(i + 1) for i in range(max_cols)]
+    if matrix_rows == 0 and question_div is not None:
+        # 再兜底：从输入控件名推断行列数
+        try:
+            inputs = question_div.find_all("input")
+        except Exception:
+            inputs = []
+        row_indices: List[int] = []
+        col_indices: List[int] = []
+        name_pattern = re.compile(rf"q{question_number}[_-](\d+)(?:[_-](\d+))?")
+        for item in inputs:
+            raw_name = str(item.get("name") or item.get("id") or "")
+            if not raw_name:
+                continue
+            match = name_pattern.search(raw_name)
+            if not match:
+                continue
+            try:
+                row_idx = int(match.group(1))
+                row_indices.append(row_idx)
+            except Exception:
+                pass
+            if match.group(2):
+                try:
+                    col_idx = int(match.group(2))
+                    col_indices.append(col_idx)
+                except Exception:
+                    pass
+        if row_indices:
+            matrix_rows = max(row_indices)
+            row_texts = [""] * matrix_rows
+        if not option_texts and col_indices:
+            max_cols = max(col_indices)
+            if max_cols > 0:
+                option_texts = [str(i + 1) for i in range(max_cols)]
     header_row = soup.find(id=f"drv{question_number}_1") if soup else None
     if header_row:
         cells = header_row.find_all("td")
@@ -296,7 +383,7 @@ def _collect_matrix_option_texts(soup, question_number: int) -> Tuple[int, List[
         if len(header_cells) > 1:
             option_texts = [_normalize_html_text(th.get_text(" ", strip=True)) for th in header_cells[1:]]
             option_texts = [text for text in option_texts if text]
-    return matrix_rows, option_texts
+    return matrix_rows, option_texts, row_texts
 
 
 def _extract_question_title(question_div, fallback_number: int) -> str:
@@ -317,6 +404,7 @@ def _extract_question_metadata_from_html(soup, question_div, question_number: in
     option_texts: List[str] = []
     option_count = 0
     matrix_rows = 0
+    row_texts: List[str] = []
     fillable_indices: List[int] = []
     if type_code in {"3", "4", "5", "11"}:
         option_texts, fillable_indices = _collect_choice_option_texts(question_div)
@@ -327,11 +415,11 @@ def _extract_question_metadata_from_html(soup, question_div, question_number: in
         if option_count > 0 and _question_div_has_shared_text_input(question_div):
             fillable_indices = [option_count - 1]
     elif type_code == "6":
-        matrix_rows, option_texts = _collect_matrix_option_texts(soup, question_number)
+        matrix_rows, option_texts, row_texts = _collect_matrix_option_texts(soup, question_div, question_number)
         option_count = len(option_texts)
     elif type_code == "8":
         option_count = 1
-    return option_texts, option_count, matrix_rows, fillable_indices
+    return option_texts, option_count, matrix_rows, row_texts, fillable_indices
 
 
 def _extract_jump_rules_from_html(question_div, question_number: int, option_texts: List[str]) -> Tuple[bool, List[Dict[str, Any]]]:
@@ -451,6 +539,27 @@ def _count_text_inputs_in_soup(question_div) -> int:
     return count
 
 
+def _soup_question_looks_like_reorder(question_div) -> bool:
+    """兜底判断：通过 DOM 特征识别排序题（静态 HTML）。"""
+    if question_div is None:
+        return False
+    try:
+        if question_div.select_one(".sortnum, .sortnum-sel, .order-number, .order-index"):
+            return True
+    except Exception:
+        pass
+    try:
+        has_list_items = bool(question_div.select("ul li, ol li"))
+        if not has_list_items:
+            return False
+        has_sort_signature = bool(
+            question_div.select(".ui-sortable, .ui-sortable-handle, [class*='sort']")
+        )
+        return has_sort_signature
+    except Exception:
+        return False
+
+
 def _normalize_question_type_code(value: Any) -> str:
     if value is None:
         return ""
@@ -503,9 +612,11 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
             if question_number is None:
                 continue
             type_code = str(question_div.get("type") or "").strip() or "0"
+            if type_code != "11" and _soup_question_looks_like_reorder(question_div):
+                type_code = "11"
             is_location = type_code in {"1", "2"} and _soup_question_is_location(question_div)
             title_text = _extract_question_title(question_div, question_number)
-            option_texts, option_count, matrix_rows, fillable_indices = _extract_question_metadata_from_html(
+            option_texts, option_count, matrix_rows, row_texts, fillable_indices = _extract_question_metadata_from_html(
                 soup, question_div, question_number, type_code
             )
             has_jump, jump_rules = _extract_jump_rules_from_html(question_div, question_number, option_texts)
@@ -521,6 +632,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "type_code": type_code,
                 "options": option_count,
                 "rows": matrix_rows,
+                "row_texts": row_texts,
                 "page": page_index,
                 "option_texts": option_texts,
                 "fillable_options": fillable_indices,

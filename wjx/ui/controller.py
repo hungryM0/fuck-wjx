@@ -280,6 +280,8 @@ class RunController(QObject):
                 q_type = "dropdown"
             elif type_code == "8":
                 q_type = "slider"
+            elif type_code == "11":
+                q_type = "order"
             else:
                 q_type = "single"
 
@@ -295,6 +297,11 @@ class RunController(QObject):
                 custom_weights = None
                 texts = None
             elif q_type == "matrix":
+                probabilities = -1
+                distribution = "random"
+                custom_weights = None
+                texts = None
+            elif q_type == "order":
                 probabilities = -1
                 distribution = "random"
                 custom_weights = None

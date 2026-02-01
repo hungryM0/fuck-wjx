@@ -70,6 +70,9 @@ class _PasteOnlyMenu(QObject):
 
 def _question_summary(entry: QuestionEntry) -> str:
     """生成题目配置摘要"""
+    def _has_nested_weights(raw: Any) -> bool:
+        return isinstance(raw, list) and any(isinstance(item, (list, tuple)) for item in raw)
+
     if entry.question_type in ("text", "multi_text"):
         texts = entry.texts or []
         if texts:
@@ -83,6 +86,14 @@ def _question_summary(entry: QuestionEntry) -> str:
         if entry.question_type == "text" and getattr(entry, "ai_enabled", False):
             summary += " | AI"
         return summary
+    if entry.question_type == "matrix":
+        rows = max(1, int(entry.rows or 1))
+        cols = max(1, int(entry.option_count or 1))
+        if isinstance(entry.custom_weights, list) or isinstance(entry.probabilities, list):
+            return f"{rows} 行 × {cols} 列 - 按行配比"
+        return f"{rows} 行 × {cols} 列 - 完全随机"
+    if entry.question_type == "order":
+        return "排序题 - 自动随机排序"
     elif entry.custom_weights:
         weights = entry.custom_weights
         summary = f"自定义配比: {','.join(str(int(w)) for w in weights[:4])}"
@@ -663,13 +674,31 @@ class DashboardPage(QWidget):
             self._refresh_entry_table()
 
     def _apply_wizard_results(self, entries: List[QuestionEntry], dlg: QuestionWizardDialog) -> None:
+        def _normalize_weights(raw: Any) -> Any:
+            if isinstance(raw, list) and any(isinstance(item, (list, tuple)) for item in raw):
+                cleaned: List[List[float]] = []
+                for row in raw:
+                    if not isinstance(row, (list, tuple)):
+                        continue
+                    cleaned.append([float(max(0, v)) for v in row])
+                return cleaned
+            if isinstance(raw, list):
+                return [float(max(0, v)) for v in raw]
+            return raw
+
         updates = dlg.get_results()
         for idx, weights in updates.items():
             if 0 <= idx < len(entries):
                 entry = entries[idx]
-                entry.custom_weights = [float(w) for w in weights]
-                entry.probabilities = [float(w) for w in weights]
-                entry.distribution_mode = "custom"
+                normalized = _normalize_weights(weights)
+                if entry.question_type == "matrix":
+                    entry.custom_weights = normalized
+                    entry.probabilities = normalized
+                    entry.distribution_mode = "custom"
+                elif isinstance(normalized, list):
+                    entry.custom_weights = normalized
+                    entry.probabilities = normalized
+                    entry.distribution_mode = "custom"
         text_updates = dlg.get_text_results()
         for idx, texts in text_updates.items():
             if 0 <= idx < len(entries):

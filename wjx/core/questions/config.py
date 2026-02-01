@@ -119,6 +119,9 @@ class QuestionEntry:
             columns = max(1, self.option_count)
             return f"{rows} 行 × {columns} 列 - {mode_text}"
 
+        if self.question_type == "order":
+            return f"{self.option_count} 个选项 - 自动随机排序"
+
         if self.question_type == "multiple" and self.probabilities == -1:
             return f"{self.option_count} 个选项 - 随机多选"
 
