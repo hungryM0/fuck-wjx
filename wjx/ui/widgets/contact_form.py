@@ -25,6 +25,9 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     MessageBox,
+    Action,
+    FluentIcon,
+    RoundMenu,
 )
 
 from wjx.ui.widgets.status_polling_mixin import StatusPollingMixin
@@ -73,6 +76,8 @@ class ContactForm(StatusPollingMixin, QWidget):
         self.email_edit = LineEdit(self)
         self.email_edit.setPlaceholderText("name@example.com")
         form_layout.addWidget(self.email_edit)
+        # 邮箱输入框：右键只保留 Fluent 风格“粘贴”
+        self._install_paste_menu(self.email_edit)
 
         form_layout.addWidget(BodyLabel("消息类型（可选）：", self))
         self.type_combo = ComboBox(self)
@@ -105,6 +110,8 @@ class ContactForm(StatusPollingMixin, QWidget):
         self.message_edit.setMinimumHeight(180)
         form_layout.addWidget(self.message_edit, 1)
         self.message_edit.installEventFilter(self)
+        # 消息输入框：右键只保留 Fluent 风格“粘贴”，并兼容图片粘贴
+        self._install_paste_menu(self.message_edit, self._on_context_paste)
 
         # 图片附件区域
         attachments_box = QVBoxLayout()
@@ -192,6 +199,33 @@ class ContactForm(StatusPollingMixin, QWidget):
                 if self._handle_clipboard_image():
                     return True
         return super().eventFilter(obj, event)
+
+    def _on_context_paste(self, target: QWidget) -> bool:
+        """右键菜单触发粘贴时的特殊处理，返回 True 表示已处理。"""
+        if target is self.message_edit:
+            # 优先尝试粘贴图片到附件
+            if self._handle_clipboard_image():
+                return True
+        return False
+
+    def _install_paste_menu(self, target: QWidget, on_paste: Optional[Callable[[QWidget], bool]] = None):
+        """为目标输入控件挂载仅含“粘贴”的圆角菜单。"""
+        target.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        def _show_menu(pos):
+            menu = RoundMenu(parent=target)
+            paste_action = Action(FluentIcon.PASTE, "粘贴", parent=menu)
+
+            def _do_paste():
+                if on_paste and on_paste(target):
+                    return
+                target.paste()
+
+            paste_action.triggered.connect(_do_paste)
+            menu.addAction(paste_action)
+            menu.exec(target.mapToGlobal(pos))
+
+        target.customContextMenuRequested.connect(_show_menu)
 
     def showEvent(self, event):
         super().showEvent(event)

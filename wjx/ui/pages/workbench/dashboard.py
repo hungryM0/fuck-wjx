@@ -2,7 +2,7 @@
 import os
 from typing import List, Dict, Any, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QObject, QEvent
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -31,6 +31,7 @@ from qfluentwidgets import (
     ComboBox,
     MessageBox,
 )
+from qfluentwidgets import RoundMenu
 
 from wjx.ui.widgets import ConfigDrawer
 from wjx.ui.widgets.no_wheel import NoWheelSlider, NoWheelSpinBox
@@ -51,6 +52,20 @@ from wjx.network.random_ip import (
     refresh_ip_counter_display,
     _validate_card,
 )
+
+
+class _PasteOnlyMenu(QObject):
+    """只保留 qfluentwidgets 风格的“粘贴”菜单"""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.ContextMenu and isinstance(obj, LineEdit):
+            menu = RoundMenu(parent=obj)
+            paste_action = Action(FluentIcon.PASTE, "粘贴", parent=menu)
+            paste_action.triggered.connect(obj.paste)
+            menu.addAction(paste_action)
+            menu.exec(event.globalPos())
+            return True
+        return super().eventFilter(obj, event)
 
 
 def _question_summary(entry: QuestionEntry) -> str:
@@ -139,6 +154,9 @@ class DashboardPage(QWidget):
         self.url_edit = LineEdit(self)
         self.url_edit.setPlaceholderText("在此处输入问卷链接")
         self.url_edit.setClearButtonEnabled(True)
+        # 仅问卷链接输入框需要 qfluentwidgets 风格的“粘贴”单项菜单
+        self._paste_only_menu = _PasteOnlyMenu(self)
+        self.url_edit.installEventFilter(self._paste_only_menu)
         input_row.addWidget(self.url_edit, 1)
         link_layout.addLayout(input_row)
         
