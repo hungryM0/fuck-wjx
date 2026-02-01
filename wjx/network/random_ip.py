@@ -25,7 +25,7 @@ from wjx.utils.app.config import (
     PROXY_MAX_PROXIES,
     PROXY_REMOTE_URL,
     STATUS_ENDPOINT,
-    CARD_TOKEN_SECRET,
+    get_card_token_secret,
 )
 from wjx.utils.logging.log_utils import (
     log_popup_confirm,
@@ -840,7 +840,8 @@ def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
     if not CARD_VALIDATION_ENDPOINT:
         logging.error("未配置 CARD_VALIDATION_ENDPOINT，无法验证卡密")
         return False, None
-    if not CARD_TOKEN_SECRET:
+    secret = get_card_token_secret()
+    if not secret:
         logging.error("未配置 CARD_TOKEN_SECRET，无法验签")
         return False, None
 
@@ -880,7 +881,7 @@ def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
         return False, None
 
     try:
-        payload_data = _verify_jwt_hs256(token, CARD_TOKEN_SECRET)
+        payload_data = _verify_jwt_hs256(token, secret)
     except Exception as exc:
         logging.error(f"卡密验证失败：JWT 无效（{exc}）")
         return False, None

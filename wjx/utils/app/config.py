@@ -15,6 +15,28 @@ from typing import Dict, Optional
 _ENV_FILE_NAME = ".env"
 
 
+def _read_windows_env_var(key: str) -> str:
+    if sys.platform != "win32":
+        return ""
+    try:
+        import winreg  # type: ignore
+    except Exception:
+        return ""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg_key:
+            value, _ = winreg.QueryValueEx(reg_key, key)
+    except FileNotFoundError:
+        return ""
+    except Exception:
+        return ""
+    if value is None:
+        return ""
+    try:
+        return str(value).strip()
+    except Exception:
+        return ""
+
+
 def _find_env_file() -> Optional[Path]:
     candidates = []
     if getattr(sys, "frozen", False):
@@ -73,7 +95,21 @@ _ENV_VARS = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
 
 
 def _resolve_env_value(key: str, default: str) -> str:
-    return os.environ.get(key) or _ENV_VARS.get(key) or default
+    env_value = os.environ.get(key)
+    if env_value:
+        return env_value
+    file_value = _ENV_VARS.get(key)
+    if file_value:
+        return file_value
+    registry_value = _read_windows_env_var(key)
+    if registry_value:
+        return registry_value
+    return default
+
+
+def get_card_token_secret() -> str:
+    """动态读取卡密验签密钥，兼容安装后环境变量未刷新场景。"""
+    return _resolve_env_value("CARD_TOKEN_SECRET", "")
 
 def _r(s: str) -> str:
     try:
