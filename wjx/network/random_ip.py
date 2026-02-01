@@ -44,8 +44,6 @@ _quota_limit_dialog_shown = False
 _proxy_api_url_override: Optional[str] = None
 _proxy_area_code_override: Optional[str] = None
 _CUSTOM_PROXY_CONFIG_FILENAME = "custom_ip.json"
-_card_token_cache: Optional[str] = None
-
 # 代理源常量
 PROXY_SOURCE_DEFAULT = "default"  # 默认代理源
 PROXY_SOURCE_PIKACHU = "pikachu"  # 皮卡丘代理站
@@ -766,11 +764,6 @@ def _schedule_on_gui_thread(gui: Any, callback: Callable[[], None]):
         logging.debug("执行回调失败", exc_info=True)
 
 
-def reset_quota_limit_dialog_flag():
-    global _quota_limit_dialog_shown
-    _quota_limit_dialog_shown = False
-
-
 def confirm_random_ip_usage(gui: Any) -> bool:
     notice = (
         "启用随机IP提交前请确认：\n\n"
@@ -898,8 +891,6 @@ def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
     except Exception:
         quota_val = _PREMIUM_RANDOM_IP_LIMIT
 
-    global _card_token_cache
-    _card_token_cache = token
     logging.info(f"卡密 {masked} 验证通过，额度 {quota_val}")
     return True, quota_val
 

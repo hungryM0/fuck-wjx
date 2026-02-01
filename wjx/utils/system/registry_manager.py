@@ -23,7 +23,6 @@ class RegistryManager:
     REGISTRY_PATH = r"Software\FuckWJX"
     REGISTRY_PATH = r"Software\FuckWJX"
     REGISTRY_KEY = "RandomIPSubmitCount"
-    REGISTRY_KEY_CARD = "CardValidateResult"
     REGISTRY_KEY_UNLIMITED = "UnlimitedQuota"
     REGISTRY_KEY_LIMIT = "RandomIPQuotaLimit"
     
@@ -80,36 +79,6 @@ class RegistryManager:
         if result:
             logging.info("随机IP提交计数已重置为 0")
         return result
-    
-    @staticmethod
-    def read_card_validate_result() -> bool:
-        if winreg is None:
-            return False
-        
-        try:
-            hkey = winreg.HKEY_CURRENT_USER
-            with winreg.OpenKey(hkey, RegistryManager.REGISTRY_PATH) as key:
-                value, _ = winreg.QueryValueEx(key, RegistryManager.REGISTRY_KEY_CARD)
-                result = bool(int(value))
-                return result
-        except FileNotFoundError:
-            return False
-        except Exception:
-            return False
-    
-    @staticmethod
-    def write_card_validate_result(validated: bool) -> bool:
-        if winreg is None:
-            return False
-        
-        try:
-            hkey = winreg.HKEY_CURRENT_USER
-            key = winreg.CreateKeyEx(hkey, RegistryManager.REGISTRY_PATH, 0, winreg.KEY_WRITE)
-            winreg.SetValueEx(key, RegistryManager.REGISTRY_KEY_CARD, 0, winreg.REG_DWORD, int(validated))
-            winreg.CloseKey(key)
-            return True
-        except Exception:
-            return False
     
     @staticmethod
     def is_quota_unlimited() -> bool:
