@@ -133,6 +133,102 @@ def _question_div_has_shared_text_input(question_div) -> bool:
     return False
 
 
+def _extract_option_text_from_attrs(target) -> str:
+    if target is None:
+        return ""
+
+    def _get_attr_text(node, keys) -> str:
+        for key in keys:
+            try:
+                raw = node.get(key)
+            except Exception:
+                raw = None
+            if raw is None:
+                continue
+            text_value = _normalize_html_text(str(raw))
+            if text_value:
+                return text_value
+        return ""
+
+    primary_keys = ("title", "data-title", "data-text", "data-label", "aria-label", "alt", "htitle")
+    text_value = _get_attr_text(target, primary_keys)
+    if text_value:
+        return text_value
+
+    try:
+        candidates = target.find_all(["a", "span", "label"], limit=4)
+    except Exception:
+        candidates = []
+    for child in candidates:
+        text_value = _get_attr_text(child, primary_keys)
+        if text_value:
+            return text_value
+
+    fallback_keys = ("val", "value", "data-value", "data-val")
+    text_value = _get_attr_text(target, fallback_keys)
+    if text_value:
+        return text_value
+    for child in candidates:
+        text_value = _get_attr_text(child, fallback_keys)
+        if text_value:
+            return text_value
+    return ""
+
+
+def _text_looks_meaningful(text: str) -> bool:
+    if not text:
+        return False
+    return bool(re.search(r"[A-Za-z0-9\u4e00-\u9fff]", text))
+
+
+def _extract_rating_option_texts(question_div) -> List[str]:
+    """优先从评分题的星级锚点提取文本（避免 iconfont 文本）"""
+    if question_div is None:
+        return []
+    selectors = (
+        ".scale-rating ul li a",
+        ".scale-rating a[val]",
+        "ul[tp='d'] li a",
+        "ul[class*='modlen'] li a",
+    )
+    anchors: List[Any] = []
+    for selector in selectors:
+        try:
+            anchors = question_div.select(selector)
+        except Exception:
+            anchors = []
+        if anchors:
+            break
+    if not anchors:
+        return []
+    texts: List[str] = []
+    seen = set()
+    for idx, anchor in enumerate(anchors):
+        text = _extract_option_text_from_attrs(anchor)
+        if not _text_looks_meaningful(text):
+            try:
+                text = _normalize_html_text(anchor.get_text(" ", strip=True))
+            except Exception:
+                text = ""
+        if not _text_looks_meaningful(text):
+            try:
+                text = _normalize_html_text(anchor.get("title") or "")
+            except Exception:
+                text = ""
+        if not _text_looks_meaningful(text):
+            try:
+                text = _normalize_html_text(anchor.get("val") or "")
+            except Exception:
+                text = ""
+        if not _text_looks_meaningful(text):
+            text = str(idx + 1)
+        if text in seen:
+            continue
+        seen.add(text)
+        texts.append(text)
+    return texts
+
+
 def _collect_choice_option_texts(question_div) -> Tuple[List[str], List[int]]:
     texts: List[str] = []
     fillable_indices: List[int] = []
@@ -146,47 +242,6 @@ def _collect_choice_option_texts(question_div) -> Tuple[List[str], List[int]]:
             option_elements = []
         if option_elements:
             break
-    def _extract_option_text_from_attrs(target) -> str:
-        if target is None:
-            return ""
-
-        def _get_attr_text(node, keys) -> str:
-            for key in keys:
-                try:
-                    raw = node.get(key)
-                except Exception:
-                    raw = None
-                if raw is None:
-                    continue
-                text_value = _normalize_html_text(str(raw))
-                if text_value:
-                    return text_value
-            return ""
-
-        primary_keys = ("title", "data-title", "data-text", "data-label", "aria-label", "alt", "htitle")
-        text_value = _get_attr_text(target, primary_keys)
-        if text_value:
-            return text_value
-
-        try:
-            candidates = target.find_all(["a", "span", "label"], limit=4)
-        except Exception:
-            candidates = []
-        for child in candidates:
-            text_value = _get_attr_text(child, primary_keys)
-            if text_value:
-                return text_value
-
-        fallback_keys = ("val", "value", "data-value", "data-val")
-        text_value = _get_attr_text(target, fallback_keys)
-        if text_value:
-            return text_value
-        for child in candidates:
-            text_value = _get_attr_text(child, fallback_keys)
-            if text_value:
-                return text_value
-        return ""
-
     if option_elements:
         for element in option_elements:
             label_element = None
@@ -646,6 +701,76 @@ def _soup_question_looks_like_reorder(question_div) -> bool:
         return False
 
 
+def _soup_question_looks_like_rating(question_div) -> bool:
+    """识别评分题（星级评价）"""
+    if question_div is None:
+        return False
+    has_scale_rating = False
+    try:
+        has_scale_rating = bool(question_div.find(class_="scale-rating"))
+    except Exception:
+        has_scale_rating = False
+    has_rate_icon = False
+    try:
+        has_rate_icon = bool(question_div.select_one("a.rate-off, a.rate-on, .rate-off, .rate-on"))
+    except Exception:
+        has_rate_icon = False
+    has_tag_wrap = False
+    try:
+        has_tag_wrap = bool(question_div.find(class_="evaluateTagWrap"))
+    except Exception:
+        has_tag_wrap = False
+    has_iconfont = False
+    if has_scale_rating:
+        try:
+            has_iconfont = bool(question_div.select_one(".scale-rating .iconfontNew"))
+        except Exception:
+            has_iconfont = False
+    try:
+        has_pj = str(question_div.get("pj") or "").strip() == "1"
+    except Exception:
+        has_pj = False
+
+    # 评分题需要更强特征：仅有量表结构时不判为评分题
+    if has_tag_wrap:
+        return True
+    if has_pj and (has_scale_rating or has_rate_icon or has_iconfont):
+        return True
+    return False
+
+
+def _extract_rating_option_count(question_div) -> int:
+    """尝试解析评分题的星级数量。"""
+    if question_div is None:
+        return 0
+    try:
+        rating_list = question_div.find("ul", class_=re.compile(r"modlen(\d+)"))
+    except Exception:
+        rating_list = None
+    if rating_list:
+        try:
+            class_attr = rating_list.get("class") or []
+            for cls in class_attr:
+                match = re.search(r"modlen(\d+)", str(cls))
+                if match:
+                    return int(match.group(1))
+        except Exception:
+            pass
+    try:
+        options = question_div.select(".scale-rating ul li")
+        if options:
+            return len(options)
+    except Exception:
+        pass
+    try:
+        options = question_div.select("a.rate-off, a.rate-on")
+        if options:
+            return len(options)
+    except Exception:
+        pass
+    return 0
+
+
 def _normalize_question_type_code(value: Any) -> str:
     if value is None:
         return ""
@@ -700,11 +825,26 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
             type_code = str(question_div.get("type") or "").strip() or "0"
             if type_code != "11" and _soup_question_looks_like_reorder(question_div):
                 type_code = "11"
+            is_rating = False
+            rating_max = 0
+            if type_code == "5":
+                is_rating = _soup_question_looks_like_rating(question_div)
+                if is_rating:
+                    rating_max = _extract_rating_option_count(question_div)
             is_location = type_code in {"1", "2"} and _soup_question_is_location(question_div)
             title_text = _extract_question_title(question_div, question_number)
             option_texts, option_count, matrix_rows, row_texts, fillable_indices = _extract_question_metadata_from_html(
                 soup, question_div, question_number, type_code
             )
+            if is_rating:
+                rating_texts = _extract_rating_option_texts(question_div)
+                if rating_texts:
+                    option_texts = rating_texts
+                option_count = max(option_count, rating_max, len(option_texts))
+                if option_count > 0:
+                    has_meaningful = any(_text_looks_meaningful(text) for text in option_texts)
+                    if not option_texts or not has_meaningful:
+                        option_texts = [str(i + 1) for i in range(option_count)]
             has_jump, jump_rules = _extract_jump_rules_from_html(question_div, question_number, option_texts)
             slider_min, slider_max, slider_step = (None, None, None)
             if type_code == "8":
@@ -723,6 +863,8 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "option_texts": option_texts,
                 "fillable_options": fillable_indices,
                 "is_location": is_location,
+                "is_rating": is_rating,
+                "rating_max": rating_max,
                 "text_inputs": text_input_count,
                 "is_multi_text": is_multi_text,
                 "is_text_like": is_text_like_question,

@@ -5,7 +5,11 @@ import time
 from typing import List, Optional
 
 import wjx.core.state as state
-from wjx.core.engine.dom_helpers import _count_choice_inputs_driver, _driver_question_looks_like_reorder
+from wjx.core.engine.dom_helpers import (
+    _count_choice_inputs_driver,
+    _driver_question_looks_like_rating,
+    _driver_question_looks_like_reorder,
+)
 from wjx.core.engine.full_simulation import (
     _build_per_question_delay_plan,
     _calculate_full_simulation_run_target,
@@ -21,6 +25,7 @@ from wjx.core.questions.types.matrix import matrix as _matrix_impl
 from wjx.core.questions.types.multiple import multiple as _multiple_impl
 from wjx.core.questions.types.reorder import reorder as _reorder_impl
 from wjx.core.questions.types.scale import scale as _scale_impl
+from wjx.core.questions.types.score import score as _score_impl
 from wjx.core.questions.types.single import single as _single_impl
 from wjx.core.questions.types.slider import slider_question as _slider_question_impl, _resolve_slider_score
 from wjx.core.questions.types.text import (
@@ -119,7 +124,10 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 _multiple_impl(driver, current_question_number, multiple_question_index, state.multiple_prob, state.multiple_option_fill_texts)
                 multiple_question_index += 1
             elif question_type == "5":
-                _scale_impl(driver, current_question_number, scale_question_index, state.scale_prob)
+                if _driver_question_looks_like_rating(question_div):
+                    _score_impl(driver, current_question_number, scale_question_index, state.scale_prob)
+                else:
+                    _scale_impl(driver, current_question_number, scale_question_index, state.scale_prob)
                 scale_question_index += 1
             elif question_type == "6":
                 matrix_question_index = _matrix_impl(driver, current_question_number, matrix_question_index, state.matrix_prob)

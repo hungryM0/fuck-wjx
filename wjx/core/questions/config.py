@@ -56,7 +56,7 @@ def _infer_option_count(entry: "QuestionEntry") -> int:
             return len(entry.texts)
     except Exception:
         pass
-    if getattr(entry, "question_type", "") == "scale":
+    if getattr(entry, "question_type", "") in ("scale", "score"):
         return 5
     return 0
 
@@ -250,7 +250,7 @@ def configure_probabilities(entries: List[QuestionEntry]):
             else:
                 for _ in range(rows):
                     state.matrix_prob.append(-1)
-        elif entry.question_type == "scale":
+        elif entry.question_type in ("scale", "score"):
             state.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
         elif entry.question_type == "slider":
             target_value: Optional[float] = None

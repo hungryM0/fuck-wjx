@@ -42,6 +42,7 @@ TYPE_CHOICES = [
     ("dropdown", "下拉题"),
     ("matrix", "矩阵题"),
     ("scale", "量表题"),
+    ("score", "评分题"),
     ("slider", "滑块题"),
     ("order", "排序题"),
 ]
@@ -63,6 +64,7 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
         "dropdown": "下拉题",
         "matrix": "矩阵题",
         "scale": "量表题",
+        "score": "评分题",
         "slider": "滑块题",
         "order": "排序题",
     }

@@ -47,6 +47,7 @@ from wjx.core.questions.types.multiple import (
 from wjx.core.questions.types.dropdown import droplist
 from wjx.core.questions.types.matrix import matrix
 from wjx.core.questions.types.scale import scale
+from wjx.core.questions.types.score import score
 from wjx.core.questions.types.slider import slider_question, _resolve_slider_score
 from wjx.core.questions.types.reorder import reorder, detect_reorder_required_count
 
@@ -96,6 +97,8 @@ __all__ = [
     "matrix",
     # question_scale
     "scale",
+    # question_score
+    "score",
     # question_slider
     "slider_question",
     "_resolve_slider_score",

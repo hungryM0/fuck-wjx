@@ -250,6 +250,14 @@ class RunController(QObject):
         except Exception:
             return default
 
+    @staticmethod
+    def _build_mid_bias_weights(option_count: int) -> List[float]:
+        """生成偏中分布的权重（评分题默认）。"""
+        count = max(1, int(option_count or 1))
+        center = (count - 1) / 2.0
+        peak = center + 1.0
+        return [max(1.0, peak - abs(idx - center)) for idx in range(count)]
+
     def _build_default_entries(self, questions_info: List[Dict[str, Any]]) -> List[QuestionEntry]:
         entries: List[QuestionEntry] = []
         for q in questions_info:
@@ -262,6 +270,8 @@ class RunController(QObject):
             text_inputs = int(q.get("text_inputs") or 0)
             slider_min = q.get("slider_min")
             slider_max = q.get("slider_max")
+            is_rating = bool(q.get("is_rating"))
+            rating_max = int(q.get("rating_max") or 0)
             title_text = str(q.get("title") or "").strip()
 
             if is_multi_text or (is_text_like and text_inputs > 1):
@@ -273,7 +283,7 @@ class RunController(QObject):
             elif type_code == "4":
                 q_type = "multiple"
             elif type_code == "5":
-                q_type = "scale"
+                q_type = "score" if is_rating else "scale"
             elif type_code == "6":
                 q_type = "matrix"
             elif type_code == "7":
@@ -285,11 +295,22 @@ class RunController(QObject):
             else:
                 q_type = "single"
 
-            option_count = max(option_count, text_inputs, 1)
+            base_option_count = max(option_count, rating_max, 1)
+            if q_type in ("text", "multi_text"):
+                option_count = max(base_option_count, text_inputs, 1)
+            else:
+                option_count = base_option_count
             if q_type in ("single", "dropdown", "scale"):
                 probabilities: Any = -1
                 distribution = "random"
                 custom_weights = None
+                texts = None
+            elif q_type == "score":
+                option_count = max(option_count, 2)
+                weights = self._build_mid_bias_weights(option_count)
+                probabilities = list(weights)
+                distribution = "custom"
+                custom_weights = list(weights)
                 texts = None
             elif q_type == "multiple":
                 probabilities = [1.0] * option_count
