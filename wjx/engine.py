@@ -64,7 +64,7 @@ TYPE_OPTIONS = [
     ("dropdown", "下拉题"),
     ("matrix", "矩阵题"),
     ("scale", "量表题"),
-    ("score", "评分题"),
+    ("score", "评价题"),
     ("slider", "滑块题"),
     ("text", "填空题"),
     ("multi_text", "多项填空题"),

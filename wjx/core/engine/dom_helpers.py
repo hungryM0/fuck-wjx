@@ -86,14 +86,9 @@ def _driver_question_looks_like_reorder(question_div) -> bool:
 
 
 def _driver_question_looks_like_rating(question_div) -> bool:
-    """兜底判断：通过 DOM 特征识别评分题（星级评价）。"""
+    """兜底判断：通过 DOM 特征识别评价题（星级评价）。"""
     if question_div is None:
         return False
-    has_scale_rating = False
-    try:
-        has_scale_rating = bool(question_div.find_elements(By.CSS_SELECTOR, ".scale-rating"))
-    except Exception:
-        has_scale_rating = False
     has_rate_icon = False
     try:
         has_rate_icon = bool(question_div.find_elements(By.CSS_SELECTOR, "a.rate-off, a.rate-on, .rate-off, .rate-on"))
@@ -105,19 +100,14 @@ def _driver_question_looks_like_rating(question_div) -> bool:
     except Exception:
         has_tag_wrap = False
     has_iconfont = False
-    if has_scale_rating:
-        try:
-            has_iconfont = bool(question_div.find_elements(By.CSS_SELECTOR, ".scale-rating .iconfontNew"))
-        except Exception:
-            has_iconfont = False
     try:
-        has_pj = str(question_div.get_attribute("pj") or "").strip() == "1"
+        has_iconfont = bool(question_div.find_elements(By.CSS_SELECTOR, ".scale-rating .iconfontNew, .iconfontNew"))
     except Exception:
-        has_pj = False
+        has_iconfont = False
 
     if has_tag_wrap:
         return True
-    if has_pj and (has_scale_rating or has_rate_icon or has_iconfont):
+    if has_rate_icon or has_iconfont:
         return True
     return False
 

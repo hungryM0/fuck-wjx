@@ -229,7 +229,7 @@ QUESTION_TYPE_LABELS = {
     "dropdown": "下拉题",
     "slider": "滑块题",
     "order": "排序题",
-    "score": "评分题",
+    "score": "评价题",
     "single": "单选题",
     "multiple": "多选题",
     "matrix": "矩阵题",

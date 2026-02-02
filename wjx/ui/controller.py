@@ -252,7 +252,7 @@ class RunController(QObject):
 
     @staticmethod
     def _build_mid_bias_weights(option_count: int) -> List[float]:
-        """生成偏中分布的权重（评分题默认）。"""
+        """生成偏中分布的权重（评价题默认）。"""
         count = max(1, int(option_count or 1))
         center = (count - 1) / 2.0
         peak = center + 1.0

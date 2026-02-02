@@ -1,4 +1,4 @@
-"""评分题处理（星级评价）"""
+"""评价题处理（星级评价）"""
 import random
 from typing import List
 
@@ -56,7 +56,7 @@ def _collect_score_options(question_div) -> List:
 
 
 def score(driver: BrowserDriver, current: int, index: int, score_prob_config: List) -> None:
-    """评分题处理主函数"""
+    """评价题处理主函数"""
     try:
         question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
     except Exception:

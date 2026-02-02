@@ -182,7 +182,7 @@ def _text_looks_meaningful(text: str) -> bool:
 
 
 def _extract_rating_option_texts(question_div) -> List[str]:
-    """优先从评分题的星级锚点提取文本（避免 iconfont 文本）"""
+    """优先从评价题的星级锚点提取文本（避免 iconfont 文本）"""
     if question_div is None:
         return []
     selectors = (
@@ -702,14 +702,9 @@ def _soup_question_looks_like_reorder(question_div) -> bool:
 
 
 def _soup_question_looks_like_rating(question_div) -> bool:
-    """识别评分题（星级评价）"""
+    """识别评价题（星级评价）"""
     if question_div is None:
         return False
-    has_scale_rating = False
-    try:
-        has_scale_rating = bool(question_div.find(class_="scale-rating"))
-    except Exception:
-        has_scale_rating = False
     has_rate_icon = False
     try:
         has_rate_icon = bool(question_div.select_one("a.rate-off, a.rate-on, .rate-off, .rate-on"))
@@ -721,26 +716,21 @@ def _soup_question_looks_like_rating(question_div) -> bool:
     except Exception:
         has_tag_wrap = False
     has_iconfont = False
-    if has_scale_rating:
-        try:
-            has_iconfont = bool(question_div.select_one(".scale-rating .iconfontNew"))
-        except Exception:
-            has_iconfont = False
     try:
-        has_pj = str(question_div.get("pj") or "").strip() == "1"
+        has_iconfont = bool(question_div.select_one(".scale-rating .iconfontNew, .iconfontNew"))
     except Exception:
-        has_pj = False
+        has_iconfont = False
 
-    # 评分题需要更强特征：仅有量表结构时不判为评分题
+    # 评价题需要“星级/评价”特征，避免普通量表误判
     if has_tag_wrap:
         return True
-    if has_pj and (has_scale_rating or has_rate_icon or has_iconfont):
+    if has_rate_icon or has_iconfont:
         return True
     return False
 
 
 def _extract_rating_option_count(question_div) -> int:
-    """尝试解析评分题的星级数量。"""
+    """尝试解析评价题的星级数量。"""
     if question_div is None:
         return 0
     try:
