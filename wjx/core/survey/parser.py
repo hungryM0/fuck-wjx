@@ -701,9 +701,42 @@ def _soup_question_looks_like_reorder(question_div) -> bool:
         return False
 
 
+def _soup_question_looks_like_numeric_scale(question_div) -> bool:
+    """检测是否更像数字量表/NPS（大量数字刻度+两端文字提示）。"""
+    if question_div is None:
+        return False
+    try:
+        anchors = question_div.select("ul[tp='d'] li a, .scale-rating ul li a, .scale-rating a[val]")
+    except Exception:
+        anchors = []
+    texts: List[str] = []
+    for anchor in anchors:
+        text = _normalize_html_text(anchor.get_text(" ", strip=True))
+        if not text:
+            try:
+                text = _normalize_html_text(anchor.get("title") or anchor.get("val") or anchor.get("value") or "")
+            except Exception:
+                text = ""
+        if text:
+            texts.append(text)
+    if not texts:
+        return False
+    numeric_count = sum(1 for t in texts if re.fullmatch(r"\d{1,2}", t))
+    has_scale_title = False
+    try:
+        has_scale_title = bool(question_div.select_one(".scaleTitle, .scaleTitle_frist, .scaleTitle_last, .scaleTitleFirst, .scaleTitleLast"))
+    except Exception:
+        has_scale_title = False
+    total = len(texts)
+    return total >= 5 and numeric_count >= max(3, int(total * 0.7)) and (total >= 9 or has_scale_title)
+
+
 def _soup_question_looks_like_rating(question_div) -> bool:
     """识别评价题（星级评价）"""
     if question_div is None:
+        return False
+    # NPS/数字刻度题虽然也有 rate-off/rate-on 样式，但应判为量表而非评价题
+    if _soup_question_looks_like_numeric_scale(question_div):
         return False
     has_rate_icon = False
     try:

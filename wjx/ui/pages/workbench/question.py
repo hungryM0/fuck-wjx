@@ -205,6 +205,20 @@ class QuestionWizardDialog(QDialog):
             type_label.setStyleSheet("color: #0078d4; font-size: 12px;")
             header.addWidget(type_label)
             header.addStretch(1)
+            if entry.question_type == "slider":
+                slider_note = BodyLabel("目标值会自动做小幅随机抖动，避免每份都填同一个数", card)
+                slider_note.setStyleSheet("font-size: 12px;")
+                slider_note.setWordWrap(False)
+                slider_note.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self._apply_label_color(slider_note, "#777777", "#bfbfbf")
+                header.addWidget(slider_note)
+            if entry.question_type == "multiple":
+                multi_note = BodyLabel("每个滑块的值对应的是选项的命中概率（%）", card)
+                multi_note.setStyleSheet("font-size: 12px;")
+                multi_note.setWordWrap(False)
+                multi_note.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self._apply_label_color(multi_note, "#777777", "#bfbfbf")
+                header.addWidget(multi_note)
             card_layout.addLayout(header)
 
             # 题目描述
@@ -406,13 +420,15 @@ class QuestionWizardDialog(QDialog):
                     self._apply_label_color(slider_hint, "#666666", "#bfbfbf")
                     card_layout.addWidget(slider_hint)
                 options = max(1, int(entry.option_count or 1))
+                default_weight = 50 if entry.question_type == "multiple" else 1
                 weights = list(entry.custom_weights or [])
                 if len(weights) < options:
-                    weights += [1] * (options - len(weights))
+                    weights += [default_weight] * (options - len(weights))
                 if all(w <= 0 for w in weights):
-                    weights = [1] * options
+                    weights = [default_weight] * options
 
                 sliders: List[NoWheelSlider] = []
+                is_multiple = entry.question_type == "multiple"
                 for opt_idx in range(options):
                     opt_widget = QWidget(card)
                     opt_layout = QHBoxLayout(opt_widget)
@@ -437,11 +453,15 @@ class QuestionWizardDialog(QDialog):
                     slider.setMinimumWidth(200)
                     opt_layout.addWidget(slider, 1)
 
-                    value_label = BodyLabel(str(slider.value()), card)
-                    value_label.setFixedWidth(36)
+                    initial_text = f"{slider.value()}%" if is_multiple else str(slider.value())
+                    value_label = BodyLabel(initial_text, card)
+                    value_label.setFixedWidth(44 if is_multiple else 36)
                     value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                     value_label.setStyleSheet("color: #0078d4; font-weight: 500; font-size: 13px;")
-                    slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
+                    if is_multiple:
+                        slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(f"{v}%"))
+                    else:
+                        slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
                     opt_layout.addWidget(value_label)
 
                     card_layout.addWidget(opt_widget)

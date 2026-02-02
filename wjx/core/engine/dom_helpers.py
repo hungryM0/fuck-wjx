@@ -1,3 +1,4 @@
+import re
 from typing import List, Optional, Tuple
 
 from wjx.network.browser_driver import By, BrowserDriver
@@ -85,9 +86,48 @@ def _driver_question_looks_like_reorder(question_div) -> bool:
         return False
 
 
+def _driver_question_looks_like_numeric_scale(question_div) -> bool:
+    """检测数字刻度/NPS 量表，避免被误判为星级评价。"""
+    if question_div is None:
+        return False
+    try:
+        anchors = question_div.find_elements(By.CSS_SELECTOR, "ul[tp='d'] li a, .scale-rating ul li a, .scale-rating a[val]")
+    except Exception:
+        anchors = []
+    texts: List[str] = []
+    for anchor in anchors:
+        try:
+            text = (anchor.text or "").strip()
+        except Exception:
+            text = ""
+        if not text:
+            for attr in ("title", "aria-label", "val", "value"):
+                try:
+                    raw = anchor.get_attribute(attr) or ""
+                except Exception:
+                    raw = ""
+                if raw:
+                    text = str(raw).strip()
+                    if text:
+                        break
+        if text:
+            texts.append(text)
+    if not texts:
+        return False
+    numeric_count = sum(1 for t in texts if re.fullmatch(r"\d{1,2}", t))
+    try:
+        has_scale_title = bool(question_div.find_elements(By.CSS_SELECTOR, ".scaleTitle, .scaleTitle_frist, .scaleTitle_last, .scaleTitleFirst, .scaleTitleLast"))
+    except Exception:
+        has_scale_title = False
+    total = len(texts)
+    return total >= 5 and numeric_count >= max(3, int(total * 0.7)) and (total >= 9 or has_scale_title)
+
+
 def _driver_question_looks_like_rating(question_div) -> bool:
     """兜底判断：通过 DOM 特征识别评价题（星级评价）。"""
     if question_div is None:
+        return False
+    if _driver_question_looks_like_numeric_scale(question_div):
         return False
     has_rate_icon = False
     try:
