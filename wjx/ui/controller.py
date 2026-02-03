@@ -252,11 +252,9 @@ class RunController(QObject):
 
     @staticmethod
     def _build_mid_bias_weights(option_count: int) -> List[float]:
-        """生成偏中分布的权重（评价题默认）。"""
+        """生成等权重（评价题默认）。"""
         count = max(1, int(option_count or 1))
-        center = (count - 1) / 2.0
-        peak = center + 1.0
-        return [max(1.0, peak - abs(idx - center)) for idx in range(count)]
+        return [1.0] * count
 
     def _build_default_entries(self, questions_info: List[Dict[str, Any]]) -> List[QuestionEntry]:
         entries: List[QuestionEntry] = []
@@ -399,7 +397,7 @@ class RunController(QObject):
         # sync controller copies
         state.url = config.url
         state.target_num = config.target
-        state.num_threads = min(config.threads, state.MAX_THREADS)
+        state.num_threads = max(1, int(config.threads or 1))
         state.browser_preference = list(getattr(config, "browser_preference", []) or [])
         state.fail_threshold = fail_threshold
         state.cur_num = getattr(state, "cur_num", 0)

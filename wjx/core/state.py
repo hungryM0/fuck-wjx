@@ -20,17 +20,12 @@ single_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 droplist_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 multiple_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 
-# 最大线程数限制（确保用户电脑流畅）
-MAX_THREADS = 8
-
-# 浏览器实例并发限制（防止内存爆炸）
-MAX_BROWSER_INSTANCES = 6
 _browser_semaphore: Optional[threading.Semaphore] = None
 _browser_semaphore_lock = threading.Lock()
 browser_preference: List[str] = []
 
 
-def _get_browser_semaphore(max_instances: int = MAX_BROWSER_INSTANCES) -> threading.Semaphore:
+def _get_browser_semaphore(max_instances: int) -> threading.Semaphore:
     """获取或创建浏览器实例信号量，限制同时运行的浏览器数量"""
     global _browser_semaphore
     with _browser_semaphore_lock:

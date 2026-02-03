@@ -191,7 +191,7 @@ class DashboardPage(QWidget):
         self.target_spin.setMinimumHeight(36)
         spin_row.addWidget(self.target_spin)
         spin_row.addSpacing(12)
-        spin_row.addWidget(BodyLabel("线程数（提交速度）：", self))
+        spin_row.addWidget(BodyLabel("并发数（提交速度）：", self))
         self.thread_spin = NoWheelSpinBox(self)
         self.thread_spin.setRange(1, 12)
         self.thread_spin.setMinimumWidth(140)

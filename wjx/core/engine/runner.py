@@ -60,7 +60,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
     proxy_address: Optional[str] = None  # 初始化代理地址变量，避免异常处理中未绑定错误
 
     # 获取浏览器实例信号量，限制同时运行的浏览器数量
-    browser_sem = state._get_browser_semaphore(min(state.num_threads, state.MAX_BROWSER_INSTANCES))
+    browser_sem = state._get_browser_semaphore(max(1, int(state.num_threads or 1)))
     sem_acquired = False
 
     logging.info(f"目标份数: {state.target_num}, 当前进度: {state.cur_num}/{state.target_num}")
