@@ -429,8 +429,9 @@ class RunController(QObject):
         state.num_threads = max(1, int(config.threads or 1))
         state.browser_preference = list(getattr(config, "browser_preference", []) or [])
         state.fail_threshold = fail_threshold
-        state.cur_num = getattr(state, "cur_num", 0)
-        state.cur_fail = getattr(state, "cur_fail", 0)
+        # 新一轮任务必须从 0 开始计数，否则进度会沿用上次完成值
+        state.cur_num = 0
+        state.cur_fail = 0
         state.stop_event = self.stop_event
         state.submit_interval_range_seconds = tuple(config.submit_interval)
         state.answer_duration_range_seconds = tuple(config.answer_duration)

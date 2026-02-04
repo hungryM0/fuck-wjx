@@ -315,7 +315,7 @@ class QuestionWizardDialog(QDialog):
                 if len(row_texts) < rows:
                     row_texts += [""] * (rows - len(row_texts))
 
-                hint = BodyLabel("矩阵量表：每一行都需要单独设置配比（数值越大概率越高）", card)
+                hint = BodyLabel("矩阵量表：每一行都需要单独设置配比", card)
                 hint.setStyleSheet("font-size: 12px;")
                 self._apply_label_color(hint, "#666666", "#bfbfbf")
                 card_layout.addWidget(hint)
