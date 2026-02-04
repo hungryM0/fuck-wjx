@@ -182,8 +182,11 @@ class SettingsPage(ScrollArea):
             settings.setValue("window_topmost", checked)
         win = self.window()
         if win:
-            win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
-            win.show()
+            if hasattr(win, "apply_topmost_state"):
+                win.apply_topmost_state(checked, show=True)
+            else:
+                win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
+                win.show()
         if show_tip:
             InfoBar.success(
                 "",

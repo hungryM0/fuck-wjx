@@ -104,7 +104,7 @@ class MainWindow(FluentWindow):
         # 应用窗口置顶设置
         settings = QSettings("FuckWjx", "Settings")
         if settings.value("window_topmost", False, type=bool):
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+            self.apply_topmost_state(True, show=False)
 
         # 创建启动页面
         self._boot_splash = create_boot_splash(self)
@@ -520,6 +520,22 @@ class MainWindow(FluentWindow):
             self.move(frame.topLeft())
         except Exception:
             pass
+
+    def apply_topmost_state(self, checked: bool, show: bool = False):
+        """应用窗口置顶状态，并刷新无边框特效以保留圆角。"""
+        flags = self.windowFlags()
+        if checked:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        else:
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        if hasattr(self, "updateFrameless"):
+            try:
+                self.updateFrameless()
+            except Exception:
+                pass
+        if show:
+            self.show()
 
     def _bind_controller_signals(self):
         self.controller.surveyParsed.connect(self._on_survey_parsed)

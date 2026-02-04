@@ -10,6 +10,7 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarIcon,
     InfoBarPosition,
+    HyperlinkButton,
     LineEdit,
     PasswordLineEdit,
     PushSettingCard,
@@ -25,6 +26,14 @@ from wjx.utils.io.load_save import RuntimeConfig
 
 
 class RuntimeAISection:
+    _PROVIDER_DOCS = {
+        "deepseek": "https://api-docs.deepseek.com/zh-cn/",
+        "qwen": "https://help.aliyun.com/zh/model-studio/get-api-key",
+        "openai": "https://platform.openai.com/docs/quickstart?desktop-os=windows",
+        "gemini": "https://ai.google.dev/gemini-api/docs/quickstart?hl=zh-cn",
+        "custom": "https://platform.openai.com/docs/api-reference/introduction",
+    }
+
     def __init__(self, parent_view: QWidget, owner: QWidget):
         self._owner = owner
         self.group = SettingCardGroup("AI 填空助手", parent_view)
@@ -77,6 +86,10 @@ class RuntimeAISection:
         idx = self.ai_provider_combo.findData(saved_provider)
         if idx >= 0:
             self.ai_provider_combo.setCurrentIndex(idx)
+        self.ai_provider_link = HyperlinkButton(FluentIcon.LINK, "", "API文档", self.ai_provider_card)
+        self._update_ai_doc_link(saved_provider)
+        self.ai_provider_card.hBoxLayout.addWidget(self.ai_provider_link, 0, Qt.AlignmentFlag.AlignRight)
+        self.ai_provider_card.hBoxLayout.addSpacing(8)
         self.ai_provider_card.hBoxLayout.addWidget(self.ai_provider_combo, 0, Qt.AlignmentFlag.AlignRight)
         self.ai_provider_card.hBoxLayout.addSpacing(16)
         self.group.addSettingCard(self.ai_provider_card)
@@ -229,6 +242,7 @@ class RuntimeAISection:
                 self.ai_model_combo.setCurrentIndex(combo_idx)
             else:
                 self.ai_model_combo.setCurrentIndex(0)
+        self._update_ai_doc_link(provider_key)
 
     def _apply_ai_config(self, cfg: RuntimeConfig):
         ai_config_present = getattr(cfg, "_ai_config_present", False)
@@ -314,6 +328,18 @@ class RuntimeAISection:
             position=InfoBarPosition.TOP,
             duration=2000,
         )
+
+    def _update_ai_doc_link(self, provider_key: str):
+        url = self._PROVIDER_DOCS.get(provider_key, "")
+        self.ai_provider_link.setVisible(provider_key != "custom")
+        if url:
+            self.ai_provider_link.setEnabled(True)
+            self.ai_provider_link.setText("API文档")
+            self.ai_provider_link.setUrl(url)
+        else:
+            self.ai_provider_link.setEnabled(False)
+            self.ai_provider_link.setText("暂无文档")
+            self.ai_provider_link.setUrl("")
 
     def _on_ai_apikey_changed(self):
         """API Key 变化"""
