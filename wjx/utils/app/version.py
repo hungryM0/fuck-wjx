@@ -3,6 +3,7 @@
 版本号及相关常量配置
 
 修改版本号时只需修改此文件中的 __VERSION__ 变量即可
+若 fork 到自己的仓库，请同步调整 GITHUB_OWNER 与 GITHUB_REPO
 """
 
 # 版本号

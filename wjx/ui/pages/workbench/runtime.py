@@ -6,6 +6,7 @@ from PySide6.QtGui import QIcon, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
+    CheckBox,
     FluentIcon,
     ModelComboBox,
     PopupTeachingTip,
@@ -65,7 +66,7 @@ class RuntimePage(ScrollArea):
         self.setWidget(self.view)
         self.setWidgetResizable(True)
         self.view.setObjectName("settings_view")
-        self.ua_checkboxes: Dict[str, object] = {}
+        self.ua_checkboxes: Dict[str, CheckBox] = {}
         self._build_ui()
         self._bind_events()
         self._sync_random_ua(self.random_ua_card.isChecked())
@@ -152,7 +153,7 @@ class RuntimePage(ScrollArea):
         # ========== 时间控制组 ==========
         time_group = SettingCardGroup("时间控制", self.view)
         # 在标题后添加小字提示（保持原标题字号）
-        time_hint = BodyLabel("（其实问卷星不会因为你提交过快就封你号）", time_group)
+        time_hint = BodyLabel("（其实问卷星官方并不会因为你提交过快就封你号）", time_group)
         time_hint.setStyleSheet("color: blue; font-size: 12px;")
         # 创建水平布局放置标题和提示
         title_container = QWidget(time_group)

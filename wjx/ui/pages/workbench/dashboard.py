@@ -1,4 +1,4 @@
-"""主控制面板页面"""
+"""主控制面板：卡片式配置区 + 底部状态条（不包含日志）"""
 import os
 from typing import List, Dict, Any, Optional
 
@@ -249,9 +249,6 @@ class DashboardPage(QWidget):
         self.select_all_action = Action(FluentIcon.CHECKBOX, "全选", checkable=True)
         self.command_bar.addAction(self.select_all_action)
         
-        # 隐藏操作：配置向导（移除隐藏按钮，避免出现更多“...”菜单）
-        self.wizard_action = Action(FluentIcon.SETTING, "配置向导")
-        
         list_layout.addWidget(self.command_bar)
         self.entry_table = TableWidget(self)
         self.entry_table.setRowCount(0)
@@ -319,7 +316,6 @@ class DashboardPage(QWidget):
         self.add_action.triggered.connect(self._show_add_question_dialog)
         self.edit_action.triggered.connect(self._edit_selected_entries)
         self.del_action.triggered.connect(self._delete_selected_entries)
-        self.wizard_action.triggered.connect(self._open_question_wizard)
         try:
             self.question_page.entriesChanged.connect(self._on_question_entries_changed)
         except Exception:
