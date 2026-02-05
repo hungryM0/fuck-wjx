@@ -3,7 +3,7 @@ import copy
 from typing import List, Dict, Any, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIntValidator
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -81,6 +81,51 @@ def _apply_label_color(label: BodyLabel, light: str, dark: str) -> None:
         if style and not style.endswith(";"):
             style = f"{style};"
         label.setStyleSheet(f"{style}color: {light};")
+
+
+def _bind_slider_input(slider: NoWheelSlider, edit: LineEdit) -> None:
+    """绑定滑块与输入框，避免循环触发。"""
+    min_value = int(slider.minimum())
+    max_value = int(slider.maximum())
+    edit.setValidator(QIntValidator(min_value, max_value, edit))
+
+    def sync_edit(value: int) -> None:
+        edit.blockSignals(True)
+        edit.setText(str(int(value)))
+        edit.blockSignals(False)
+
+    def sync_slider_live(text: str) -> None:
+        if not text:
+            return
+        try:
+            value = int(text)
+        except Exception:
+            return
+        if value < min_value or value > max_value:
+            return
+        slider.blockSignals(True)
+        slider.setValue(value)
+        slider.blockSignals(False)
+
+    def sync_slider_final() -> None:
+        text = edit.text().strip()
+        if not text:
+            return
+        try:
+            value = int(text)
+        except Exception:
+            return
+        value = max(min_value, min(max_value, value))
+        slider.blockSignals(True)
+        slider.setValue(value)
+        slider.blockSignals(False)
+        edit.blockSignals(True)
+        edit.setText(str(value))
+        edit.blockSignals(False)
+
+    slider.valueChanged.connect(sync_edit)
+    edit.textChanged.connect(sync_slider_live)
+    edit.editingFinished.connect(sync_slider_final)
 
 
 def _get_entry_type_label(entry: QuestionEntry) -> str:
@@ -356,12 +401,12 @@ class QuestionWizardDialog(QDialog):
                         slider.setMinimumWidth(200)
                         opt_layout.addWidget(slider, 1)
 
-                        value_label = BodyLabel(str(slider.value()), parent_widget)
-                        value_label.setFixedWidth(36)
-                        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                        value_label.setStyleSheet("color: #0078d4; font-weight: 500; font-size: 13px;")
-                        slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
-                        opt_layout.addWidget(value_label)
+                        value_input = LineEdit(parent_widget)
+                        value_input.setFixedWidth(60)
+                        value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        value_input.setText(str(slider.value()))
+                        _bind_slider_input(slider, value_input)
+                        opt_layout.addWidget(value_input)
 
                         target_layout.addWidget(opt_widget)
                         sliders.append(slider)
@@ -456,16 +501,18 @@ class QuestionWizardDialog(QDialog):
                     slider.setMinimumWidth(200)
                     opt_layout.addWidget(slider, 1)
 
-                    initial_text = f"{slider.value()}%" if is_multiple else str(slider.value())
-                    value_label = BodyLabel(initial_text, card)
-                    value_label.setFixedWidth(44 if is_multiple else 36)
-                    value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                    value_label.setStyleSheet("color: #0078d4; font-weight: 500; font-size: 13px;")
+                    value_input = LineEdit(card)
+                    value_input.setFixedWidth(60)
+                    value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    value_input.setText(str(slider.value()))
+                    _bind_slider_input(slider, value_input)
+                    opt_layout.addWidget(value_input)
                     if is_multiple:
-                        slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(f"{v}%"))
-                    else:
-                        slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
-                    opt_layout.addWidget(value_label)
+                        percent_label = BodyLabel("%", card)
+                        percent_label.setFixedWidth(12)
+                        percent_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                        _apply_label_color(percent_label, "#666666", "#bfbfbf")
+                        opt_layout.addWidget(percent_label)
 
                     card_layout.addWidget(opt_widget)
                     sliders.append(slider)
@@ -1012,17 +1059,17 @@ class QuestionAddDialog(QDialog):
                         slider.setMinimumWidth(200)
                         opt_layout.addWidget(slider, 1)
 
-                        value_label = BodyLabel(str(slider.value()), row_card)
-                        value_label.setFixedWidth(36)
-                        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                        value_label.setStyleSheet("color: #0078d4; font-weight: 500; font-size: 13px;")
-                        slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
+                        value_input = LineEdit(row_card)
+                        value_input.setFixedWidth(60)
+                        value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        value_input.setText(str(slider.value()))
+                        _bind_slider_input(slider, value_input)
 
                         def _on_matrix_slider_changed(value, r=row_idx, c=col_idx):
                             self._matrix_weights[r][c] = float(value)
 
                         slider.valueChanged.connect(_on_matrix_slider_changed)
-                        opt_layout.addWidget(value_label)
+                        opt_layout.addWidget(value_input)
                         row_card_layout.addWidget(opt_widget)
 
                     card_layout.addWidget(row_card)
@@ -1107,22 +1154,24 @@ class QuestionAddDialog(QDialog):
                 slider.setMinimumWidth(200)
                 opt_layout.addWidget(slider, 1)
 
-                initial_text = f"{slider.value()}%" if is_multiple else str(slider.value())
-                value_label = BodyLabel(initial_text, opt_widget)
-                value_label.setFixedWidth(44 if is_multiple else 36)
-                value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                value_label.setStyleSheet("color: #0078d4; font-weight: 500; font-size: 13px;")
+                value_input = LineEdit(opt_widget)
+                value_input.setFixedWidth(60)
+                value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                value_input.setText(str(slider.value()))
 
                 def _on_slider_changed(value, index=idx):
                     if index < len(self._slider_values):
                         self._slider_values[index] = float(value)
 
-                if is_multiple:
-                    slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(f"{v}%"))
-                else:
-                    slider.valueChanged.connect(lambda v, lab=value_label: lab.setText(str(v)))
+                _bind_slider_input(slider, value_input)
                 slider.valueChanged.connect(_on_slider_changed)
-                opt_layout.addWidget(value_label)
+                opt_layout.addWidget(value_input)
+                if is_multiple:
+                    percent_label = BodyLabel("%", opt_widget)
+                    percent_label.setFixedWidth(12)
+                    percent_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                    _apply_label_color(percent_label, "#666666", "#bfbfbf")
+                    opt_layout.addWidget(percent_label)
 
                 sliders_layout.addWidget(opt_widget)
 
