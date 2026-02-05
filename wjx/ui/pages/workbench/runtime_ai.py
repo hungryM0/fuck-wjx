@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject, Qt, QThread
 from PySide6.QtWidgets import QSizePolicy, QPlainTextEdit, QVBoxLayout, QWidget
 from qfluentwidgets import (
     ComboBox,
+    EditableComboBox,
     FluentIcon,
     IndeterminateProgressRing,
     InfoBar,
@@ -29,6 +30,8 @@ class RuntimeAISection(QObject):
     _PROVIDER_DOCS = {
         "deepseek": "https://api-docs.deepseek.com/zh-cn/",
         "qwen": "https://help.aliyun.com/zh/model-studio/get-api-key",
+        "siliconflow": "https://docs.siliconflow.cn/cn/userguide/quickstart#2-%E6%9F%A5%E7%9C%8B%E6%A8%A1%E5%9E%8B%E5%88%97%E8%A1%A8%E5%92%8C%E6%A8%A1%E5%9E%8B%E8%AF%A6%E6%83%85",
+        "volces": "https://www.volcengine.com/docs/82379/1399008?lang=zh#da0e9d90",
         "openai": "https://platform.openai.com/docs/quickstart?desktop-os=windows",
         "gemini": "https://ai.google.dev/gemini-api/docs/quickstart?hl=zh-cn",
         "custom": "https://platform.openai.com/docs/api-reference/introduction",
@@ -41,6 +44,7 @@ class RuntimeAISection(QObject):
         self._ai_loading = False
         self._ai_test_thread: Optional[QThread] = None
         self._ai_test_worker: Optional[AITestWorker] = None
+        self._current_infobar: Optional[InfoBar] = None  # 存储当前显示的InfoBar引用
         ai_config = get_ai_settings()
         self._ai_system_prompt = ai_config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
         self._build_ui(ai_config)
@@ -112,7 +116,7 @@ class RuntimeAISection(QObject):
         self.ai_apikey_card = SettingCard(
             FluentIcon.FINGERPRINT,
             "API Key",
-            "输入对应服务的 API 密钥",
+            "输入对应服务的 API 密钥，获取方法请查阅服务商API文档",
             self.group,
         )
         self.ai_apikey_edit = PasswordLineEdit(self.ai_apikey_card)
@@ -125,18 +129,23 @@ class RuntimeAISection(QObject):
 
         self.ai_model_card = SettingCard(
             FluentIcon.DEVELOPER_TOOLS,
-            "模型",
-            "选择或输入模型名称",
+            "模型 ID",
+            "请查阅所选服务商的API文档后再填写准确的模型id号，切勿随意填写",
             self.group,
         )
-        self.ai_model_combo = ComboBox(self.ai_model_card)
-        self.ai_model_combo.setMinimumWidth(200)
-        self.ai_model_combo.addItem("deepseek-chat")
-        self.ai_model_combo.addItem("deepseek-reasoner")
+        # 可编辑下拉框 - 用于有推荐模型的服务商
+        self.ai_model_combo = EditableComboBox(self.ai_model_card)
+        self.ai_model_combo.setMinimumWidth(280)
+        self.ai_model_combo.setPlaceholderText("输入或选择模型名称")
+        current_model = ai_config.get("model") or ""
+        if current_model:
+            self.ai_model_combo.setText(current_model)
+        # 纯输入框 - 用于自定义模式
         self.ai_model_edit = LineEdit(self.ai_model_card)
-        self.ai_model_edit.setMinimumWidth(200)
-        self.ai_model_edit.setPlaceholderText("gpt-3.5-turbo")
-        self.ai_model_edit.setText(ai_config.get("model") or "")
+        self.ai_model_edit.setMinimumWidth(280)
+        self.ai_model_edit.setPlaceholderText("输入模型名称")
+        if current_model:
+            self.ai_model_edit.setText(current_model)
         self.ai_model_card.hBoxLayout.addWidget(self.ai_model_combo, 0, Qt.AlignmentFlag.AlignRight)
         self.ai_model_card.hBoxLayout.addWidget(self.ai_model_edit, 0, Qt.AlignmentFlag.AlignRight)
         self.ai_model_card.hBoxLayout.addSpacing(16)
@@ -191,8 +200,8 @@ class RuntimeAISection(QObject):
         self.ai_provider_combo.currentIndexChanged.connect(self._on_ai_provider_changed)
         self.ai_apikey_edit.editingFinished.connect(self._on_ai_apikey_changed)
         self.ai_baseurl_edit.editingFinished.connect(self._on_ai_baseurl_changed)
-        self.ai_model_edit.editingFinished.connect(self._on_ai_model_changed)
-        self.ai_model_combo.currentIndexChanged.connect(self._on_ai_model_combo_changed)
+        self.ai_model_combo.currentTextChanged.connect(self._on_ai_model_changed)
+        self.ai_model_edit.editingFinished.connect(self._on_ai_model_edit_changed)
         self.ai_test_card.clicked.connect(self._on_ai_test_clicked)
         self.ai_prompt_edit.textChanged.connect(self._on_ai_prompt_changed)
 
@@ -219,30 +228,61 @@ class RuntimeAISection(QObject):
         self.ai_test_spinner.setVisible(loading)
         self.ai_test_card.button.setEnabled(not loading)
 
+    def _show_ai_infobar(self, message: str, success: bool = True, duration: int = 2000):
+        """安全地显示 InfoBar，关闭之前的避免动画冲突"""
+        # 先关闭之前的 InfoBar
+        if self._current_infobar is not None:
+            try:
+                self._current_infobar.close()
+            except (RuntimeError, AttributeError):
+                pass  # InfoBar 可能已被销毁
+            self._current_infobar = None
+        
+        # 显示新的 InfoBar
+        infobar_func = InfoBar.success if success else InfoBar.error
+        self._current_infobar = infobar_func(
+            "",
+            message,
+            parent=self._owner.window(),
+            position=InfoBarPosition.TOP,
+            duration=duration,
+        )
+
     def _update_ai_visibility(self):
-        """根据选择的提供商更新 AI 配置项的可见性"""
+        """根据选择的提供商更新 AI 配置项的可见性和推荐模型"""
         idx = self.ai_provider_combo.currentIndex()
         provider_key = str(self.ai_provider_combo.itemData(idx)) if idx >= 0 else "deepseek"
         is_custom = provider_key == "custom"
         self.ai_baseurl_card.setVisible(is_custom)
+        
+        # 更新推荐模型列表
         provider_config = AI_PROVIDERS.get(provider_key, {})
+        recommended_models = provider_config.get("recommended_models", [])
         default_model = provider_config.get("default_model", "")
-        self.ai_model_edit.setPlaceholderText(default_model or "模型名称")
-
-        is_deepseek = provider_key == "deepseek"
-        self.ai_model_combo.setVisible(is_deepseek)
-        self.ai_model_edit.setVisible(not is_deepseek)
-        if is_deepseek:
-            current_model = self._get_current_model_value().strip()
-            if not current_model:
-                current_model = "deepseek-chat"
-                if not self._ai_loading:
-                    save_ai_settings(model=current_model)
-            combo_idx = self.ai_model_combo.findText(current_model)
-            if combo_idx >= 0:
-                self.ai_model_combo.setCurrentIndex(combo_idx)
-            else:
-                self.ai_model_combo.setCurrentIndex(0)
+        
+        # 控制显示哪个输入控件
+        self.ai_model_combo.setVisible(not is_custom)
+        self.ai_model_edit.setVisible(is_custom)
+        
+        if is_custom:
+            # 自定义模式：切换时清空（除非是初始化加载）
+            if not self._ai_loading:
+                self.ai_model_edit.setText("")
+                save_ai_settings(model="")
+        else:
+            # 非自定义模式：清空并填充推荐模型
+            self.ai_model_combo.clear()
+            if recommended_models:
+                self.ai_model_combo.addItems(recommended_models)
+            
+            # 更新占位符
+            self.ai_model_combo.setPlaceholderText(default_model or "输入模型名称")
+            
+            # 切换服务商时使用新的默认模型（除非是初始化加载）
+            if not self._ai_loading:
+                self.ai_model_combo.setText(default_model)
+                save_ai_settings(model=default_model)
+        
         self._update_ai_doc_link(provider_key)
 
     def _apply_ai_config(self, cfg: RuntimeConfig):
@@ -271,14 +311,9 @@ class RuntimeAISection(QObject):
         self.ai_apikey_edit.setText(cfg.ai_api_key or "")
         self.ai_baseurl_edit.setText(cfg.ai_base_url or "")
         current_model = (cfg.ai_model or "").strip()
-        if not current_model and cfg.ai_provider == "deepseek":
-            current_model = "deepseek-chat"
-        self.ai_model_edit.setText(current_model)
-        combo_idx = self.ai_model_combo.findText(current_model)
-        if combo_idx >= 0:
-            self.ai_model_combo.setCurrentIndex(combo_idx)
-        else:
-            self.ai_model_combo.setCurrentIndex(0)
+        if current_model:
+            self.ai_model_combo.setText(current_model)
+            self.ai_model_edit.setText(current_model)
         self._ai_system_prompt = cfg.ai_system_prompt or DEFAULT_SYSTEM_PROMPT
         self.ai_prompt_edit.setPlainText(self._ai_system_prompt)
         self._update_ai_visibility()
@@ -299,13 +334,7 @@ class RuntimeAISection(QObject):
         if self._ai_loading:
             return
         save_ai_settings(enabled=checked)
-        InfoBar.success(
-            "",
-            f"AI 填空功能已{'开启' if checked else '关闭'}",
-            parent=self._owner.window(),
-            position=InfoBarPosition.TOP,
-            duration=2000,
-        )
+        self._show_ai_infobar(f"AI 填空功能已{'开启' if checked else '关闭'}")
 
     def _on_ai_provider_changed(self):
         """AI 提供商选择变化"""
@@ -315,20 +344,8 @@ class RuntimeAISection(QObject):
         provider_key = str(self.ai_provider_combo.itemData(idx)) if idx >= 0 else "deepseek"
         save_ai_settings(provider=provider_key)
         self._update_ai_visibility()
-        if provider_key != "deepseek":
-            if self.ai_model_edit.isVisible():
-                current_model = self.ai_model_edit.text().strip()
-                if current_model in {"deepseek-chat", "deepseek-reasoner"}:
-                    self.ai_model_edit.setText("")
-                    save_ai_settings(model="")
         provider_config = AI_PROVIDERS.get(provider_key, {})
-        InfoBar.success(
-            "",
-            f"AI 服务已切换为：{provider_config.get('label', provider_key)}",
-            parent=self._owner.window(),
-            position=InfoBarPosition.TOP,
-            duration=2000,
-        )
+        self._show_ai_infobar(f"AI 服务已切换为：{provider_config.get('label', provider_key)}")
 
     def _update_ai_doc_link(self, provider_key: str):
         url = self._PROVIDER_DOCS.get(provider_key, "")
@@ -354,26 +371,23 @@ class RuntimeAISection(QObject):
             return
         save_ai_settings(base_url=self.ai_baseurl_edit.text())
 
-    def _on_ai_model_changed(self):
-        """模型变化"""
+    def _on_ai_model_changed(self, text: str):
+        """模型变化（EditableComboBox）"""
         if self._ai_loading:
             return
-        if not self.ai_model_edit.isVisible():
-            return
-        save_ai_settings(model=self.ai_model_edit.text())
+        save_ai_settings(model=text.strip())
 
-    def _on_ai_model_combo_changed(self):
-        """DeepSeek 模型变化"""
+    def _on_ai_model_edit_changed(self):
+        """模型变化（LineEdit - 自定义模式）"""
         if self._ai_loading:
             return
-        if not self.ai_model_combo.isVisible():
-            return
-        save_ai_settings(model=self._get_current_model_value())
+        save_ai_settings(model=self.ai_model_edit.text().strip())
 
     def _get_current_model_value(self) -> str:
-        if self.ai_model_combo.isVisible():
-            return self.ai_model_combo.currentText().strip()
-        return self.ai_model_edit.text().strip()
+        """获取当前模型值"""
+        if self.ai_model_edit.isVisible():
+            return self.ai_model_edit.text().strip()
+        return self.ai_model_combo.currentText().strip()
 
     def _on_ai_prompt_changed(self):
         """系统提示词变化"""
@@ -411,10 +425,10 @@ class RuntimeAISection(QObject):
         """测试 AI 连接完成"""
         self._set_ai_test_loading(False)
         if success:
-            InfoBar.success("", message, parent=self._owner.window(), position=InfoBarPosition.TOP, duration=3000)
+            self._show_ai_infobar(message, success=True, duration=3000)
         else:
             logging.error("AI 连接测试失败: %s", message)
-            InfoBar.error("", message, parent=self._owner.window(), position=InfoBarPosition.TOP, duration=5000)
+            self._show_ai_infobar(message, success=False, duration=5000)
         save_ai_settings(enabled=self.ai_enabled_card.switchButton.isChecked())
 
     def _on_ai_test_thread_finished(self):

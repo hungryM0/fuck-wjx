@@ -5,35 +5,48 @@ import requests
 from typing import Optional, Dict, Any
 
 # AI 服务提供商配置
+# 注意: recommended_models 仅作为 UI 快捷选择建议,用户可以自由输入任意模型名
 AI_PROVIDERS = {
     "deepseek": {
         "label": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "recommended_models": ["deepseek-chat", "deepseek-reasoner"],
         "default_model": "deepseek-chat",
     },
     "qwen": {
         "label": "通义千问",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": ["qwen3-max", "qwen-flash", "qwen-plus", "qwen-turbo", "qwen-turbo-latest"],
-        "default_model": "qwen-flash",
+        "recommended_models": ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-long", "qwen-flash"],
+        "default_model": "qwen-turbo",
+    },
+    "siliconflow": {
+        "label": "硅基流动",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "recommended_models": ["deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3-VL-8B-Instruct", "PaddlePaddle/PaddleOCR-VL-1.5"],
+        "default_model": "deepseek-ai/DeepSeek-V3.2",
+    },
+    "volces": {
+        "label": "火山引擎",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "recommended_models": ["doubao-seed-1-8-251228", "glm-4-7-251222", "doubao-seed-1-6-251015", "doubao-seed-1-6-lite-251015", "doubao-seed-1-6-flash-250828", "doubao-seed-1-6-250615"],
+        "default_model": "doubao-seed-1-8-251228",
     },
     "openai": {
         "label": "ChatGPT",
         "base_url": "https://api.openai.com/v1",
-        "models": ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano"],
-        "default_model": "gpt-5-mini",
+        "recommended_models": ["gpt-5.2-2025-12-11", "gpt-5-2025-08-07", "gpt-5-mini-2025-08-07", "gpt-5-nano-2025-08-07", "gpt-4.1-2025-04-14", "chatgpt-4o-latest"],
+        "default_model": "gpt-5-mini-2025-08-07",
     },
     "gemini": {
         "label": "Gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "models": ["gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+        "recommended_models": ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
         "default_model": "gemini-3-flash-preview",
     },
     "custom": {
         "label": "自定义 (OpenAI 兼容)",
         "base_url": "",
-        "models": [],
+        "recommended_models": [],
         "default_model": "",
     },
 }
@@ -189,6 +202,8 @@ def generate_answer(question_title: str) -> str:
         provider_config = AI_PROVIDERS.get(provider, AI_PROVIDERS["openai"])
         base_url = provider_config["base_url"]
         model = config["model"] or provider_config["default_model"]
+        if provider == "siliconflow" and not model:
+            raise RuntimeError("硅基流动需要先配置模型名称")
 
     return _call_openai_compatible(base_url, api_key, model, question_title, system_prompt)
 
