@@ -19,5 +19,6 @@ Setup/
     
 # 运行环境
 __pycache__/
+*.pyc
 configs/
 logs/

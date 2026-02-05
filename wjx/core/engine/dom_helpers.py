@@ -2,6 +2,7 @@ import re
 from typing import List, Optional, Tuple
 
 from wjx.network.browser_driver import By, BrowserDriver
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 _TEXT_INPUT_ALLOWED_TYPES = {"", "text", "search", "tel", "number"}
@@ -39,14 +40,14 @@ def _driver_question_has_shared_text_input(question_div) -> bool:
         shared = question_div.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea")
         if shared:
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("dom_helpers._driver_question_has_shared_text_input shared", exc)
     try:
         keyword_elements = question_div.find_elements(By.CSS_SELECTOR, "input[id*='other'], textarea[id*='other']")
         if keyword_elements:
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("dom_helpers._driver_question_has_shared_text_input keyword", exc)
     try:
         text_blob = (question_div.text or "").strip()
     except Exception:
@@ -73,8 +74,8 @@ def _driver_question_looks_like_reorder(question_div) -> bool:
     try:
         if question_div.find_elements(By.CSS_SELECTOR, ".sortnum, .sortnum-sel"):
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("dom_helpers._driver_question_looks_like_reorder quick check", exc)
     try:
         # 仅作为兜底：需要同时满足“存在列表项”与“具备排序/拖拽特征”，避免误判普通题型
         has_list_items = bool(question_div.find_elements(By.CSS_SELECTOR, "ul li, ol li"))
@@ -174,8 +175,8 @@ def _count_choice_inputs_driver(question_div) -> Tuple[int, int]:
         try:
             if not ipt.is_displayed():
                 continue
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("dom_helpers._count_choice_inputs_driver is_displayed", exc)
         if input_type == "checkbox":
             checkbox_count += 1
         elif input_type == "radio":

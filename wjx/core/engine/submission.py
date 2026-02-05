@@ -10,6 +10,7 @@ from wjx.core.engine.runtime_control import _is_fast_mode, _sleep_with_stop
 from wjx.core.questions.utils import extract_text_from_element as _extract_text_from_element
 from wjx.network.browser_driver import By, BrowserDriver, NoSuchElementException
 from wjx.utils.app.config import SUBMIT_CLICK_SETTLE_DELAY, SUBMIT_INITIAL_DELAY
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
@@ -123,8 +124,8 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
                 break
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("submission.submit confirm dialog", exc)
 
 
 def _normalize_url_for_compare(value: str) -> str:

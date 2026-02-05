@@ -4,6 +4,7 @@ import time
 from typing import Any, Optional
 
 import wjx.core.state as state
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def _is_fast_mode() -> bool:
@@ -43,8 +44,8 @@ def _wait_if_paused(gui_instance: Optional[Any], stop_signal: Optional[threading
     try:
         if gui_instance and hasattr(gui_instance, "wait_if_paused"):
             gui_instance.wait_if_paused(stop_signal)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("runtime_control._wait_if_paused", exc)
 
 
 def _trigger_target_reached_stop(
@@ -88,8 +89,8 @@ def _trigger_target_reached_stop(
         try:
             root.after(0, _notify)
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("runtime_control._trigger_target_reached_stop root.after", exc)
     _notify()
 
 

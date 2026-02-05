@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import sys
 import time
@@ -18,6 +19,7 @@ from playwright.sync_api import (
 import base64
 
 from wjx.utils.app.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
+from wjx.utils.logging.log_utils import log_suppressed_exception
 from wjx.network.random_ip import (
     _normalize_proxy_address,
     get_proxy_source,
@@ -25,7 +27,8 @@ from wjx.network.random_ip import (
     PROXY_SOURCE_CUSTOM,
 )
 
-_PA = "MTgxNzAxMTk4MDg6dFdKNWhMRG9Id3JIZ1RraWowelk="
+# 默认代理账号密码（base64 编码的 "username:password"），允许环境变量覆盖以便部署时替换
+_PROXY_AUTH_B64 = "MTgxNzAxMTk4MDg6dFdKNWhMRG9Id3JIZ1RraWowelk="
 
 
 class NoSuchElementException(Exception):
@@ -119,8 +122,8 @@ class PlaywrightElement:
             try:
                 self._handle.scroll_into_view_if_needed()
                 self._handle.click()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("browser_driver.PlaywrightElement.click fallback", exc)
 
     def clear(self) -> None:
         try:
@@ -133,8 +136,8 @@ class PlaywrightElement:
                 "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); "
                 "el.dispatchEvent(new Event('change', {bubbles:true})); }"
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightElement.clear js fallback", exc)
 
     def send_keys(self, value: str) -> None:
         text = "" if value is None else str(value)
@@ -145,8 +148,8 @@ class PlaywrightElement:
             pass
         try:
             self._handle.type(text)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightElement.send_keys type fallback", exc)
 
     def find_element(self, by: str, value: str):
         selector = _build_selector(by, value)
@@ -213,8 +216,8 @@ class PlaywrightDriver:
         try:
             self._page.set_default_navigation_timeout(timeout)
             self._page.set_default_timeout(timeout)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightDriver.get set timeouts", exc)
 
         try:
             self._page.goto(url, wait_until=wait_until, timeout=timeout)
@@ -253,32 +256,32 @@ class PlaywrightDriver:
     def set_window_size(self, width: int, height: int) -> None:
         try:
             self._page.set_viewport_size({"width": width, "height": height})
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightDriver.set_window_size", exc)
 
     def refresh(self) -> None:
         try:
             self._page.reload(wait_until="domcontentloaded")
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightDriver.refresh", exc)
 
     def quit(self) -> None:
         try:
             self._page.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightDriver.quit page.close", exc)
         try:
             self._context.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightDriver.quit context.close", exc)
         try:
             self._browser.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightDriver.quit browser.close", exc)
         try:
             self._playwright.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.PlaywrightDriver.quit playwright.stop", exc)
 
 
 BrowserDriver = PlaywrightDriver
@@ -331,23 +334,23 @@ def graceful_terminate_process_tree(pids: Set[int], wait_seconds: float = 3.0) -
                 procs.append(cur)
                 try:
                     stack.extend(cur.children(recursive=False))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("browser_driver.graceful_terminate_process_tree children", exc)
         except Exception:
             continue
 
     for proc in procs:
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.graceful_terminate_process_tree terminate", exc)
 
     _, alive = psutil.wait_procs(procs, timeout=max(0.1, float(wait_seconds or 0.0)))
     for proc in alive:
         try:
             proc.kill()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("browser_driver.graceful_terminate_process_tree kill", exc)
     return len(procs)
 
 
@@ -370,8 +373,8 @@ def _collect_process_tree(root_pid: Optional[int]) -> Set[int]:
                 pids.add(int(child.pid))
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("browser_driver._collect_process_tree children", exc)
     return pids
 
 
@@ -433,12 +436,13 @@ def create_playwright_driver(
                         proxy_settings["username"] = parsed.username
                     if parsed.password:
                         proxy_settings["password"] = parsed.password
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("browser_driver.create_playwright_driver parse proxy", exc)
 
                 if get_proxy_source() in (PROXY_SOURCE_DEFAULT, PROXY_SOURCE_CUSTOM) and "username" not in proxy_settings:
                     try:
-                        decoded = base64.b64decode(_PA).decode("utf-8")
+                        encoded = os.environ.get("WJX_PROXY_AUTH_B64", _PROXY_AUTH_B64)
+                        decoded = base64.b64decode(encoded).decode("utf-8")
                         username, password = decoded.split(":", 1)
                         proxy_settings["username"] = username
                         proxy_settings["password"] = password
@@ -452,8 +456,8 @@ def create_playwright_driver(
                 try:
                     width, height = [int(x) for x in HEADLESS_WINDOW_SIZE.split(",")]
                     context_args["viewport"] = {"width": width, "height": height}
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("browser_driver.create_playwright_driver parse headless size", exc)
 
             context = browser_instance.new_context(**context_args)
             page = context.new_page()
@@ -473,9 +477,9 @@ def create_playwright_driver(
                     for pid in list(collected_pids):
                         collected_pids.update(_collect_process_tree(pid))
                     if not collected_pids:
-                        logging.warning("[Action Log] 未捕获浏览器主 PID，回退到差集依然为空")
-                except Exception:
-                    pass
+                        logging.warning("[Action Log] 未捕获浏览器主 PID,回退到差集依然为空")
+                except Exception as exc:
+                    log_suppressed_exception("browser_driver.create_playwright_driver collect pid fallback", exc)
 
             driver.browser_pids = collected_pids
             logging.debug("[Action Log] 捕获浏览器 PID: %s", sorted(collected_pids) if collected_pids else "无")
@@ -485,7 +489,7 @@ def create_playwright_driver(
             logging.warning("启动 %s 浏览器失败: %s", browser, exc)
             try:
                 pw.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("browser_driver.create_playwright_driver pw.stop", exc)
 
     raise RuntimeError(f"无法启动任何浏览器: {last_exc}")

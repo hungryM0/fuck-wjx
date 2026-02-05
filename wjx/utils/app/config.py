@@ -117,13 +117,12 @@ def _r(s: str) -> str:
     except Exception:
         return ""
 
-_CFG = {
-    "a": "aHR0cHM6Ly9zZXJ2aWNlLmlwemFuLmNvbS9jb3JlLWV4dHJhY3Q/bnVtPTEmbm89MjAyNjAxMTI1NzIzNzY0OTA4NzQmbWludXRlPTEmZm9ybWF0PWpzb24mcmVwZWF0PTEmcHJvdG9jb2w9MSZwb29sPW9yZGluYXJ5Jm1vZGU9YXV0aCZzZWNyZXQ9cGY3MDZ2azc3a2tubG8=",
-    "b": "aHR0cHM6Ly9ib3QuaHVuZ3J5bTAudG9w",
-    "c": "aHR0cHM6Ly9hcGktd2p4Lmh1bmdyeW0wLnRvcC9hcGkvY2FyZC92ZXJpZnk=",
-    "d": "aHR0cHM6Ly93anguaHVuZ3J5bTAudG9wL3N0YXR1cw==",
-    "e": "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0NoYXJsZXNQaWthY2h1L2ZyZWVwcm94eS9tYXN0ZXIvcHJveGllcy5qc29u",
-}
+# 编码后的默认端点（base64），保留原值以兼容历史配置。
+_DEFAULT_RANDOM_IP_API_B64 = "aHR0cHM6Ly9zZXJ2aWNlLmlwemFuLmNvbS9jb3JlLWV4dHJhY3Q/bnVtPTEmbm89MjAyNjAxMTI1NzIzNzY0OTA4NzQmbWludXRlPTEmZm9ybWF0PWpzb24mcmVwZWF0PTEmcHJvdG9jb2w9MSZwb29sPW9yZGluYXJ5Jm1vZGU9YXV0aCZzZWNyZXQ9cGY3MDZ2azc3a2tubG8="
+_DEFAULT_CONTACT_API_B64 = "aHR0cHM6Ly9ib3QuaHVuZ3J5bTAudG9w"
+_DEFAULT_CARD_VALIDATION_B64 = "aHR0cHM6Ly9hcGktd2p4Lmh1bmdyeW0wLnRvcC9hcGkvY2FyZC92ZXJpZnk="
+_DEFAULT_STATUS_ENDPOINT_B64 = "aHR0cHM6Ly93anguaHVuZ3J5bTAudG9wL3N0YXR1cw=="
+_DEFAULT_PIKACHU_PROXY_API_B64 = "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL0NoYXJsZXNQaWthY2h1L2ZyZWVwcm94eS9tYXN0ZXIvcHJveGllcy5qc29u"
 
 # ==================== 浏览器配置 ====================
 # 浏览器选择优先级（默认优先 Edge，不存在则回落到 Chrome/内置 Chromium）
@@ -193,13 +192,13 @@ PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "https://www.wjx.cn"
 PROXY_HEALTH_CHECK_TIMEOUT = 15
 _RANDOM_IP_API_ENV_KEY = "RANDOM_IP_API_URL"
-PROXY_REMOTE_URL = _resolve_env_value(_RANDOM_IP_API_ENV_KEY, _r(_CFG["a"]))
+PROXY_REMOTE_URL = _resolve_env_value(_RANDOM_IP_API_ENV_KEY, _r(_DEFAULT_RANDOM_IP_API_B64))
 
 # ==================== API 端点配置 ====================
-CONTACT_API_URL = _resolve_env_value("CONTACT_API_URL", _r(_CFG["b"]))
-CARD_VALIDATION_ENDPOINT = _resolve_env_value("CARD_VALIDATION_ENDPOINT", _r(_CFG["c"]))
-STATUS_ENDPOINT = _resolve_env_value("STATUS_ENDPOINT", _r(_CFG["d"]))
-PIKACHU_PROXY_API = _resolve_env_value("PIKACHU_PROXY_API", _r(_CFG["e"]))
+CONTACT_API_URL = _resolve_env_value("CONTACT_API_URL", _r(_DEFAULT_CONTACT_API_B64))
+CARD_VALIDATION_ENDPOINT = _resolve_env_value("CARD_VALIDATION_ENDPOINT", _r(_DEFAULT_CARD_VALIDATION_B64))
+STATUS_ENDPOINT = _resolve_env_value("STATUS_ENDPOINT", _r(_DEFAULT_STATUS_ENDPOINT_B64))
+PIKACHU_PROXY_API = _resolve_env_value("PIKACHU_PROXY_API", _r(_DEFAULT_PIKACHU_PROXY_API_B64))
 
 
 # ==================== 时长控制配置 ====================

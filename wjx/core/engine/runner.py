@@ -42,6 +42,7 @@ from wjx.utils.app.config import (
     POST_SUBMIT_URL_MAX_WAIT,
     POST_SUBMIT_URL_POLL_INTERVAL,
 )
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=None):
@@ -83,8 +84,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 if pid_set:
                     pids.update(int(p) for p in pid_set)
                 gui_instance._launched_browser_pids.update(pids)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("runner._register_driver collect pids", exc)
 
     def _unregister_driver(instance: BrowserDriver) -> None:
         if gui_instance and hasattr(gui_instance, 'active_drivers'):
@@ -102,8 +103,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     pids.update(int(p) for p in pid_set)
                 for pid in pids:
                     gui_instance._launched_browser_pids.discard(int(pid))
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("runner._unregister_driver cleanup pids", exc)
 
     def _dispose_driver() -> None:
         nonlocal driver, sem_acquired
@@ -113,23 +114,23 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             _unregister_driver(driver)
             try:
                 driver.quit()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("runner._dispose_driver driver.quit", exc)
             driver = None
             # 等待已知 PID 自行退出，避免 taskkill
             if pids_to_kill:
                 try:
                     graceful_terminate_process_tree(pids_to_kill, wait_seconds=3.0)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("runner._dispose_driver terminate process tree", exc)
         # 释放信号量
         if sem_acquired:
             try:
                 browser_sem.release()
                 sem_acquired = False
                 logging.debug("已释放浏览器信号量")
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("runner._dispose_driver release semaphore", exc)
 
     while True:
         _wait_if_paused(gui_instance, stop_signal)
@@ -357,8 +358,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     if duration_control.is_survey_completion_page(driver):
                         completion_detected = True
                         break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("runner.wait_completion is_survey_completion_page", exc)
                 time.sleep(extra_poll)
 
             if not completion_detected and not stop_signal.is_set():

@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Tuple, Union
 
 from wjx.network.browser_driver import By, BrowserDriver
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def weighted_index(probabilities: List[float]) -> int:
@@ -143,12 +144,12 @@ def fill_option_additional_text(driver: BrowserDriver, question_number: int, opt
         option_element = option_elements[option_index_zero_based]
         try:
             candidate_inputs.extend(option_element.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='search'], textarea"))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("questions.utils.fill_option_additional_text inputs", exc)
         try:
             candidate_inputs.extend(option_element.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea"))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("questions.utils.fill_option_additional_text other inputs", exc)
     if not candidate_inputs:
         try:
             candidate_inputs = question_div.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea")
@@ -167,12 +168,12 @@ def fill_option_additional_text(driver: BrowserDriver, question_number: int, opt
             continue
         try:
             smooth_scroll_to_element(driver, input_element, 'center')
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("questions.utils.fill_option_additional_text scroll", exc)
         try:
             input_element.clear()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("questions.utils.fill_option_additional_text clear", exc)
         try:
             input_element.send_keys(text)
             time.sleep(0.05)
@@ -189,8 +190,8 @@ def smooth_scroll_to_element(driver: BrowserDriver, element, block: str = 'cente
     if not full_simulation_active:
         try:
             driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}', behavior:'auto'}});", element)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("questions.utils.smooth_scroll_to_element quick scroll", exc)
         return
     
     try:
@@ -231,8 +232,8 @@ def smooth_scroll_to_element(driver: BrowserDriver, element, block: str = 'cente
     except Exception:
         try:
             driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}'}});", element)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("questions.utils.smooth_scroll_to_element fallback", exc)
 
 
 def normalize_single_like_prob_config(prob_config: Union[List[float], int, float, None], option_count: int) -> Union[List[float], int]:

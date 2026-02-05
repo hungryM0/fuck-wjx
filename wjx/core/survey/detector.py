@@ -8,6 +8,7 @@ import threading
 from typing import Optional, List, Tuple
 
 from wjx.network.browser_driver import BrowserDriver, By, NoSuchElementException
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def _extract_text_from_element(element) -> str:
@@ -66,8 +67,8 @@ def try_click_start_answer_button(
                     already_reported = True
                 try:
                     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("survey.detector.try_click_start_answer_button scroll", exc)
                 for click_method in (
                     lambda: element.click(),
                     lambda: driver.execute_script("arguments[0].click();", element),
@@ -130,8 +131,8 @@ def dismiss_resume_dialog_if_present(
                     clicked_once = True
                 try:
                     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("survey.detector.dismiss_resume_dialog_if_present scroll", exc)
                 for click_method in (
                     lambda: button.click(),
                     lambda: driver.execute_script("arguments[0].click();", button),

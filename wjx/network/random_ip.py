@@ -28,6 +28,7 @@ from wjx.utils.app.config import (
     get_card_token_secret,
 )
 from wjx.utils.logging.log_utils import (
+    log_suppressed_exception,
     log_popup_confirm,
     log_popup_error,
     log_popup_info,
@@ -125,8 +126,8 @@ def get_random_ip_limit() -> int:
         limit = int(limit)
         if limit > 0:
             return limit
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("random_ip.get_random_ip_limit", exc)
     return _DEFAULT_RANDOM_IP_FREE_LIMIT
 
 
@@ -176,8 +177,8 @@ def _handle_area_quality_failure(stop_signal: Optional[threading.Event] = None) 
         try:
             if not stop_signal.is_set():
                 stop_signal.set()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("random_ip._handle_area_quality_failure set stop_signal", exc)
 
 
 def _apply_area_to_proxy_url(url: str, area_code: Optional[str]) -> str:
@@ -454,8 +455,8 @@ def _mask_proxy_for_log(proxy_address: Optional[str]) -> str:
         host_port = _format_host_port(parsed.hostname or "", parsed.port)
         if host_port:
             return host_port
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("random_ip._mask_proxy_for_log parse proxy", exc)
     raw = text
     if "://" in raw:
         raw = raw.split("://", 1)[1]
@@ -911,8 +912,8 @@ def handle_random_ip_submission(gui: Any, stop_signal: Optional[threading.Event]
     logging.info(f"随机IP提交计数: {ip_count}/{limit}")
     try:
         _schedule_on_gui_thread(gui, lambda: refresh_ip_counter_display(gui))
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("random_ip.handle_random_ip_submission refresh counter", exc)
     # 递增后再次检查是否达到限制
     if ip_count >= limit:
         logging.warning(f"随机IP提交已达{limit}份，停止任务并弹出卡密验证窗口")

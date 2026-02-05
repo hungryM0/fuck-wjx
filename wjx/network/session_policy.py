@@ -3,6 +3,7 @@ from typing import Any, Optional, Tuple
 
 import wjx.core.state as state
 from wjx.network.random_ip import _fetch_new_proxy_batch, _mask_proxy_for_log
+from wjx.utils.logging.log_utils import log_suppressed_exception
 from wjx.utils.io.load_save import _select_user_agent_from_keys
 
 
@@ -20,8 +21,8 @@ def _record_bad_proxy_and_maybe_pause(gui_instance: Optional[Any]) -> bool:
         try:
             if gui_instance and hasattr(gui_instance, "pause_run"):
                 gui_instance.pause_run(reason)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("session_policy._record_bad_proxy_and_maybe_pause pause_run", exc)
         return True
     return False
 

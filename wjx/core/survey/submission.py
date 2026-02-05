@@ -14,6 +14,7 @@ from wjx.utils.app.config import (
     POST_SUBMIT_URL_MAX_WAIT,
     POST_SUBMIT_URL_POLL_INTERVAL,
 )
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def _extract_text_from_element(element) -> str:
@@ -53,8 +54,8 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
             }
             """
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("survey.submission._click_next_page_button unhide", exc)
     locator_candidates = [
         (By.CSS_SELECTOR, "#divNext"),
         (By.XPATH, '//*[@id="ctlNext"]'),
@@ -85,8 +86,8 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
                 continue
             try:
                 driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("survey.submission._click_next_page_button scroll", exc)
             for click_method in (
                 lambda: element.click(),
                 lambda: driver.execute_script("arguments[0].click();", element),
@@ -139,8 +140,8 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
         )
         if executed:
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("survey.submission._click_next_page_button js fallback", exc)
     return False
 
 
@@ -264,8 +265,8 @@ def submit(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None,
                 break
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("survey.submission.submit confirm dialog", exc)
 
 
 def _normalize_url_for_compare(value: str) -> str:

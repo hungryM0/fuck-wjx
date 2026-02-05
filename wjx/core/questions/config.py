@@ -10,6 +10,7 @@ from wjx.core.questions.utils import (
     resolve_prob_config as _resolve_prob_config,
 )
 from wjx.utils.app.config import DEFAULT_FILL_TEXT, LOCATION_QUESTION_LABEL, QUESTION_TYPE_LABELS
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def _infer_option_count(entry: "QuestionEntry") -> int:
@@ -39,23 +40,23 @@ def _infer_option_count(entry: "QuestionEntry") -> int:
     try:
         if entry.option_count and entry.option_count > 0:
             return int(entry.option_count)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("questions.config._infer_option_count option_count", exc)
     try:
         if entry.custom_weights and len(entry.custom_weights) > 0:
             return len(entry.custom_weights)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("questions.config._infer_option_count custom_weights", exc)
     try:
         if isinstance(entry.probabilities, (list, tuple)) and len(entry.probabilities) > 0:
             return len(entry.probabilities)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("questions.config._infer_option_count probabilities", exc)
     try:
         if entry.texts and len(entry.texts) > 0:
             return len(entry.texts)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("questions.config._infer_option_count texts", exc)
     if getattr(entry, "question_type", "") in ("scale", "score"):
         return 5
     return 0

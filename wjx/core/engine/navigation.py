@@ -9,6 +9,7 @@ from wjx.core.questions.utils import (
     smooth_scroll_to_element as _smooth_scroll_to_element,
 )
 from wjx.network.browser_driver import By, BrowserDriver
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def try_click_start_answer_button(
@@ -51,8 +52,8 @@ def try_click_start_answer_button(
                     already_reported = True
                 try:
                     _smooth_scroll_to_element(driver, element, 'center')
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("navigation.try_click_start_answer_button scroll", exc)
                 for click_method in (
                     lambda: element.click(),
                     lambda: driver.execute_script("arguments[0].click();", element),
@@ -115,8 +116,8 @@ def dismiss_resume_dialog_if_present(
                     clicked_once = True
                 try:
                     _smooth_scroll_to_element(driver, button, 'center')
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("navigation.dismiss_resume_dialog_if_present scroll", exc)
                 for click_method in (
                     lambda: button.click(),
                     lambda: driver.execute_script("arguments[0].click();", button),
@@ -142,12 +143,12 @@ def _human_scroll_after_question(driver: BrowserDriver) -> None:
         try:
             page.mouse.wheel(0, distance)
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("navigation._human_scroll_after_question mouse wheel", exc)
     try:
         driver.execute_script("window.scrollBy(0, arguments[0]);", distance)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("navigation._human_scroll_after_question script", exc)
 
 
 def _click_next_page_button(driver: BrowserDriver) -> bool:
@@ -171,8 +172,8 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
             }
             """
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("navigation._click_next_page_button unhide", exc)
     locator_candidates = [
         (By.CSS_SELECTOR, "#divNext"),
         (By.XPATH, '//*[@id="ctlNext"]'),
@@ -203,18 +204,18 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
                 continue
             try:
                 _smooth_scroll_to_element(driver, element, 'center')
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("navigation._click_next_page_button scroll", exc)
             try:
                 element.click()
                 return True
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("navigation._click_next_page_button click", exc)
             try:
                 driver.execute_script("arguments[0].click();", element)
                 return True
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("navigation._click_next_page_button js click", exc)
     try:
         executed = driver.execute_script(
             """
@@ -226,6 +227,6 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
         )
         if executed:
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("navigation._click_next_page_button js fallback", exc)
     return False

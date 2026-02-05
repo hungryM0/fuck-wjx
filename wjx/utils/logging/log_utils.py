@@ -18,6 +18,23 @@ ORIGINAL_EXCEPTHOOK = sys.excepthook
 _popup_handler: Optional[Callable[[str, str, str], Any]] = None
 
 
+def log_suppressed_exception(
+    context: str,
+    exc: Optional[BaseException] = None,
+    *,
+    level: int = logging.DEBUG,
+) -> None:
+    """记录被吞掉的异常，默认只在调试级别输出。"""
+    try:
+        if exc is None:
+            logging.log(level, "[Suppressed] %s", context)
+        else:
+            logging.log(level, "[Suppressed] %s: %s", context, exc, exc_info=True)
+    except Exception:
+        # 记录日志失败不应影响主流程
+        pass
+
+
 class StreamToLogger:
     def __init__(self, logger: logging.Logger, level: int, stream=None):
         self.logger = logger
