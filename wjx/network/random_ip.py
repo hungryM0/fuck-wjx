@@ -831,7 +831,6 @@ def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
         return False, None
 
     token = str(data.get("token") or "").strip()
-    quota_raw = data.get("quota")
     if not token:
         logging.error("卡密验证响应缺少 token")
         return False, None
@@ -842,11 +841,7 @@ def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
         logging.error(f"卡密验证失败：JWT 无效（{exc}）")
         return False, None
 
-    quota = payload_data.get("quota", quota_raw)
-    try:
-        quota_val = int(quota) if quota is not None else _PREMIUM_RANDOM_IP_LIMIT
-    except Exception:
-        quota_val = _PREMIUM_RANDOM_IP_LIMIT
+    quota_val = _PREMIUM_RANDOM_IP_LIMIT
 
     logging.info(f"卡密 {masked} 验证通过，额度 {quota_val}")
     return True, quota_val

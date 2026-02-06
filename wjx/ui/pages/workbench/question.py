@@ -182,6 +182,36 @@ class QuestionWizardDialog(QDialog):
             return [list(uniform) for _ in range(rows)]
         return [[1.0] * columns for _ in range(rows)]
 
+    @staticmethod
+    def _to_float(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
+    def _resolve_slider_bounds(self, idx: int, entry: QuestionEntry) -> List[int]:
+        min_val = 0.0
+        max_val = 10.0
+
+        if idx < len(self.info):
+            question_info = self.info[idx] or {}
+            min_val = self._to_float(question_info.get("slider_min"), min_val)
+            raw_max = question_info.get("slider_max")
+            max_val = self._to_float(raw_max, 100.0 if raw_max is None else max_val)
+
+        if max_val <= min_val:
+            max_val = min_val + 100.0
+
+        if isinstance(entry.custom_weights, (list, tuple)) and entry.custom_weights:
+            current = self._to_float(entry.custom_weights[0], min_val)
+            max_val = max(max_val, current)
+
+        min_int = int(round(min_val))
+        max_int = int(round(max_val))
+        if max_int <= min_int:
+            max_int = min_int + 1
+        return [min_int, max_int]
+
     def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], parent=None):
         super().__init__(parent)
         self.setWindowTitle("配置向导")
@@ -458,14 +488,25 @@ class QuestionWizardDialog(QDialog):
             else:
                 # 选择题：显示滑块
                 self._has_content = True
+                slider_min, slider_max = (0, 100)
                 if entry.question_type == "slider":
-                    slider_hint = BodyLabel("滑块题：此处数值代表填写时的目标值（不是概率）", card)
+                    slider_min, slider_max = self._resolve_slider_bounds(idx, entry)
+                if entry.question_type == "slider":
+                    slider_hint = BodyLabel(
+                        f"滑块题：此处数值代表填写时的目标值（不是概率），已识别范围 {slider_min}~{slider_max}",
+                        card,
+                    )
                     slider_hint.setWordWrap(True)
                     slider_hint.setStyleSheet("font-size: 12px;")
                     _apply_label_color(slider_hint, "#666666", "#bfbfbf")
                     card_layout.addWidget(slider_hint)
                 options = max(1, int(entry.option_count or 1))
-                default_weight = 50 if entry.question_type == "multiple" else 1
+                if entry.question_type == "multiple":
+                    default_weight = 50
+                elif entry.question_type == "slider":
+                    default_weight = int(round((slider_min + slider_max) / 2))
+                else:
+                    default_weight = 1
                 weights = list(entry.custom_weights or [])
                 if len(weights) < options:
                     weights += [default_weight] * (options - len(weights))
@@ -494,7 +535,7 @@ class QuestionWizardDialog(QDialog):
 
                     slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
                     if entry.question_type == "slider":
-                        slider.setRange(0, 10)
+                        slider.setRange(slider_min, slider_max)
                     else:
                         slider.setRange(0, 100)
                     slider.setValue(int(min(slider.maximum(), max(slider.minimum(), weights[opt_idx]))))

@@ -204,7 +204,10 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
                 status_fetcher=self._status_fetcher or get_status,
                 status_formatter=self._status_formatter or _format_status_payload,
             )
-            dlg.exec()
+            result = dlg.exec()
+            sent_type = getattr(getattr(dlg, "form", None), "_current_message_type", "")
+            if result == QDialog.DialogCode.Accepted and sent_type == "白嫖卡密（？）":
+                self.accept()
         except Exception:
             webbrowser.open(ISSUE_FEEDBACK_URL)
 
