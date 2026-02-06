@@ -2,7 +2,16 @@ import os
 import sys
 
 
+def _get_project_root() -> str:
+    """获取项目根目录（开发环境：Fuck wjx/；打包后：可执行文件目录）"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    # 开发环境：wjx/utils/app/runtime_paths.py -> 向上4层到项目根
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
 def _get_runtime_directory() -> str:
+    """获取运行时目录（wjx/ 包目录）- 已废弃，建议使用 _get_project_root()"""
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

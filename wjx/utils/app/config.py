@@ -183,8 +183,9 @@ POST_SUBMIT_URL_POLL_INTERVAL = 0.1
 # 判定提交成功后，关闭浏览器实例前的缓冲等待（秒）
 # 目的：避免过早关闭页面导致提交请求尚未发送/尚未完成就被中断。
 POST_SUBMIT_CLOSE_GRACE_SECONDS = 1.2
-# 停止操作的强制等待时间（秒）
-STOP_FORCE_WAIT_SECONDS = 1.5
+# 停止操作的强制等待时间（秒）- 浏览器cleanup延迟启动时间
+# 降低此值可减少窗口关闭到重新打开的间隔
+STOP_FORCE_WAIT_SECONDS = 0.5
 
 # ==================== 代理配置 ====================
 PROXY_MAX_PROXIES = 80

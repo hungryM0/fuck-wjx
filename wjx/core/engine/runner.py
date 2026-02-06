@@ -23,7 +23,6 @@ from wjx.core.engine.runtime_control import (
 )
 from wjx.core.engine.submission import _is_device_quota_limit_page, _normalize_url_for_compare
 from wjx.core.stats.collector import stats_collector
-from wjx.core.stats.persistence import save_stats
 from wjx.network.browser_driver import (
     BrowserDriver,
     ProxyConnectionError,
@@ -270,14 +269,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         logging.info(
                             f"[OK/Quota] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
-                        # 记录统计并保存
+                        # 记录统计（不立即保存文件）
                         stats_collector.record_submission_success()
-                        try:
-                            current_stats = stats_collector.get_current_stats()
-                            if current_stats:
-                                save_stats(current_stats)
-                        except Exception:
-                            pass
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
                             trigger_target_stop = True
@@ -338,6 +331,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
 
                 if aliyun_detected:
                     driver_had_error = True
+                    # 触发智能验证，标记为失败
+                    _handle_submission_failure(stop_signal)
                     _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
@@ -345,6 +340,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 if not stop_signal.is_set() and _submission_blocked_by_security_check(driver):
                     driver_had_error = True
                     logging.warning("提交后检测到安全校验拦截提示，触发全局暂停")
+                    # 触发智能验证，标记为失败
+                    _handle_submission_failure(stop_signal)
                     _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
@@ -373,6 +370,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     if _submission_blocked_by_security_check(driver):
                         driver_had_error = True
                         logging.warning("提交后等待完成页期间命中安全校验提示，触发全局暂停")
+                        # 触发智能验证，标记为失败
+                        _handle_submission_failure(stop_signal)
                         _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                         break
                     time.sleep(poll_interval)
@@ -391,6 +390,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     except AliyunCaptchaBypassError:
                         driver_had_error = True
                         logging.warning("提交后未进入完成页且检测到阿里云智能验证，触发全局暂停")
+                        # 触发智能验证，标记为失败
+                        _handle_submission_failure(stop_signal)
                         _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                         break
                     except Exception as exc:
@@ -409,14 +410,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         logging.info(
                             f"[OK] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
-                        # 记录统计并保存
+                        # 记录统计（不立即保存文件）
                         stats_collector.record_submission_success()
-                        try:
-                            current_stats = stats_collector.get_current_stats()
-                            if current_stats:
-                                save_stats(current_stats)
-                        except Exception:
-                            pass
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
                             trigger_target_stop = True
@@ -437,6 +432,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 break
         except AliyunCaptchaBypassError:
             driver_had_error = True
+            # 触发智能验证，标记为失败
+            _handle_submission_failure(stop_signal)
             _handle_aliyun_captcha_detected(gui_instance, stop_signal)
             break
         except AIRuntimeError as exc:
@@ -494,6 +491,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     aliyun_detected = False
                 if aliyun_detected:
                     driver_had_error = True
+                    # 触发智能验证，标记为失败
+                    _handle_submission_failure(stop_signal)
                     _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
@@ -520,14 +519,8 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         logging.info(
                             f"[OK] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
-                        # 记录统计并保存
+                        # 记录统计（不立即保存文件）
                         stats_collector.record_submission_success()
-                        try:
-                            current_stats = stats_collector.get_current_stats()
-                            if current_stats:
-                                save_stats(current_stats)
-                        except Exception:
-                            pass
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
                             trigger_target_stop = True

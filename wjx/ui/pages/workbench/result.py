@@ -59,10 +59,6 @@ class ResultPage(QWidget):
         self.history_combo.setMinimumWidth(200)
         header.addWidget(self.history_combo)
 
-        # 刷新按钮
-        self.refresh_btn = PushButton("刷新", self, FluentIcon.SYNC)
-        header.addWidget(self.refresh_btn)
-
         # 导出按钮
         self.export_btn = PushButton("导出统计", self, FluentIcon.SAVE)
         header.addWidget(self.export_btn)
@@ -86,10 +82,10 @@ class ResultPage(QWidget):
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll, 1)
 
-        # 占位提示
-        self.placeholder = BodyLabel("暂无统计数据，开始执行任务后将在此显示统计信息", self)
-        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll_layout.addWidget(self.placeholder)
+        # 初始占位提示
+        placeholder = BodyLabel("暂无统计数据，开始执行任务后将在此显示统计信息", self)
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scroll_layout.addWidget(placeholder)
         self.scroll_layout.addStretch(1)
 
     def _build_overview_card(self) -> CardWidget:
@@ -273,7 +269,6 @@ class ResultPage(QWidget):
         return table
 
     def _bind_events(self) -> None:
-        self.refresh_btn.clicked.connect(self.refresh_stats)
         self.export_btn.clicked.connect(self._on_export)
         self.history_combo.currentIndexChanged.connect(self._on_history_selected)
 
@@ -285,9 +280,13 @@ class ResultPage(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._refresh_timer.start()
-        self.refresh_stats()
+        # 先加载历史列表
         self._load_history_list()
+        # 再刷新当前统计（仅当选中"当前会话"时）
+        if self.history_combo.currentIndex() <= 0:
+            self.refresh_stats()
+        # 最后启动定时器
+        self._refresh_timer.start()
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
@@ -322,28 +321,22 @@ class ResultPage(QWidget):
 
     def _update_question_cards(self, stats: SurveyStats) -> None:
         """更新题目统计卡片"""
-        # 清除旧卡片（但保留 placeholder）
+        # 清除所有旧内容
         while self.scroll_layout.count() > 0:
             item = self.scroll_layout.takeAt(0)
-            widget = item.widget() if item else None
-            if widget and widget is not self.placeholder:
+            widget = item.widget()
+            if widget:
                 widget.deleteLater()
 
         self._question_cards.clear()
 
         if not stats.questions:
-            # 确保 placeholder 存在且可见
-            if not self.placeholder or not self.placeholder.parent():
-                self.placeholder = BodyLabel("暂无统计数据，开始执行任务后将在此显示统计信息", self)
-                self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.placeholder.show()
-            self.scroll_layout.addWidget(self.placeholder)
+            # 重新创建 placeholder
+            placeholder = BodyLabel("暂无统计数据，开始执行任务后将在此显示统计信息", self)
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.scroll_layout.addWidget(placeholder)
             self.scroll_layout.addStretch(1)
             return
-
-        # 隐藏 placeholder（如果存在）
-        if self.placeholder and self.placeholder.parent():
-            self.placeholder.hide()
 
         # 按题号排序添加卡片
         for q_num in sorted(stats.questions.keys()):
@@ -387,34 +380,95 @@ class ResultPage(QWidget):
 
     def _load_history_list(self) -> None:
         """加载历史统计列表"""
-        self.history_combo.clear()
-        self.history_combo.addItem("当前会话")
+        # 临时断开信号连接，避免在填充列表时触发回调
         try:
+            self.history_combo.currentIndexChanged.disconnect(self._on_history_selected)
+        except:
+            pass  # 如果没有连接，忽略错误
+        
+        try:
+            self.history_combo.clear()
+            self.history_combo.addItem("当前会话")
+            self.history_combo.setItemData(0, None)  # 明确设置第一项的 data 为 None
+            
             files = list_stats_files()
-            for path in files[:20]:  # 最多显示20条
+            print(f"[DEBUG] 找到 {len(files)} 个统计文件")
+            for idx, path in enumerate(files[:20], start=1):  # 最多显示20条，从索引1开始
                 filename = os.path.basename(path)
-                self.history_combo.addItem(filename, path)
-        except Exception:
-            pass
+                self.history_combo.addItem(filename)
+                self.history_combo.setItemData(idx, path)  # 单独设置 userData
+                print(f"[DEBUG] 添加项: index={idx}, {filename} -> {path}")
+        except Exception as e:
+            print(f"[DEBUG] 加载历史列表失败: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # 重新连接信号
+            self.history_combo.currentIndexChanged.connect(self._on_history_selected)
 
     def _on_history_selected(self, index: int) -> None:
         """选择历史记录"""
+        print(f"[DEBUG] 选择历史记录，index={index}")
+        
+        # 选择"当前会话"，刷新当前统计
         if index <= 0:
+            print(f"[DEBUG] 刷新当前会话")
             self.refresh_stats()
             return
+        
+        # 获取选中文件的路径
         path = self.history_combo.itemData(index)
-        if path:
-            try:
-                stats = load_stats(path)
-                if stats:
-                    self._current_stats = stats
-                    self._update_overview(stats)
-                    self._update_question_cards(stats)
-            except Exception as exc:
-                InfoBar.error(
+        print(f"[DEBUG] 文件路径: {path}")
+        
+        if not path:
+            InfoBar.warning(
+                "",
+                f"未找到文件路径 (index={index})",
+                parent=self.window(),
+                position=InfoBarPosition.TOP,
+                duration=2000,
+            )
+            return
+            
+        try:
+            # 加载统计文件
+            stats = load_stats(path)
+            if not stats:
+                InfoBar.warning(
                     "",
-                    f"加载失败: {exc}",
+                    "文件加载失败或数据为空",
                     parent=self.window(),
                     position=InfoBarPosition.TOP,
                     duration=2000,
                 )
+                return
+            
+            # 验证数据
+            if not hasattr(stats, 'total_submissions'):
+                InfoBar.error(
+                    "",
+                    "数据格式错误",
+                    parent=self.window(),
+                    position=InfoBarPosition.TOP,
+                    duration=2000,
+                )
+                return
+                
+            # 更新界面
+            self._current_stats = stats
+            self._update_overview(stats)
+            self._update_question_cards(stats)
+            
+            # 强制重绘界面
+            self.update()
+            
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            InfoBar.error(
+                "",
+                f"加载失败: {str(exc)[:50]}",
+                parent=self.window(),
+                position=InfoBarPosition.TOP,
+                duration=3000,
+            )

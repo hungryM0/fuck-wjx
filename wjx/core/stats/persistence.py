@@ -8,14 +8,14 @@ from typing import List, Optional
 from urllib.parse import urlparse
 
 from wjx.core.stats.models import OptionStats, QuestionStats, SurveyStats
-from wjx.utils.app.runtime_paths import _get_runtime_directory
+from wjx.utils.app.runtime_paths import _get_project_root
 
 STATS_DIR_NAME = "stats"
 
 
 def _ensure_stats_dir() -> str:
-    """确保统计目录存在"""
-    base = _get_runtime_directory()
+    """确保统计目录存在（项目根目录下的 stats/）"""
+    base = _get_project_root()
     stats_dir = os.path.join(base, STATS_DIR_NAME)
     os.makedirs(stats_dir, exist_ok=True)
     return stats_dir
