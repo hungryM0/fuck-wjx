@@ -29,7 +29,7 @@ class ResultPage(QWidget):
         developing_label.setStyleSheet("font-size: 16px;")
         card_layout.addWidget(developing_label)
 
-        tip_label = BodyLabel("后续会在这里展示运行结果与统计信息", card)
+        tip_label = BodyLabel("后续会在这里展示运行结果与信度统计信息", card)
         tip_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         tip_label.setStyleSheet("font-size: 12px;")
         card_layout.addWidget(tip_label)
