@@ -492,10 +492,7 @@ class QuestionWizardDialog(QDialog):
                 if entry.question_type == "slider":
                     slider_min, slider_max = self._resolve_slider_bounds(idx, entry)
                 if entry.question_type == "slider":
-                    slider_hint = BodyLabel(
-                        f"滑块题：此处数值代表填写时的目标值（不是概率），已识别范围 {slider_min}~{slider_max}",
-                        card,
-                    )
+                    slider_hint = BodyLabel("滑块题：此处数值代表填写时的目标值（不是概率）", card)
                     slider_hint.setWordWrap(True)
                     slider_hint.setStyleSheet("font-size: 12px;")
                     _apply_label_color(slider_hint, "#666666", "#bfbfbf")
@@ -893,7 +890,7 @@ class QuestionAddDialog(QDialog):
         is_matrix = q_type == "matrix"
         is_order = q_type == "order"
 
-        self.strategy_row_widget.setVisible(not is_text and not is_slider and not is_matrix and not is_order)
+        self.strategy_row_widget.setVisible(not is_text and not is_matrix and not is_order)
         self.row_count_widget.setVisible(is_matrix)
         self.matrix_strategy_widget.setVisible(is_matrix)
         self.option_label.setText("列数：" if is_matrix else "选项数量：")
@@ -1145,8 +1142,10 @@ class QuestionAddDialog(QDialog):
             is_multiple = q_type == "multiple"
             is_slider = q_type == "slider"
             strategy = self._resolve_strategy()
-            if is_slider:
-                hint_text = "滑块题：此处数值代表填写时的目标值，会做小幅抖动避免每份相同（默认 0-10）"
+            if is_slider and strategy == "random":
+                hint_text = "滑块题：当前为完全随机，每次会在 0-100 范围内随机填写"
+            elif is_slider:
+                hint_text = "滑块题：此处数值代表填写时的目标值，会做小幅抖动避免每份相同（默认 0-100）"
             elif strategy == "random":
                 hint_text = "当前为完全随机，切换为自定义配比可编辑。"
             elif is_multiple:
@@ -1161,7 +1160,7 @@ class QuestionAddDialog(QDialog):
             card_layout.addWidget(hint)
 
             count = 1 if is_slider else option_count
-            default_weight = 5 if is_slider else (50 if is_multiple else 1)
+            default_weight = 50 if is_slider else (50 if is_multiple else 1)
             self._ensure_slider_values(count, default_weight)
 
             sliders_container = QWidget(card)
@@ -1188,7 +1187,7 @@ class QuestionAddDialog(QDialog):
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, opt_widget)
                 if is_slider:
-                    slider.setRange(0, 10)
+                    slider.setRange(0, 100)
                 else:
                     slider.setRange(0, 100)
                 slider.setValue(int(min(slider.maximum(), max(slider.minimum(), self._slider_values[idx]))))
@@ -1216,7 +1215,7 @@ class QuestionAddDialog(QDialog):
 
                 sliders_layout.addWidget(opt_widget)
 
-            if not is_slider and strategy == "random":
+            if strategy == "random":
                 sliders_container.setEnabled(False)
             card_layout.addWidget(sliders_container)
 
@@ -1282,13 +1281,13 @@ class QuestionAddDialog(QDialog):
                 question_num=str(self._entry_index),
             )
 
-        strategy = "custom" if q_type == "slider" else self._resolve_strategy()
+        strategy = self._resolve_strategy()
         count = 1 if q_type == "slider" else option_count
-        default_weight = 5 if q_type == "slider" else (50 if q_type == "multiple" else 1)
+        default_weight = 50 if q_type == "slider" else (50 if q_type == "multiple" else 1)
         self._ensure_slider_values(count, default_weight)
         custom_weights = None
         if strategy == "custom":
-            custom_weights = [float(max(0, min(10 if q_type == "slider" else 100, v))) for v in self._slider_values[:count]]
+            custom_weights = [float(max(0, min(100, v))) for v in self._slider_values[:count]]
             if q_type == "slider":
                 custom_weights = [custom_weights[0] if custom_weights else 50.0]
                 option_count = 1

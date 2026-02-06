@@ -254,6 +254,10 @@ def configure_probabilities(entries: List[QuestionEntry]):
         elif entry.question_type in ("scale", "score"):
             state.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
         elif entry.question_type == "slider":
+            mode = str(getattr(entry, "distribution_mode", "") or "").strip().lower()
+            if mode == "random":
+                state.slider_targets.append(float("nan"))
+                continue
             target_value: Optional[float] = None
             if isinstance(entry.custom_weights, (list, tuple)) and entry.custom_weights:
                 try:

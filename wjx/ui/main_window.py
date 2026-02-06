@@ -36,6 +36,7 @@ from qfluentwidgets import (
 # 导入拆分后的页面
 from wjx.ui.pages.workbench.dashboard import DashboardPage
 from wjx.ui.pages.workbench.runtime import RuntimePage
+from wjx.ui.pages.workbench.result import ResultPage
 from wjx.ui.pages.account.settings import SettingsPage
 from wjx.ui.pages.workbench.question import QuestionPage
 from wjx.ui.pages.workbench.log import LogPage
@@ -114,6 +115,7 @@ class MainWindow(FluentWindow):
         self.controller.card_code_provider = self._ask_card_code
 
         self.runtime_page = RuntimePage(self.controller, self)
+        self.result_page = ResultPage(self)
         self.question_page = QuestionPage(self)
         # QuestionPage 仅用作题目配置的数据载体，不作为主界面子页面展示；
         # 若不隐藏会以默认几何 (0,0,100,30) 叠在窗口左上角，造成标题栏错乱。
@@ -134,6 +136,7 @@ class MainWindow(FluentWindow):
         self.dashboard.setObjectName("dashboard")
         self.question_page.setObjectName("question")
         self.runtime_page.setObjectName("runtime")
+        self.result_page.setObjectName("result")
         self.log_page.setObjectName("logs")
         self.support_page.setObjectName("support")
         self.qq_group_page.setObjectName("qq_group")
@@ -314,6 +317,7 @@ class MainWindow(FluentWindow):
     def _init_navigation(self):
         self.addSubInterface(self.dashboard, FluentIcon.HOME, "概览", NavigationItemPosition.TOP)
         self.addSubInterface(self.runtime_page, FluentIcon.DEVELOPER_TOOLS, "运行参数", NavigationItemPosition.TOP)
+        self.addSubInterface(self.result_page, FluentIcon.PIE_SINGLE, "结果", NavigationItemPosition.TOP)
         self.addSubInterface(self.log_page, FluentIcon.INFO, "日志", NavigationItemPosition.TOP)
         # 登录页面（动态更新）
         self._login_nav_widget = None
