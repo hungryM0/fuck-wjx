@@ -294,15 +294,20 @@ class ResultPage(QWidget):
     def _add_option_bars(self, layout: QVBoxLayout,
                          q: QuestionStats, parent: QWidget) -> None:
         """选择类题目——选项柱状行"""
-        sorted_opts = sorted(q.options.items(), key=lambda x: x[0])
-        for idx, opt in sorted_opts:
-            name = opt.option_text if opt.option_text else f"选项 {idx + 1}"
+        # 使用配置的选项总数来显示所有选项，即使某些未被选择
+        option_count = q.option_count if q.option_count else max(q.options.keys(), default=0) + 1
+        
+        for idx in range(option_count):
+            opt = q.options.get(idx)
+            count = opt.count if opt else 0
+            name = (opt.option_text if opt and opt.option_text else f"选项 {idx + 1}")
             pct = q.get_option_percentage(idx)
-            layout.addWidget(_BarRow(name, opt.count, pct, parent))
+            layout.addWidget(_BarRow(name, count, pct, parent))
 
     def _add_slider_bars(self, layout: QVBoxLayout,
                          q: QuestionStats, parent: QWidget) -> None:
         """滑块题——按值排序展示"""
+        # 滑块题由于值范围不固定，只显示有统计数据的值
         sorted_opts = sorted(q.options.items(), key=lambda x: x[0])
         for idx, opt in sorted_opts:
             name = f"值 {idx}"
@@ -312,19 +317,37 @@ class ResultPage(QWidget):
     def _add_matrix_grid(self, layout: QVBoxLayout,
                          q: QuestionStats, parent: QWidget) -> None:
         """矩阵题——热力网格"""
-        if not q.rows:
-            layout.addWidget(BodyLabel("暂无矩阵数据", parent))
-            return
+        # 使用配置的行列数来显示完整矩阵，即使某些单元格未被选择
+        if q.matrix_rows is None or q.matrix_cols is None:
+            # 降级：从实际数据中推断（尽可能智能）
+            if not q.rows:
+                layout.addWidget(BodyLabel("暂无矩阵数据", parent))
+                return
+            
+            # 推断行数：找到最大行索引+1
+            max_row = max(q.rows.keys())
+            rows = list(range(max_row + 1))
+            
+            # 推断列数：从所有行中找到最大列索引+1
+            all_cols = set()
+            for row_data in q.rows.values():
+                all_cols.update(row_data.keys())
+            if not all_cols:
+                layout.addWidget(BodyLabel("矩阵数据不完整", parent))
+                return
+            max_col = max(all_cols)
+            cols = list(range(max_col + 1))
+        else:
+            # 使用配置元数据
+            rows = list(range(q.matrix_rows))
+            cols = list(range(q.matrix_cols))
 
-        all_cols = set()
-        for row_data in q.rows.values():
-            all_cols.update(row_data.keys())
-        cols = sorted(all_cols)
-
-        # 找最大值用于调色
-        max_val = max(
-            (cnt for rd in q.rows.values() for cnt in rd.values()), default=1
-        )
+        # 找最大值用于调色（包括0计数）
+        max_val = 1
+        if q.rows:
+            max_val = max(
+                (cnt for rd in q.rows.values() for cnt in rd.values()), default=1
+            )
 
         grid = QGridLayout()
         grid.setSpacing(4)
@@ -338,13 +361,17 @@ class ResultPage(QWidget):
             grid.addWidget(h, 0, ci + 1)
 
         # 数据行
-        for ri, (r, col_data) in enumerate(sorted(q.rows.items())):
+        for ri, r in enumerate(rows):
             row_label = CaptionLabel(f"行 {r + 1}", parent)
             row_label.setAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             )
             row_label.setFixedWidth(48)
             grid.addWidget(row_label, ri + 1, 0)
+            
+            # 获取该行的数据（如果存在）
+            col_data = q.rows.get(r, {}) if q.rows else {}
+            
             for ci, c in enumerate(cols):
                 cnt = col_data.get(c, 0)
                 cell = _MatrixCell(cnt, max_val, parent)

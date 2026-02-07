@@ -80,6 +80,7 @@ class EngineGuiAdapter:
         card_code_provider: Optional[Callable[[], Optional[str]]] = None,
         on_ip_counter: Optional[Callable[[int, int, bool, bool], None]] = None,
         async_dispatcher: Optional[Callable[[Callable[[], None]], None]] = None,
+        cleanup_runner: Optional[CleanupRunner] = None,
     ):
         self.random_ip_enabled_var = BoolVar(False)
         self.active_drivers: List[Any] = []
@@ -91,6 +92,7 @@ class EngineGuiAdapter:
         self.update_random_ip_counter = on_ip_counter
         self._pause_event = threading.Event()
         self._pause_reason = ""
+        self._cleanup_runner = cleanup_runner  # 用于异步清理浏览器
 
     def _post_to_ui_thread(self, callback: Callable[[], None]) -> None:
         """提供 UI 线程派发钩子，供引擎辅助逻辑调用。"""
@@ -194,10 +196,13 @@ class RunController(QObject):
         self.question_entries: List[QuestionEntry] = []
         self.stop_event = threading.Event()
         self.worker_threads: List[threading.Thread] = []
+        # 先创建清理器，后续 adapter 需要引用
+        self._cleanup_runner = CleanupRunner()
         self.adapter = EngineGuiAdapter(
             self._dispatch_to_ui,
             self.stop_event,
             async_dispatcher=self._dispatch_to_ui_async,
+            cleanup_runner=self._cleanup_runner,
         )
         self.running = False
         self._paused_state = False
@@ -206,7 +211,6 @@ class RunController(QObject):
         self._status_timer.timeout.connect(self._emit_status)
         self.on_ip_counter: Optional[Callable[[int, int, bool, bool], None]] = None
         self.card_code_provider: Optional[Callable[[], Optional[str]]] = None
-        self._cleanup_runner = CleanupRunner()
         self._completion_cleanup_done = False
         self._cleanup_scheduled = False
         self._stopped_by_stop_run = False
@@ -514,6 +518,7 @@ class RunController(QObject):
             card_code_provider=getattr(self, "card_code_provider", None),
             on_ip_counter=getattr(self, "on_ip_counter", None),
             async_dispatcher=self._dispatch_to_ui_async,
+            cleanup_runner=self._cleanup_runner,  # 传递异步清理器
         )
         self.adapter.random_ip_enabled_var.set(config.random_ip_enabled)
         self._paused_state = False

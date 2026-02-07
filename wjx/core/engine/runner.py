@@ -140,18 +140,37 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         if driver:
             # 收集浏览器进程 PID 用于强制清理
             pids_to_kill = set(getattr(driver, "browser_pids", set()))
+            driver_to_close = driver  # 保存引用，避免闭包问题
             _unregister_driver(driver)
-            try:
-                driver.quit()
-            except Exception as exc:
-                log_suppressed_exception("runner._dispose_driver driver.quit", exc)
-            driver = None
-            # 短暂等待已知 PID 自行退出；不要等太久（CleanupRunner 会做彻底清理）
-            if pids_to_kill:
+            driver = None  # 立即清空引用，避免重复处理
+            
+            # 使用后台异步清理，避免阻塞工作线程
+            cleanup_runner = getattr(gui_instance, '_cleanup_runner', None) if gui_instance else None
+            if cleanup_runner:
+                def _async_close_browser():
+                    try:
+                        driver_to_close.quit()
+                    except Exception as exc:
+                        log_suppressed_exception("runner._dispose_driver async driver.quit", exc)
+                    if pids_to_kill:
+                        try:
+                            graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.5)
+                        except Exception as exc:
+                            log_suppressed_exception("runner._dispose_driver async terminate process tree", exc)
+                # 提交到后台清理队列，延迟0秒立即执行但不阻塞当前线程
+                cleanup_runner.submit(_async_close_browser, delay_seconds=0.0)
+                logging.debug("已提交浏览器关闭任务到后台队列")
+            else:
+                # 兜底：如果没有cleanup_runner，退回同步关闭（不应发生）
                 try:
-                    graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.5)
+                    driver_to_close.quit()
                 except Exception as exc:
-                    log_suppressed_exception("runner._dispose_driver terminate process tree", exc)
+                    log_suppressed_exception("runner._dispose_driver fallback driver.quit", exc)
+                if pids_to_kill:
+                    try:
+                        graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.5)
+                    except Exception as exc:
+                        log_suppressed_exception("runner._dispose_driver fallback terminate process tree", exc)
         # 释放信号量
         if sem_acquired:
             try:

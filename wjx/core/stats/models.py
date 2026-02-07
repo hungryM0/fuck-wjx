@@ -25,6 +25,10 @@ class QuestionStats:
     rows: Optional[Dict[int, Dict[int, int]]] = None  # row_index -> {col_index: count}
     # 填空题专用：记录填写的文本
     text_answers: Optional[Dict[str, int]] = None     # answer_text -> count
+    # 配置元数据：用于展示时补全所有选项/行列（即使计数为0）
+    option_count: Optional[int] = None          # 总选项数
+    matrix_rows: Optional[int] = None           # 矩阵题总行数
+    matrix_cols: Optional[int] = None           # 矩阵题总列数
 
     def record_selection(self, option_index: int) -> None:
         """记录一次选项选择"""

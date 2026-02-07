@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from datetime import datetime
 from typing import List, Optional
 from urllib.parse import urlparse
@@ -21,30 +22,62 @@ def _ensure_stats_dir() -> str:
     return stats_dir
 
 
-def _generate_stats_filename(survey_url: str) -> str:
-    """生成统计文件名"""
-    parsed = urlparse(survey_url)
-    path_part = parsed.path.replace("/", "_").strip("_")
-    if not path_part:
-        path_part = "survey"
-    url_hash = hashlib.md5(survey_url.encode()).hexdigest()[:8]
+def _sanitize_filename(name: str) -> str:
+    """清理文件名中的非法字符"""
+    # 替换 Windows 文件名非法字符为下划线
+    sanitized = re.sub(r'[\\/:*?"<>|]', '_', name)
+    # 去除首尾空白和点号
+    sanitized = sanitized.strip('. ')
+    # 限制长度
+    if len(sanitized) > 50:
+        sanitized = sanitized[:50].rstrip('. ')
+    return sanitized or "未命名问卷"
+
+
+def _generate_stats_filename(stats: SurveyStats, target_num: int) -> str:
+    """生成统计文件名：标题_目标份数_日期时间.json
+    
+    Args:
+        stats: 统计数据对象
+        target_num: 目标执行份数
+    
+    Returns:
+        文件名字符串
+    """
+    # 获取标题，如果没有则使用 URL 路径部分
+    if stats.survey_title:
+        title = _sanitize_filename(stats.survey_title)
+    else:
+        parsed = urlparse(stats.survey_url)
+        path_part = parsed.path.replace("/", "_").strip("_")
+        title = path_part if path_part else "未命名问卷"
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"stats_{path_part}_{url_hash}_{timestamp}.json"
+    return f"{title}_{target_num}份_{timestamp}.json"
 
 
-def save_stats(stats: SurveyStats, path: Optional[str] = None) -> str:
+def save_stats(stats: SurveyStats, path: Optional[str] = None, target_num: Optional[int] = None) -> str:
     """保存统计数据到文件
 
     Args:
         stats: 统计数据对象
         path: 可选的保存路径，不指定则自动生成
+        target_num: 目标执行份数，用于生成文件名（不指定则从 state 读取）
 
     Returns:
         保存的文件路径
     """
     if path is None:
+        # 如果没有指定目标份数，从 state 读取
+        if target_num is None:
+            try:
+                import wjx.core.state as state
+                target_num = state.target_num
+            except:
+                target_num = 1  # 降级默认值
+        
         stats_dir = _ensure_stats_dir()
-        filename = _generate_stats_filename(stats.survey_url)
+        filename = _generate_stats_filename(stats, target_num)
         path = os.path.join(stats_dir, filename)
 
     # 序列化数据
@@ -69,6 +102,14 @@ def save_stats(stats: SurveyStats, path: Optional[str] = None) -> str:
                 for idx, opt in q_stats.options.items()
             }
         }
+        # 保存配置元数据（选项数、矩阵行列数等）
+        if q_stats.option_count is not None:
+            q_data["option_count"] = q_stats.option_count
+        if q_stats.matrix_rows is not None:
+            q_data["matrix_rows"] = q_stats.matrix_rows
+        if q_stats.matrix_cols is not None:
+            q_data["matrix_cols"] = q_stats.matrix_cols
+        
         if q_stats.rows:
             q_data["rows"] = {
                 str(r): {str(c): cnt for c, cnt in cols.items()}
@@ -122,6 +163,9 @@ def load_stats(path: str) -> Optional[SurveyStats]:
             question_type=q_data.get("question_type", "unknown"),
             question_title=q_data.get("question_title"),
             total_responses=q_data.get("total_responses", 0),
+            option_count=q_data.get("option_count"),
+            matrix_rows=q_data.get("matrix_rows"),
+            matrix_cols=q_data.get("matrix_cols"),
         )
 
         for idx_str, opt_data in q_data.get("options", {}).items():
