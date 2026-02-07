@@ -177,6 +177,8 @@ class PlaywrightDriver:
         except Exception:
             self.browser_pid = None
         self.browser_pids: Set[int] = set()
+        self._cleanup_done = False  # 线程安全标志，避免重复清理
+        self._cleanup_lock = __import__('threading').Lock()
 
     def find_element(self, by: str, value: str):
         handle = self._page.query_selector(_build_selector(by, value))
@@ -264,15 +266,19 @@ class PlaywrightDriver:
         except Exception as exc:
             log_suppressed_exception("browser_driver.PlaywrightDriver.refresh", exc)
 
+    def mark_cleanup_done(self) -> bool:
+        """标记清理已完成，返回 True 表示可以执行清理，False 表示已被其他线程清理过。"""
+        with self._cleanup_lock:
+            if self._cleanup_done:
+                return False
+            self._cleanup_done = True
+            return True
+
     def quit(self) -> None:
-        try:
-            self._page.close()
-        except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightDriver.quit page.close", exc)
-        try:
-            self._context.close()
-        except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightDriver.quit context.close", exc)
+        """
+        遗留兼容方法，不推荐直接使用。
+        现代清理流程由 runner._dispose_driver() 统一管理。
+        """
         try:
             self._browser.close()
         except Exception as exc:
@@ -398,6 +404,7 @@ def create_playwright_driver(
             pw = sync_playwright().start()
         except Exception as exc:
             last_exc = exc
+            logging.warning(f"启动 {browser} 的 Playwright 失败: {exc}")
             continue
 
         try:

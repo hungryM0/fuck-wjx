@@ -138,39 +138,52 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
     def _dispose_driver() -> None:
         nonlocal driver, sem_acquired
         if driver:
+            # 检查是否已被清理，避免重复处理
+            if not driver.mark_cleanup_done():
+                logging.debug("浏览器实例已被其他线程清理，跳过")
+                driver = None
+                if sem_acquired:
+                    browser_sem.release()
+                    sem_acquired = False
+                return
+            
             # 收集浏览器进程 PID 用于强制清理
             pids_to_kill = set(getattr(driver, "browser_pids", set()))
             driver_to_close = driver  # 保存引用，避免闭包问题
             _unregister_driver(driver)
             driver = None  # 立即清空引用，避免重复处理
             
-            # 使用后台异步清理，避免阻塞工作线程
+            # 关键修复：playwright.stop() 必须在工作线程中同步执行（greenlet 限制）
+            # 优化策略：先快速关闭 browser，让 playwright.stop() 变快（通常总共 100-200ms）
+            try:
+                driver_to_close._browser.close()
+                logging.debug("已关闭浏览器实例")
+            except Exception as exc:
+                log_suppressed_exception("runner._dispose_driver sync browser.close", exc)
+            
+            try:
+                driver_to_close._playwright.stop()
+                logging.debug("已同步停止 playwright 实例（工作线程）")
+            except Exception as exc:
+                log_suppressed_exception("runner._dispose_driver sync playwright.stop", exc)
+            
+            # 进程清理放后台异步执行，避免阻塞（这部分可能耗时较长）
             cleanup_runner = getattr(gui_instance, '_cleanup_runner', None) if gui_instance else None
-            if cleanup_runner:
-                def _async_close_browser():
-                    try:
-                        driver_to_close.quit()
-                    except Exception as exc:
-                        log_suppressed_exception("runner._dispose_driver async driver.quit", exc)
-                    if pids_to_kill:
-                        try:
-                            graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.5)
-                        except Exception as exc:
-                            log_suppressed_exception("runner._dispose_driver async terminate process tree", exc)
-                # 提交到后台清理队列，延迟0秒立即执行但不阻塞当前线程
-                cleanup_runner.submit(_async_close_browser, delay_seconds=0.0)
-                logging.debug("已提交浏览器关闭任务到后台队列")
-            else:
-                # 兜底：如果没有cleanup_runner，退回同步关闭（不应发生）
-                try:
-                    driver_to_close.quit()
-                except Exception as exc:
-                    log_suppressed_exception("runner._dispose_driver fallback driver.quit", exc)
-                if pids_to_kill:
+            if cleanup_runner and pids_to_kill:
+                def _async_kill_processes():
                     try:
                         graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.5)
+                        logging.debug(f"已清理浏览器进程树: {len(pids_to_kill)} 个进程")
                     except Exception as exc:
-                        log_suppressed_exception("runner._dispose_driver fallback terminate process tree", exc)
+                        log_suppressed_exception("runner._dispose_driver async terminate process tree", exc)
+                cleanup_runner.submit(_async_kill_processes, delay_seconds=0.0)
+                logging.debug(f"已提交进程清理任务到后台（{len(pids_to_kill)} 个进程）")
+            elif pids_to_kill:
+                # 兜底：如果没有 cleanup_runner，快速同步清理进程
+                try:
+                    graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.3)
+                except Exception as exc:
+                    log_suppressed_exception("runner._dispose_driver fallback terminate process tree", exc)
         # 释放信号量
         if sem_acquired:
             try:

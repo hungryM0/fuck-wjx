@@ -32,7 +32,7 @@ from qfluentwidgets import (
 
 from wjx.core.stats.collector import stats_collector
 from wjx.core.stats.models import SurveyStats, QuestionStats
-from wjx.core.stats.persistence import save_stats, list_stats_files, load_stats
+from wjx.core.stats.persistence import save_stats, list_stats_files, load_stats, _ensure_stats_dir
 
 
 # ── 题型中文映射 ──────────────────────────────────────────────
@@ -204,6 +204,9 @@ class ResultPage(QWidget):
         self.history_combo.setPlaceholderText("选择历史统计…")
         self.history_combo.setMinimumWidth(260)
         header.addWidget(self.history_combo)
+
+        self.open_folder_btn = PushButton("打开统计文件夹", self, FluentIcon.FOLDER)
+        header.addWidget(self.open_folder_btn)
 
         self.export_btn = PushButton("导出统计", self, FluentIcon.SAVE)
         header.addWidget(self.export_btn)
@@ -416,6 +419,7 @@ class ResultPage(QWidget):
     # ── 事件绑定 ──────────────────────────────────────────────
 
     def _bind_events(self) -> None:
+        self.open_folder_btn.clicked.connect(self._on_open_folder)
         self.export_btn.clicked.connect(self._on_export)
         self.history_combo.currentIndexChanged.connect(self._on_history_selected)
 
@@ -475,6 +479,18 @@ class ResultPage(QWidget):
         self._scroll_layout.addStretch(1)
 
     # ── 导出 ──────────────────────────────────────────────────
+
+    def _on_open_folder(self) -> None:
+        """打开统计文件夹"""
+        try:
+            stats_dir = _ensure_stats_dir()
+            os.startfile(stats_dir)
+        except Exception as exc:
+            InfoBar.error(
+                "", f"无法打开统计文件夹: {exc}",
+                parent=self.window(),
+                position=InfoBarPosition.TOP, duration=3000,
+            )
 
     def _on_export(self) -> None:
         stats = self._current_stats or stats_collector.get_current_stats()
