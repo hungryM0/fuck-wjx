@@ -23,6 +23,7 @@ from qfluentwidgets import (
     LineEdit,
     CheckBox,
     ProgressBar,
+    IndeterminateProgressRing,
     CommandBar,
     Action,
     FluentIcon,
@@ -120,6 +121,7 @@ class DashboardPage(QWidget):
         self._pending_restart = False
         self._show_end_toast_after_cleanup = False
         self._last_progress = 0
+        self._progress_infobar: Optional[InfoBar] = None  # 存储进度消息条的引用
         self._build_ui()
         self.config_drawer = ConfigDrawer(self, self._load_config_from_path)
         self._bind_events()
@@ -319,6 +321,9 @@ class DashboardPage(QWidget):
         self.add_action.triggered.connect(self._show_add_question_dialog)
         self.edit_action.triggered.connect(self._edit_selected_entries)
         self.del_action.triggered.connect(self._delete_selected_entries)
+        # 连接问卷解析信号
+        self.controller.surveyParsed.connect(self._on_survey_parsed)
+        self.controller.surveyParseFailed.connect(self._on_survey_parse_failed)
         try:
             self.question_page.entriesChanged.connect(self._on_question_entries_changed)
         except Exception:
@@ -358,9 +363,43 @@ class DashboardPage(QWidget):
         if not self._is_wjx_domain(url):
             self._toast("仅支持问卷星链接", "error")
             return
-        self._toast("正在解析问卷...", "info", duration=1800)
+        # 使用进度消息条显示解析状态，duration=-1 表示不自动关闭
+        self._toast("正在解析问卷...", "info", duration=-1, show_progress=True)
         self._open_wizard_after_parse = True
         self.controller.parse_survey(url)
+
+    def _on_survey_parsed(self, info: list, title: str):
+        """问卷解析成功的处理"""
+        # 关闭进度消息条
+        if self._progress_infobar:
+            try:
+                self._progress_infobar.close()
+            except Exception:
+                pass
+            self._progress_infobar = None
+        
+        # 显示解析成功消息
+        count = len(info) if info else 0
+        self._toast(f"解析成功，已识别 {count} 个题目", "success", duration=2500)
+        
+        # 如果设置了打开向导标志，则打开问卷配置向导
+        if self._open_wizard_after_parse:
+            self._open_wizard_after_parse = False
+            self._open_question_wizard()
+
+    def _on_survey_parse_failed(self, error_msg: str):
+        """问卷解析失败的处理"""
+        # 关闭进度消息条
+        if self._progress_infobar:
+            try:
+                self._progress_infobar.close()
+            except Exception:
+                pass
+            self._progress_infobar = None
+        
+        # 显示解析失败消息
+        self._toast(f"解析失败：{error_msg}", "error", duration=3000)
+        self._open_wizard_after_parse = False
 
     @staticmethod
     def _is_wjx_domain(url: str) -> bool:
@@ -848,14 +887,58 @@ class DashboardPage(QWidget):
             if item:
                 item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
-    def _toast(self, text: str, level: str = "info", duration: int = 2000):
+    def _toast(self, text: str, level: str = "info", duration: int = 2000, show_progress: bool = False):
+        """
+        显示消息提示
+        
+        Args:
+            text: 消息内容
+            level: 消息级别 (info/success/warning/error)
+            duration: 显示时长（毫秒），-1 表示不自动关闭
+            show_progress: 是否显示进度条（适用于耗时操作）
+        """
+        # 如果之前有进度消息条正在显示，先关闭它
+        if self._progress_infobar:
+            try:
+                self._progress_infobar.close()
+            except Exception:
+                pass
+            self._progress_infobar = None
+        
         parent = self.window() or self
         kind = level.lower()
-        if kind == "success":
-            InfoBar.success("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
-        elif kind == "warning":
-            InfoBar.warning("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
-        elif kind == "error":
-            InfoBar.error("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+        
+        # 如果需要显示进度条，创建带进度条的InfoBar
+        if show_progress:
+            from PySide6.QtCore import Qt
+            
+            # 创建InfoBar实例
+            if kind == "success":
+                infobar = InfoBar.success("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            elif kind == "warning":
+                infobar = InfoBar.warning("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            elif kind == "error":
+                infobar = InfoBar.error("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            else:
+                infobar = InfoBar.info("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            
+            # 添加转圈的加载动画
+            spinner = IndeterminateProgressRing()
+            spinner.setFixedSize(20, 20)  # 设置spinner大小
+            spinner.setStrokeWidth(3)  # 设置环的粗细
+            infobar.addWidget(spinner)
+            
+            # 保存引用以便后续关闭
+            self._progress_infobar = infobar
+            return infobar
         else:
-            InfoBar.info("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            # 普通InfoBar（不带进度条）
+            if kind == "success":
+                InfoBar.success("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            elif kind == "warning":
+                InfoBar.warning("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            elif kind == "error":
+                InfoBar.error("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            else:
+                InfoBar.info("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+            return None
