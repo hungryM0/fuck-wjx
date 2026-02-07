@@ -264,7 +264,8 @@ class RunController(QObject):
             try:
                 info, title = self._parse_questions(normalized_url)
                 self.questions_info = info
-                self.question_entries = self._build_default_entries(info)
+                # 传入现有配置，以便复用已配置的题型权重
+                self.question_entries = self._build_default_entries(info, self.question_entries)
                 self.config.url = normalized_url
                 self.surveyParsed.emit(info, title or "")
             except Exception as exc:
@@ -323,7 +324,21 @@ class RunController(QObject):
         count = max(1, int(option_count or 1))
         return [1.0] * count
 
-    def _build_default_entries(self, questions_info: List[Dict[str, Any]]) -> List[QuestionEntry]:
+    def _build_default_entries(
+        self, 
+        questions_info: List[Dict[str, Any]], 
+        existing_entries: Optional[List[QuestionEntry]] = None
+    ) -> List[QuestionEntry]:
+        """构建题目配置列表。如果 existing_entries 中有相同题型的配置，则优先复用其权重设置。"""
+        # 建立题型到已配置权重的映射
+        type_config_map: Dict[str, QuestionEntry] = {}
+        if existing_entries:
+            for entry in existing_entries:
+                q_type = entry.question_type
+                # 只保存每个题型的第一个配置作为参考
+                if q_type not in type_config_map:
+                    type_config_map[q_type] = entry
+        
         entries: List[QuestionEntry] = []
         for q in questions_info:
             type_code = _normalize_question_type_code(q.get("type_code"))
@@ -365,49 +380,63 @@ class RunController(QObject):
                 option_count = max(base_option_count, text_inputs, 1)
             else:
                 option_count = base_option_count
-            if q_type in ("single", "dropdown", "scale"):
-                probabilities: Any = -1
-                distribution = "random"
-                custom_weights = None
-                texts = None
-            elif q_type == "score":
-                option_count = max(option_count, 2)
-                weights = self._build_mid_bias_weights(option_count)
-                probabilities = list(weights)
-                distribution = "custom"
-                custom_weights = list(weights)
-                texts = None
-            elif q_type == "multiple":
-                probabilities = [1.0] * option_count
-                distribution = "random"
-                custom_weights = None
-                texts = None
-            elif q_type == "matrix":
-                probabilities = -1
-                distribution = "random"
-                custom_weights = None
-                texts = None
-            elif q_type == "order":
-                probabilities = -1
-                distribution = "random"
-                custom_weights = None
-                texts = None
-            elif q_type == "slider":
-                min_val = self._as_float(slider_min, 0.0)
-                max_val = self._as_float(slider_max, 100.0 if slider_max is None else slider_max)
-                if max_val <= min_val:
-                    max_val = min_val + 100.0
-                midpoint = min_val + (max_val - min_val) / 2.0
-                probabilities = [midpoint]
-                distribution = "custom"
-                custom_weights = [midpoint]
-                texts = None
-                option_count = 1
+            
+            # 检查是否有已配置的相同题型，如果有则复用其权重配置
+            existing_config = type_config_map.get(q_type)
+            if existing_config:
+                # 复用已配置的权重设置
+                probabilities: Any = existing_config.probabilities
+                distribution = existing_config.distribution_mode or "random"
+                custom_weights = existing_config.custom_weights
+                texts = existing_config.texts
+                # 对于文本题，复用AI设置
+                ai_enabled_from_existing = getattr(existing_config, "ai_enabled", False) if q_type in ("text", "multi_text") else False
             else:
-                probabilities = [1.0]
-                distribution = "random"
-                custom_weights = None
-                texts = [DEFAULT_FILL_TEXT]
+                # 没有已配置的相同题型，使用默认配置
+                ai_enabled_from_existing = False
+                if q_type in ("single", "dropdown", "scale"):
+                    probabilities = -1
+                    distribution = "random"
+                    custom_weights = None
+                    texts = None
+                elif q_type == "score":
+                    option_count = max(option_count, 2)
+                    weights = self._build_mid_bias_weights(option_count)
+                    probabilities = list(weights)
+                    distribution = "custom"
+                    custom_weights = list(weights)
+                    texts = None
+                elif q_type == "multiple":
+                    probabilities = [1.0] * option_count
+                    distribution = "random"
+                    custom_weights = None
+                    texts = None
+                elif q_type == "matrix":
+                    probabilities = -1
+                    distribution = "random"
+                    custom_weights = None
+                    texts = None
+                elif q_type == "order":
+                    probabilities = -1
+                    distribution = "random"
+                    custom_weights = None
+                    texts = None
+                elif q_type == "slider":
+                    min_val = self._as_float(slider_min, 0.0)
+                    max_val = self._as_float(slider_max, 100.0 if slider_max is None else slider_max)
+                    if max_val <= min_val:
+                        max_val = min_val + 100.0
+                    midpoint = min_val + (max_val - min_val) / 2.0
+                    probabilities = [midpoint]
+                    distribution = "custom"
+                    custom_weights = [midpoint]
+                    texts = None
+                    option_count = 1
+                else:
+                    probabilities = [1.0]
+                    distribution = "random"
+                    custom_weights = None
+                    texts = [DEFAULT_FILL_TEXT]
 
             entry = QuestionEntry(
                 question_type=q_type,
@@ -419,7 +448,7 @@ class RunController(QObject):
                 custom_weights=custom_weights,
                 question_num=q.get("num"),
                 question_title=title_text or None,
-                ai_enabled=False,
+                ai_enabled=ai_enabled_from_existing if q_type in ("text", "multi_text") else False,
                 option_fill_texts=None,
                 fillable_option_indices=q.get("fillable_options"),
                 is_location=is_location,

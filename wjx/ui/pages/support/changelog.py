@@ -30,7 +30,7 @@ class ReleaseListItem(CardWidget):
     
     def _build_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(16, 14, 16, 14)
         
         icon = TransparentToolButton(FluentIcon.CHEVRON_RIGHT_MED, self)
         icon.setFixedSize(24, 24)
@@ -94,7 +94,7 @@ class ChangelogPage(ScrollArea):
         layout.addLayout(header)
         
         self.container = QVBoxLayout()
-        self.container.setSpacing(8)
+        self.container.setSpacing(10)
         layout.addLayout(self.container)
         
         layout.addStretch(1)
@@ -157,7 +157,10 @@ class ChangelogDetailPage(ScrollArea):
         
         self.content_browser = TextBrowser(self)
         self.content_browser.setOpenExternalLinks(True)
-        self.content_browser.setStyleSheet("border: none; background: transparent;")
+        self.content_browser.setStyleSheet("""
+            border: none;
+            background: transparent;
+        """)
         layout.addWidget(self.content_browser)
     
     def setRelease(self, release: dict):
@@ -165,4 +168,42 @@ class ChangelogDetailPage(ScrollArea):
         body = release.get("body", "")
         self.title_label.setText(f"v{version}")
         processed_body = strip_markdown(body)
+        
+        # 将 Markdown 转换为 HTML 并嵌入 CSS 样式
+        html_content = """
+        <style>
+            body {
+                line-height: 1.9;
+                font-size: 14px;
+            }
+            p {
+                margin-bottom: 10px;
+                line-height: 1.9;
+            }
+            ul, ol {
+                margin-top: 6px;
+                margin-bottom: 10px;
+                padding-left: 24px;
+            }
+            li {
+                margin-bottom: 6px;
+                line-height: 1.9;
+            }
+            h1, h2, h3, h4, h5, h6 {
+                margin-top: 14px;
+                margin-bottom: 10px;
+            }
+        </style>
+        """
+        
+        # 先设置 Markdown，然后获取转换后的 HTML
         self.content_browser.setMarkdown(processed_body)
+        original_html = self.content_browser.toHtml()
+        
+        # 在 HTML 中插入样式
+        if "<head>" in original_html:
+            final_html = original_html.replace("<head>", f"<head>{html_content}")
+        else:
+            final_html = f"<html><head>{html_content}</head><body>{original_html}</body></html>"
+        
+        self.content_browser.setHtml(final_html)

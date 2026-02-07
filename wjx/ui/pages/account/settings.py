@@ -1,4 +1,4 @@
-"""界面设置页面"""
+"""应用程序设置页面"""
 import sys
 import subprocess
 
@@ -21,7 +21,7 @@ from wjx.utils.app.config import GITHUB_MIRROR_SOURCES, DEFAULT_GITHUB_MIRROR
 
 
 class SettingsPage(ScrollArea):
-    """界面设置页面"""
+    """应用程序设置页面"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,60 +39,55 @@ class SettingsPage(ScrollArea):
         # 从设置中读取配置
         settings = QSettings("FuckWjx", "Settings")
 
-        # 界面设置组
-        self.ui_group = SettingCardGroup("界面设置", self.view)
+        # 界面外观组
+        self.appearance_group = SettingCardGroup("界面外观", self.view)
 
         # 侧边栏展开设置卡片
         self.sidebar_card = SwitchSettingCard(
             FluentIcon.MENU,
             "始终展开侧边栏",
             "开启后侧边栏将始终保持展开状态",
-            self.ui_group
+            self.appearance_group
         )
         self.sidebar_card.setChecked(settings.value("sidebar_always_expand", True, type=bool))
-        self.ui_group.addSettingCard(self.sidebar_card)
+        self.appearance_group.addSettingCard(self.sidebar_card)
 
         # 窗口置顶设置卡片
         self.topmost_card = SwitchSettingCard(
             FluentIcon.PIN,
             "窗口置顶",
             "开启后程序窗口将始终保持在最上层",
-            self.ui_group
+            self.appearance_group
         )
         self.topmost_card.setChecked(settings.value("window_topmost", False, type=bool))
-        self.ui_group.addSettingCard(self.topmost_card)
+        self.appearance_group.addSettingCard(self.topmost_card)
+
+        layout.addWidget(self.appearance_group)
+
+        # 行为设置组
+        self.behavior_group = SettingCardGroup("行为设置", self.view)
 
         # 关闭前询问保存设置卡片
         self.ask_save_card = SwitchSettingCard(
-            FluentIcon.CLOSE,
+            FluentIcon.SAVE,
             "关闭前询问是否保存",
             "关闭窗口时提示是否保存当前配置",
-            self.ui_group
+            self.behavior_group
         )
         self.ask_save_card.setChecked(settings.value("ask_save_on_close", True, type=bool))
-        self.ui_group.addSettingCard(self.ask_save_card)
+        self.behavior_group.addSettingCard(self.ask_save_card)
 
-        # 重启程序设置卡片
-        self.restart_card = PushSettingCard(
-            text="重启",
-            icon=FluentIcon.SYNC,
-            title="重新启动程序",
-            content="重启程序以应用某些设置更改",
-            parent=self.ui_group
+        # 自动保存统计结果设置卡片
+        self.auto_save_stats_card = SwitchSettingCard(
+            FluentIcon.FLAG,
+            "自动保存统计结果",
+            "执行完成后自动保存本次作答的统计数据",
+            self.behavior_group
         )
-        self.ui_group.addSettingCard(self.restart_card)
+        self.auto_save_stats_card.setChecked(settings.value("auto_save_stats", True, type=bool))
+        self.behavior_group.addSettingCard(self.auto_save_stats_card)
 
-        # 恢复默认设置卡片
-        self.reset_ui_card = PushSettingCard(
-            text="恢复默认",
-            icon=FluentIcon.BROOM,
-            title="恢复默认设置",
-            content="恢复界面与更新相关的默认选项",
-            parent=self.ui_group
-        )
-        self.ui_group.addSettingCard(self.reset_ui_card)
-
-        layout.addWidget(self.ui_group)
+        layout.addWidget(self.behavior_group)
 
         # 软件更新组
         self.update_group = SettingCardGroup("软件更新", self.view)
@@ -131,12 +126,38 @@ class SettingsPage(ScrollArea):
 
         layout.addWidget(self.update_group)
 
+        # 系统工具组
+        self.tools_group = SettingCardGroup("系统工具", self.view)
+
+        # 重启程序设置卡片
+        self.restart_card = PushSettingCard(
+            text="重启",
+            icon=FluentIcon.SYNC,
+            title="重新启动程序",
+            content="重启程序以应用某些设置更改",
+            parent=self.tools_group
+        )
+        self.tools_group.addSettingCard(self.restart_card)
+
+        # 恢复默认设置卡片
+        self.reset_ui_card = PushSettingCard(
+            text="恢复默认",
+            icon=FluentIcon.BROOM,
+            title="恢复默认设置",
+            content="恢复所有设置项的默认值",
+            parent=self.tools_group
+        )
+        self.tools_group.addSettingCard(self.reset_ui_card)
+
+        layout.addWidget(self.tools_group)
+
         layout.addStretch(1)
 
         # 绑定事件
         self.sidebar_card.switchButton.checkedChanged.connect(self._on_sidebar_toggled)
         self.topmost_card.switchButton.checkedChanged.connect(self._on_topmost_toggled)
         self.ask_save_card.switchButton.checkedChanged.connect(self._on_ask_save_on_close_toggled)
+        self.auto_save_stats_card.switchButton.checkedChanged.connect(self._on_auto_save_stats_toggled)
         self.restart_card.clicked.connect(self._restart_program)
         self.reset_ui_card.clicked.connect(self._on_reset_ui_settings)
         self.auto_update_card.switchButton.checkedChanged.connect(self._on_auto_update_toggled)
@@ -222,6 +243,20 @@ class SettingsPage(ScrollArea):
                 duration=2000
             )
 
+    def _apply_auto_save_stats_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
+        """应用自动保存统计结果设置"""
+        settings = QSettings("FuckWjx", "Settings")
+        if persist:
+            settings.setValue("auto_save_stats", checked)
+        if show_tip:
+            InfoBar.success(
+                "",
+                f"自动保存统计结果已{'开启' if checked else '关闭'}",
+                parent=self.window(),
+                position=InfoBarPosition.TOP,
+                duration=2000
+            )
+
     def _on_sidebar_toggled(self, checked: bool):
         """侧边栏展开切换"""
         self._apply_sidebar_state(checked)
@@ -263,11 +298,15 @@ class SettingsPage(ScrollArea):
         """关闭前询问保存切换"""
         self._apply_ask_save_state(checked)
 
+    def _on_auto_save_stats_toggled(self, checked: bool):
+        """自动保存统计结果切换"""
+        self._apply_auto_save_stats_state(checked)
+
     def _on_reset_ui_settings(self):
         """恢复默认设置"""
         box = MessageBox(
             "恢复默认设置",
-            "确定要恢复默认设置吗？\n这将还原界面与更新相关选项。",
+            "确定要恢复默认设置吗？\n这将还原所有设置项到初始状态。",
             self.window() or self
         )
         box.yesButton.setText("恢复")
@@ -276,18 +315,20 @@ class SettingsPage(ScrollArea):
             return
 
         settings = QSettings("FuckWjx", "Settings")
-        for key in ("sidebar_always_expand", "window_topmost", "ask_save_on_close", "auto_check_update"):
+        for key in ("sidebar_always_expand", "window_topmost", "ask_save_on_close", "auto_save_stats", "auto_check_update"):
             settings.remove(key)
 
         defaults = {
             "sidebar_always_expand": True,
             "window_topmost": False,
             "ask_save_on_close": True,
+            "auto_save_stats": True,
             "auto_check_update": True,
         }
         self._set_switch_state(self.sidebar_card, defaults["sidebar_always_expand"])
         self._set_switch_state(self.topmost_card, defaults["window_topmost"])
         self._set_switch_state(self.ask_save_card, defaults["ask_save_on_close"])
+        self._set_switch_state(self.auto_save_stats_card, defaults["auto_save_stats"])
         self._set_switch_state(self.auto_update_card, defaults["auto_check_update"])
         self._apply_sidebar_state(defaults["sidebar_always_expand"], persist=False, show_tip=False)
         self._apply_topmost_state(defaults["window_topmost"], persist=False, show_tip=False)
