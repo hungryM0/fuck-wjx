@@ -185,20 +185,29 @@ class AboutPage(ScrollArea):
         credit_layout.addWidget(StrongBodyLabel("致谢与许可", self))
         
         inspire_layout = QHBoxLayout()
-        inspire_layout.addWidget(BodyLabel("Inspired by:", self))
+        inspire_layout.addWidget(BodyLabel("Inspired by：", self))
         inspire_link = HyperlinkButton("https://github.com/Zemelee/wjx", "Zemelee/wjx", self)
         inspire_layout.addWidget(inspire_link)
         inspire_layout.addStretch(1)
         credit_layout.addLayout(inspire_layout)
         
+        # 服务条款链接
+        terms_layout = QHBoxLayout()
+        terms_layout.addWidget(BodyLabel("服务条款与隐私声明：", self))
+        self.terms_btn = HyperlinkButton("", "查看详情", self)
+        self.terms_btn.clicked.connect(self._show_terms_of_service)
+        terms_layout.addWidget(self.terms_btn)
+        terms_layout.addStretch(1)
+        credit_layout.addLayout(terms_layout)
+        
         license_layout = QHBoxLayout()
-        license_layout.addWidget(BodyLabel("License:", self))
+        license_layout.addWidget(BodyLabel("License：", self))
         license_layout.addWidget(BodyLabel("GPL-3.0 License", self))
         license_layout.addStretch(1)
         credit_layout.addLayout(license_layout)
         
         third_party_layout = QHBoxLayout()
-        third_party_layout.addWidget(BodyLabel("Third-party:", self))
+        third_party_layout.addWidget(BodyLabel("Third-party：", self))
         pyside_link = HyperlinkButton("https://doc.qt.io/qtforpython-6/", "PySide6 (LGPL)", self)
         qfw_link = HyperlinkButton("https://qfluentwidgets.com", "QFluentWidgets (GPLv3)", self)
         third_party_layout.addWidget(pyside_link)
@@ -325,3 +334,9 @@ class AboutPage(ScrollArea):
         except Exception:
             display = "--"
         self.ip_balance_label.setText(f"|  开发者实时剩余经费：￥{display}")
+
+    def _show_terms_of_service(self):
+        """显示服务条款对话框"""
+        from wjx.ui.dialogs import TermsOfServiceDialog
+        dlg = TermsOfServiceDialog(self.window())
+        dlg.exec()
