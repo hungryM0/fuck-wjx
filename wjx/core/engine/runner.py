@@ -47,7 +47,8 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 # 全局锁：串行化浏览器关闭操作，避免多线程同时执行导致 GUI 卡顿
-_browser_cleanup_lock = threading.Lock()
+# 注意：已移除全局 _browser_cleanup_lock — 原来的串行化反而延长总耗时
+# 现在改为直接 PID 终止浏览器进程，不再走 Playwright sync_api，无需加锁
 
 
 def _submission_blocked_by_security_check(driver: BrowserDriver) -> bool:
@@ -151,45 +152,28 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     sem_acquired = False
                 return
             
-            # 收集浏览器进程 PID 用于强制清理
+            # 收集浏览器进程 PID 用于直接终止
             pids_to_kill = set(getattr(driver, "browser_pids", set()))
-            driver_to_close = driver  # 保存引用，避免闭包问题
+            driver_to_close = driver  # 保存引用
             _unregister_driver(driver)
             driver = None  # 立即清空引用，避免重复处理
-            
-            # 【卡顿修复】使用全局锁串行化浏览器关闭，避免多线程同时执行导致 GUI 卡顿
-            # playwright.stop() 必须在创建它的工作线程中同步执行（greenlet 限制）
-            # 但通过加锁，确保一次只关闭一个浏览器，减少 CPU 瞬间飙升和 GIL 抢占
-            with _browser_cleanup_lock:
+
+            # 【卡顿修复】不再使用 _browser.close()（Playwright sync_api 通过 greenlet 轮询，
+            # 会频繁抢占 GIL 导致 Qt 主线程事件循环被饿死→GUI 极度卡顿）。
+            # 改为：先通过 PID 直接终止浏览器进程（psutil，快速、不阻塞 GIL），
+            # 再调用 _playwright.stop() 清理 Playwright 服务端（进程已死，几乎瞬间返回）。
+            if pids_to_kill:
                 try:
-                    driver_to_close._browser.close()
-                    logging.debug("已关闭浏览器实例（串行锁保护）")
+                    graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.5)
+                    logging.debug(f"已终止浏览器进程树: {len(pids_to_kill)} 个进程")
                 except Exception as exc:
-                    log_suppressed_exception("runner._dispose_driver browser.close", exc)
-                
-                try:
-                    driver_to_close._playwright.stop()
-                    logging.debug("已停止 playwright 实例（串行锁保护）")
-                except Exception as exc:
-                    log_suppressed_exception("runner._dispose_driver playwright.stop", exc)
-            
-            # 进程清理改为异步，避免阻塞（这是耗时的部分）
-            cleanup_runner = getattr(gui_instance, '_cleanup_runner', None) if gui_instance else None
-            if cleanup_runner and pids_to_kill:
-                def _async_kill_processes():
-                    try:
-                        graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.5)
-                        logging.debug(f"已清理浏览器进程树: {len(pids_to_kill)} 个进程")
-                    except Exception as exc:
-                        log_suppressed_exception("runner._dispose_driver async terminate process tree", exc)
-                cleanup_runner.submit(_async_kill_processes, delay_seconds=0.0)
-                logging.debug(f"已提交进程清理任务到后台（{len(pids_to_kill)} 个进程）")
-            elif pids_to_kill:
-                # 兜底：如果没有 cleanup_runner，快速同步清理进程
-                try:
-                    graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.3)
-                except Exception as exc:
-                    log_suppressed_exception("runner._dispose_driver fallback terminate process tree", exc)
+                    log_suppressed_exception("runner._dispose_driver terminate process tree", exc)
+
+            try:
+                driver_to_close._playwright.stop()
+                logging.debug("已停止 playwright 实例")
+            except Exception as exc:
+                log_suppressed_exception("runner._dispose_driver playwright.stop", exc)
         
         # 释放信号量
         if sem_acquired:

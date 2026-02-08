@@ -165,15 +165,20 @@ class EngineGuiAdapter:
                     pids_to_wait.update(int(p) for p in pid_set)
             except Exception:
                 pass
+
+        # 先直接终止所有浏览器进程（快速、无 GIL 争用）
+        if pids_to_wait:
             try:
-                driver.quit()
+                graceful_terminate_process_tree(pids_to_wait, wait_seconds=0.8)
             except Exception:
                 pass
 
-        if pids_to_wait:
+        # 进程已死后再清理 Playwright 实例（不再调用 _browser.close()，避免 GIL 争用）
+        for driver in drivers:
+            if not driver.mark_cleanup_done():
+                continue  # 已被工作线程清理过，跳过
             try:
-                # 降低等待时间，加快浏览器重启速度（从1.5秒→0.8秒）
-                graceful_terminate_process_tree(pids_to_wait, wait_seconds=0.8)
+                driver._playwright.stop()
             except Exception:
                 pass
 
