@@ -46,6 +46,10 @@ from wjx.utils.app.config import (
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
+# 全局锁：串行化浏览器关闭操作，避免多线程同时执行导致 GUI 卡顿
+_browser_cleanup_lock = threading.Lock()
+
+
 def _submission_blocked_by_security_check(driver: BrowserDriver) -> bool:
     """检测提交后是否出现“需要安全校验/请重新提交”等拦截提示。"""
     script = r"""
@@ -153,21 +157,23 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             _unregister_driver(driver)
             driver = None  # 立即清空引用，避免重复处理
             
-            # 关键修复：playwright.stop() 必须在工作线程中同步执行（greenlet 限制）
-            # 优化策略：先快速关闭 browser，让 playwright.stop() 变快（通常总共 100-200ms）
-            try:
-                driver_to_close._browser.close()
-                logging.debug("已关闭浏览器实例")
-            except Exception as exc:
-                log_suppressed_exception("runner._dispose_driver sync browser.close", exc)
+            # 【卡顿修复】使用全局锁串行化浏览器关闭，避免多线程同时执行导致 GUI 卡顿
+            # playwright.stop() 必须在创建它的工作线程中同步执行（greenlet 限制）
+            # 但通过加锁，确保一次只关闭一个浏览器，减少 CPU 瞬间飙升和 GIL 抢占
+            with _browser_cleanup_lock:
+                try:
+                    driver_to_close._browser.close()
+                    logging.debug("已关闭浏览器实例（串行锁保护）")
+                except Exception as exc:
+                    log_suppressed_exception("runner._dispose_driver browser.close", exc)
+                
+                try:
+                    driver_to_close._playwright.stop()
+                    logging.debug("已停止 playwright 实例（串行锁保护）")
+                except Exception as exc:
+                    log_suppressed_exception("runner._dispose_driver playwright.stop", exc)
             
-            try:
-                driver_to_close._playwright.stop()
-                logging.debug("已同步停止 playwright 实例（工作线程）")
-            except Exception as exc:
-                log_suppressed_exception("runner._dispose_driver sync playwright.stop", exc)
-            
-            # 进程清理放后台异步执行，避免阻塞（这部分可能耗时较长）
+            # 进程清理改为异步，避免阻塞（这是耗时的部分）
             cleanup_runner = getattr(gui_instance, '_cleanup_runner', None) if gui_instance else None
             if cleanup_runner and pids_to_kill:
                 def _async_kill_processes():
@@ -184,6 +190,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     graceful_terminate_process_tree(pids_to_kill, wait_seconds=0.3)
                 except Exception as exc:
                     log_suppressed_exception("runner._dispose_driver fallback terminate process tree", exc)
+        
         # 释放信号量
         if sem_acquired:
             try:

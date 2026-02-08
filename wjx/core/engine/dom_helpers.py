@@ -154,6 +154,27 @@ def _driver_question_looks_like_rating(question_div) -> bool:
 
 
 
+def _driver_question_looks_like_description(question_div, question_type: str) -> bool:
+    """运行时检测说明页/阅读材料（有 type 属性但无可交互控件）。"""
+    if question_div is None:
+        return False
+    if question_type not in ("3", "4"):
+        return False
+    try:
+        choice_inputs = question_div.find_elements(
+            By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']"
+        )
+        if choice_inputs:
+            return False
+        if question_div.find_elements(By.CSS_SELECTOR, ".ui-controlgroup"):
+            return False
+        if question_div.find_elements(By.CSS_SELECTOR, ".jqradio, .jqcheck"):
+            return False
+    except Exception:
+        return False
+    return True
+
+
 def _count_choice_inputs_driver(question_div) -> Tuple[int, int]:
     try:
         inputs = question_div.find_elements(By.CSS_SELECTOR, "input[type='checkbox'], input[type='radio']")

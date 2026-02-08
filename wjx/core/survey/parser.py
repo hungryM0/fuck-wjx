@@ -681,6 +681,38 @@ def _count_text_inputs_in_soup(question_div) -> int:
     return count
 
 
+def _soup_question_looks_like_description(question_div, type_code: str) -> bool:
+    """检测是否为说明页/阅读材料（有 topic 和 type 属性但无可交互控件）。
+
+    问卷星有时会给纯阅读材料/说明文字也打上 topic 和 type 属性，
+    导致解析器误将其识别为正常题目。此函数通过检测交互控件的缺失来识别这类情况。
+    """
+    if question_div is None:
+        return False
+    # 只对选择类题型做检测（type 3/4 是最常见的误识别情况）
+    if type_code not in {"3", "4"}:
+        return False
+    try:
+        # 检查是否有 radio/checkbox input（单选/多选题必备）
+        choice_inputs = question_div.find_all(
+            "input", attrs={"type": lambda v: v and v.lower() in ("radio", "checkbox")}
+        )
+        if choice_inputs:
+            return False
+        # 检查是否有标准选项容器
+        has_control_group = bool(question_div.select_one(".ui-controlgroup"))
+        if has_control_group:
+            return False
+        # 检查是否有 jqradio/jqcheck 样式的选项（另一种模板）
+        has_jq_controls = bool(question_div.select_one(".jqradio, .jqcheck"))
+        if has_jq_controls:
+            return False
+    except Exception:
+        return False
+    # 没有任何选择控件 → 说明页
+    return True
+
+
 def _soup_question_looks_like_reorder(question_div) -> bool:
     """兜底判断：通过 DOM 特征识别排序题（静态 HTML）。"""
     if question_div is None:
@@ -849,6 +881,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
             type_code = str(question_div.get("type") or "").strip() or "0"
             if type_code != "11" and _soup_question_looks_like_reorder(question_div):
                 type_code = "11"
+            is_description = _soup_question_looks_like_description(question_div, type_code)
             is_rating = False
             rating_max = 0
             if type_code == "5":
@@ -888,6 +921,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "fillable_options": fillable_indices,
                 "is_location": is_location,
                 "is_rating": is_rating,
+                "is_description": is_description,
                 "rating_max": rating_max,
                 "text_inputs": text_input_count,
                 "is_multi_text": is_multi_text,

@@ -7,6 +7,7 @@ from typing import List, Optional
 import wjx.core.state as state
 from wjx.core.engine.dom_helpers import (
     _count_choice_inputs_driver,
+    _driver_question_looks_like_description,
     _driver_question_looks_like_rating,
     _driver_question_looks_like_reorder,
 )
@@ -98,6 +99,11 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
             # 先读取题型（即使题目不可见也需要，用于维护索引）
             question_type = question_div.get_attribute("type")
             is_reorder_question = (question_type == "11") or _driver_question_looks_like_reorder(question_div)
+
+            # 检测说明页/阅读材料：有 type 属性但无可交互控件
+            if _driver_question_looks_like_description(question_div, question_type):
+                logging.debug("跳过第%d题（说明页/阅读材料，type=%s）", current_question_number, question_type)
+                continue
 
             if not question_visible:
                 logging.debug("跳过第%d题（未显示，type=%s）", current_question_number, question_type)

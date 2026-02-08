@@ -3,7 +3,7 @@
 import os
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QBrush, QPen, QFont
 from PySide6.QtWidgets import (
     QWidget,
@@ -185,7 +185,7 @@ class ResultPage(QWidget):
         self._question_cards: list = []
         self._build_ui()
         self._bind_events()
-        self._setup_refresh_timer()
+        self._connect_stats_signal()
 
     # ── 界面搭建 ──────────────────────────────────────────────
 
@@ -423,25 +423,26 @@ class ResultPage(QWidget):
         self.export_btn.clicked.connect(self._on_export)
         self.history_combo.currentIndexChanged.connect(self._on_history_selected)
 
-    def _setup_refresh_timer(self) -> None:
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(2000)
-        self._refresh_timer.timeout.connect(self._auto_refresh)
+    def _connect_stats_signal(self) -> None:
+        """连接统计更新信号（强制 QueuedConnection 确保在主线程执行刷新）"""
+        stats_collector.signals.stats_updated.connect(
+            self._on_stats_updated, Qt.ConnectionType.QueuedConnection
+        )
+
+    def _on_stats_updated(self) -> None:
+        """统计数据更新时的回调（每完成1份问卷后触发）"""
+        # 只有在查看"当前会话"时才自动刷新
+        if self.history_combo.currentIndex() <= 0:
+            self.refresh_stats()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._load_history_list()
         if self.history_combo.currentIndex() <= 0:
             self.refresh_stats()
-        self._refresh_timer.start()
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
-        self._refresh_timer.stop()
-
-    def _auto_refresh(self) -> None:
-        if self.history_combo.currentIndex() <= 0:
-            self.refresh_stats()
 
     # ── 数据刷新 ──────────────────────────────────────────────
 

@@ -263,6 +263,8 @@ class RunController(QObject):
         def _worker():
             try:
                 info, title = self._parse_questions(normalized_url)
+                # 过滤掉说明页/阅读材料，只保留真正的题目
+                info = [q for q in info if not q.get("is_description")]
                 self.questions_info = info
                 # 传入现有配置，以便复用已配置的题型权重
                 self.question_entries = self._build_default_entries(info, self.question_entries)
@@ -342,6 +344,9 @@ class RunController(QObject):
         entries: List[QuestionEntry] = []
         for q in questions_info:
             type_code = _normalize_question_type_code(q.get("type_code"))
+            # 跳过说明页/阅读材料，不为其创建配置条目
+            if bool(q.get("is_description")):
+                continue
             option_count = int(q.get("options") or 0)
             rows = int(q.get("rows") or 1)
             is_location = bool(q.get("is_location"))

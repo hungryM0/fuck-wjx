@@ -5,6 +5,8 @@ import threading
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
+from PySide6.QtCore import QObject, Signal
+
 from wjx.core.stats.models import SurveyStats
 
 
@@ -15,11 +17,19 @@ _PendingAction = tuple  # 动作元组：(类型字符串, 其他参数...)
 _PendingBuffer = Dict[int, List[_PendingAction]]
 
 
+class _StatsSignals(QObject):
+    """统计信号发射器（用于跨线程通知 GUI）"""
+    stats_updated = Signal()  # 统计数据更新信号
+
+
 class StatsCollector:
     """线程安全的统计数据收集器（单例模式）
     
     设计：每轮作答先记录到 buffer，只有提交成功才合并到主统计。
     避免因提交失败导致题目统计与提交次数不一致。
+    
+    【多线程修复】每个工作线程有独立的 pending buffer（按线程 ID 隔离），
+    避免跨线程 start_round/commit_round 竞态导致 total_responses 与 total_submissions 不一致。
     """
 
     _instance: Optional["StatsCollector"] = None
@@ -37,9 +47,20 @@ class StatsCollector:
             return
         self._data_lock = threading.Lock()
         self._current_stats: Optional[SurveyStats] = None
-        self._pending_buffer: _PendingBuffer = {}  # 当前轮次暂存
+        # 【多线程修复】按线程 ID 隔离 buffer，避免跨线程竞态
+        self._pending_buffers: Dict[int, _PendingBuffer] = {}  # thread_id -> buffer
         self._enabled = False
+        self._signals = _StatsSignals()  # 信号发射器
         self._initialized = True
+
+    def _get_thread_id(self) -> int:
+        """获取当前线程 ID"""
+        return threading.current_thread().ident or 0
+
+    @property
+    def signals(self) -> _StatsSignals:
+        """获取信号发射器"""
+        return self._signals
 
     def start_session(self, survey_url: str, survey_title: Optional[str] = None) -> None:
         """开始新的统计会话"""
@@ -48,31 +69,35 @@ class StatsCollector:
                 survey_url=survey_url,
                 survey_title=survey_title
             )
-            self._pending_buffer = {}
+            self._pending_buffers = {}
             self._enabled = True
 
     def end_session(self) -> None:
         """结束当前会话"""
         with self._data_lock:
             self._enabled = False
-            self._pending_buffer = {}
+            self._pending_buffers = {}
 
     def start_round(self) -> None:
-        """开始新的作答轮次（清空暂存缓冲区）"""
+        """开始新的作答轮次（清空当前线程的暂存缓冲区）"""
+        tid = self._get_thread_id()
         with self._data_lock:
-            self._pending_buffer = {}
+            self._pending_buffers[tid] = {}
 
     def commit_round(self) -> None:
-        """提交成功：将暂存缓冲区的统计合并到主统计，并补充配置元数据"""
+        """提交成功：将当前线程暂存缓冲区的统计合并到主统计，并补充配置元数据"""
+        tid = self._get_thread_id()
+        should_emit = False
         with self._data_lock:
-            if not self._current_stats or not self._pending_buffer:
+            pending = self._pending_buffers.pop(tid, None)
+            if not self._current_stats or not pending:
                 return
-            
+
             # 导入 state 以获取题目配置信息
             import wjx.core.state as state
-            
+
             # 逐题应用缓冲区中的操作
-            for q_num, actions in self._pending_buffer.items():
+            for q_num, actions in pending.items():
                 for action in actions:
                     action_type = action[0]
                     if action_type == "single":
@@ -97,16 +122,20 @@ class StatsCollector:
                     elif action_type == "text":
                         q = self._current_stats.get_or_create_question(q_num, "text")
                         q.record_text_answer(action[1])
-            
+
             # 补充配置元数据（从 state 中提取）
             self._enrich_config_metadata(state)
-            
+
             # 记录提交成功
             self._current_stats.total_submissions += 1
             self._current_stats.updated_at = datetime.now().isoformat()
-            
-            # 清空缓冲区
-            self._pending_buffer = {}
+
+            # buffer 已在 pop 时移除，无需额外清空
+            should_emit = True
+
+        # 在锁外面发射信号，避免与 get_current_stats 的锁竞争
+        if should_emit:
+            self._signals.stats_updated.emit()
     
     def _enrich_config_metadata(self, state) -> None:
         """从 state 中提取题目配置元数据，补全到 QuestionStats 中"""
@@ -190,79 +219,113 @@ class StatsCollector:
                 pass
 
     def discard_round(self) -> None:
-        """提交失败：丢弃暂存缓冲区"""
+        """提交失败：丢弃当前线程的暂存缓冲区"""
+        tid = self._get_thread_id()
+        should_emit = False
         with self._data_lock:
-            self._pending_buffer = {}
+            self._pending_buffers.pop(tid, None)
             # 记录失败
             if self._current_stats:
                 self._current_stats.failed_submissions += 1
                 self._current_stats.updated_at = datetime.now().isoformat()
+                should_emit = True
 
-    # ── 题目作答记录（写入暂存缓冲区） ────────────────────────
+        # 在锁外面发射信号
+        if should_emit:
+            self._signals.stats_updated.emit()
+
+    # ── 内部辅助：获取当前线程的 buffer ────────────────────────
+
+    def _get_thread_buffer(self) -> Optional[_PendingBuffer]:
+        """获取当前线程的 pending buffer，不存在则返回 None（需在 _data_lock 内调用）"""
+        tid = self._get_thread_id()
+        return self._pending_buffers.get(tid)
+
+    # ── 题目作答记录（写入当前线程的暂存缓冲区） ────────────────
 
     def record_single_choice(self, question_num: int, selected_index: int) -> None:
-        """记录单选题选择（暂存）"""
+        """记录单选题选择（暂存到当前线程 buffer）"""
         with self._data_lock:
             if not self._enabled:
                 return
-            if question_num not in self._pending_buffer:
-                self._pending_buffer[question_num] = []
-            self._pending_buffer[question_num].append(("single", selected_index))
+            buf = self._get_thread_buffer()
+            if buf is None:
+                return
+            if question_num not in buf:
+                buf[question_num] = []
+            buf[question_num].append(("single", selected_index))
 
     def record_multiple_choice(self, question_num: int, selected_indices: List[int]) -> None:
-        """记录多选题选择（暂存）"""
+        """记录多选题选择（暂存到当前线程 buffer）"""
         with self._data_lock:
             if not self._enabled:
                 return
-            if question_num not in self._pending_buffer:
-                self._pending_buffer[question_num] = []
-            self._pending_buffer[question_num].append(("multiple", tuple(selected_indices)))
+            buf = self._get_thread_buffer()
+            if buf is None:
+                return
+            if question_num not in buf:
+                buf[question_num] = []
+            buf[question_num].append(("multiple", tuple(selected_indices)))
 
     def record_matrix_choice(self, question_num: int, row_index: int, col_index: int) -> None:
-        """记录矩阵题选择（暂存）"""
+        """记录矩阵题选择（暂存到当前线程 buffer）"""
         with self._data_lock:
             if not self._enabled:
                 return
-            if question_num not in self._pending_buffer:
-                self._pending_buffer[question_num] = []
-            self._pending_buffer[question_num].append(("matrix", row_index, col_index))
+            buf = self._get_thread_buffer()
+            if buf is None:
+                return
+            if question_num not in buf:
+                buf[question_num] = []
+            buf[question_num].append(("matrix", row_index, col_index))
 
     def record_scale_choice(self, question_num: int, selected_index: int) -> None:
-        """记录量表题选择（暂存）"""
+        """记录量表题选择（暂存到当前线程 buffer）"""
         with self._data_lock:
             if not self._enabled:
                 return
-            if question_num not in self._pending_buffer:
-                self._pending_buffer[question_num] = []
-            self._pending_buffer[question_num].append(("scale", selected_index))
+            buf = self._get_thread_buffer()
+            if buf is None:
+                return
+            if question_num not in buf:
+                buf[question_num] = []
+            buf[question_num].append(("scale", selected_index))
 
     def record_dropdown_choice(self, question_num: int, selected_index: int) -> None:
-        """记录下拉题选择（暂存）"""
+        """记录下拉题选择（暂存到当前线程 buffer）"""
         with self._data_lock:
             if not self._enabled:
                 return
-            if question_num not in self._pending_buffer:
-                self._pending_buffer[question_num] = []
-            self._pending_buffer[question_num].append(("dropdown", selected_index))
+            buf = self._get_thread_buffer()
+            if buf is None:
+                return
+            if question_num not in buf:
+                buf[question_num] = []
+            buf[question_num].append(("dropdown", selected_index))
 
     def record_slider_choice(self, question_num: int, selected_index: int) -> None:
-        """记录滑块题选择（暂存）"""
+        """记录滑块题选择（暂存到当前线程 buffer）"""
         with self._data_lock:
             if not self._enabled:
                 return
-            if question_num not in self._pending_buffer:
-                self._pending_buffer[question_num] = []
-            self._pending_buffer[question_num].append(("slider", selected_index))
+            buf = self._get_thread_buffer()
+            if buf is None:
+                return
+            if question_num not in buf:
+                buf[question_num] = []
+            buf[question_num].append(("slider", selected_index))
 
     def record_text_answer(self, question_num: int, text: str) -> None:
-        """记录填空题答案（暂存）"""
+        """记录填空题答案（暂存到当前线程 buffer）"""
         with self._data_lock:
             if not self._enabled:
                 return
-            if question_num not in self._pending_buffer:
-                self._pending_buffer[question_num] = []
-            self._pending_buffer[question_num].append(("text", text))
-
+            buf = self._get_thread_buffer()
+            if buf is None:
+                return
+            if question_num not in buf:
+                buf[question_num] = []
+            buf[question_num].append(("text", text))
     # ── 旧接口兼容（已废弃，请使用 commit_round/discard_round） ──
 
     def record_submission_success(self) -> None:
@@ -292,7 +355,7 @@ class StatsCollector:
         """重置统计数据"""
         with self._data_lock:
             self._current_stats = None
-            self._pending_buffer = {}
+            self._pending_buffers = {}
             self._enabled = False
 
 
