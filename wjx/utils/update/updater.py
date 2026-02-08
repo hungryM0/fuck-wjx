@@ -32,8 +32,8 @@ def _get_github_mirror() -> str:
     if QSettings is not None:
         try:
             settings = QSettings("FuckWjx", "Settings")
-            value = settings.value("github_mirror", DEFAULT_GITHUB_MIRROR, type=str)
-            return str(value) if value else DEFAULT_GITHUB_MIRROR
+            value = str(settings.value("github_mirror", DEFAULT_GITHUB_MIRROR))
+            return value if value else DEFAULT_GITHUB_MIRROR
         except Exception:
             pass
     return DEFAULT_GITHUB_MIRROR

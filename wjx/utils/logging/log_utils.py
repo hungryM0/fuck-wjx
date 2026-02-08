@@ -93,6 +93,9 @@ class LogBufferHandler(logging.Handler):
             message = self.format(record)
             # 清理 ANSI 转义序列
             message = self._strip_ansi_codes(message)
+            # 过滤包含敏感信息的日志（只过滤特定服务）
+            if self._should_filter_sensitive(message):
+                return
             category = self._determine_category(record, message)
             display_text = self._apply_category_label(message, original_level, category)
             entry = LogBufferEntry(text=display_text, category=category)
@@ -111,6 +114,20 @@ class LogBufferHandler(logging.Handler):
         if not text:
             return text
         return LogBufferHandler._ANSI_ESCAPE_PATTERN.sub('', text)
+
+    @staticmethod
+    def _should_filter_sensitive(message: str) -> bool:
+        """检查是否应过滤包含敏感信息的日志"""
+        if not message:
+            return False
+        # 过滤特定服务的API请求日志（只过滤这一个域名）
+        sensitive_patterns = [
+            "service.ipzan.com",
+            "userProduct-get",
+            "20260112572376490874",
+            "72FH7U4E0IG",
+        ]
+        return any(pattern in message for pattern in sensitive_patterns)
 
     @staticmethod
     def _determine_category(record: logging.LogRecord, message: str) -> str:

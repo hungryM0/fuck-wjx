@@ -49,7 +49,7 @@ class SettingsPage(ScrollArea):
             "开启后侧边栏将始终保持展开状态",
             self.appearance_group
         )
-        self.sidebar_card.setChecked(settings.value("sidebar_always_expand", True, type=bool))
+        self.sidebar_card.setChecked(bool(settings.value("sidebar_always_expand", True)))
         self.appearance_group.addSettingCard(self.sidebar_card)
 
         # 窗口置顶设置卡片
@@ -59,7 +59,7 @@ class SettingsPage(ScrollArea):
             "开启后程序窗口将始终保持在最上层",
             self.appearance_group
         )
-        self.topmost_card.setChecked(settings.value("window_topmost", False, type=bool))
+        self.topmost_card.setChecked(bool(settings.value("window_topmost", False)))
         self.appearance_group.addSettingCard(self.topmost_card)
 
         layout.addWidget(self.appearance_group)
@@ -74,7 +74,7 @@ class SettingsPage(ScrollArea):
             "关闭窗口时提示是否保存当前配置",
             self.behavior_group
         )
-        self.ask_save_card.setChecked(settings.value("ask_save_on_close", True, type=bool))
+        self.ask_save_card.setChecked(bool(settings.value("ask_save_on_close", True)))
         self.behavior_group.addSettingCard(self.ask_save_card)
 
         # 自动保存统计结果设置卡片
@@ -84,7 +84,7 @@ class SettingsPage(ScrollArea):
             "执行完成后自动保存本次作答的统计数据",
             self.behavior_group
         )
-        self.auto_save_stats_card.setChecked(settings.value("auto_save_stats", True, type=bool))
+        self.auto_save_stats_card.setChecked(bool(settings.value("auto_save_stats", True)))
         self.behavior_group.addSettingCard(self.auto_save_stats_card)
 
         layout.addWidget(self.behavior_group)
@@ -101,7 +101,7 @@ class SettingsPage(ScrollArea):
         )
         # 从设置中读取，默认开启
         settings = QSettings("FuckWjx", "Settings")
-        self.auto_update_card.setChecked(settings.value("auto_check_update", True, type=bool))
+        self.auto_update_card.setChecked(bool(settings.value("auto_check_update", True)))
         self.update_group.addSettingCard(self.auto_update_card)
 
         # 下载镜像源选择
@@ -116,7 +116,7 @@ class SettingsPage(ScrollArea):
         for key, source in GITHUB_MIRROR_SOURCES.items():
             self.mirror_combo.addItem(source["label"], userData=key)
         # 读取保存的镜像源设置
-        saved_mirror = settings.value("github_mirror", DEFAULT_GITHUB_MIRROR, type=str)
+        saved_mirror = str(settings.value("github_mirror", DEFAULT_GITHUB_MIRROR))
         idx = self.mirror_combo.findData(saved_mirror)
         if idx >= 0:
             self.mirror_combo.setCurrentIndex(idx)
@@ -136,7 +136,7 @@ class SettingsPage(ScrollArea):
             "开启后将显示更详细日志信息，便于排查问题",
             self.tools_group
         )
-        debug_mode = bool(settings.value("debug_mode", False, type=bool))
+        debug_mode = bool(settings.value("debug_mode", False))
         self._set_switch_state(self.debug_mode_card, debug_mode)
         self.tools_group.addSettingCard(self.debug_mode_card)
 

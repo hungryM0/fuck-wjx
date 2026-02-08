@@ -77,13 +77,10 @@ class RegistryManager:
             with winreg.OpenKey(hkey, RegistryManager.REGISTRY_PATH) as key:
                 value, _ = winreg.QueryValueEx(key, RegistryManager.REGISTRY_KEY_UNLIMITED)
                 result = bool(int(value))
-                logging.debug(f"无限额度状态: {result}")
                 return result
         except FileNotFoundError:
-            logging.debug("无限额度标记不存在，返回False")
             return False
         except Exception as e:
-            logging.debug(f"读取无限额度状态失败: {e}")
             return False
     
     @staticmethod
@@ -96,11 +93,8 @@ class RegistryManager:
             key = winreg.CreateKeyEx(hkey, RegistryManager.REGISTRY_PATH, 0, winreg.KEY_WRITE)
             winreg.SetValueEx(key, RegistryManager.REGISTRY_KEY_UNLIMITED, 0, winreg.REG_DWORD, int(unlimited))
             winreg.CloseKey(key)
-            status = "启用" if unlimited else "禁用"
-            logging.info(f"无限额度已{status}")
             return True
         except Exception as e:
-            logging.warning(f"设置无限额度失败: {e}")
             return False
 
     @staticmethod

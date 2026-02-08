@@ -25,7 +25,7 @@ def main():
     
     # 应用保存的调试模式设置
     settings = QSettings("FuckWjx", "Settings")
-    debug_mode = settings.value("debug_mode", False, type=bool)
+    debug_mode = bool(settings.value("debug_mode", False))
     set_debug_mode(debug_mode)
     
     qInstallMessageHandler(_qt_message_handler)

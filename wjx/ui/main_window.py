@@ -105,7 +105,7 @@ class MainWindow(FluentWindow):
 
         # 应用窗口置顶设置
         settings = QSettings("FuckWjx", "Settings")
-        if settings.value("window_topmost", False, type=bool):
+        if bool(settings.value("window_topmost", False)):
             self.apply_topmost_state(True, show=False)
 
         # 创建启动页面
@@ -152,16 +152,9 @@ class MainWindow(FluentWindow):
         self._init_changelog_navigation()
 
         self._init_github_avatar()
-        # 设置侧边栏宽度和折叠策略
-        try:
-            self.navigationInterface.setExpandWidth(140)
-            settings = QSettings("FuckWjx", "Settings")
-            always_expand = settings.value("sidebar_always_expand", True, type=bool)
-            self.navigationInterface.setCollapsible(not always_expand)
-            if always_expand:
-                self.navigationInterface.expand(useAni=False)
-        except Exception:
-            logging.debug("初始化时展开侧边栏失败", exc_info=True)
+        # 设置侧边栏宽度和折叠策略（延迟到事件循环中，避免时序问题）
+        self.navigationInterface.setExpandWidth(140)
+        QTimer.singleShot(0, self._setup_sidebar_state)
         self._sidebar_expanded = False  # 标记侧边栏是否已展开
         self._bind_controller_signals()
         # 确保初始 adapter 也能回调随机 IP 计数
@@ -205,6 +198,17 @@ class MainWindow(FluentWindow):
         if self._boot_splash:
             self._boot_splash.update_layout(self.width(), self.height())
 
+    def _setup_sidebar_state(self):
+        """设置侧边栏折叠状态（在事件循环中调用以避免时序问题）"""
+        try:
+            settings = QSettings("FuckWjx", "Settings")
+            always_expand = bool(settings.value("sidebar_always_expand", True))
+            self.navigationInterface.setCollapsible(not always_expand)
+            if always_expand:
+                self.navigationInterface.expand(useAni=False)
+        except Exception:
+            logging.debug("设置侧边栏状态失败", exc_info=True)
+
     def showEvent(self, e):
         """窗口显示时展开侧边栏"""
         super().showEvent(e)
@@ -212,7 +216,7 @@ class MainWindow(FluentWindow):
             return
         self._sidebar_expanded = True
         settings = QSettings("FuckWjx", "Settings")
-        always_expand = settings.value("sidebar_always_expand", True, type=bool)
+        always_expand = bool(settings.value("sidebar_always_expand", True))
         if not always_expand:
             return
         try:
@@ -236,7 +240,7 @@ class MainWindow(FluentWindow):
         
         if not self._skip_save_on_close:
             settings = QSettings("FuckWjx", "Settings")
-            ask_save = settings.value("ask_save_on_close", True, type=bool)
+            ask_save = bool(settings.value("ask_save_on_close", True))
             if ask_save:
                 # 询问用户是否保存配置
                 box = MessageBox("保存配置", "是否保存当前配置？", self)
@@ -702,7 +706,7 @@ class MainWindow(FluentWindow):
     def _check_update_on_startup(self):
         """根据设置在启动时检查更新"""
         settings = QSettings("FuckWjx", "Settings")
-        if settings.value("auto_check_update", True, type=bool):
+        if bool(settings.value("auto_check_update", True)):
             from wjx.utils.update.updater import check_updates_on_startup
             check_updates_on_startup(self)
 
