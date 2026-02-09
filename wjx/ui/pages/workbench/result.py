@@ -251,6 +251,7 @@ class ResultPage(QWidget):
         self._question_cards: list = []
         self._analysis_thread: Optional[QThread] = None
         self._analysis_worker: Optional[_AnalysisWorker] = None
+        self._last_infobar_submission_count: int = -1  # 记录上次显示 InfoBar 时的提交次数
         self._build_ui()
         self._bind_events()
         self._connect_stats_signal()
@@ -819,6 +820,26 @@ class ResultPage(QWidget):
         settings = QSettings("FuckWjx", "Settings")
         auto_save = settings.value("auto_save_stats", True, type=bool)
         
+        # 获取统计数据
+        stats = self._current_stats or stats_collector.get_current_stats()
+        if stats is None:
+            return
+        
+        # 检查提交次数是否增加（避免重复显示 InfoBar）
+        current_count = stats.total_submissions
+        if current_count <= self._last_infobar_submission_count:
+            # 数据未更新，静默保存，不显示 InfoBar
+            if auto_save:
+                try:
+                    save_stats(stats)
+                    self._load_history_list()
+                except Exception:
+                    pass  # 静默失败
+            return
+        
+        # 数据已更新，记录当前提交次数
+        self._last_infobar_submission_count = current_count
+        
         if not auto_save:
             # 未开启自动保存，仅显示提示
             InfoBar.info(
@@ -828,11 +849,7 @@ class ResultPage(QWidget):
             )
             return
         
-        # 自动保存统计数据
-        stats = self._current_stats or stats_collector.get_current_stats()
-        if stats is None:
-            return
-        
+        # 自动保存统计数据并显示提示
         try:
             path = save_stats(stats)
             InfoBar.success(

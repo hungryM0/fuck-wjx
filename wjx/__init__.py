@@ -1,9 +1,5 @@
 """Support modules for the WJX automation package."""
 
-# 加载 .env 文件中的环境变量
-from dotenv import load_dotenv
-load_dotenv()
-
 # 导入子模块使其可以通过 wjx.* 访问
 from wjx import (
     boot,

@@ -35,7 +35,7 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _generate_stats_filename(stats: SurveyStats) -> str:
-    """生成统计文件名：标题_已提交份数.json
+    """生成统计文件名：标题.json（固定文件名，覆盖保存）
     
     Args:
         stats: 统计数据对象
@@ -51,9 +51,8 @@ def _generate_stats_filename(stats: SurveyStats) -> str:
         path_part = parsed.path.replace("/", "_").strip("_")
         title = path_part if path_part else "未命名问卷"
     
-    # 使用实际提交份数
-    submitted = stats.total_submissions
-    return f"{title}_{submitted}份.json"
+    # 不再包含提交份数，固定文件名（每次保存覆盖旧文件）
+    return f"{title}.json"
 
 
 def save_stats(stats: SurveyStats, path: Optional[str] = None, target_num: Optional[int] = None) -> str:

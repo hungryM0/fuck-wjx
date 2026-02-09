@@ -59,13 +59,12 @@ def _generate_base_index(option_count: int, probabilities: Union[List[float], in
 def get_tendency_index(option_count: int, probabilities: Union[List[float], int, None]) -> int:
     """获取带有一致性倾向的选项索引。
 
-    当概率配置为 -1（随机模式）时：
-        第一次调用会生成基准偏好，之后每次调用在基准附近 ±1 波动，
-        保持同一份问卷内量表类答案的逻辑一致性。
+    核心改进：无论是随机模式还是手动配置概率，都会应用一致性约束，确保信效度。
 
-    当概率配置为显式列表时：
-        严格按用户设定的概率分布选择，不应用一致性波动。
-        这样用户把某选项概率设为 0 时就绝不会被选中。
+    一致性机制：
+        - 第一次调用：根据概率配置（或随机）选择一个基准偏好
+        - 后续调用：在基准 ±1 范围内，结合原概率和距离衰减，重新加权选择
+          这样既保持了用户配置的宏观概率分布，又确保了单份问卷内的答题一致性。
 
     Args:
         option_count: 该题的选项数量（比如5分量表就是5）
@@ -77,18 +76,16 @@ def get_tendency_index(option_count: int, probabilities: Union[List[float], int,
     if option_count <= 0:
         return 0
 
-    # 显式概率配置：严格按用户设定的权重选择，不做一致性波动
-    if isinstance(probabilities, list) and probabilities:
-        return weighted_index(probabilities)
-
-    # 随机模式（-1 或 None）：使用一致性倾向机制
+    # 获取或生成基准偏好
     base = getattr(_thread_local, 'base_index', None)
 
     if base is None:
-        # 首次调用：完全随机生成基准偏好
-        base = random.randrange(option_count)
+        # 首次调用：根据概率配置生成基准偏好
+        base = _generate_base_index(option_count, probabilities)
         _thread_local.base_index = base
+        return base
 
+    # 后续调用：应用一致性约束
     # 当前题目选项数可能与生成 base 时不同，需要夹到合法范围
     effective_base = min(base, option_count - 1)
 
@@ -96,9 +93,28 @@ def get_tendency_index(option_count: int, probabilities: Union[List[float], int,
     low = max(0, effective_base - _FLUCTUATION)
     high = min(option_count - 1, effective_base + _FLUCTUATION)
 
-    # 在 [low, high] 范围内随机选一个，但偏向基准值
+    # 如果有显式概率配置，需要结合原概率和距离衰减
+    if isinstance(probabilities, list) and len(probabilities) == option_count:
+        # 计算修正后的概率：原概率 * 距离衰减
+        adjusted_probs = []
+        for i in range(option_count):
+            if low <= i <= high:
+                # 在约束范围内：保留原概率，距离基准越近权重越高
+                distance = abs(i - effective_base)
+                decay = 2.0 if distance == 0 else (1.0 if distance == 1 else 0.1)
+                adjusted_probs.append(probabilities[i] * decay)
+            else:
+                # 在约束范围外：大幅降低概率（保留小概率避免完全违背用户意图）
+                adjusted_probs.append(probabilities[i] * 0.05)
+        
+        # 归一化
+        total = sum(adjusted_probs)
+        if total > 0:
+            adjusted_probs = [p / total for p in adjusted_probs]
+            return weighted_index(adjusted_probs)
+
+    # 随机模式或无有效概率：在约束范围内均匀波动，但偏向基准
     candidates = list(range(low, high + 1))
-    # 给基准值更高的权重（2倍），让结果更集中
     weights = []
     for c in candidates:
         if c == effective_base:
