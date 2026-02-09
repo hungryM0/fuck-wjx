@@ -5,6 +5,9 @@
 
 方案：每次填写问卷时，先生成一个"基准偏好"（倾向于选高分/中分/低分），
 之后所有量表类题目都围绕这个基准 ±1 波动，模拟真人的答题一致性。
+
+增强（画像融合）：当存在虚拟画像时，基准偏好由画像的 satisfaction_tendency
+决定，而非完全随机。这样画像越"满意"的人物，量表题越倾向选高分。
 """
 import random
 import threading
@@ -30,9 +33,23 @@ def reset_tendency() -> None:
 def _generate_base_index(option_count: int, probabilities: Union[List[float], int, None]) -> int:
     """根据概率配置生成本份问卷的基准偏好索引。
 
-    如果有概率配置，按概率选择基准；否则完全随机。
+    如果有概率配置，按概率选择基准；否则参考画像的满意度倾向。
+    当画像存在时，基准偏好 = satisfaction_tendency * (option_count - 1)，
+    再加上少许随机扰动，让不同问卷间仍有差异。
     """
     if probabilities == -1 or probabilities is None:
+        # 尝试从画像获取满意度倾向
+        try:
+            from wjx.core.persona.generator import get_current_persona
+            persona = get_current_persona()
+            if persona is not None:
+                # 根据满意度倾向计算基准，加少许扰动
+                raw = persona.satisfaction_tendency * (option_count - 1)
+                jitter = random.gauss(0, 0.5)
+                base = int(round(max(0, min(option_count - 1, raw + jitter))))
+                return base
+        except Exception:
+            pass
         return random.randrange(option_count)
     if isinstance(probabilities, list) and probabilities:
         return weighted_index(probabilities)

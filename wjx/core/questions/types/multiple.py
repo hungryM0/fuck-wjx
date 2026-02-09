@@ -24,7 +24,9 @@ from wjx.utils.app.config import (
 from wjx.core.questions.utils import (
     get_fill_text_from_config,
     fill_option_additional_text,
+    extract_text_from_element,
 )
+from wjx.core.persona.context import apply_persona_boost, record_answer
 from wjx.core.stats.collector import stats_collector
 
 # 缓存检测到的多选限制
@@ -336,6 +338,11 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
     selection_probabilities = multiple_prob_config[index] if index < len(multiple_prob_config) else [50.0] * len(option_elements)
     fill_entries = multiple_option_fill_texts_config[index] if index < len(multiple_option_fill_texts_config) else None
 
+    # 提取选项文本，用于画像约束和上下文记录
+    option_texts: List[str] = []
+    for elem in option_elements:
+        option_texts.append(extract_text_from_element(elem))
+
     if selection_probabilities == -1 or (isinstance(selection_probabilities, list) and len(selection_probabilities) == 1 and selection_probabilities[0] == -1):
         num_to_select = random.randint(min_required, max_allowed)
         selected_indices = random.sample(range(len(option_elements)), num_to_select)
@@ -346,6 +353,9 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
             fill_option_additional_text(driver, current, option_idx, fill_value)
         # 记录统计数据
         stats_collector.record_multiple_choice(current, selected_indices)
+        # 记录作答上下文
+        selected_texts = [option_texts[i] for i in selected_indices if i < len(option_texts)]
+        record_answer(current, "multiple", selected_indices=selected_indices, selected_texts=selected_texts)
         return
 
     if len(option_elements) != len(selection_probabilities):
@@ -373,6 +383,11 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
         prob_value = max(0.0, min(100.0, prob_value))
         sanitized_probabilities.append(prob_value)
     selection_probabilities = sanitized_probabilities
+
+    # 画像约束：对匹配画像的选项概率加成
+    # 多选题概率是 0-100 的百分比，加成后上限仍为 100
+    boosted = apply_persona_boost(option_texts, selection_probabilities)
+    selection_probabilities = [min(100.0, p) for p in boosted]
 
     selection_mask: List[int] = []
     attempts = 0
@@ -432,3 +447,7 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
 
     # 记录统计数据
     stats_collector.record_multiple_choice(current, selected_indices)
+
+    # 记录作答上下文
+    selected_texts = [option_texts[i] for i in selected_indices if i < len(option_texts)]
+    record_answer(current, "multiple", selected_indices=selected_indices, selected_texts=selected_texts)

@@ -11,6 +11,7 @@ from wjx.core.questions.utils import (
     smooth_scroll_to_element,
 )
 from wjx.core.ai.runtime import AIRuntimeError, generate_ai_answer, resolve_question_title_for_ai
+from wjx.core.persona.context import record_answer
 from wjx.core.stats.collector import stats_collector
 
 # 多项填空题分隔符
@@ -343,6 +344,7 @@ def vacant(
         _handle_single_text(driver, current, selected_answer)
         # 记录统计数据（AI生成的答案）
         stats_collector.record_text_answer(current, selected_answer)
+        record_answer(current, "text", text_answer=selected_answer)
         return
 
     selected_index = weighted_index(selection_probabilities)
@@ -352,11 +354,13 @@ def vacant(
         _handle_multi_text(driver, current, selected_answer)
         # 记录统计数据
         stats_collector.record_text_answer(current, selected_answer)
+        record_answer(current, "text", text_answer=selected_answer)
         return
 
     _handle_single_text(driver, current, selected_answer)
     # 记录统计数据
     stats_collector.record_text_answer(current, selected_answer)
+    record_answer(current, "text", text_answer=selected_answer)
 
 
 def _handle_multi_text(driver: BrowserDriver, current: int, selected_answer: str) -> None:

@@ -3,6 +3,7 @@ import time
 from typing import Any, List, Optional, Tuple, Union
 
 from wjx.network.browser_driver import By, BrowserDriver
+from wjx.core.persona.context import apply_persona_boost, record_answer
 from wjx.core.questions.utils import (
     weighted_index,
     normalize_droplist_probs,
@@ -126,14 +127,19 @@ def _fill_droplist_via_click(driver: BrowserDriver, current: int, prob_config: U
     if option_count <= 0:
         return
     probabilities = normalize_droplist_probs(prob_config, option_count)
+    # 画像约束：对匹配画像的选项加权
+    click_option_texts = [text for _, _, text in filtered_options]
+    probabilities = apply_persona_boost(click_option_texts, probabilities)
     selected_idx = weighted_index(probabilities)
-    _, selected_option, _ = filtered_options[selected_idx]
+    _, selected_option, selected_text = filtered_options[selected_idx]
     try:
         selected_option.click()
     except Exception:
         return
     # 记录统计数据
     stats_collector.record_dropdown_choice(current, selected_idx)
+    # 记录作答上下文
+    record_answer(current, "dropdown", selected_indices=[selected_idx], selected_texts=[selected_text])
     fill_value = get_fill_text_from_config(fill_entries, selected_idx)
     fill_option_additional_text(driver, current, selected_idx, fill_value)
 
@@ -145,11 +151,16 @@ def droplist(driver: BrowserDriver, current: int, index: int, droplist_prob_conf
     select_element, select_options = _extract_select_options(driver, current)
     if select_options:
         probabilities = normalize_droplist_probs(prob_config, len(select_options))
+        # 画像约束：对匹配画像的选项加权
+        option_texts = [text for _, text in select_options]
+        probabilities = apply_persona_boost(option_texts, probabilities)
         selected_idx = weighted_index(probabilities)
         selected_value, selected_text = select_options[selected_idx]
         if _select_dropdown_option_via_js(driver, select_element, selected_value, selected_text):
             # 记录统计数据
             stats_collector.record_dropdown_choice(current, selected_idx)
+            # 记录作答上下文
+            record_answer(current, "dropdown", selected_indices=[selected_idx], selected_texts=[selected_text])
             fill_value = get_fill_text_from_config(fill_entries, selected_idx)
             fill_option_additional_text(driver, current, selected_idx, fill_value)
             return

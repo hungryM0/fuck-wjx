@@ -469,7 +469,7 @@ class DashboardPage(QWidget):
         cfg.question_entries = list(self.question_page.get_entries())
         cfg.questions_info = list(self.question_page.questions_info or [])
         self.controller.config = cfg
-        path, _ = QFileDialog.getSaveFileName(self, "保存配置", os.path.join(get_runtime_directory(), "config.json"), "JSON 文件 (*.json);;所有文件 (*.*)")
+        path, _ = QFileDialog.getSaveFileName(self, "保存配置", os.path.join(get_runtime_directory(), "configs", "config.json"), "JSON 文件 (*.json);;所有文件 (*.*)")
         if not path:
             return
         try:

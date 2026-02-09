@@ -3,11 +3,13 @@ import logging
 from typing import Any, List, Optional, Set, Union
 
 from wjx.network.browser_driver import By, BrowserDriver
+from wjx.core.persona.context import apply_persona_boost, record_answer
 from wjx.core.questions.utils import (
     weighted_index,
     normalize_droplist_probs,
     get_fill_text_from_config,
     fill_option_additional_text,
+    extract_text_from_element,
 )
 from wjx.core.stats.collector import stats_collector
 
@@ -72,6 +74,11 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
             len(option_elements),
             current,
         )
+    # 画像约束：提取选项文本，对匹配画像的选项加权
+    option_texts = []
+    for elem in option_elements:
+        option_texts.append(extract_text_from_element(elem))
+    probabilities = apply_persona_boost(option_texts, probabilities)
     target_index = weighted_index(probabilities)
     selected_option = target_index + 1
     target_elem = option_elements[target_index] if target_index < len(option_elements) else None
@@ -100,6 +107,10 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
 
     # 记录统计数据
     stats_collector.record_single_choice(current, target_index)
+
+    # 记录作答上下文（供后续题目参考）
+    selected_text = option_texts[target_index] if target_index < len(option_texts) else ""
+    record_answer(current, "single", selected_indices=[target_index], selected_texts=[selected_text])
 
     fill_entries = single_option_fill_texts_config[index] if index < len(single_option_fill_texts_config) else None
     fill_value = get_fill_text_from_config(fill_entries, selected_option - 1)

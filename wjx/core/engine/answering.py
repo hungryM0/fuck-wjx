@@ -22,6 +22,8 @@ from wjx.core.engine.navigation import _click_next_page_button, _human_scroll_af
 from wjx.core.engine.question_detection import detect
 from wjx.core.engine.runtime_control import _is_fast_mode, _sleep_with_stop
 from wjx.core.engine.submission import submit
+from wjx.core.persona.context import reset_context as _reset_answer_context
+from wjx.core.persona.generator import generate_persona, reset_persona, set_current_persona
 from wjx.core.questions.types.dropdown import droplist as _droplist_impl
 from wjx.core.questions.types.matrix import matrix as _matrix_impl
 from wjx.core.questions.types.multiple import multiple as _multiple_impl
@@ -42,8 +44,13 @@ from wjx.network.browser_driver import BrowserDriver, By, NoSuchElementException
 
 def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> bool:
     """批量填写一份问卷；返回 True 代表完整提交，False 代表过程中被用户打断。"""
-    # 每份问卷开始前重置答题倾向，确保不同问卷之间的倾向独立
+    # 每份问卷开始前：生成画像 → 重置上下文 → 重置倾向
+    # 画像必须在 reset_tendency() 之前设置，因为倾向模块会参考画像的满意度
+    persona = generate_persona()
+    set_current_persona(persona)
+    _reset_answer_context()
     reset_tendency()
+    logging.debug("本轮画像：%s", persona.to_description())
     questions_per_page = detect(driver, stop_signal=stop_signal)
     total_question_count = sum(questions_per_page)
     fast_mode = _is_fast_mode()
@@ -255,6 +262,8 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
             else:
                 time.sleep(click_delay)
     if _abort_requested():
+        reset_persona()
         return False
     submit(driver, stop_signal=active_stop)
+    reset_persona()
     return True

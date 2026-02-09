@@ -49,15 +49,39 @@ def normalize_probabilities(values: List[float]) -> List[float]:
 
 
 def generate_random_chinese_name() -> str:
-    """生成随机中文姓名"""
+    """生成随机中文姓名，如果存在画像则根据性别选择名字风格"""
     surname_pool = [
         "张", "王", "李", "赵", "陈", "杨", "刘", "黄", "周", "吴", "徐", "孙", "马", "朱", "胡", "林",
         "郭", "何", "高", "罗", "郑", "梁", "谢", "宋", "唐", "韩", "曹", "许", "邓", "冯",
     ]
-    given_pool = "嘉伟俊涛明强磊洋超刚凯鹏华建鑫宇泽浩瑞博杰涛宁安晨泽轩磊晨豪轩皓轩梓轩浩宇子豪思远家豪文博宇航志强明浩志伟文涛文轩梓豪志鹏伟豪君豪承泽"
+    # 偏男性化的名字用字
+    male_given_pool = "伟俊涛强磊刚凯鹏鑫宇浩瑞博杰宁豪轩皓浩宇子豪思远家豪文博宇航志强明浩志伟文涛梓豪志鹏伟豪君豪承泽"
+    # 偏女性化的名字用字
+    female_given_pool = "婷雅静怡欣萱琳玲芳颖慧敏雪晶莉倩蕾佳媛茜悦岚蓉瑶诗梦菲琪韵彤璐"
+    # 中性用字
+    neutral_given_pool = "嘉明华建安晨泽文超洋"
+
+    # 尝试从画像获取性别
+    gender = None
+    try:
+        from wjx.core.persona.generator import get_current_persona
+        persona = get_current_persona()
+        if persona is not None:
+            gender = persona.gender
+    except Exception:
+        pass
+
     surname = random.choice(surname_pool)
     given_len = 1 if random.random() < 0.65 else 2
-    given = "".join(random.choice(given_pool) for _ in range(given_len))
+
+    if gender == "男":
+        pool = male_given_pool + neutral_given_pool
+    elif gender == "女":
+        pool = female_given_pool + neutral_given_pool
+    else:
+        pool = male_given_pool + female_given_pool + neutral_given_pool
+
+    given = "".join(random.choice(pool) for _ in range(given_len))
     return f"{surname}{given}"
 
 

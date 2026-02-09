@@ -67,6 +67,16 @@ def generate_ai_answer(question_title: str) -> str:
     cleaned = _cleanup_question_title(question_title)
     if not cleaned:
         raise AIRuntimeError("题干为空，无法调用 AI")
+
+    # 注入画像和上下文信息，让 AI 答案与前面的作答保持一致
+    try:
+        from wjx.core.persona.context import build_ai_context_prompt
+        context_prompt = build_ai_context_prompt()
+        if context_prompt:
+            cleaned = f"{context_prompt}\n\n请回答以下问卷问题：{cleaned}"
+    except Exception:
+        pass
+
     try:
         answer = generate_answer(cleaned)
     except Exception as exc:

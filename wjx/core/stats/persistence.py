@@ -34,12 +34,11 @@ def _sanitize_filename(name: str) -> str:
     return sanitized or "未命名问卷"
 
 
-def _generate_stats_filename(stats: SurveyStats, target_num: int) -> str:
-    """生成统计文件名：标题_目标份数_日期时间.json
+def _generate_stats_filename(stats: SurveyStats) -> str:
+    """生成统计文件名：标题_已提交份数.json
     
     Args:
         stats: 统计数据对象
-        target_num: 目标执行份数
     
     Returns:
         文件名字符串
@@ -52,8 +51,9 @@ def _generate_stats_filename(stats: SurveyStats, target_num: int) -> str:
         path_part = parsed.path.replace("/", "_").strip("_")
         title = path_part if path_part else "未命名问卷"
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{title}_{target_num}份_{timestamp}.json"
+    # 使用实际提交份数
+    submitted = stats.total_submissions
+    return f"{title}_{submitted}份.json"
 
 
 def save_stats(stats: SurveyStats, path: Optional[str] = None, target_num: Optional[int] = None) -> str:
@@ -62,22 +62,14 @@ def save_stats(stats: SurveyStats, path: Optional[str] = None, target_num: Optio
     Args:
         stats: 统计数据对象
         path: 可选的保存路径，不指定则自动生成
-        target_num: 目标执行份数，用于生成文件名（不指定则从 state 读取）
+        target_num: 目标执行份数（已废弃，保留仅为向后兼容）
 
     Returns:
         保存的文件路径
     """
     if path is None:
-        # 如果没有指定目标份数，从 state 读取
-        if target_num is None:
-            try:
-                import wjx.core.state as state
-                target_num = state.target_num
-            except:
-                target_num = 1  # 降级默认值
-        
         stats_dir = _ensure_stats_dir()
-        filename = _generate_stats_filename(stats, target_num)
+        filename = _generate_stats_filename(stats)
         path = os.path.join(stats_dir, filename)
 
     # 序列化数据

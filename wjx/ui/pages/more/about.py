@@ -328,12 +328,14 @@ class AboutPage(ScrollArea):
         threading.Thread(target=_do_load, daemon=True).start()
 
     def _on_ip_balance_loaded(self, balance: float):
-        """更新IP余额标签"""
+        """更新IP余额标签，显示剩余IP数"""
         try:
-            display = f"{float(balance):.2f}"
+            # 计算剩余IP数：经费除以0.0035，截断小数部分
+            ip_count = int(float(balance) / 0.0035)
+            display = str(ip_count)
         except Exception:
             display = "--"
-        self.ip_balance_label.setText(f"|  开发者实时剩余经费：￥{display}")
+        self.ip_balance_label.setText(f"|  代理源剩余IP数：{display}")
 
     def _show_terms_of_service(self):
         """显示服务条款对话框"""
