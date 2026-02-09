@@ -240,9 +240,8 @@ class QuestionWizardDialog(QDialog):
         # 滚动区域
         scroll = ScrollArea(self)
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.enableTransparentBackground()
         container = QWidget(self)
-        container.setStyleSheet("background: transparent;")
         scroll.setWidget(container)
         inner = QVBoxLayout(container)
         inner.setContentsMargins(4, 4, 12, 4)
@@ -420,9 +419,8 @@ class QuestionWizardDialog(QDialog):
                 per_row_scroll.setWidgetResizable(True)
                 per_row_scroll.setMinimumHeight(180)
                 per_row_scroll.setMaximumHeight(320)
-                per_row_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+                per_row_scroll.enableTransparentBackground()
                 per_row_view = QWidget(card)
-                per_row_view.setStyleSheet("background: transparent;")
                 per_row_scroll.setWidget(per_row_view)
                 per_row_layout = QVBoxLayout(per_row_view)
                 per_row_layout.setContentsMargins(0, 0, 0, 0)
@@ -790,9 +788,8 @@ class QuestionAddDialog(QDialog):
 
         self.preview_scroll = ScrollArea(preview_card)
         self.preview_scroll.setWidgetResizable(True)
-        self.preview_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.preview_scroll.enableTransparentBackground()
         self.preview_container = QWidget(preview_card)
-        self.preview_container.setStyleSheet("background: transparent;")
         self.preview_layout = QVBoxLayout(self.preview_container)
         self.preview_layout.setContentsMargins(4, 4, 4, 4)
         self.preview_layout.setSpacing(12)
@@ -1340,9 +1337,9 @@ class QuestionPage(ScrollArea):
         self.entries: List[QuestionEntry] = []
         self.questions_info: List[Dict[str, Any]] = []
         self.view = QWidget(self)
-        self.view.setStyleSheet("background: transparent;")
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+        self.enableTransparentBackground()
         self._build_ui()
 
     def _build_ui(self):

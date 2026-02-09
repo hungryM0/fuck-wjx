@@ -378,8 +378,9 @@ class AccountPage(ScrollArea):
         self._build_issue_card(layout)
         
         layout.addStretch(1)
-        
+
         self.setWidget(container)
+        self.enableTransparentBackground()
     
     def _build_network_card(self, parent_layout: QVBoxLayout):
         """构建网络优化卡片"""

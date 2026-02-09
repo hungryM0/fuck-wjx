@@ -141,6 +141,7 @@ class DashboardPage(QWidget):
         scroll.setWidgetResizable(True)
         inner = QWidget(self)
         scroll.setWidget(inner)
+        scroll.enableTransparentBackground()
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)

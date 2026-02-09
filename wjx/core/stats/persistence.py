@@ -79,7 +79,6 @@ def save_stats(stats: SurveyStats, path: Optional[str] = None, target_num: Optio
         "created_at": stats.created_at,
         "updated_at": stats.updated_at,
         "total_submissions": stats.total_submissions,
-        "failed_submissions": stats.failed_submissions,
         "questions": {}
     }
 
@@ -144,7 +143,7 @@ def load_stats(path: str) -> Optional[SurveyStats]:
         created_at=data.get("created_at", ""),
         updated_at=data.get("updated_at", ""),
         total_submissions=data.get("total_submissions", 0),
-        failed_submissions=data.get("failed_submissions", 0),
+        # failed_submissions 已废弃，但保持向后兼容（忽略旧文件中的该字段）
         reliability_validity=data.get("reliability_validity"),  # 加载信效度分析结果
     )
 

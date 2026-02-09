@@ -61,9 +61,9 @@ class RuntimePage(ScrollArea):
         self.controller = controller
         self._browser_icons = self._load_browser_icons()
         self.view = QWidget(self)
-        self.view.setStyleSheet("background: transparent;")
         self.setWidget(self.view)
         self.setWidgetResizable(True)
+        self.enableTransparentBackground()
         self.view.setObjectName("settings_view")
         self.ua_checkboxes: Dict[str, CheckBox] = {}
         self._build_ui()

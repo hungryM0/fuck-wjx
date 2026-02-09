@@ -58,15 +58,15 @@ class AboutPage(ScrollArea):
         self._updateCheckFinished.connect(self._on_update_result)
         self._updateCheckError.connect(self._on_update_error)
         self._ipBalanceLoaded.connect(self._on_ip_balance_loaded)
-        
+
         self.view = QWidget(self)
         self.view.setObjectName('view')
         self.setWidget(self.view)
         self.setWidgetResizable(True)
-        self.view.setStyleSheet("QWidget#view { background: transparent; }")
-        
+        self.enableTransparentBackground()
+
         self._checking_update = False
-        
+
         self._build_ui()
 
     def _build_ui(self):

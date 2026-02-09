@@ -70,8 +70,7 @@ class SurveyStats:
     survey_title: Optional[str] = None          # 问卷标题
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    total_submissions: int = 0                  # 总提交份数
-    failed_submissions: int = 0                 # 失败次数
+    total_submissions: int = 0                  # 总提交份数（内部计数，不显示）
     questions: Dict[int, QuestionStats] = field(default_factory=dict)  # 题号 -> 统计
 
     # 信效度分析结果（可选，仅当执行过分析时才有值）

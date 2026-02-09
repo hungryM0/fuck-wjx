@@ -85,17 +85,18 @@ def pick_time_value(parent: QWidget, title: str, current_seconds: int) -> Option
     main_layout.addWidget(card)
     main_layout.addStretch(1)
 
-    def update_preview():
+    def update_preview(_value=None):
+        """更新预览文本（接受但忽略 valueChanged 信号的参数）"""
         m = minutes_spin.value()
         s = seconds_spin.value()
         preview_value.setText(f"{m}分{s}秒")
 
     minutes_slider.valueChanged.connect(minutes_spin.setValue)
     minutes_spin.valueChanged.connect(minutes_slider.setValue)
-    minutes_spin.valueChanged.connect(lambda: update_preview())
+    minutes_spin.valueChanged.connect(update_preview)
     seconds_slider.valueChanged.connect(seconds_spin.setValue)
     seconds_spin.valueChanged.connect(seconds_slider.setValue)
-    seconds_spin.valueChanged.connect(lambda: update_preview())
+    seconds_spin.valueChanged.connect(update_preview)
     update_preview()
 
     btn_row = QHBoxLayout()

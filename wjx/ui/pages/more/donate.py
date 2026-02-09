@@ -31,7 +31,7 @@ class DonatePage(ScrollArea):
         self.view.setObjectName('view')
         self.setWidget(self.view)
         self.setWidgetResizable(True)
-        self.view.setStyleSheet("QWidget#view { background: transparent; }")
+        self.enableTransparentBackground()
         self._build_ui()
 
     def _build_ui(self):

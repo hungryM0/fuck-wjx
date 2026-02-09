@@ -276,18 +276,9 @@ class StatsCollector:
     def discard_round(self) -> None:
         """提交失败：丢弃当前线程的暂存缓冲区"""
         tid = self._get_thread_id()
-        should_emit = False
         with self._data_lock:
             self._pending_buffers.pop(tid, None)
-            # 记录失败
-            if self._current_stats:
-                self._current_stats.failed_submissions += 1
-                self._current_stats.updated_at = datetime.now().isoformat()
-                should_emit = True
-
-        # 在锁外面发射信号
-        if should_emit:
-            self._signals.stats_updated.emit()
+            # 不再记录失败次数，仅丢弃缓冲区
 
     # ── 内部辅助：获取当前线程的 buffer ────────────────────────
 

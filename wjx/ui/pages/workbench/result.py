@@ -252,6 +252,7 @@ class ResultPage(QWidget):
         self._analysis_thread: Optional[QThread] = None
         self._analysis_worker: Optional[_AnalysisWorker] = None
         self._last_infobar_submission_count: int = -1  # 记录上次显示 InfoBar 时的提交次数
+        self._last_infobar_timestamp: str = ""  # 记录上次显示 InfoBar 时的时间戳
         self._build_ui()
         self._bind_events()
         self._connect_stats_signal()
@@ -281,10 +282,6 @@ class ResultPage(QWidget):
         header.addWidget(self.export_btn)
         root.addLayout(header)
 
-        # ─── 概览卡片 ───
-        self._overview_card = self._build_overview_card()
-        root.addWidget(self._overview_card)
-
         # ─── 信效度分析卡片 ───
         self._analysis_card = self._build_analysis_card()
         root.addWidget(self._analysis_card)
@@ -292,10 +289,9 @@ class ResultPage(QWidget):
         # ─── 滚动区域（题目卡片） ───
         scroll = ScrollArea(self)
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.enableTransparentBackground()
 
         self._scroll_content = QWidget()
-        self._scroll_content.setStyleSheet("background: transparent;")
         self._scroll_layout = QVBoxLayout(self._scroll_content)
         self._scroll_layout.setContentsMargins(0, 0, 0, 0)
         self._scroll_layout.setSpacing(12)
@@ -304,25 +300,6 @@ class ResultPage(QWidget):
 
         # 初始占位提示
         self._show_placeholder()
-
-    def _build_overview_card(self) -> SimpleCardWidget:
-        """概览卡片：四个数字指标水平排列"""
-        card = SimpleCardWidget(self)
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(28, 20, 28, 20)
-        layout.setSpacing(48)
-
-        self._stat_total = _StatNumberWidget("总提交", "0")
-        self._stat_success = _StatNumberWidget("成功", "0", "#22c55e")
-        self._stat_fail = _StatNumberWidget("失败", "0", "#ef4444")
-        self._stat_rate = _StatNumberWidget("成功率", "0%")
-
-        layout.addWidget(self._stat_total)
-        layout.addWidget(self._stat_success)
-        layout.addWidget(self._stat_fail)
-        layout.addWidget(self._stat_rate)
-        layout.addStretch(1)
-        return card
 
     def _build_analysis_card(self) -> SimpleCardWidget:
         """信效度分析卡片：Cronbach's Alpha / KMO / Bartlett"""
@@ -415,11 +392,6 @@ class ResultPage(QWidget):
         title_label = StrongBodyLabel(title, card)
         title_row.addWidget(title_label)
         title_row.addStretch(1)
-
-        # 总作答次数小徽标
-        resp_label = CaptionLabel(f"共 {q.total_responses} 次作答", card)
-        resp_label.setStyleSheet("color: rgba(128,128,128,0.75);")
-        title_row.addWidget(resp_label)
         v.addLayout(title_row)
 
         v.addWidget(_Divider(card))
@@ -603,20 +575,8 @@ class ResultPage(QWidget):
         if stats is None:
             return
         self._current_stats = stats
-        self._update_overview(stats)
         self._update_question_cards(stats)
         self._trigger_analysis()
-
-    def _update_overview(self, stats: SurveyStats) -> None:
-        total = stats.total_submissions + stats.failed_submissions
-        success = stats.total_submissions
-        fail = stats.failed_submissions
-        rate = (success / total * 100) if total > 0 else 0
-
-        self._stat_total.setValue(str(total))
-        self._stat_success.setValue(str(success))
-        self._stat_fail.setValue(str(fail))
-        self._stat_rate.setValue(f"{rate:.1f}%")
 
     def _update_question_cards(self, stats: SurveyStats) -> None:
         self._clear_scroll()
@@ -825,9 +785,9 @@ class ResultPage(QWidget):
         if stats is None:
             return
         
-        # 检查提交次数是否增加（避免重复显示 InfoBar）
-        current_count = stats.total_submissions
-        if current_count <= self._last_infobar_submission_count:
+        # 检查时间戳是否更新（避免重复显示 InfoBar）
+        current_timestamp = stats.updated_at
+        if current_timestamp == self._last_infobar_timestamp:
             # 数据未更新，静默保存，不显示 InfoBar
             if auto_save:
                 try:
@@ -837,8 +797,8 @@ class ResultPage(QWidget):
                     pass  # 静默失败
             return
         
-        # 数据已更新，记录当前提交次数
-        self._last_infobar_submission_count = current_count
+        # 数据已更新，记录当前时间戳
+        self._last_infobar_timestamp = current_timestamp
         
         if not auto_save:
             # 未开启自动保存，仅显示提示
@@ -1071,7 +1031,6 @@ class ResultPage(QWidget):
                 return
 
             self._current_stats = stats
-            self._update_overview(stats)
             self._update_question_cards(stats)
 
             # 如果历史数据中保存了信效度分析结果，则显示
