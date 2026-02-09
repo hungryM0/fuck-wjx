@@ -7,7 +7,8 @@ from typing import List, Optional, Dict, Any
 
 from PySide6.QtCore import QObject, Signal
 
-from wjx.core.stats.models import SurveyStats
+from wjx.core.stats.models import ResponseRecord, SurveyStats
+from wjx.core.stats.raw_storage import raw_data_storage
 
 
 # ── 暂存缓冲区类型定义 ──────────────────────────────────────
@@ -72,11 +73,17 @@ class StatsCollector:
             self._pending_buffers = {}
             self._enabled = True
 
+        # 同步开启原始数据存储会话
+        raw_data_storage.open_session(survey_url, survey_title)
+
     def end_session(self) -> None:
         """结束当前会话"""
         with self._data_lock:
             self._enabled = False
             self._pending_buffers = {}
+
+        # 同步关闭原始数据存储会话
+        raw_data_storage.close_session()
 
     def start_round(self) -> None:
         """开始新的作答轮次（清空当前线程的暂存缓冲区）"""
@@ -88,6 +95,8 @@ class StatsCollector:
         """提交成功：将当前线程暂存缓冲区的统计合并到主统计，并补充配置元数据"""
         tid = self._get_thread_id()
         should_emit = False
+        raw_record: Optional[ResponseRecord] = None
+
         with self._data_lock:
             pending = self._pending_buffers.pop(tid, None)
             if not self._current_stats or not pending:
@@ -96,6 +105,10 @@ class StatsCollector:
             # 导入 state 以获取题目配置信息
             import wjx.core.state as state
 
+            # ── 构建原始答卷记录 ──
+            submission_idx = self._current_stats.total_submissions + 1
+            raw_record = ResponseRecord(submission_index=submission_idx)
+
             # 逐题应用缓冲区中的操作
             for q_num, actions in pending.items():
                 for action in actions:
@@ -103,28 +116,47 @@ class StatsCollector:
                     if action_type == "single":
                         q = self._current_stats.get_or_create_question(q_num, "single")
                         q.record_selection(action[1])
+                        raw_record.answers[q_num] = action[1]
+                        raw_record.question_types[q_num] = "single"
                     elif action_type == "multiple":
                         q = self._current_stats.get_or_create_question(q_num, "multiple")
                         for idx in action[1]:
                             q.record_selection(idx)
+                        raw_record.answers[q_num] = tuple(action[1])
+                        raw_record.question_types[q_num] = "multiple"
                     elif action_type == "matrix":
                         q = self._current_stats.get_or_create_question(q_num, "matrix")
                         q.record_matrix_selection(action[1], action[2])
+                        # 矩阵题可能有多行，需要累积到 dict 中
+                        if q_num not in raw_record.answers:
+                            raw_record.answers[q_num] = {}
+                            raw_record.question_types[q_num] = "matrix"
+                        raw_record.answers[q_num][action[1]] = action[2]
                     elif action_type == "scale":
                         q = self._current_stats.get_or_create_question(q_num, "scale")
                         q.record_selection(action[1])
+                        raw_record.answers[q_num] = action[1]
+                        raw_record.question_types[q_num] = "scale"
                     elif action_type == "score":
                         q = self._current_stats.get_or_create_question(q_num, "score")
                         q.record_selection(action[1])
+                        raw_record.answers[q_num] = action[1]
+                        raw_record.question_types[q_num] = "score"
                     elif action_type == "dropdown":
                         q = self._current_stats.get_or_create_question(q_num, "dropdown")
                         q.record_selection(action[1])
+                        raw_record.answers[q_num] = action[1]
+                        raw_record.question_types[q_num] = "dropdown"
                     elif action_type == "slider":
                         q = self._current_stats.get_or_create_question(q_num, "slider")
                         q.record_selection(action[1])
+                        raw_record.answers[q_num] = action[1]
+                        raw_record.question_types[q_num] = "slider"
                     elif action_type == "text":
                         q = self._current_stats.get_or_create_question(q_num, "text")
                         q.record_text_answer(action[1])
+                        raw_record.answers[q_num] = action[1]
+                        raw_record.question_types[q_num] = "text"
 
             # 补充配置元数据（从 state 中提取）
             self._enrich_config_metadata(state)
@@ -136,7 +168,10 @@ class StatsCollector:
             # buffer 已在 pop 时移除，无需额外清空
             should_emit = True
 
-        # 在锁外面发射信号，避免与 get_current_stats 的锁竞争
+        # 在锁外面执行 IO 操作（写 CSV）和发射信号
+        if raw_record is not None:
+            raw_data_storage.append_record(raw_record)
+
         if should_emit:
             self._signals.stats_updated.emit()
     

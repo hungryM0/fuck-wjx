@@ -322,7 +322,7 @@ class MainWindow(FluentWindow):
     def _init_navigation(self):
         self.addSubInterface(self.dashboard, FluentIcon.HOME, "概览", NavigationItemPosition.TOP)
         self.addSubInterface(self.runtime_page, FluentIcon.DEVELOPER_TOOLS, "运行参数", NavigationItemPosition.TOP)
-        self.addSubInterface(self.result_page, FluentIcon.PIE_SINGLE, "结果统计", NavigationItemPosition.TOP)
+        self.addSubInterface(self.result_page, FluentIcon.PIE_SINGLE, "结果分析", NavigationItemPosition.TOP)
         self.addSubInterface(self.log_page, FluentIcon.INFO, "日志", NavigationItemPosition.TOP)
         # 登录页面（动态更新）
         self._login_nav_widget = None

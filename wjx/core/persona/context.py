@@ -35,7 +35,7 @@ PERSONA_BOOST_FACTOR = 3.0
 
 def reset_context() -> None:
     """清空当前线程的作答上下文（每份问卷开始时调用）。"""
-    _thread_local.answered: Dict[int, AnsweredQuestion] = {}
+    _thread_local.answered = {}
 
 
 def record_answer(

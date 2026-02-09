@@ -1,16 +1,15 @@
-"""结果页面 - 展示作答统计"""
+"""结果分析页面 - 展示作答统计与信效度分析"""
 
 import os
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, QObject, Signal
 from PySide6.QtGui import QColor, QPainter, QBrush, QPen, QFont
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QGridLayout,
-    QSizePolicy,
     QFrame,
 )
 from qfluentwidgets import (
@@ -33,6 +32,8 @@ from qfluentwidgets import (
 from wjx.core.stats.collector import stats_collector
 from wjx.core.stats.models import SurveyStats, QuestionStats
 from wjx.core.stats.persistence import save_stats, list_stats_files, load_stats, _ensure_stats_dir
+from wjx.core.stats.raw_storage import raw_data_storage
+from wjx.core.stats.analysis import AnalysisResult, run_analysis
 
 
 # ── 题型中文映射 ──────────────────────────────────────────────
@@ -46,6 +47,21 @@ _TYPE_LABELS = {
     "dropdown": "下拉题",
     "slider": "滑块题",
 }
+
+
+# ── 后台分析 Worker ──────────────────────────────────────────
+
+class _AnalysisWorker(QObject):
+    """后台线程中执行统计分析，避免阻塞 GUI"""
+    finished = Signal(object)  # AnalysisResult
+
+    def __init__(self, jsonl_path: str) -> None:
+        super().__init__()
+        self._path = jsonl_path
+
+    def run(self) -> None:
+        result = run_analysis(self._path)
+        self.finished.emit(result)
 
 
 # ── 辅助组件 ──────────────────────────────────────────────────
@@ -85,6 +101,11 @@ class _StatNumberWidget(QWidget):
 
     def setValue(self, text: str) -> None:
         self._value_label.setText(text)
+
+    def setColor(self, color: str) -> None:
+        self._value_label.setStyleSheet(
+            f"font-size: 28px; font-weight: 700; color: {color};"
+        )
 
 
 class _BarRow(QWidget):
@@ -174,15 +195,62 @@ class _MatrixCell(QWidget):
         painter.end()
 
 
+# ── 信效度指标组件 ──────────────────────────────────────────────
+
+class _MetricWidget(QWidget):
+    """信效度分析卡片中的单个指标展示
+
+    显示结构：
+        指标名
+        数值（带颜色）
+        解释文字
+    """
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        self._title_label = CaptionLabel(title, self)
+        self._title_label.setStyleSheet("color: rgba(128,128,128,0.9);")
+
+        self._value_label = StrongBodyLabel("--", self)
+        self._value_label.setStyleSheet("font-size: 20px;")
+
+        self._desc_label = CaptionLabel("", self)
+        self._desc_label.setStyleSheet("color: rgba(128,128,128,0.7);")
+        self._desc_label.setWordWrap(True)
+
+        layout.addWidget(self._title_label)
+        layout.addWidget(self._value_label)
+        layout.addWidget(self._desc_label)
+
+    def set_value(self, text: str, color: str, description: str,
+                  tooltip: str = "") -> None:
+        self._value_label.setText(text)
+        self._value_label.setStyleSheet(f"font-size: 20px; color: {color};")
+        self._desc_label.setText(description)
+        if tooltip:
+            self._value_label.setToolTip(tooltip)
+
+    def set_unavailable(self, reason: str = "") -> None:
+        self._value_label.setText("--")
+        self._value_label.setStyleSheet("font-size: 20px; color: rgba(128,128,128,0.5);")
+        self._desc_label.setText(reason)
+
+
 # ── 主页面 ────────────────────────────────────────────────────
 
 class ResultPage(QWidget):
-    """结果页面：展示作答统计信息"""
+    """结果分析页面：展示作答统计与信效度分析"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_stats: Optional[SurveyStats] = None
         self._question_cards: list = []
+        self._analysis_thread: Optional[QThread] = None
+        self._analysis_worker: Optional[_AnalysisWorker] = None
         self._build_ui()
         self._bind_events()
         self._connect_stats_signal()
@@ -197,7 +265,7 @@ class ResultPage(QWidget):
         # ─── 顶部标题栏 ───
         header = QHBoxLayout()
         header.setSpacing(12)
-        header.addWidget(SubtitleLabel("执行结果与统计", self))
+        header.addWidget(SubtitleLabel("结果分析", self))
         header.addStretch(1)
 
         self.history_combo = ComboBox(self)
@@ -216,6 +284,10 @@ class ResultPage(QWidget):
         self._overview_card = self._build_overview_card()
         root.addWidget(self._overview_card)
 
+        # ─── 信效度分析卡片 ───
+        self._analysis_card = self._build_analysis_card()
+        root.addWidget(self._analysis_card)
+
         # ─── 滚动区域（题目卡片） ───
         scroll = ScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -233,7 +305,7 @@ class ResultPage(QWidget):
         self._show_placeholder()
 
     def _build_overview_card(self) -> SimpleCardWidget:
-        """概览卡片：五个数字指标水平排列"""
+        """概览卡片：四个数字指标水平排列"""
         card = SimpleCardWidget(self)
         layout = QHBoxLayout(card)
         layout.setContentsMargins(28, 20, 28, 20)
@@ -243,15 +315,84 @@ class ResultPage(QWidget):
         self._stat_success = _StatNumberWidget("成功", "0", "#22c55e")
         self._stat_fail = _StatNumberWidget("失败", "0", "#ef4444")
         self._stat_rate = _StatNumberWidget("成功率", "0%")
-        self._stat_alpha = _StatNumberWidget("信度系数", "--", "#8b5cf6")
 
         layout.addWidget(self._stat_total)
         layout.addWidget(self._stat_success)
         layout.addWidget(self._stat_fail)
         layout.addWidget(self._stat_rate)
-        layout.addWidget(self._stat_alpha)
         layout.addStretch(1)
         return card
+
+    def _build_analysis_card(self) -> SimpleCardWidget:
+        """信效度分析卡片：Cronbach's Alpha / KMO / Bartlett"""
+        card = SimpleCardWidget(self)
+        v = QVBoxLayout(card)
+        v.setContentsMargins(28, 16, 28, 16)
+        v.setSpacing(12)
+
+        # 标题行
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_label = StrongBodyLabel("信效度分析", card)
+        title_row.addWidget(title_label)
+
+        self._analysis_status_label = CaptionLabel("", card)
+        self._analysis_status_label.setStyleSheet("color: rgba(128,128,128,0.6);")
+        title_row.addWidget(self._analysis_status_label)
+        title_row.addStretch(1)
+
+        # 样本信息
+        self._analysis_sample_label = CaptionLabel("", card)
+        self._analysis_sample_label.setStyleSheet("color: rgba(128,128,128,0.7);")
+        title_row.addWidget(self._analysis_sample_label)
+
+        v.addLayout(title_row)
+        v.addWidget(_Divider(card))
+
+        # 三个指标水平排列
+        metrics_layout = QHBoxLayout()
+        metrics_layout.setSpacing(48)
+
+        self._metric_alpha = _MetricWidget("Cronbach's Alpha（信度）", card)
+        self._metric_alpha.setToolTip(
+            "Cronbach's Alpha 用于评估问卷的内部一致性（可靠性）\n\n"
+            "衡量问卷中各题目是否在测量同一个构念\n"
+            "值越接近 1 表示内部一致性越好"
+        )
+
+        self._metric_kmo = _MetricWidget("KMO 检验（效度）", card)
+        self._metric_kmo.setToolTip(
+            "KMO (Kaiser-Meyer-Olkin) 检验用于评估数据是否适合做因子分析\n\n"
+            "衡量变量间的偏相关程度\n"
+            "值越接近 1 表示越适合做因子分析"
+        )
+
+        self._metric_bartlett = _MetricWidget("Bartlett 球形检验（效度）", card)
+        self._metric_bartlett.setToolTip(
+            "Bartlett 球形检验用于检验变量之间是否存在相关性\n\n"
+            "原假设：变量间无相关性（相关矩阵是单位矩阵）\n"
+            "p < 0.05 时拒绝原假设，说明适合做因子分析"
+        )
+
+        metrics_layout.addWidget(self._metric_alpha)
+        metrics_layout.addWidget(self._metric_kmo)
+        metrics_layout.addWidget(self._metric_bartlett)
+        metrics_layout.addStretch(1)
+
+        v.addLayout(metrics_layout)
+
+        # 初始状态
+        self._reset_analysis_card()
+
+        return card
+
+    def _reset_analysis_card(self) -> None:
+        """重置信效度分析卡片到初始状态"""
+        self._analysis_status_label.setText("")
+        self._analysis_sample_label.setText("")
+        self._metric_alpha.set_unavailable("等待数据...")
+        self._metric_kmo.set_unavailable("等待数据...")
+        self._metric_bartlett.set_unavailable("等待数据...")
 
     # ── 题目卡片构造 ──────────────────────────────────────────
 
@@ -301,7 +442,7 @@ class ResultPage(QWidget):
         """选择类题目——选项柱状行"""
         # 使用配置的选项总数来显示所有选项，即使某些未被选择
         option_count = q.option_count if q.option_count else max(q.options.keys(), default=0) + 1
-        
+
         for idx in range(option_count):
             opt = q.options.get(idx)
             count = opt.count if opt else 0
@@ -328,11 +469,11 @@ class ResultPage(QWidget):
             if not q.rows:
                 layout.addWidget(BodyLabel("暂无矩阵数据", parent))
                 return
-            
+
             # 推断行数：找到最大行索引+1
             max_row = max(q.rows.keys())
             rows = list(range(max_row + 1))
-            
+
             # 推断列数：从所有行中找到最大列索引+1
             all_cols = set()
             for row_data in q.rows.values():
@@ -373,10 +514,10 @@ class ResultPage(QWidget):
             )
             row_label.setFixedWidth(48)
             grid.addWidget(row_label, ri + 1, 0)
-            
+
             # 获取该行的数据（如果存在）
             col_data = q.rows.get(r, {}) if q.rows else {}
-            
+
             for ci, c in enumerate(cols):
                 cnt = col_data.get(c, 0)
                 cell = _MatrixCell(cnt, max_val, parent)
@@ -455,6 +596,7 @@ class ResultPage(QWidget):
         self._current_stats = stats
         self._update_overview(stats)
         self._update_question_cards(stats)
+        self._trigger_analysis()
 
     def _update_overview(self, stats: SurveyStats) -> None:
         total = stats.total_submissions + stats.failed_submissions
@@ -466,50 +608,6 @@ class ResultPage(QWidget):
         self._stat_success.setValue(str(success))
         self._stat_fail.setValue(str(fail))
         self._stat_rate.setValue(f"{rate:.1f}%")
-
-        # 计算并显示 Cronbach's Alpha 系数
-        alpha = stats.calculate_cronbach_alpha()
-        if alpha is not None:
-            # 根据系数值设置颜色
-            if alpha >= 0.8:
-                color = "#22c55e"  # 绿色：良好
-            elif alpha >= 0.7:
-                color = "#f59e0b"  # 橙色：可接受
-            else:
-                color = "#ef4444"  # 红色：较差
-            self._stat_alpha._value_label.setStyleSheet(
-                f"font-size: 28px; font-weight: 700; color: {color};"
-            )
-            self._stat_alpha.setValue(f"{alpha:.3f}")
-            # 设置提示信息
-            if alpha >= 0.9:
-                tip = "优秀 (≥0.9)"
-            elif alpha >= 0.8:
-                tip = "良好 (≥0.8)"
-            elif alpha >= 0.7:
-                tip = "可接受 (≥0.7)"
-            elif alpha >= 0.6:
-                tip = "勉强可接受 (≥0.6)"
-            else:
-                tip = "较差 (<0.6)"
-            self._stat_alpha._value_label.setToolTip(
-                f"Cronbach's Alpha: {alpha:.3f}\n"
-                f"内部一致性: {tip}\n\n"
-                f"说明：该系数用于评估问卷的信度（可靠性）\n"
-                f"• ≥0.9: 优秀\n"
-                f"• ≥0.8: 良好\n"
-                f"• ≥0.7: 可接受\n"
-                f"• <0.7: 需要改进"
-            )
-        else:
-            self._stat_alpha.setValue("--")
-            self._stat_alpha._value_label.setToolTip(
-                "Cronbach's Alpha 系数不可用\n\n"
-                "可能原因：\n"
-                "• 题目数量少于 2 道\n"
-                "• 样本数量不足\n"
-                "• 没有适用的题型（需要量表题、评分题等）"
-            )
 
     def _update_question_cards(self, stats: SurveyStats) -> None:
         self._clear_scroll()
@@ -524,6 +622,150 @@ class ResultPage(QWidget):
             self._scroll_layout.addWidget(card)
 
         self._scroll_layout.addStretch(1)
+
+    # ── 信效度分析（异步） ────────────────────────────────────
+
+    def _trigger_analysis(self) -> None:
+        """触发后台信效度分析"""
+        jsonl_path = raw_data_storage.get_file_path()
+        if not jsonl_path or not os.path.exists(jsonl_path):
+            self._reset_analysis_card()
+            self._analysis_status_label.setText("暂无原始数据")
+            return
+
+        # 如果有正在运行的分析线程，先等它结束
+        self._cleanup_analysis_thread()
+
+        self._analysis_status_label.setText("分析中...")
+        self._analysis_status_label.setStyleSheet("color: #f59e0b;")
+
+        # 在后台线程执行分析
+        self._analysis_thread = QThread()
+        self._analysis_worker = _AnalysisWorker(jsonl_path)
+        self._analysis_worker.moveToThread(self._analysis_thread)
+
+        self._analysis_thread.started.connect(self._analysis_worker.run)
+        self._analysis_worker.finished.connect(self._on_analysis_finished)
+        self._analysis_worker.finished.connect(self._analysis_thread.quit)
+
+        self._analysis_thread.start()
+
+    def _cleanup_analysis_thread(self) -> None:
+        """清理旧的分析线程"""
+        if self._analysis_thread is not None and self._analysis_thread.isRunning():
+            self._analysis_thread.quit()
+            self._analysis_thread.wait(3000)
+        self._analysis_thread = None
+        self._analysis_worker = None
+
+    def _on_analysis_finished(self, result: AnalysisResult) -> None:
+        """分析完成的回调（在主线程执行）"""
+        if result.error:
+            self._analysis_status_label.setText(result.error)
+            self._analysis_status_label.setStyleSheet("color: rgba(128,128,128,0.6);")
+            self._metric_alpha.set_unavailable(result.error)
+            self._metric_kmo.set_unavailable(result.error)
+            self._metric_bartlett.set_unavailable(result.error)
+            return
+
+        self._analysis_status_label.setText("")
+        self._analysis_sample_label.setText(
+            f"{result.sample_count} 份样本 / {result.item_count} 道题"
+        )
+
+        # ── Cronbach's Alpha ──
+        if result.cronbach_alpha is not None:
+            alpha = result.cronbach_alpha
+            if alpha >= 0.9:
+                color, desc = "#22c55e", "优秀"
+            elif alpha >= 0.8:
+                color, desc = "#22c55e", "良好"
+            elif alpha >= 0.7:
+                color, desc = "#f59e0b", "可接受"
+            elif alpha >= 0.6:
+                color, desc = "#f59e0b", "勉强可接受"
+            else:
+                color, desc = "#ef4444", "较差"
+
+            self._metric_alpha.set_value(
+                f"{alpha:.3f}", color, desc,
+                tooltip=(
+                    f"Cronbach's Alpha = {alpha:.4f}\n\n"
+                    f"内部一致性评级：{desc}\n\n"
+                    "评级标准：\n"
+                    "  >= 0.9  优秀\n"
+                    "  >= 0.8  良好\n"
+                    "  >= 0.7  可接受\n"
+                    "  >= 0.6  勉强可接受\n"
+                    "  <  0.6  较差，建议修改问卷"
+                ),
+            )
+        else:
+            self._metric_alpha.set_unavailable("数据不足，无法计算")
+
+        # ── KMO ──
+        if result.kmo_value is not None:
+            kmo = result.kmo_value
+            if kmo >= 0.9:
+                color, desc = "#22c55e", "非常适合因子分析"
+            elif kmo >= 0.8:
+                color, desc = "#22c55e", "适合因子分析"
+            elif kmo >= 0.7:
+                color, desc = "#3b82f6", "中等适合"
+            elif kmo >= 0.6:
+                color, desc = "#f59e0b", "勉强适合"
+            else:
+                color, desc = "#ef4444", "不适合因子分析"
+
+            self._metric_kmo.set_value(
+                f"{kmo:.3f}", color, desc,
+                tooltip=(
+                    f"KMO = {kmo:.4f}\n\n"
+                    f"适合度评级：{desc}\n\n"
+                    "评级标准：\n"
+                    "  >= 0.9  非常适合\n"
+                    "  >= 0.8  适合\n"
+                    "  >= 0.7  中等\n"
+                    "  >= 0.6  勉强\n"
+                    "  <  0.6  不适合"
+                ),
+            )
+        else:
+            self._metric_kmo.set_unavailable("数据不足，无法计算")
+
+        # ── Bartlett ──
+        if result.bartlett_p is not None:
+            p = result.bartlett_p
+            chi2 = result.bartlett_chi2
+
+            if p < 0.001:
+                color, desc = "#22c55e", "显著（适合因子分析）"
+                p_text = "< 0.001"
+            elif p < 0.01:
+                color, desc = "#22c55e", "显著（适合因子分析）"
+                p_text = f"{p:.4f}"
+            elif p < 0.05:
+                color, desc = "#f59e0b", "边缘显著"
+                p_text = f"{p:.4f}"
+            else:
+                color, desc = "#ef4444", "不显著（不适合因子分析）"
+                p_text = f"{p:.4f}"
+
+            display_text = f"p = {p_text}"
+            self._metric_bartlett.set_value(
+                display_text, color, desc,
+                tooltip=(
+                    f"Bartlett 球形检验\n\n"
+                    f"卡方值 (χ²) = {chi2:.2f}\n"
+                    f"p 值 = {p_text}\n\n"
+                    f"结论：{desc}\n\n"
+                    "判断标准：\n"
+                    "  p < 0.05  拒绝原假设 → 变量间存在相关性 → 适合因子分析\n"
+                    "  p >= 0.05 接受原假设 → 变量间无相关性 → 不适合因子分析"
+                ),
+            )
+        else:
+            self._metric_bartlett.set_unavailable("数据不足，无法计算")
 
     # ── 导出 ──────────────────────────────────────────────────
 
@@ -609,6 +851,10 @@ class ResultPage(QWidget):
             self._current_stats = stats
             self._update_overview(stats)
             self._update_question_cards(stats)
+
+            # 历史数据暂不支持信效度分析（没有对应的 JSONL 文件）
+            self._reset_analysis_card()
+            self._analysis_status_label.setText("历史统计暂不支持信效度分析")
         except Exception as exc:
             InfoBar.error(
                 "", f"加载失败: {str(exc)[:50]}",
