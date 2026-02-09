@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QFrame,
+    QSizePolicy,
 )
 from qfluentwidgets import (
     ScrollArea,
@@ -72,6 +73,16 @@ class _Divider(QFrame):
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.HLine)
         self.setFixedHeight(1)
+        self.setStyleSheet("background: rgba(128,128,128,0.15); border: none;")
+
+
+class _VerticalDivider(QFrame):
+    """1px 垂直分割线"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.VLine)
+        self.setFixedWidth(1)
         self.setStyleSheet("background: rgba(128,128,128,0.15); border: none;")
 
 
@@ -208,6 +219,7 @@ class _MetricWidget(QWidget):
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -341,7 +353,7 @@ class ResultPage(QWidget):
 
         # 三个指标水平排列
         metrics_layout = QHBoxLayout()
-        metrics_layout.setSpacing(48)
+        metrics_layout.setSpacing(18)
 
         self._metric_alpha = _MetricWidget("Cronbach's Alpha（信度）", card)
         self._metric_alpha.setToolTip(
@@ -364,10 +376,11 @@ class ResultPage(QWidget):
             "p < 0.05 时拒绝原假设，说明适合做因子分析"
         )
 
-        metrics_layout.addWidget(self._metric_alpha)
-        metrics_layout.addWidget(self._metric_kmo)
-        metrics_layout.addWidget(self._metric_bartlett)
-        metrics_layout.addStretch(1)
+        metrics_layout.addWidget(self._metric_alpha, 1)
+        metrics_layout.addWidget(_VerticalDivider(card))
+        metrics_layout.addWidget(self._metric_kmo, 1)
+        metrics_layout.addWidget(_VerticalDivider(card))
+        metrics_layout.addWidget(self._metric_bartlett, 1)
 
         v.addLayout(metrics_layout)
 
@@ -538,10 +551,23 @@ class ResultPage(QWidget):
     # ── 占位与刷新逻辑 ────────────────────────────────────────
 
     def _show_placeholder(self) -> None:
-        p = BodyLabel("暂无统计数据，开始执行任务后将在此显示统计信息", self)
-        p.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        p.setStyleSheet("color: rgba(128,128,128,0.6); padding: 40px 0;")
-        self._scroll_layout.addWidget(p)
+        holder = QWidget(self._scroll_content)
+        holder_layout = QVBoxLayout(holder)
+        holder_layout.setContentsMargins(16, 48, 16, 48)
+        holder_layout.setSpacing(8)
+
+        title = StrongBodyLabel("暂无统计数据", holder)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        desc = BodyLabel("开始执行任务后将在此显示统计信息", holder)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setStyleSheet("color: rgba(128,128,128,0.62);")
+
+        holder_layout.addWidget(title)
+        holder_layout.addWidget(desc)
+
+        self._scroll_layout.addStretch(1)
+        self._scroll_layout.addWidget(holder, 0, Qt.AlignmentFlag.AlignHCenter)
         self._scroll_layout.addStretch(1)
 
     def _clear_scroll(self) -> None:
@@ -584,10 +610,24 @@ class ResultPage(QWidget):
 
     def refresh_stats(self) -> None:
         stats = stats_collector.get_current_stats()
-        if stats is None:
-            return
         self._current_stats = stats
+
+        # 当前会话为空：清空历史残留并显示占位
+        if stats is None:
+            self._clear_scroll()
+            self._show_placeholder()
+            self._reset_analysis_card()
+            self._analysis_status_label.setText("当前会话暂无数据")
+            return
+
         self._update_question_cards(stats)
+
+        # 当前会话还没产生题目统计：同样重置分析区，避免残留历史结果
+        if not stats.questions:
+            self._reset_analysis_card()
+            self._analysis_status_label.setText("当前会话暂无原始数据")
+            return
+
         self._trigger_analysis()
 
     def _update_question_cards(self, stats: SurveyStats) -> None:

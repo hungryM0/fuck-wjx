@@ -4,11 +4,12 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import sys
 import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QThread, QTimer, QSettings, Signal, QCoreApplication
+from PySide6.QtCore import Qt, QThread, QTimer, QSettings, Signal, QCoreApplication, QEvent
 from PySide6.QtGui import QColor, QIcon, QGuiApplication, QPixmap
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
@@ -93,8 +94,10 @@ class MainWindow(FluentWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         qconfig.load(os.path.join(get_runtime_directory(), "wjx", "ui", "theme.json"))
-        setTheme(Theme.AUTO)
+        self._theme_sync_pending = False
+        self._apply_theme_mode(qconfig.get(qconfig.themeMode))
         setThemeColor("#2563EB")
+        qconfig.themeChanged.connect(self._on_theme_changed)
         self._skip_save_on_close = False
         
         self.setWindowTitle(f"问卷星速填 v{__VERSION__}")
@@ -102,6 +105,7 @@ class MainWindow(FluentWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         self.setMinimumSize(1080, 720)
+        self._enable_window_material_effect()
 
         # 应用窗口置顶设置
         settings = QSettings("FuckWjx", "Settings")
@@ -191,6 +195,70 @@ class MainWindow(FluentWindow):
 
         # 根据设置检查更新
         self._check_update_on_startup()
+
+    def _apply_theme_mode(self, theme_mode: Theme):
+        """按指定主题模式应用样式（不覆盖用户配置文件）。"""
+        try:
+            setTheme(theme_mode, save=False, lazy=False)
+        except Exception:
+            logging.debug("应用主题模式失败", exc_info=True)
+
+    def _enable_window_material_effect(self):
+        """启用窗口材质效果（Windows 下优先使用 Mica）。"""
+        if not sys.platform.startswith("win"):
+            return
+        if not hasattr(self, "setMicaEffectEnabled"):
+            return
+        try:
+            self.setMicaEffectEnabled(True)
+        except Exception:
+            logging.debug("启用窗口材质效果失败", exc_info=True)
+
+    def _on_theme_changed(self, _theme: Theme):
+        """主题变化后刷新主题敏感组件。"""
+        self._enable_window_material_effect()
+        try:
+            drawer = getattr(getattr(self, "dashboard", None), "config_drawer", None)
+            if drawer and hasattr(drawer, "_apply_theme"):
+                drawer._apply_theme()
+        except Exception:
+            logging.debug("主题变更后刷新组件失败", exc_info=True)
+
+    def changeEvent(self, event):
+        """系统主题/调色板变化时，在 AUTO 模式下重同步主题。"""
+        super().changeEvent(event)
+        watched_events = {
+            QEvent.Type.ApplicationPaletteChange,
+            QEvent.Type.PaletteChange,
+        }
+        if hasattr(QEvent.Type, "ThemeChange"):
+            watched_events.add(QEvent.Type.ThemeChange)
+        if event.type() in watched_events:
+            self._schedule_auto_theme_sync()
+
+    def _schedule_auto_theme_sync(self):
+        if self._theme_sync_pending:
+            return
+        self._theme_sync_pending = True
+        QTimer.singleShot(0, self._sync_auto_theme_if_needed)
+
+    def _sync_auto_theme_if_needed(self):
+        self._theme_sync_pending = False
+        try:
+            theme_mode = qconfig.get(qconfig.themeMode)
+        except Exception:
+            theme_mode = Theme.AUTO
+        if theme_mode != Theme.AUTO:
+            return
+        # setTheme(AUTO) 在 themeMode 已经是 AUTO 时会被 qconfig.set 短路，
+        # 导致内部 theme 属性不会被重新检测。这里手动强制刷新。
+        from qfluentwidgets.common.style_sheet import updateStyleSheet
+        old_theme = qconfig.theme
+        qconfig.theme = Theme.AUTO          # 触发 darkdetect 重新检测
+        if qconfig.theme != old_theme:
+            updateStyleSheet()
+            qconfig.themeChangedFinished.emit()
+            qconfig._cfg.themeChanged.emit(Theme.AUTO)
 
     def resizeEvent(self, e):
         """调整启动页面组件位置"""
@@ -546,6 +614,7 @@ class MainWindow(FluentWindow):
                 self.updateFrameless()
             except Exception:
                 logging.debug("刷新无边框窗口状态失败", exc_info=True)
+        self._enable_window_material_effect()
         if show:
             self.show()
 
