@@ -618,15 +618,15 @@ class DashboardPage(QWidget):
 
     def update_random_ip_counter(self, count: int, limit: int, unlimited: bool, custom_api: bool):
         from wjx.network.random_ip import _PREMIUM_RANDOM_IP_LIMIT
-        # 检查是否已解锁大额IP（额度上限>=400）
-        is_unlocked = limit >= _PREMIUM_RANDOM_IP_LIMIT
-        if is_unlocked:
+        # 检查是否已验证过卡密或无限额度
+        is_verified = RegistryManager.is_card_verified()
+        if is_verified or unlimited:
             self.card_btn.setEnabled(False)
             self.card_btn.setText("已解锁")
         else:
             self.card_btn.setEnabled(True)
             self.card_btn.setText("解锁大额IP")
-        
+
         if custom_api:
             self.random_ip_hint.setText("自定义接口")
             self.random_ip_hint.setStyleSheet("color:#ff8c00;")
@@ -741,7 +741,8 @@ class DashboardPage(QWidget):
             current_limit = get_random_ip_limit()
             new_limit = current_limit + quota_to_add
             RegistryManager.write_quota_limit(new_limit)
-            RegistryManager.set_quota_unlimited(False)
+            # 标记为已验证过卡密
+            RegistryManager.set_card_verified(True)
             refresh_ip_counter_display(self.controller.adapter)
             self.random_ip_cb.setChecked(True)
             try:

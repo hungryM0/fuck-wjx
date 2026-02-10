@@ -353,7 +353,7 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
         if success:
             extra = ""
             if self._validation_quota is not None:
-                extra = f"，额度 {self._validation_quota}"
+                extra = f"，额度 +{self._validation_quota}"
             InfoBar.success("", f"卡密验证通过{extra}", parent=self, position=InfoBarPosition.TOP, duration=2000)
             # 延迟关闭窗口，让用户看到成功提示
             QTimer.singleShot(1500, self._close_on_success)

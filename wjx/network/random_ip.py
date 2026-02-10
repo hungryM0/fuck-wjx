@@ -854,7 +854,7 @@ def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
 
     新API格式：
     - 请求：POST /api/card/verify，Body: {"code": "卡密"}
-    - 成功响应：{"ok": true}
+    - 成功响应：{"ok": true, "quota": 400}  # quota字段指定增加的额度
     - 失败响应：{"detail": "invalid_code"} 或 {"detail": "invalid request body"}
     """
     if not card_code:
@@ -892,10 +892,24 @@ def _validate_card(card_code: str) -> tuple[bool, Optional[int]]:
         return False, None
 
     # 检查响应格式
-    # 成功：{"ok": true}
+    # 成功：{"ok": true, "quota": 400}
     if isinstance(data, dict) and data.get("ok") is True:
-        quota_val = _PREMIUM_RANDOM_IP_LIMIT
-        logging.info(f"卡密 {masked} 验证通过，额度 {quota_val}")
+        # 从响应中读取 quota 字段，如果没有则使用默认值
+        quota_val = data.get("quota")
+        if quota_val is None:
+            logging.warning(f"卡密验证响应中缺少quota字段，使用默认值 {_PREMIUM_RANDOM_IP_LIMIT}")
+            quota_val = _PREMIUM_RANDOM_IP_LIMIT
+        else:
+            try:
+                quota_val = int(quota_val)
+                if quota_val <= 0:
+                    logging.warning(f"卡密验证响应中quota值无效: {quota_val}，使用默认值 {_PREMIUM_RANDOM_IP_LIMIT}")
+                    quota_val = _PREMIUM_RANDOM_IP_LIMIT
+            except (ValueError, TypeError):
+                logging.warning(f"卡密验证响应中quota值格式错误: {quota_val}，使用默认值 {_PREMIUM_RANDOM_IP_LIMIT}")
+                quota_val = _PREMIUM_RANDOM_IP_LIMIT
+
+        logging.info(f"卡密 {masked} 验证通过，额度+{quota_val}")
         return True, quota_val
 
     # 失败：{"detail": "invalid_code"} 或其他错误信息
@@ -926,7 +940,8 @@ def show_card_validation_dialog(gui: Any = None) -> bool:
         current_limit = get_random_ip_limit()
         new_limit = current_limit + quota_to_add
         RegistryManager.write_quota_limit(new_limit)
-        RegistryManager.set_quota_unlimited(False)
+        # 标记为已验证过卡密
+        RegistryManager.set_card_verified(True)
         _invoke_popup(gui, "info", "验证成功", f"卡密验证通过，已增加 {quota_to_add} 额度（当前总额度：{new_limit}）。")
         return True
     _invoke_popup(gui, "error", "验证失败", "卡密验证失败，请检查后重试。")
