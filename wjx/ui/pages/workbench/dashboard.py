@@ -323,6 +323,8 @@ class DashboardPage(QWidget):
         self.thread_spin.valueChanged.connect(lambda v: self.runtime_page.thread_spin.setValue(int(v)))
         self.random_ip_cb.stateChanged.connect(self._on_random_ip_toggled)
         self.card_btn.clicked.connect(self._on_card_code_clicked)
+        # 监听问卷链接输入框的文本变化（用于检测 reset 命令）
+        self.url_edit.textChanged.connect(self._on_url_text_changed)
         # CommandBar Actions
         self.select_all_action.triggered.connect(self._toggle_select_all_action)
         self.add_action.triggered.connect(self._show_add_question_dialog)
@@ -361,6 +363,43 @@ class DashboardPage(QWidget):
     def _on_question_entries_changed(self, _count: int):
         self._refresh_entry_table()
         self._sync_start_button_state()
+
+    def _on_url_text_changed(self, text: str):
+        """监听问卷链接输入框文本变化，检测 reset 命令（仅调试模式下可用）"""
+        if text.strip().lower() == "reset":
+            # 检查是否启用了调试模式
+            from PySide6.QtCore import QSettings
+            from wjx.utils.app.config import get_bool_from_qsettings
+
+            settings = QSettings("FuckWjx", "Settings")
+            debug_mode = get_bool_from_qsettings(settings.value("debug_mode"), False)
+
+            if not debug_mode:
+                # 调试模式未启用，不执行重置
+                return
+
+            # 重置额度和验证状态
+            from wjx.network.random_ip import _get_default_quota_with_cache
+            # 从 API 获取默认额度
+            default_quota = _get_default_quota_with_cache()
+
+            # 重置计数为 0
+            RegistryManager.write_submit_count(0)
+            # 重置额度上限为默认值
+            RegistryManager.write_quota_limit(default_quota)
+            # 清除验证标记
+            RegistryManager.set_card_verified(False)
+            # 清除无限额度标记
+            RegistryManager.set_quota_unlimited(False)
+
+            # 清空输入框
+            self.url_edit.clear()
+
+            # 刷新显示
+            refresh_ip_counter_display(self.controller.adapter)
+
+            # 显示提示
+            self._toast(f"已重置随机IP额度为 0/{default_quota}", "success", duration=2500)
 
     def _on_parse_clicked(self):
         url = self.url_edit.text().strip()
