@@ -79,6 +79,19 @@ Pull Requests are welcome. Areas for improvement include but are not limited to:
 
 ---
 
+## Contributors
+
+Thanks to the following contributors for their support:
+
+<a href="https://github.com/shiahonb777">
+  <img src="https://github.com/shiahonb777.png" width="50" height="50" alt="shiahonb777" style="border-radius: 50%;" />
+</a>
+<a href="https://github.com/BingBuLiang">
+  <img src="https://github.com/BingBuLiang.png" width="50" height="50" alt="BingBuLiang" style="border-radius: 50%;" />
+</a>
+
+---
+
 ## Donate
 
 <img width="250" alt="payment" src="assets/payment.png" />

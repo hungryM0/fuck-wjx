@@ -79,6 +79,19 @@ python fuck-wjx.py
 
 ---
 
+## 贡献者
+
+感谢以下贡献者对本项目的支持：
+
+<a href="https://github.com/shiahonb777">
+  <img src="https://github.com/shiahonb777.png" width="50" height="50" alt="shiahonb777" style="border-radius: 50%;" />
+</a>
+<a href="https://github.com/BingBuLiang">
+  <img src="https://github.com/BingBuLiang.png" width="50" height="50" alt="BingBuLiang" style="border-radius: 50%;" />
+</a>
+
+---
+
 ## 捐助
 
 <img width="250" alt="payment" src="assets/payment.png" />

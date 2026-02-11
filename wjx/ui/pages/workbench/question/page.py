@@ -1,4 +1,5 @@
 """题目配置主页面，包含表格展示和按钮操作。"""
+import logging
 from typing import List, Dict, Any, Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -27,6 +28,8 @@ from wjx.ui.helpers.ai_fill import ensure_ai_ready
 
 from .constants import _get_entry_type_label
 from .add_dialog import QuestionAddDialog
+
+logger = logging.getLogger(__name__)
 
 
 class QuestionPage(ScrollArea):
@@ -153,8 +156,12 @@ class QuestionPage(ScrollArea):
                 if answer:
                     entry.texts = [answer]
                     success_count += 1
+                else:
+                    fail_count += 1
+                    logger.warning(f"AI 生成答案失败 (题目 {idx+1}: {title}): 返回空答案")
             except Exception as e:
                 fail_count += 1
+                logger.warning(f"AI 生成答案失败 (题目 {idx+1}: {title}): {e}", exc_info=True)
 
         self._refresh_table()
 
@@ -171,8 +178,8 @@ class QuestionPage(ScrollArea):
         self.table.resizeColumnsToContents()
         try:
             self.entriesChanged.emit(int(self.table.rowCount()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"发送 entriesChanged 信号失败: {e}")
 
     def _insert_row(self, row: int, entry: QuestionEntry):
         self.table.insertRow(row)
