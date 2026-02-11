@@ -20,13 +20,11 @@ pyside6_dir = os.path.dirname(PySide6.__file__)
 pyside6_root_dlls = {
     'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll',
     'Qt6Svg.dll', 'Qt6SvgWidgets.dll', 'Qt6Xml.dll',
-    'Qt6Multimedia.dll', 'Qt6MultimediaWidgets.dll',
     'pyside6.abi3.dll',
 }
 pyside6_pyd_files = {
     'QtCore.pyd', 'QtGui.pyd', 'QtWidgets.pyd', 'QtNetwork.pyd',
     'QtSvg.pyd', 'QtSvgWidgets.pyd', 'QtXml.pyd',
-    'QtMultimedia.pyd', 'QtMultimediaWidgets.pyd',
 }
 
 # 收集白名单内的 PySide6 二进制文件
@@ -80,8 +78,6 @@ pyside6_modules = [
     'PySide6.QtXml',
     'PySide6.QtSvg',
     'PySide6.QtSvgWidgets',
-    'PySide6.QtMultimedia',
-    'PySide6.QtMultimediaWidgets',
 ]
 hiddenimports = qfw_hiddenimports + pyside6_modules + ['shiboken6']
 binaries += qfw_binaries + pyside_binaries
@@ -148,18 +144,16 @@ a = Analysis(
 )
 
 # === 在 Analysis 之后强制过滤掉不需要的 PySide6 DLL ===
-# excludes 只对 Python import 有效，对二进制 DLL 无效
+# excludes 只对 Python import 有效,对二进制 DLL 无效
 # 所以需要在这里手动过滤 a.binaries
 _pyside6_keep = {
     # 根目录的 DLL
     'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll',
     'Qt6Svg.dll', 'Qt6SvgWidgets.dll', 'Qt6Xml.dll',
-    'Qt6Multimedia.dll', 'Qt6MultimediaWidgets.dll',
     'pyside6.abi3.dll',
     # PySide6/ 目录的 PYD
     'QtCore.pyd', 'QtGui.pyd', 'QtWidgets.pyd', 'QtNetwork.pyd',
     'QtSvg.pyd', 'QtSvgWidgets.pyd', 'QtXml.pyd',
-    'QtMultimedia.pyd', 'QtMultimediaWidgets.pyd',
 }
 
 def _is_unwanted_pyside6(name):
