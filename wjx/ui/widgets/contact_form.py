@@ -2,10 +2,10 @@
 import re
 import threading
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Optional, Callable, Any, cast
 
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent
-from PySide6.QtGui import QDoubleValidator, QIntValidator, QKeySequence, QGuiApplication
+from PySide6.QtGui import QDoubleValidator, QIntValidator, QKeySequence, QGuiApplication, QKeyEvent
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -43,7 +43,7 @@ class PasteOnlyLineEdit(LineEdit):
         super().__init__(parent)
         self._on_paste = on_paste
 
-    def contextMenuEvent(self, event):
+    def contextMenuEvent(self, e):
         menu = RoundMenu(parent=self)
         copy_action = Action(FluentIcon.COPY, "复制", parent=menu)
         copy_action.setEnabled(self.hasSelectedText())
@@ -58,8 +58,8 @@ class PasteOnlyLineEdit(LineEdit):
         menu.addAction(copy_action)
         paste_action.triggered.connect(_do_paste)
         menu.addAction(paste_action)
-        menu.exec(event.globalPos())
-        event.accept()
+        menu.exec(e.globalPos())
+        e.accept()
 
 
 class PasteOnlyPlainTextEdit(PlainTextEdit):
@@ -69,7 +69,7 @@ class PasteOnlyPlainTextEdit(PlainTextEdit):
         super().__init__(parent)
         self._on_paste = on_paste
 
-    def contextMenuEvent(self, event):
+    def contextMenuEvent(self, e):
         menu = RoundMenu(parent=self)
         copy_action = Action(FluentIcon.COPY, "复制", parent=menu)
         copy_action.setEnabled(self.textCursor().hasSelection())
@@ -84,8 +84,8 @@ class PasteOnlyPlainTextEdit(PlainTextEdit):
         menu.addAction(copy_action)
         paste_action.triggered.connect(_do_paste)
         menu.addAction(paste_action)
-        menu.exec(event.globalPos())
-        event.accept()
+        menu.exec(e.globalPos())
+        e.accept()
 
 
 class ContactForm(StatusPollingMixin, QWidget):
@@ -268,12 +268,13 @@ class ContactForm(StatusPollingMixin, QWidget):
         if self.cancel_btn is not None:
             self.cancel_btn.clicked.connect(self.cancelRequested.emit)
 
-    def eventFilter(self, obj, event):
-        if obj is self.message_edit and event.type() == QEvent.Type.KeyPress:
-            if event.matches(QKeySequence.StandardKey.Paste):
+    def eventFilter(self, watched, event):
+        if watched is self.message_edit and event.type() == QEvent.Type.KeyPress:
+            key_event = cast(QKeyEvent, event)
+            if key_event.matches(QKeySequence.StandardKey.Paste):
                 if self._handle_clipboard_image():
                     return True
-        return super().eventFilter(obj, event)
+        return super().eventFilter(watched, event)
 
     def _on_context_paste(self, target: QWidget) -> bool:
         """右键菜单触发粘贴时的特殊处理，返回 True 表示已处理。"""
@@ -531,6 +532,18 @@ class ContactForm(StatusPollingMixin, QWidget):
 
         mtype = self.type_combo.currentText() or "报错反馈"
 
+        if mtype in ("卡密获取", "白嫖卡密（？）"):
+            try:
+                from wjx.utils.system.registry_manager import RegistryManager
+                if RegistryManager.read_submit_count() <= 0:
+                    InfoBar.warning(
+                        "", "你都还没开始用呢，咋就来申请了😡",
+                        parent=self, position=InfoBarPosition.TOP, duration=3000,
+                    )
+                    return
+            except Exception:
+                pass
+
         if mtype == "卡密获取":
             amount_text = (self.amount_edit.text() or "").strip()
             quantity_text = (self.quantity_edit.text() or "").strip()
@@ -615,7 +628,7 @@ class ContactForm(StatusPollingMixin, QWidget):
 
         def _send():
             try:
-                multipart_fields = [
+                multipart_fields: list[tuple[str, tuple[None, str] | tuple[str, bytes, str]]] = [
                     ("message", (None, payload["message"])),
                     ("timestamp", (None, payload["timestamp"])),
                 ]
@@ -712,29 +725,33 @@ class ContactForm(StatusPollingMixin, QWidget):
         dashboard = host if hasattr(host, "random_ip_cb") else getattr(host, "dashboard", None)
         if dashboard and hasattr(dashboard, "random_ip_cb"):
             try:
-                dashboard.random_ip_cb.blockSignals(True)
-                dashboard.random_ip_cb.setChecked(True)
+                dashboard_obj = cast(Any, dashboard)
+                dashboard_obj.random_ip_cb.blockSignals(True)
+                dashboard_obj.random_ip_cb.setChecked(True)
             except Exception:
                 pass
             finally:
                 try:
-                    dashboard.random_ip_cb.blockSignals(False)
+                    dashboard_obj = cast(Any, dashboard)
+                    dashboard_obj.random_ip_cb.blockSignals(False)
                 except Exception:
                     pass
 
         runtime_page = None
         if hasattr(host, "runtime_page"):
-            runtime_page = host.runtime_page
+            runtime_page = cast(Any, host).runtime_page
         elif dashboard is not None and hasattr(dashboard, "runtime_page"):
-            runtime_page = dashboard.runtime_page
+            runtime_page = cast(Any, dashboard).runtime_page
         if runtime_page and hasattr(runtime_page, "random_ip_switch"):
             try:
-                runtime_page.random_ip_switch.blockSignals(True)
-                runtime_page.random_ip_switch.setChecked(True)
+                runtime_page_obj = cast(Any, runtime_page)
+                runtime_page_obj.random_ip_switch.blockSignals(True)
+                runtime_page_obj.random_ip_switch.setChecked(True)
             except Exception:
                 pass
             finally:
                 try:
-                    runtime_page.random_ip_switch.blockSignals(False)
+                    runtime_page_obj = cast(Any, runtime_page)
+                    runtime_page_obj.random_ip_switch.blockSignals(False)
                 except Exception:
                     pass
