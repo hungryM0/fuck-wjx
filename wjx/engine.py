@@ -2,16 +2,9 @@
 
 from wjx.core.engine.answering import brush
 from wjx.core.engine.dom_helpers import (
-    _KNOWN_NON_TEXT_QUESTION_TYPES,
-    _TEXT_INPUT_ALLOWED_TYPES,
     _count_choice_inputs_driver,
-    _driver_element_contains_text_input,
-    _driver_question_has_shared_text_input,
     _driver_question_looks_like_rating,
     _driver_question_looks_like_reorder,
-    _extract_select_options,
-    _select_dropdown_option_via_js,
-    _verify_text_indicates_location,
 )
 from wjx.core.engine.driver_factory import create_playwright_driver
 from wjx.core.engine.full_simulation import (
@@ -56,22 +49,6 @@ from wjx.core.survey.parser import (
     _normalize_question_type_code,
 )
 
-
-TYPE_OPTIONS = [
-    ("single", "单选题"),
-    ("multiple", "多选题"),
-    ("dropdown", "下拉题"),
-    ("matrix", "矩阵题"),
-    ("scale", "量表题"),
-    ("score", "评价题"),
-    ("slider", "滑块题"),
-    ("text", "填空题"),
-    ("multi_text", "多项填空题"),
-    ("location", "位置题"),
-]
-
-LABEL_TO_TYPE = {label: value for value, label in TYPE_OPTIONS}
-
 __all__ = [
     "parse_survey_questions_from_html",
     "_extract_survey_title_from_html",
@@ -84,17 +61,12 @@ __all__ = [
     "_wait_if_paused",
     "_trigger_target_reached_stop",
     "_sync_full_sim_state_from_globals",
-    "_driver_element_contains_text_input",
-    "_driver_question_has_shared_text_input",
-    "_verify_text_indicates_location",
     "_driver_question_looks_like_rating",
     "_driver_question_looks_like_reorder",
     "_count_choice_inputs_driver",
     "try_click_start_answer_button",
     "dismiss_resume_dialog_if_present",
     "detect",
-    "_extract_select_options",
-    "_select_dropdown_option_via_js",
     "_full_simulation_active",
     "_reset_full_simulation_runtime_state",
     "_prepare_full_simulation_schedule",
@@ -114,8 +86,4 @@ __all__ = [
     "_page_looks_like_wjx_questionnaire",
     "_is_device_quota_limit_page",
     "run",
-    "TYPE_OPTIONS",
-    "LABEL_TO_TYPE",
-    "_TEXT_INPUT_ALLOWED_TYPES",
-    "_KNOWN_NON_TEXT_QUESTION_TYPES",
 ]

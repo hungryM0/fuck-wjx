@@ -1,71 +1,9 @@
 """DOM 元素查找与操作辅助函数"""
 import re
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from wjx.network.browser_driver import By, BrowserDriver
 from wjx.utils.logging.log_utils import log_suppressed_exception
-
-
-_TEXT_INPUT_ALLOWED_TYPES = {"", "text", "search", "tel", "number"}
-_KNOWN_NON_TEXT_QUESTION_TYPES = {"3", "4", "5", "6", "7", "8", "11"}
-
-
-def _driver_element_contains_text_input(element) -> bool:
-    if element is None:
-        return False
-    try:
-        inputs = element.find_elements(By.CSS_SELECTOR, "input, textarea")
-    except Exception:
-        return False
-    for candidate in inputs:
-        try:
-            tag_name = (candidate.tag_name or "").lower()
-        except Exception:
-            tag_name = ""
-        input_type = ""
-        try:
-            input_type = (candidate.get_attribute("type") or "").lower()
-        except Exception:
-            input_type = ""
-        if tag_name == "textarea":
-            return True
-        if tag_name == "input" and input_type in ("", "text", "search", "tel", "number"):
-            return True
-    return False
-
-
-def _driver_question_has_shared_text_input(question_div) -> bool:
-    if question_div is None:
-        return False
-    try:
-        shared = question_div.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea")
-        if shared:
-            return True
-    except Exception as exc:
-        log_suppressed_exception("dom_helpers._driver_question_has_shared_text_input shared", exc)
-    try:
-        keyword_elements = question_div.find_elements(By.CSS_SELECTOR, "input[id*='other'], textarea[id*='other']")
-        if keyword_elements:
-            return True
-    except Exception as exc:
-        log_suppressed_exception("dom_helpers._driver_question_has_shared_text_input keyword", exc)
-    try:
-        text_blob = (question_div.text or "").strip()
-    except Exception:
-        text_blob = ""
-    if not text_blob:
-        return False
-    option_fill_keywords = ["请注明", "其他", "填空", "填写", "specify", "other"]
-    return any(keyword in text_blob for keyword in option_fill_keywords)
-
-
-def _verify_text_indicates_location(value: Optional[str]) -> bool:
-    if not value:
-        return False
-    text = str(value).strip()
-    if not text:
-        return False
-    return ("地图" in text) or ("map" in text.lower())
 
 
 def _driver_question_looks_like_reorder(question_div) -> bool:
@@ -204,66 +142,3 @@ def _count_choice_inputs_driver(question_div) -> Tuple[int, int]:
         elif input_type == "radio":
             radio_count += 1
     return checkbox_count, radio_count
-
-
-
-def _extract_select_options(driver: BrowserDriver, question_number: int):
-    try:
-        select_element = driver.find_element(By.CSS_SELECTOR, f"#q{question_number}")
-    except Exception:
-        return None, []
-    try:
-        option_elements = select_element.find_elements(By.CSS_SELECTOR, "option")
-    except Exception:
-        option_elements = []
-    valid_options: List[Tuple[str, str]] = []
-    for idx, opt in enumerate(option_elements):
-        try:
-            value = (opt.get_attribute("value") or "").strip()
-        except Exception:
-            value = ""
-        try:
-            text = (opt.text or "").strip()
-        except Exception:
-            text = ""
-        if idx == 0 and ((value == "") or (value == "0") or ("请选择" in text)):
-            continue
-        if not text and not value:
-            continue
-        valid_options.append((value, text or value))
-    return select_element, valid_options
-
-
-def _select_dropdown_option_via_js(
-    driver: BrowserDriver, select_element, option_value: str, display_text: str
-) -> bool:
-    try:
-        applied = driver.execute_script(
-            """
-const select = arguments[0];
-const optionValue = arguments[1];
-const displayText = arguments[2];
-if (!select) { return false; }
-const opts = Array.from(select.options || []);
-const target = opts.find(o => (o.value || '') == optionValue);
-if (!target) { return false; }
-target.selected = true;
-select.value = target.value;
-try { select.setAttribute('value', target.value); } catch (e) {}
-['input','change'].forEach(name => {
-    try { select.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
-});
-const span = document.getElementById(`select2-${select.id}-container`);
-if (span) {
-    span.textContent = displayText || target.textContent || target.innerText || '';
-    span.title = span.textContent;
-}
-return true;
-            """,
-            select_element,
-            option_value or "",
-            display_text or "",
-        )
-    except Exception:
-        applied = False
-    return bool(applied)
