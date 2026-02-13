@@ -1,10 +1,12 @@
 """引擎主循环 - 任务执行与线程调度"""
-import logging
 import random
 import threading
 import time
 import traceback
 from typing import Optional, Set
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 import wjx.core.state as state
 import wjx.modes.duration_control as duration_control
@@ -43,7 +45,6 @@ from wjx.utils.app.config import (
     POST_SUBMIT_URL_MAX_WAIT,
     POST_SUBMIT_URL_POLL_INTERVAL,
 )
-from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 # 全局锁：已移除 - 改用批量 PID 清理机制，无需串行化
@@ -53,6 +54,7 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 
 def _submission_blocked_by_security_check(driver: BrowserDriver) -> bool:
     """检测提交后是否出现“需要安全校验/请重新提交”等拦截提示。"""
+
     script = r"""
         return (() => {
             const text = (document.body?.innerText || '').replace(/\s+/g, '');
@@ -119,14 +121,14 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     pids.update(int(p) for p in pid_set)
                 gui_instance._launched_browser_pids.update(pids)
             except Exception as exc:
-                log_suppressed_exception("runner._register_driver collect pids", exc)
+                log_suppressed_exception("runner._register_driver collect pids", exc, level=logging.WARNING)
 
     def _unregister_driver(instance: BrowserDriver) -> None:
         if gui_instance and hasattr(gui_instance, 'active_drivers'):
             try:
                 gui_instance.active_drivers.remove(instance)
-            except ValueError:
-                pass
+            except ValueError as exc:
+                log_suppressed_exception("_unregister_driver: gui_instance.active_drivers.remove(instance)", exc, level=logging.WARNING)
             try:
                 pids = set()
                 pid_single = getattr(instance, "browser_pid", None)
@@ -138,7 +140,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 for pid in pids:
                     gui_instance._launched_browser_pids.discard(int(pid))
             except Exception as exc:
-                log_suppressed_exception("runner._unregister_driver cleanup pids", exc)
+                log_suppressed_exception("runner._unregister_driver cleanup pids", exc, level=logging.WARNING)
 
     def _dispose_driver() -> None:
         """异步清理浏览器实例，立即返回不阻塞工作线程
@@ -157,7 +159,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     sem_acquired = False
                     logging.debug("已释放浏览器信号量（无浏览器实例）")
                 except Exception as exc:
-                    log_suppressed_exception("runner._dispose_driver release semaphore (no driver)", exc)
+                    log_suppressed_exception("runner._dispose_driver release semaphore (no driver)", exc, level=logging.WARNING)
             return
 
         # 检查是否已被清理，避免重复处理
@@ -182,7 +184,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 cleanup_runner.submit_pid_cleanup(pids_to_kill)
                 logging.debug(f"已提交 {len(pids_to_kill)} 个 PID 到批量清理队列")
             except Exception as exc:
-                log_suppressed_exception("runner._dispose_driver submit_pid_cleanup", exc)
+                log_suppressed_exception("runner._dispose_driver submit_pid_cleanup", exc, level=logging.WARNING)
 
         # 【修复】同步停止 Playwright 实例（必须在同一工作线程中调用）
         # Playwright Sync API 会在当前线程创建 asyncio 事件循环，
@@ -193,7 +195,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             playwright_instance.stop()
             logging.debug("已停止 playwright 实例")
         except Exception as exc:
-            log_suppressed_exception("runner._dispose_driver playwright.stop", exc)
+            log_suppressed_exception("runner._dispose_driver playwright.stop", exc, level=logging.WARNING)
 
         # 释放信号量（立即释放，不等待清理完成）
         if sem_acquired:
@@ -202,7 +204,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 sem_acquired = False
                 logging.debug("已释放浏览器信号量")
             except Exception as exc:
-                log_suppressed_exception("runner._dispose_driver release semaphore", exc)
+                log_suppressed_exception("runner._dispose_driver release semaphore", exc, level=logging.WARNING)
 
     while True:
         _wait_if_paused(gui_instance, stop_signal)
@@ -410,7 +412,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                             completion_detected = True
                             break
                     except Exception as exc:
-                        log_suppressed_exception("runner.post_submit_wait is_survey_completion_page", exc)
+                        log_suppressed_exception("runner.post_submit_wait is_survey_completion_page", exc, level=logging.WARNING)
 
                     if _submission_blocked_by_security_check(driver):
                         driver_had_error = True
@@ -514,7 +516,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         completion_detected = True
                         break
                 except Exception as exc:
-                    log_suppressed_exception("runner.wait_completion is_survey_completion_page", exc)
+                    log_suppressed_exception("runner.wait_completion is_survey_completion_page", exc, level=logging.WARNING)
                 time.sleep(extra_poll)
 
             if not completion_detected and not stop_signal.is_set():

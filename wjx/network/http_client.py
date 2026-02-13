@@ -1,9 +1,13 @@
 """基于 httpx 的统一 HTTP 客户端（后台异步 + 同步封装）。"""
 from __future__ import annotations
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 import asyncio
 import atexit
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, Optional, Tuple, Union
 from urllib.parse import urlsplit
@@ -13,10 +17,14 @@ import httpx
 
 _MAX_CONCURRENT_REQUESTS = 6
 _CLIENT_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
+_MAX_CLIENTS = 20  # 最大客户端数量
+_CLIENT_TTL = 300  # 客户端生存时间（秒），5分钟未使用则清理
 
 
 class _Exceptions:
     """兼容旧代码的异常命名。"""
+
+
 
     Timeout = httpx.TimeoutException
     ConnectTimeout = httpx.ConnectTimeout
@@ -69,15 +77,27 @@ class _StreamResponse:
         self._response.raise_for_status()
 
     def iter_content(self, chunk_size: int = 8192) -> Iterator[bytes]:
-        aiter = self._response.aiter_bytes(chunk_size=chunk_size)
+        """批量读取，减少跨线程调用次数"""
+        buffer_size = chunk_size * 10  # 一次读取10个块
+
+        async def read_batch():
+            chunks = []
+            total_size = 0
+            async for chunk in self._response.aiter_bytes(chunk_size):
+                chunks.append(chunk)
+                total_size += len(chunk)
+                if total_size >= buffer_size:
+                    break
+            return chunks
+
         try:
             while True:
-                try:
-                    chunk = _loop_runner.run(aiter.__anext__())
-                except StopAsyncIteration:
+                chunks = _loop_runner.run(read_batch())
+                if not chunks:
                     break
-                if chunk:
-                    yield chunk
+                for chunk in chunks:
+                    if chunk:
+                        yield chunk
         finally:
             self.close()
 
@@ -87,8 +107,8 @@ class _StreamResponse:
         self._closed = True
         try:
             _loop_runner.run(self._stream_ctx.__aexit__(None, None, None))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("close: _loop_runner.run(self._stream_ctx.__aexit__(None, None, None))", exc, level=logging.WARNING)
 
     def __del__(self) -> None:  # pragma: no cover
         self.close()
@@ -101,7 +121,8 @@ class _AsyncLoopRunner:
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="HttpxAsyncLoop")
         self._thread.start()
-        self._clients: Dict[_ClientKey, httpx.AsyncClient] = {}
+        # 客户端缓存：key -> (client, last_used_time)
+        self._clients: Dict[_ClientKey, Tuple[httpx.AsyncClient, float]] = {}
         self._clients_lock = threading.Lock()
         self._semaphore: Optional[asyncio.Semaphore] = None
 
@@ -112,6 +133,41 @@ class _AsyncLoopRunner:
     def run(self, coro):
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result()
+
+    async def _cleanup_stale_clients(self) -> None:
+        """清理超过TTL未使用的客户端"""
+        now = time.time()
+        to_close = []
+
+        with self._clients_lock:
+            stale_keys = [
+                key for key, (client, last_used) in self._clients.items()
+                if now - last_used > _CLIENT_TTL
+            ]
+            for key in stale_keys:
+                client, _ = self._clients.pop(key)
+                to_close.append(client)
+
+        # 在锁外关闭客户端，避免阻塞
+        for client in to_close:
+            try:
+                await client.aclose()
+            except Exception as exc:
+                log_suppressed_exception("_cleanup_stale_clients: await client.aclose()", exc, level=logging.WARNING)
+
+    async def _evict_oldest_client(self) -> None:
+        """当客户端数量超限时，移除最久未使用的客户端"""
+        with self._clients_lock:
+            if not self._clients:
+                return
+            # 找到最久未使用的客户端
+            oldest_key = min(self._clients.keys(), key=lambda k: self._clients[k][1])
+            client, _ = self._clients.pop(oldest_key)
+
+        try:
+            await client.aclose()
+        except Exception as exc:
+            log_suppressed_exception("_evict_oldest_client: await client.aclose()", exc, level=logging.WARNING)
 
     async def _get_client(
         self,
@@ -126,20 +182,50 @@ class _AsyncLoopRunner:
             follow_redirects=follow_redirects,
             trust_env=trust_env,
         )
+
+        # 定期清理过期客户端
+        await self._cleanup_stale_clients()
+
+        now = time.time()
         with self._clients_lock:
-            client = self._clients.get(key)
-            if client is not None:
+            cached = self._clients.get(key)
+            if cached is not None:
+                client, _ = cached
+                # 更新使用时间
+                self._clients[key] = (client, now)
                 return client
-            client = httpx.AsyncClient(
-                timeout=None,
-                verify=verify,
-                proxy=proxy,
-                follow_redirects=follow_redirects,
-                trust_env=trust_env,
-                limits=_CLIENT_LIMITS,
-            )
-            self._clients[key] = client
-            return client
+
+            # 限制客户端数量
+            if len(self._clients) >= _MAX_CLIENTS:
+                # 在锁外执行清理
+                pass
+            else:
+                # 创建新客户端
+                client = httpx.AsyncClient(
+                    timeout=None,
+                    verify=verify,
+                    proxy=proxy,
+                    follow_redirects=follow_redirects,
+                    trust_env=trust_env,
+                    limits=_CLIENT_LIMITS,
+                )
+                self._clients[key] = (client, now)
+                return client
+
+        # 如果超限，需要清理后再创建
+        await self._evict_oldest_client()
+
+        client = httpx.AsyncClient(
+            timeout=None,
+            verify=verify,
+            proxy=proxy,
+            follow_redirects=follow_redirects,
+            trust_env=trust_env,
+            limits=_CLIENT_LIMITS,
+        )
+        with self._clients_lock:
+            self._clients[key] = (client, now)
+        return client
 
     async def request(
         self,
@@ -202,13 +288,13 @@ class _AsyncLoopRunner:
 
     async def close(self) -> None:
         with self._clients_lock:
-            clients = list(self._clients.values())
+            clients = [client for client, _ in self._clients.values()]
             self._clients.clear()
         for client in clients:
             try:
                 await client.aclose()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("close: await client.aclose()", exc, level=logging.WARNING)
 
 
 def _resolve_proxy(proxies: Any, url: str) -> Tuple[Optional[str], bool]:
@@ -262,8 +348,8 @@ def close() -> None:
     """关闭异步客户端池。"""
     try:
         _loop_runner.run(_loop_runner.close())
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("close: _loop_runner.run(_loop_runner.close())", exc, level=logging.WARNING)
 
 
 atexit.register(close)

@@ -1,5 +1,4 @@
 """应用更新检测与执行 - 检查新版本、下载安装包"""
-import logging
 import os
 import subprocess
 import sys
@@ -7,6 +6,9 @@ import tempfile
 import time
 from threading import Thread
 from typing import Optional, Dict, Any, Callable
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 import wjx.network.http_client as http_client
 
@@ -26,13 +28,15 @@ from wjx.utils.app.config import GITHUB_MIRROR_SOURCES, DEFAULT_GITHUB_MIRROR
 
 def _get_github_mirror() -> str:
     """获取当前选择的 GitHub 镜像源 key"""
+
+
     if QSettings is not None:
         try:
             settings = QSettings("FuckWjx", "Settings")
             value = str(settings.value("github_mirror", DEFAULT_GITHUB_MIRROR))
             return value if value else DEFAULT_GITHUB_MIRROR
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_get_github_mirror: settings = QSettings(\"FuckWjx\", \"Settings\")", exc, level=logging.WARNING)
     return DEFAULT_GITHUB_MIRROR
 
 
@@ -43,8 +47,8 @@ def _set_github_mirror(mirror_key: str) -> None:
             settings = QSettings("FuckWjx", "Settings")
             settings.setValue("github_mirror", mirror_key)
             logging.debug(f"已切换镜像源为: {mirror_key}")
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_set_github_mirror: settings = QSettings(\"FuckWjx\", \"Settings\")", exc, level=logging.WARNING)
 
 
 def _get_next_mirror(current_key: str) -> Optional[str]:
@@ -88,8 +92,8 @@ if not GITHUB_TOKEN:
         try:
             with open(token_file, "r", encoding="utf-8") as f:
                 GITHUB_TOKEN = f.read().strip()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("module: with open(token_file, \"r\", encoding=\"utf-8\") as f: GITHUB_TOKEN = f.read().st...", exc, level=logging.WARNING)
 
 
 class UpdateManager:
@@ -265,8 +269,8 @@ class UpdateManager:
                     temp_file = target_file + ".tmp"
                     if os.path.exists(temp_file):
                         os.remove(temp_file)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("download_update: current_dir = _get_runtime_directory()", exc, level=logging.WARNING)
                 
                 # 尝试切换到下一个镜像源
                 next_mirror = _get_next_mirror(current_mirror)
@@ -291,8 +295,8 @@ class UpdateManager:
                     temp_file = target_file + ".tmp"
                     if os.path.exists(temp_file):
                         os.remove(temp_file)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("download_update: current_dir = _get_runtime_directory()", exc, level=logging.WARNING)
                 return None
 
     @staticmethod

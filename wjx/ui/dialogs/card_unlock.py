@@ -2,6 +2,9 @@
 import os
 import webbrowser
 from typing import Optional, Callable
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLineEdit
@@ -29,6 +32,8 @@ from wjx.utils.app.version import ISSUE_FEEDBACK_URL
 
 class CardValidateWorker(QThread):
     """卡密验证 Worker"""
+
+
     finished = Signal(bool, object)  # 验证结果、额度
 
     def __init__(self, card_code: str, validator: Callable[[str], object]):
@@ -167,8 +172,8 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
 
         try:
             self.card_edit.setFocus()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("__init__: self.card_edit.setFocus()", exc, level=logging.WARNING)
 
     def closeEvent(self, arg__1):
         """对话框关闭时安全停止线程"""
@@ -191,8 +196,8 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
             self.status_spinner.hide()
             self.status_label.setText(text)
             self.status_label.setStyleSheet(f"color:{color};")
-        except RuntimeError:
-            pass
+        except RuntimeError as exc:
+            log_suppressed_exception("_on_status_loaded: self.status_spinner.hide()", exc, level=logging.WARNING)
 
     def _open_contact(self):
         # 延迟导入避免循环依赖
@@ -221,8 +226,8 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
         try:
             confirm_box.yesButton.setText("继续")
             confirm_box.cancelButton.setText("取消")
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_open_donate: confirm_box.yesButton.setText(\"继续\")", exc, level=logging.WARNING)
         if not confirm_box.exec():
             return
         try:
@@ -230,8 +235,8 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
             if os.path.exists(payment_path):
                 webbrowser.open(payment_path)
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_open_donate: payment_path = os.path.join(get_assets_directory(), \"payment.png\")", exc, level=logging.WARNING)
         webbrowser.open("https://github.com/hungryM0/fuck-wjx")
 
     def _show_card_edit_menu(self, pos):
@@ -280,12 +285,12 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
                 # 断开原有的按住显示信号
                 try:
                     btn.pressed.disconnect()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_setup_toggle_password_button: btn.pressed.disconnect()", exc, level=logging.WARNING)
                 try:
                     btn.released.disconnect()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_setup_toggle_password_button: btn.released.disconnect()", exc, level=logging.WARNING)
                 
                 # 使用点击切换模式
                 self._password_visible = False
@@ -295,24 +300,24 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
                         self.card_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                         try:
                             btn.setIcon(FluentIcon.VIEW)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            log_suppressed_exception("toggle_password: btn.setIcon(FluentIcon.VIEW)", exc, level=logging.WARNING)
                     else:
                         self.card_edit.setEchoMode(QLineEdit.EchoMode.Password)
                         try:
                             btn.setIcon(FluentIcon.HIDE)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            log_suppressed_exception("toggle_password: btn.setIcon(FluentIcon.HIDE)", exc, level=logging.WARNING)
                 
                 # 默认使用“隐藏”图标
                 try:
                     btn.setIcon(FluentIcon.HIDE)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_setup_toggle_password_button: btn.setIcon(FluentIcon.HIDE)", exc, level=logging.WARNING)
                 
                 btn.clicked.connect(toggle_password)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_setup_toggle_password_button: btn = getattr(self.card_edit, 'button', None)", exc, level=logging.WARNING)
 
     def _on_validate_clicked(self):
         """点击验证按钮时触发"""

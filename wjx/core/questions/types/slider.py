@@ -1,13 +1,19 @@
 """滑块题处理"""
 import random
 from typing import List, Optional, Union
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.network.browser_driver import By, BrowserDriver, NoSuchElementException
+from wjx.core.questions.utils import smooth_scroll_to_element
 from wjx.core.stats.collector import stats_collector
 
 
 def _set_slider_input_value(driver: BrowserDriver, current: int, value: Union[int, float]) -> None:
     """设置滑块输入值"""
+
+
     try:
         slider_input = driver.find_element(By.CSS_SELECTOR, f"#q{current}")
     except NoSuchElementException:
@@ -21,8 +27,8 @@ def _set_slider_input_value(driver: BrowserDriver, current: int, value: Union[in
     )
     try:
         driver.execute_script(script, slider_input, value)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("_set_slider_input_value: driver.execute_script(script, slider_input, value)", exc, level=logging.ERROR)
 
 
 def _click_slider_track(driver: BrowserDriver, container, ratio: float) -> bool:
@@ -73,17 +79,14 @@ def _resolve_slider_score(index: int, slider_targets_config: List[float]) -> flo
     return random.uniform(base - jitter, base + jitter)
 
 
-def slider_question(driver: BrowserDriver, current: int, score: Optional[float] = None) -> None:
+def slider(driver: BrowserDriver, current: int, score: Optional[float] = None) -> None:
     """滑块题处理主函数"""
     try:
         question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
     except NoSuchElementException:
         question_div = None
     if question_div:
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", question_div)
-        except Exception:
-            pass
+        smooth_scroll_to_element(driver, question_div, "center")
 
     slider_input = None
     min_value = 0.0
@@ -131,8 +134,8 @@ def slider_question(driver: BrowserDriver, current: int, score: Optional[float] 
     if container:
         try:
             _click_slider_track(driver, container, ratio)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("slider: _click_slider_track(driver, container, ratio)", exc, level=logging.ERROR)
         try:
             driver.execute_script(
                 r"""
@@ -160,8 +163,8 @@ def slider_question(driver: BrowserDriver, current: int, score: Optional[float] 
                 container,
                 ratio,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("slider: driver.execute_script( r\"\"\" const container = arguments[0]; const ratio = arg...", exc, level=logging.ERROR)
     _set_slider_input_value(driver, current, target_value)
     # 记录统计数据（将目标值映射为索引，按step计算）
     if step_value > 0 and max_value > min_value:

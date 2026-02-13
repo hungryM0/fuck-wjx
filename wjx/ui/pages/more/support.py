@@ -2,6 +2,9 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from qfluentwidgets import ScrollArea, SubtitleLabel, BodyLabel, CardWidget
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.ui.widgets.contact_form import ContactForm
 from wjx.network.random_ip import get_status, _format_status_payload
@@ -9,6 +12,8 @@ from wjx.network.random_ip import get_status, _format_status_payload
 
 class SupportPage(ScrollArea):
     """客服与支持页面，直接内嵌联系开发者表单。"""
+
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,8 +27,8 @@ class SupportPage(ScrollArea):
         super().showEvent(event)
         try:
             self.contact_form.start_status_polling()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("showEvent: self.contact_form.start_status_polling()", exc, level=logging.WARNING)
 
     def _build_ui(self):
         layout = QVBoxLayout(self.view)

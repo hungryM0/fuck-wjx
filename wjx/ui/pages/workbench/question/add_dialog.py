@@ -1,5 +1,8 @@
 """新增题目弹窗：基础信息 + 题目配置预览。"""
 from typing import List, Optional
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -32,6 +35,8 @@ from .utils import _shorten_text, _apply_label_color, _bind_slider_input
 
 class QuestionAddDialog(QDialog):
     """新增题目弹窗：基础信息 + 题目配置预览。"""
+
+
 
     def __init__(self, entries: List[QuestionEntry], parent=None):
         super().__init__(parent)
@@ -323,8 +328,8 @@ class QuestionAddDialog(QDialog):
                     self.ai_toggle.blockSignals(True)
                     self.ai_toggle.setChecked(False)
                     self.ai_toggle.blockSignals(False)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_on_ai_toggled: if self.ai_toggle is not None: self.ai_toggle.blockSignals(True) self.ai_togg...", exc, level=logging.WARNING)
             self._set_text_area_enabled(True)
             return
         self._ai_enabled = bool(checked)

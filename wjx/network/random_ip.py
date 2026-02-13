@@ -38,10 +38,12 @@ STATUS_TIMEOUT_SECONDS = 5
 _quota_limit_dialog_shown = False
 _cached_default_quota: Optional[int] = None  # 缓存从API获取的默认额度
 _cached_default_quota_timestamp: float = 0.0  # 缓存时间戳
-_DEFAULT_QUOTA_CACHE_TTL = 3600  # 缓存有效期：1小时（秒）
+_DEFAULT_QUOTA_CACHE_TTL = 1800  # 缓存有效期：30分钟（秒），从1小时改为30分钟
 _DEFAULT_QUOTA_API_ENDPOINT = "https://api-wjx.hungrym0.top/api/default"  # 默认额度API端点
 _proxy_api_url_override: Optional[str] = None
 _proxy_area_code_override: Optional[str] = None
+_quota_update_lock = threading.Lock()  # 用于保护后台更新
+_quota_updating = False  # 标记是否正在后台更新
 # 代理源常量
 PROXY_SOURCE_DEFAULT = "default"  # 默认代理源
 PROXY_SOURCE_PIKACHU = "pikachu"  # 皮卡丘代理站
@@ -178,6 +180,9 @@ def _get_default_quota_with_cache() -> int:
         cache_age = current_time - _cached_default_quota_timestamp
         if cache_age < _DEFAULT_QUOTA_CACHE_TTL:
             logging.debug(f"使用缓存的默认额度: {_cached_default_quota} (缓存剩余 {int(_DEFAULT_QUOTA_CACHE_TTL - cache_age)}秒)")
+            # 如果缓存快过期（剩余不到5分钟），启动后台更新
+            if cache_age > _DEFAULT_QUOTA_CACHE_TTL - 300:
+                _update_quota_cache_async()
             return _cached_default_quota
 
     # 缓存过期或不存在，尝试从API获取
@@ -192,11 +197,40 @@ def _get_default_quota_with_cache() -> int:
     return _DEFAULT_RANDOM_IP_FREE_LIMIT
 
 
+def _update_quota_cache_async() -> None:
+    """后台异步更新额度缓存"""
+    global _quota_updating
+
+    with _quota_update_lock:
+        if _quota_updating:
+            return  # 已经有线程在更新，避免重复
+        _quota_updating = True
+
+    def _do_update():
+        global _cached_default_quota, _cached_default_quota_timestamp, _quota_updating
+        try:
+            api_quota = _fetch_default_quota_from_api()
+            if api_quota is not None:
+                with _quota_update_lock:
+                    _cached_default_quota = api_quota
+                    _cached_default_quota_timestamp = time.time()
+                    logging.debug(f"后台更新默认额度成功: {api_quota}")
+        except Exception as exc:
+            log_suppressed_exception("_update_quota_cache_async", exc)
+        finally:
+            with _quota_update_lock:
+                _quota_updating = False
+
+    thread = threading.Thread(target=_do_update, daemon=True, name="QuotaUpdateThread")
+    thread.start()
+
+
 def get_random_ip_limit() -> int:
     """Read quota from registry with sane defaults."""
     try:
-        # 获取动态默认值（优先从API，失败则用硬编码）
+        # 获取动态默认值（优先从缓存，后台异步更新）
         default_quota = _get_default_quota_with_cache()
+
 
         limit = RegistryManager.read_quota_limit(default_quota)  # type: ignore[attr-defined]
         limit = int(limit)

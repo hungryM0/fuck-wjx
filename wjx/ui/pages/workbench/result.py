@@ -1,6 +1,7 @@
 ﻿"""结果分析页面 - 展示作答统计与信效度分析"""
 
 import os
+import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, QThread, QObject, Signal, QSettings
@@ -35,6 +36,7 @@ from wjx.core.stats.models import SurveyStats, QuestionStats
 from wjx.core.stats.persistence import save_stats, list_stats_files, load_stats, _ensure_stats_dir
 from wjx.core.stats.raw_storage import raw_data_storage
 from wjx.core.stats.analysis import AnalysisResult, run_analysis
+from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 # ── 题型中文映射 ──────────────────────────────────────────────
@@ -923,8 +925,12 @@ class ResultPage(QWidget):
     def _load_history_list(self) -> None:
         try:
             self.history_combo.currentIndexChanged.disconnect(self._on_history_selected)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception(
+                "ResultPage._load_history_list: disconnect currentIndexChanged failed",
+                exc,
+                level=logging.WARNING,
+            )
 
         try:
             self.history_combo.clear()

@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+
+
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 """
 GitHub Hosts 优化工具
 
@@ -6,7 +11,6 @@ GitHub Hosts 优化工具
 """
 
 import ctypes
-import logging
 import os
 import re
 import sys
@@ -334,6 +338,6 @@ with open(RESULT_PATH, "w", encoding="utf-8") as f:
             try:
                 if os.path.exists(path):
                     os.remove(path)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("run_hosts_operation_as_admin: if os.path.exists(path): os.remove(path)", exc, level=logging.WARNING)
 

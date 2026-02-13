@@ -1,5 +1,8 @@
 """评价题处理（星级评价）"""
 from typing import List
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.network.browser_driver import By, BrowserDriver
 from wjx.core.persona.context import record_answer
@@ -17,8 +20,8 @@ def _is_valid_score_option(element) -> bool:
     try:
         element.find_element(By.XPATH, "ancestor::*[contains(@class,'evaluateTagWrap')]")
         return False
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("_is_valid_score_option: element.find_element(By.XPATH, \"ancestor::*[contains(@class,'evaluateTagWrap'...", exc, level=logging.ERROR)
     return True
 
 
@@ -58,6 +61,8 @@ def _collect_score_options(question_div) -> List:
 
 def score(driver: BrowserDriver, current: int, index: int, score_prob_config: List) -> None:
     """评价题处理主函数"""
+
+
     try:
         question_div = driver.find_element(By.CSS_SELECTOR, f"#div{current}")
     except Exception:
@@ -77,8 +82,8 @@ def score(driver: BrowserDriver, current: int, index: int, score_prob_config: Li
     except Exception:
         try:
             driver.execute_script("arguments[0].click();", target)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("score: driver.execute_script(\"arguments[0].click();\", target)", exc, level=logging.ERROR)
     # 记录统计数据
     stats_collector.record_score_choice(current, selected_index)
     # 记录作答上下文

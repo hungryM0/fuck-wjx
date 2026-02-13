@@ -1,6 +1,9 @@
 """填空题/多项填空题处理"""
 import time
 from typing import Any, List, Optional, Set
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.network.browser_driver import By, BrowserDriver
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
@@ -20,6 +23,8 @@ MULTI_TEXT_DELIMITER = "||"
 
 def fill_text_question_input(driver: BrowserDriver, element, value: Optional[Any]) -> None:
     """填充单/多行文本题"""
+
+
     raw_text = "" if value is None else str(value)
     try:
         read_only_attr = element.get_attribute("readonly") or ""
@@ -30,8 +35,8 @@ def fill_text_question_input(driver: BrowserDriver, element, value: Optional[Any
     if not is_readonly:
         try:
             element.clear()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("fill_text_question_input: element.clear()", exc, level=logging.ERROR)
         element.send_keys(raw_text)
         return
 
@@ -83,8 +88,8 @@ def fill_contenteditable_element(driver: BrowserDriver, element, value: str) -> 
             """,
             element,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("fill_contenteditable_element: driver.execute_script( \"\"\" const el = arguments[0]; if (!el) { return; } try ...", exc, level=logging.ERROR)
 
     typed_successfully = False
     try:
@@ -191,8 +196,8 @@ def count_visible_text_inputs(question_div) -> int:
                 sibling_class = (sibling.get_attribute("class") or "").lower()
                 if sibling_tag in {"label", "div", "span"} and "textedit" in sibling_class:
                     continue
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("count_visible_text_inputs: sibling = cand.find_element(By.XPATH, \"following-sibling::*[1]\")", exc, level=logging.ERROR)
 
         if tag_name == "textarea" or (tag_name == "input" and input_type in _TEXT_INPUT_ALLOWED_TYPES):
             try:
@@ -247,8 +252,8 @@ def driver_question_is_location(question_div) -> bool:
         local_elements = question_div.find_elements(By.CSS_SELECTOR, ".get_Local")
         if local_elements:
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("driver_question_is_location: local_elements = question_div.find_elements(By.CSS_SELECTOR, \".get_Local\")", exc, level=logging.ERROR)
     try:
         inputs = question_div.find_elements(By.CSS_SELECTOR, "input[verify], .get_Local input, input")
     except Exception:
@@ -289,7 +294,7 @@ def should_treat_as_text_like(type_code: Any, option_count: int, text_input_coun
     return (option_count or 0) <= 1 and text_input_count > 0
 
 
-def vacant(
+def text(
     driver: BrowserDriver,
     current: int,
     index: int,
@@ -481,12 +486,12 @@ def _handle_multi_text(driver: BrowserDriver, current: int, selected_answer: str
         if tag_name in {"span", "div"}:
             try:
                 smooth_scroll_to_element(driver, element, 'center')
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_handle_multi_text: smooth_scroll_to_element(driver, element, 'center')", exc, level=logging.ERROR)
             try:
                 element.click()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_handle_multi_text: element.click()", exc, level=logging.ERROR)
             fill_contenteditable_element(driver, element, value)
         else:
             fill_text_question_input(driver, element, value)
@@ -511,8 +516,8 @@ def _handle_multi_text(driver: BrowserDriver, current: int, selected_answer: str
                 f"q{current}_{idx_value + 1}",
                 val or DEFAULT_FILL_TEXT,
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("_handle_multi_text: sync_values = fill_values if fill_values else [DEFAULT_FILL_TEXT]", exc, level=logging.ERROR)
 
     try:
         driver.execute_script(
@@ -533,8 +538,8 @@ def _handle_multi_text(driver: BrowserDriver, current: int, selected_answer: str
             """,
             f"div{current}"
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("_handle_multi_text: driver.execute_script( \"\"\" return (function() { const qid = arguments[0]; con...", exc, level=logging.ERROR)
 
 
 def _handle_single_text(driver: BrowserDriver, current: int, selected_answer: str) -> None:
@@ -600,16 +605,16 @@ def _handle_single_text(driver: BrowserDriver, current: int, selected_answer: st
             try:
                 if not editable.is_displayed():
                     continue
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_handle_single_text: if not editable.is_displayed(): continue", exc, level=logging.ERROR)
             try:
                 smooth_scroll_to_element(driver, editable, 'center')
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_handle_single_text: smooth_scroll_to_element(driver, editable, 'center')", exc, level=logging.ERROR)
             try:
                 editable.click()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_handle_single_text: editable.click()", exc, level=logging.ERROR)
             try:
                 fill_value = DEFAULT_FILL_TEXT if selected_answer is None else str(selected_answer)
                 fill_contenteditable_element(driver, editable, fill_value)

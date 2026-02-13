@@ -3,6 +3,9 @@ import re
 import threading
 from datetime import datetime
 from typing import Optional, Callable, Any, cast
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent
 from PySide6.QtGui import QDoubleValidator, QIntValidator, QKeySequence, QGuiApplication, QKeyEvent
@@ -39,6 +42,8 @@ from wjx.utils.app.version import __VERSION__
 
 class PasteOnlyLineEdit(LineEdit):
     """只显示 Fluent 风格“复制 / 粘贴 / 全选”菜单的 LineEdit。"""
+
+
 
     def __init__(self, parent=None, on_paste: Optional[Callable[[QWidget], bool]] = None):
         super().__init__(parent)
@@ -302,8 +307,8 @@ class ContactForm(StatusPollingMixin, QWidget):
         try:
             self._sendFinished.disconnect()
             self._statusLoaded.disconnect()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("closeEvent: self._sendFinished.disconnect()", exc, level=logging.WARNING)
         super().closeEvent(event)
 
 
@@ -515,8 +520,8 @@ class ContactForm(StatusPollingMixin, QWidget):
             self.status_spinner.hide()
             self.online_label.setText(text)
             self.online_label.setStyleSheet(f"color:{color};")
-        except RuntimeError:
-            pass
+        except RuntimeError as exc:
+            log_suppressed_exception("_on_status_loaded: self.status_spinner.hide()", exc, level=logging.WARNING)
 
     def _validate_email(self, email: str) -> bool:
         if not email:
@@ -542,8 +547,8 @@ class ContactForm(StatusPollingMixin, QWidget):
                         parent=self, position=InfoBarPosition.TOP, duration=3000,
                     )
                     return
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_on_send_clicked: from wjx.utils.system.registry_manager import RegistryManager", exc, level=logging.WARNING)
 
         if mtype == "卡密获取":
             amount_text = (self.amount_edit.text() or "").strip()
@@ -644,15 +649,15 @@ class ContactForm(StatusPollingMixin, QWidget):
         """清除邮箱选择（由QTimer调用）"""
         try:
             self.email_edit.setSelection(0, 0)
-        except (RuntimeError, AttributeError):
-            pass  # 对象已销毁，忽略
+        except (RuntimeError, AttributeError) as exc:
+            log_suppressed_exception("_clear_email_selection: self.email_edit.setSelection(0, 0)", exc, level=logging.WARNING)
 
     def _focus_send_button(self):
         """聚焦发送按钮（由QTimer调用）"""
         try:
             self.send_btn.setFocus()
-        except (RuntimeError, AttributeError):
-            pass  # 对象已销毁，忽略
+        except (RuntimeError, AttributeError) as exc:
+            log_suppressed_exception("_focus_send_button: self.send_btn.setFocus()", exc, level=logging.WARNING)
 
     def _on_send_finished(self, success: bool, error_msg: str):
         """发送完成回调（在主线程执行）"""
@@ -713,8 +718,8 @@ class ContactForm(StatusPollingMixin, QWidget):
         if adapter:
             try:
                 adapter.random_ip_enabled_var.set(True)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_apply_whitepiao_unlock: adapter.random_ip_enabled_var.set(True)", exc, level=logging.WARNING)
             refresh_ip_counter_display(adapter)
 
         dashboard = host if hasattr(host, "random_ip_cb") else getattr(host, "dashboard", None)
@@ -723,14 +728,14 @@ class ContactForm(StatusPollingMixin, QWidget):
                 dashboard_obj = cast(Any, dashboard)
                 dashboard_obj.random_ip_cb.blockSignals(True)
                 dashboard_obj.random_ip_cb.setChecked(True)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_apply_whitepiao_unlock: dashboard_obj = cast(Any, dashboard)", exc, level=logging.WARNING)
             finally:
                 try:
                     dashboard_obj = cast(Any, dashboard)
                     dashboard_obj.random_ip_cb.blockSignals(False)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_apply_whitepiao_unlock: dashboard_obj = cast(Any, dashboard)", exc, level=logging.WARNING)
 
         runtime_page = None
         if hasattr(host, "runtime_page"):
@@ -742,12 +747,12 @@ class ContactForm(StatusPollingMixin, QWidget):
                 runtime_page_obj = cast(Any, runtime_page)
                 runtime_page_obj.random_ip_switch.blockSignals(True)
                 runtime_page_obj.random_ip_switch.setChecked(True)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_apply_whitepiao_unlock: runtime_page_obj = cast(Any, runtime_page)", exc, level=logging.WARNING)
             finally:
                 try:
                     runtime_page_obj = cast(Any, runtime_page)
                     runtime_page_obj.random_ip_switch.blockSignals(False)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_apply_whitepiao_unlock: runtime_page_obj = cast(Any, runtime_page)", exc, level=logging.WARNING)
 

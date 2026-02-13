@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+
+
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 """
 GitHub Device Flow 认证模块
 
@@ -52,8 +57,8 @@ class GitHubAuth:
                     data = json.load(f)
                     self._access_token = data.get("access_token")
                     self._user_info = data.get("user_info")
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_load_token: with open(token_path, \"r\", encoding=\"utf-8\") as f: data = json.load(f) self._...", exc, level=logging.WARNING)
     
     def _save_token(self):
         """保存 Token 到文件"""
@@ -64,8 +69,8 @@ class GitHubAuth:
                     "access_token": self._access_token,
                     "user_info": self._user_info
                 }, f, ensure_ascii=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_save_token: with open(token_path, \"w\", encoding=\"utf-8\") as f: json.dump({ \"access_token\"...", exc, level=logging.WARNING)
     
     def _clear_token(self):
         """清除 Token"""
@@ -75,8 +80,8 @@ class GitHubAuth:
         if os.path.exists(token_path):
             try:
                 os.remove(token_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_clear_token: os.remove(token_path)", exc, level=logging.WARNING)
     
     @property
     def is_logged_in(self) -> bool:
@@ -222,8 +227,8 @@ class GitHubAuth:
             )
             if resp.status_code == 200:
                 self._user_info = resp.json()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_fetch_user_info: resp = http_client.get( GITHUB_USER_API_URL, headers={ \"Authorization\": f\"Bea...", exc, level=logging.WARNING)
     
     def logout(self):
         """登出"""

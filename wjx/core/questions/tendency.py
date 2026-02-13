@@ -12,6 +12,11 @@
 import random
 import threading
 from typing import List, Optional, Union
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
+
+
 
 from wjx.core.questions.utils import weighted_index
 
@@ -48,8 +53,8 @@ def _generate_base_index(option_count: int, probabilities: Union[List[float], in
                 jitter = random.gauss(0, 0.5)
                 base = int(round(max(0, min(option_count - 1, raw + jitter))))
                 return base
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_generate_base_index: from wjx.core.persona.generator import get_current_persona", exc, level=logging.ERROR)
         return random.randrange(option_count)
     if isinstance(probabilities, list) and probabilities:
         return weighted_index(probabilities)

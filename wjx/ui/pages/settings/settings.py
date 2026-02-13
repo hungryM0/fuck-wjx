@@ -1,6 +1,9 @@
 """应用程序设置页面"""
 import sys
 import subprocess
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication
@@ -22,6 +25,8 @@ from wjx.utils.app.config import GITHUB_MIRROR_SOURCES, DEFAULT_GITHUB_MIRROR, g
 
 class SettingsPage(ScrollArea):
     """应用程序设置页面"""
+
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -206,8 +211,8 @@ class SettingsPage(ScrollArea):
                         position=InfoBarPosition.TOP,
                         duration=2000
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_apply_sidebar_state: if checked: nav.setCollapsible(False) nav.expand() else: nav.setCollapsible(T...", exc, level=logging.WARNING)
 
     def _apply_topmost_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
         settings = QSettings("FuckWjx", "Settings")

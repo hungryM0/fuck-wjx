@@ -1,5 +1,8 @@
 """运行参数设置页面"""
 from typing import Dict, List, Optional
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QStandardItemModel, QStandardItem
@@ -32,6 +35,8 @@ from wjx.utils.io.load_save import RuntimeConfig
 
 class RuntimePage(ScrollArea):
     """独立的运行参数/开关页，方便在侧边栏查看。"""
+
+
 
     BROWSER_OPTION_MAP = {
         "auto": {
@@ -278,22 +283,22 @@ class RuntimePage(ScrollArea):
                 api_url = self.custom_api_edit.text().strip()
                 set_proxy_api_override(api_url if api_url else None)
             set_proxy_source(source)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_on_proxy_source_changed: from wjx.network.random_ip import set_proxy_source, set_proxy_api_override", exc, level=logging.WARNING)
 
     def _sync_random_ua(self, enabled: bool):
         try:
             self.random_ua_card.setUAEnabled(bool(enabled))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_sync_random_ua: self.random_ua_card.setUAEnabled(bool(enabled))", exc, level=logging.WARNING)
 
     def _sync_timed_mode(self, enabled: bool):
         """定时模式切换时禁用/启用时间控制按钮"""
         try:
             self.interval_card.setEnabled(not enabled)
             self.answer_card.setEnabled(not enabled)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_sync_timed_mode: self.interval_card.setEnabled(not enabled)", exc, level=logging.WARNING)
 
     def _load_browser_icons(self) -> Dict[str, QIcon]:
         icons: Dict[str, QIcon] = {}
@@ -439,8 +444,8 @@ class RuntimePage(ScrollArea):
         self.thread_spin.setValue(max(1, cfg.threads))
         try:
             self._apply_browser_preference(getattr(cfg, "browser_preference", None))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("apply_config: self._apply_browser_preference(getattr(cfg, \"browser_preference\", None))", exc, level=logging.WARNING)
 
         interval_min_seconds = max(0, cfg.submit_interval[0])
         self.interval_min_seconds = interval_min_seconds
@@ -488,6 +493,6 @@ class RuntimePage(ScrollArea):
             set_proxy_source(proxy_source)
             area_code = getattr(cfg, "proxy_area_code", None)
             self.random_ip_card.set_area_code(area_code)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("apply_config: proxy_source = getattr(cfg, \"proxy_source\", \"default\")", exc, level=logging.WARNING)
         self.ai_section.apply_config(cfg)

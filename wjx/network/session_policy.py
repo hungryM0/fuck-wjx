@@ -1,15 +1,17 @@
 """会话策略 - 代理切换与浏览器实例复用逻辑"""
-import logging
 from typing import Any, Optional, Tuple
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 import wjx.core.state as state
 from wjx.network.random_ip import _fetch_new_proxy_batch, _mask_proxy_for_log
-from wjx.utils.logging.log_utils import log_suppressed_exception
 from wjx.utils.io.load_save import _select_user_agent_from_keys
 
 
 def _record_bad_proxy_and_maybe_pause(gui_instance: Optional[Any]) -> bool:
     """
+
     记录连续无效代理次数；达到阈值时暂停执行以避免继续消耗代理 API 额度。
     返回 True 表示已触发暂停。
     """
@@ -23,7 +25,7 @@ def _record_bad_proxy_and_maybe_pause(gui_instance: Optional[Any]) -> bool:
             if gui_instance and hasattr(gui_instance, "pause_run"):
                 gui_instance.pause_run(reason)
         except Exception as exc:
-            log_suppressed_exception("session_policy._record_bad_proxy_and_maybe_pause pause_run", exc)
+            log_suppressed_exception("session_policy._record_bad_proxy_and_maybe_pause pause_run", exc, level=logging.WARNING)
         return True
     return False
 
@@ -77,5 +79,5 @@ def _discard_unresponsive_proxy(proxy_address: str) -> None:
         try:
             state.proxy_ip_pool.remove(proxy_address)
             logging.debug(f"已移除无响应代理：{_mask_proxy_for_log(proxy_address)}")
-        except ValueError:
-            pass
+        except ValueError as exc:
+            log_suppressed_exception("_discard_unresponsive_proxy: state.proxy_ip_pool.remove(proxy_address)", exc, level=logging.WARNING)

@@ -1,5 +1,8 @@
 """右侧配置抽屉，用于展示 configs 目录下的配置文件列表。"""
 from __future__ import annotations
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 import os
 from datetime import datetime
@@ -24,6 +27,8 @@ from wjx.utils.io.load_save import get_runtime_directory
 
 class _OverlayWidget(QWidget):
     """遮罩层组件，点击时关闭抽屉"""
+
+
 
     def __init__(self, parent=None, on_click: Optional[Callable[[], None]] = None):
         super().__init__(parent)
@@ -183,8 +188,8 @@ class ConfigDrawer(QWidget):
         if self._close_connected:
             try:
                 self._slide_anim.finished.disconnect(self._on_close_finished)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("open_drawer: self._slide_anim.finished.disconnect(self._on_close_finished)", exc, level=logging.WARNING)
             self._close_connected = False
 
         target_x = host.width() - self.width()
@@ -220,8 +225,8 @@ class ConfigDrawer(QWidget):
             if self._close_connected:
                 try:
                     self._slide_anim.finished.disconnect(self._on_close_finished)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("close_drawer: self._slide_anim.finished.disconnect(self._on_close_finished)", exc, level=logging.WARNING)
                 self._close_connected = False
             start_pos = self.pos()
             end_pos = QPoint(host.width(), start_pos.y())
@@ -256,8 +261,8 @@ class ConfigDrawer(QWidget):
         if self._close_connected:
             try:
                 self._slide_anim.finished.disconnect(self._on_close_finished)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_on_close_finished: self._slide_anim.finished.disconnect(self._on_close_finished)", exc, level=logging.WARNING)
             self._close_connected = False
         self._is_closing = False
         self._overlay.hide()

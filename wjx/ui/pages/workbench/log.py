@@ -1,5 +1,6 @@
 """日志页面"""
 import os
+import logging
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit
 from PySide6.QtGui import QFont, QTextCursor
@@ -13,8 +14,7 @@ from qfluentwidgets import (
     isDarkTheme,
     qconfig,
 )
-
-from wjx.utils.logging.log_utils import LOG_BUFFER_HANDLER, save_log_records_to_file
+from wjx.utils.logging.log_utils import LOG_BUFFER_HANDLER, save_log_records_to_file, log_suppressed_exception
 from wjx.utils.app.config import LOG_BUFFER_CAPACITY, LOG_REFRESH_INTERVAL_MS
 from wjx.utils.io.load_save import get_runtime_directory
 from wjx.ui.widgets.log_highlighter import LogHighlighter
@@ -53,6 +53,8 @@ LOG_LEVELS = [
 
 class LogPage(QWidget):
     """独立的日志页，放在侧边栏。"""
+
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -111,8 +113,8 @@ class LogPage(QWidget):
         try:
             if LOG_BUFFER_CAPACITY and int(LOG_BUFFER_CAPACITY) > 0:
                 self.log_view.document().setMaximumBlockCount(int(LOG_BUFFER_CAPACITY))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_build_ui: if LOG_BUFFER_CAPACITY and int(LOG_BUFFER_CAPACITY) > 0: self.log_view.docume...", exc, level=logging.WARNING)
         self._highlighter = LogHighlighter(
             self.log_view.document(),
             colors=self._resolve_log_colors(),
@@ -327,5 +329,5 @@ class LogPage(QWidget):
                     content = f.read()
                 if content.strip():
                     self.log_view.setPlainText(content)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_load_last_session_logs: log_path = os.path.join(get_runtime_directory(), \"logs\", \"last_session.log\")", exc, level=logging.WARNING)

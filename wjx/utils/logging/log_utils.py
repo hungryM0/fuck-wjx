@@ -20,6 +20,21 @@ ORIGINAL_EXCEPTHOOK = sys.excepthook
 _popup_handler: Optional[Callable[[str, str, str], Any]] = None
 
 
+def _safe_internal_log(message: str, exc: Optional[BaseException] = None) -> None:
+    """在日志系统内部安全输出，避免递归调用 logging。"""
+    try:
+        ORIGINAL_STDERR.write(f"[LogInternal] {message}\n")
+        if exc is not None:
+            ORIGINAL_STDERR.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+        ORIGINAL_STDERR.flush()
+    except Exception:
+        try:
+            ORIGINAL_STDERR.write("[LogInternal] safe log failed\n")
+            ORIGINAL_STDERR.flush()
+        except Exception:
+            return
+
+
 def log_suppressed_exception(
     context: str,
     exc: Optional[BaseException] = None,
@@ -32,9 +47,9 @@ def log_suppressed_exception(
             logging.log(level, "[Suppressed] %s", context)
         else:
             logging.log(level, "[Suppressed] %s: %s", context, exc, exc_info=True)
-    except Exception:
+    except Exception as inner_exc:
         # 记录日志失败不应影响主流程
-        pass
+        _safe_internal_log("log_suppressed_exception failed", inner_exc)
 
 
 class StreamToLogger:
@@ -57,8 +72,8 @@ class StreamToLogger:
         if self.stream:
             try:
                 self.stream.write(message)
-            except Exception:
-                pass
+            except Exception as exc:
+                _safe_internal_log("StreamToLogger.write failed", exc)
 
     def flush(self):
         if self._buffer:
@@ -67,8 +82,8 @@ class StreamToLogger:
         if self.stream:
             try:
                 self.stream.flush()
-            except Exception:
-                pass
+            except Exception as exc:
+                _safe_internal_log("StreamToLogger.flush failed", exc)
 
 
 @dataclass
@@ -155,9 +170,9 @@ class LogBufferHandler(logging.Handler):
                 with self._version_lock:
                     self._version += 1
 
-            except Exception:
+            except Exception as exc:
                 # 后台线程不应崩溃
-                pass
+                _safe_internal_log("LogBufferHandler worker loop failed", exc)
 
     def _process_record(self, record: logging.LogRecord):
         """处理单条日志记录（在后台线程中执行）"""
@@ -182,9 +197,9 @@ class LogBufferHandler(logging.Handler):
             entry = LogBufferEntry(text=display_text, category=category)
             self._records.append(entry)
 
-        except Exception:
+        except Exception as exc:
             # 处理失败不应影响其他日志
-            pass
+            _safe_internal_log("LogBufferHandler process_record failed", exc)
 
     def emit(self, record: logging.LogRecord):
         """接收日志记录（完全无阻塞）"""
@@ -193,7 +208,7 @@ class LogBufferHandler(logging.Handler):
             self._queue.put_nowait(record)
         except queue.Full:
             # 队列满时丢弃日志（极端情况）
-            pass
+            _safe_internal_log("LogBufferHandler queue full, dropping log")
         except Exception:
             self.handleError(record)
 

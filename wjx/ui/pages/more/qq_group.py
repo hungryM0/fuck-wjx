@@ -1,5 +1,8 @@
 """QQ群页面与卡片组件"""
 import os
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QDialog
@@ -11,6 +14,8 @@ from wjx.utils.io.load_save import get_assets_directory
 
 class QQGroupCard(CardWidget):
     """展示QQ群二维码的卡片，支持点击放大"""
+
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -54,8 +59,8 @@ class QQGroupCard(CardWidget):
             qq_group_path = os.path.join(get_assets_directory(), "QQ_group.jpg")
             if os.path.exists(qq_group_path):
                 self._show_full_image(qq_group_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_on_qq_group_clicked: qq_group_path = os.path.join(get_assets_directory(), \"QQ_group.jpg\")", exc, level=logging.WARNING)
 
     def _show_full_image(self, image_path: str):
         """显示原图弹窗"""

@@ -1,6 +1,9 @@
 """主控制面板：卡片式配置区 + 底部状态条（不包含日志）"""
 import os
 from typing import List, Dict, Any, Optional
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Qt, QObject, QEvent
 from PySide6.QtWidgets import (
@@ -57,6 +60,8 @@ from wjx.network.random_ip import (
 
 class _PasteOnlyMenu(QObject):
     """只保留 qfluentwidgets 风格的“粘贴”菜单"""
+
+
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.ContextMenu and isinstance(obj, LineEdit):
@@ -335,15 +340,15 @@ class DashboardPage(QWidget):
         self.controller.surveyParseFailed.connect(self._on_survey_parse_failed)
         try:
             self.question_page.entriesChanged.connect(self._on_question_entries_changed)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_bind_events: self.question_page.entriesChanged.connect(self._on_question_entries_changed)", exc, level=logging.WARNING)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         try:
             self.config_drawer.sync_to_parent()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("resizeEvent: self.config_drawer.sync_to_parent()", exc, level=logging.WARNING)
 
     def _has_question_entries(self) -> bool:
         try:
@@ -418,8 +423,8 @@ class DashboardPage(QWidget):
         if self._progress_infobar:
             try:
                 self._progress_infobar.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_on_survey_parsed: self._progress_infobar.close()", exc, level=logging.WARNING)
             self._progress_infobar = None
 
         # 显示解析成功消息
@@ -432,8 +437,8 @@ class DashboardPage(QWidget):
         if self._progress_infobar:
             try:
                 self._progress_infobar.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_on_survey_parse_failed: self._progress_infobar.close()", exc, level=logging.WARNING)
             self._progress_infobar = None
         
         # 显示解析失败消息
@@ -683,8 +688,8 @@ class DashboardPage(QWidget):
                 self.runtime_page.random_ip_switch.blockSignals(True)
                 self.runtime_page.random_ip_switch.setChecked(False)
                 self.runtime_page.random_ip_switch.blockSignals(False)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("update_random_ip_counter: self.runtime_page.random_ip_switch.blockSignals(True)", exc, level=logging.WARNING)
 
     def _on_random_ip_toggled(self, state: int):
         enabled = state != 0
@@ -703,8 +708,8 @@ class DashboardPage(QWidget):
                     self.runtime_page.random_ip_switch.blockSignals(True)
                     self.runtime_page.random_ip_switch.setChecked(False)
                     self.runtime_page.random_ip_switch.blockSignals(False)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_on_random_ip_toggled: self.runtime_page.random_ip_switch.blockSignals(True)", exc, level=logging.WARNING)
                 return
         try:
             self.controller.adapter.random_ip_enabled_var.set(bool(enabled))
@@ -719,8 +724,8 @@ class DashboardPage(QWidget):
             self.runtime_page.random_ip_switch.blockSignals(True)
             self.runtime_page.random_ip_switch.setChecked(enabled)
             self.runtime_page.random_ip_switch.blockSignals(False)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_on_random_ip_toggled: self.runtime_page.random_ip_switch.blockSignals(True)", exc, level=logging.WARNING)
         # 刷新计数显示
         refresh_ip_counter_display(self.controller.adapter)
 
@@ -730,8 +735,8 @@ class DashboardPage(QWidget):
         if hasattr(win, "_ask_card_code"):
             try:
                 return win._ask_card_code()  # type: ignore[union-attr]
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_ask_card_code: return win._ask_card_code()", exc, level=logging.WARNING)
         dialog = CardUnlockDialog(
             self,
             status_fetcher=get_status,
@@ -748,8 +753,8 @@ class DashboardPage(QWidget):
         if hasattr(win, "_open_contact_dialog"):
             try:
                 return win._open_contact_dialog(default_type)  # type: ignore[union-attr]
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_open_contact_dialog: return win._open_contact_dialog(default_type)", exc, level=logging.WARNING)
         dlg = ContactDialog(self, default_type=default_type, status_fetcher=get_status, status_formatter=_format_status_payload)
         dlg.exec()
 
@@ -781,8 +786,8 @@ class DashboardPage(QWidget):
                 self.runtime_page.random_ip_switch.blockSignals(True)
                 self.runtime_page.random_ip_switch.setChecked(True)
                 self.runtime_page.random_ip_switch.blockSignals(False)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_on_card_code_clicked: self.runtime_page.random_ip_switch.blockSignals(True)", exc, level=logging.WARNING)
 
     def _show_add_question_dialog(self):
         """新增题目 - 委托给 QuestionPage"""
@@ -938,8 +943,8 @@ class DashboardPage(QWidget):
         if self._progress_infobar:
             try:
                 self._progress_infobar.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_toast: self._progress_infobar.close()", exc, level=logging.WARNING)
             self._progress_infobar = None
         
         parent = self.window() or self

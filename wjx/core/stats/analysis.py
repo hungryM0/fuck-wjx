@@ -18,11 +18,15 @@
 """
 
 import json
-import logging
 import os
 import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
+
+
 
 import numpy as np
 import pandas as pd
@@ -313,15 +317,15 @@ def calculate_validity(df: pd.DataFrame) -> Tuple[Optional[float], Optional[floa
         try:
             kmo_per_item, kmo_overall = calculate_kmo(df_clean)
             kmo_value = float(kmo_overall)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("calculate_validity: kmo_per_item, kmo_overall = calculate_kmo(df_clean)", exc, level=logging.WARNING)
 
         try:
             chi2, p_value = calculate_bartlett_sphericity(df_clean)
             bartlett_chi2 = float(chi2)
             bartlett_p = float(p_value)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("calculate_validity: chi2, p_value = calculate_bartlett_sphericity(df_clean)", exc, level=logging.WARNING)
         
         # 将捕获的警告以WARNING级别记录到日志
         for warning in w:
@@ -597,8 +601,8 @@ def run_analysis(jsonl_path: str) -> AnalysisResult:
     # 3. 计算信度（Cronbach's Alpha - 全量）
     try:
         result.cronbach_alpha = calculate_cronbach_alpha(df)
-    except Exception:
-        pass  # alpha 保持 None
+    except Exception as exc:
+        log_suppressed_exception("run_analysis: result.cronbach_alpha = calculate_cronbach_alpha(df)", exc, level=logging.WARNING)
 
     # 4. 计算效度（KMO + Bartlett）
     try:
@@ -606,8 +610,8 @@ def run_analysis(jsonl_path: str) -> AnalysisResult:
         result.kmo_value = kmo
         result.bartlett_chi2 = chi2
         result.bartlett_p = p
-    except Exception:
-        pass  # 效度指标保持 None
+    except Exception as exc:
+        log_suppressed_exception("run_analysis: kmo, chi2, p = calculate_validity(df)", exc, level=logging.WARNING)
 
     # 5. 执行探索性因子分析（EFA）
     try:

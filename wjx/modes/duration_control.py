@@ -1,11 +1,13 @@
 """答题时长控制 - 模拟真实答题时间分布"""
-import logging
 import random
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, List, Optional, Tuple
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.utils.app.config import DURATION_CONTROL_JITTER, DURATION_CONTROL_MIN_DELAY_SECONDS
 
@@ -119,6 +121,8 @@ def simulate_answer_duration_delay(
     answer_duration_range_seconds: Tuple[int, int] = (0, 0),
 ) -> bool:
     """在提交前模拟答题时长等待；返回 True 表示等待中被中断。"""
+
+
     min_delay, max_delay = answer_duration_range_seconds
     min_delay = max(0, min_delay)
     max_delay = max(min_delay, max(0, max_delay))
@@ -157,13 +161,13 @@ def is_survey_completion_page(driver: Any) -> bool:
             text = getattr(divdsc, "text", "") or ""
             if "答卷已经提交" in text or "感谢您的参与" in text:
                 detected = True
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("is_survey_completion_page: divdsc = None", exc, level=logging.WARNING)
     if not detected:
         try:
             page_text = driver.execute_script("return document.body.innerText || '';") or ""
             if "答卷已经提交" in page_text or "感谢您的参与" in page_text:
                 detected = True
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("is_survey_completion_page: page_text = driver.execute_script(\"return document.body.innerText || '';\") or \"\"", exc, level=logging.WARNING)
     return bool(detected)

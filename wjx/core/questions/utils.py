@@ -1,17 +1,19 @@
 """题型处理共享辅助函数"""
-import logging
 import math
 import random
 import time
 from typing import Any, List, Optional, Tuple, Union
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.network.browser_driver import By, BrowserDriver
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
-from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def weighted_index(probabilities: List[float]) -> int:
     """根据权重列表随机选择索引"""
+
     if not probabilities:
         raise ValueError("probabilities cannot be empty")
     weights: List[float] = []
@@ -68,8 +70,8 @@ def generate_random_chinese_name() -> str:
         persona = get_current_persona()
         if persona is not None:
             gender = persona.gender
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("generate_random_chinese_name: from wjx.core.persona.generator import get_current_persona", exc, level=logging.ERROR)
 
     surname = random.choice(surname_pool)
     given_len = 1 if random.random() < 0.65 else 2
@@ -169,11 +171,11 @@ def fill_option_additional_text(driver: BrowserDriver, question_number: int, opt
         try:
             candidate_inputs.extend(option_element.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='search'], textarea"))
         except Exception as exc:
-            log_suppressed_exception("questions.utils.fill_option_additional_text inputs", exc)
+            log_suppressed_exception("questions.utils.fill_option_additional_text inputs", exc, level=logging.ERROR)
         try:
             candidate_inputs.extend(option_element.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea"))
         except Exception as exc:
-            log_suppressed_exception("questions.utils.fill_option_additional_text other inputs", exc)
+            log_suppressed_exception("questions.utils.fill_option_additional_text other inputs", exc, level=logging.ERROR)
     if not candidate_inputs:
         try:
             candidate_inputs = question_div.find_elements(By.CSS_SELECTOR, ".ui-other input, .ui-other textarea")
@@ -193,11 +195,11 @@ def fill_option_additional_text(driver: BrowserDriver, question_number: int, opt
         try:
             smooth_scroll_to_element(driver, input_element, 'center')
         except Exception as exc:
-            log_suppressed_exception("questions.utils.fill_option_additional_text scroll", exc)
+            log_suppressed_exception("questions.utils.fill_option_additional_text scroll", exc, level=logging.ERROR)
         try:
             input_element.clear()
         except Exception as exc:
-            log_suppressed_exception("questions.utils.fill_option_additional_text clear", exc)
+            log_suppressed_exception("questions.utils.fill_option_additional_text clear", exc, level=logging.ERROR)
         try:
             input_element.send_keys(text)
             time.sleep(0.05)
@@ -215,7 +217,7 @@ def smooth_scroll_to_element(driver: BrowserDriver, element, block: str = 'cente
         try:
             driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}', behavior:'auto'}});", element)
         except Exception as exc:
-            log_suppressed_exception("questions.utils.smooth_scroll_to_element quick scroll", exc)
+            log_suppressed_exception("questions.utils.smooth_scroll_to_element quick scroll", exc, level=logging.ERROR)
         return
     
     try:
@@ -257,7 +259,7 @@ def smooth_scroll_to_element(driver: BrowserDriver, element, block: str = 'cente
         try:
             driver.execute_script(f"arguments[0].scrollIntoView({{block:'{block}'}});", element)
         except Exception as exc:
-            log_suppressed_exception("questions.utils.smooth_scroll_to_element fallback", exc)
+            log_suppressed_exception("questions.utils.smooth_scroll_to_element fallback", exc, level=logging.ERROR)
 
 
 def normalize_single_like_prob_config(prob_config: Union[List[float], int, float, None], option_count: int) -> Union[List[float], int]:

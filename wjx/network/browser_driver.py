@@ -1,7 +1,9 @@
 """浏览器驱动封装 - Playwright 浏览器实例创建与操作"""
 from __future__ import annotations
-
 import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
+
 import os
 import random
 import subprocess
@@ -21,7 +23,6 @@ from playwright.sync_api import (
 import base64
 
 from wjx.utils.app.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
-from wjx.utils.logging.log_utils import log_suppressed_exception
 from wjx.network.random_ip import (
     _normalize_proxy_address,
     get_proxy_source,
@@ -124,33 +125,33 @@ class PlaywrightElement:
                 self._handle.scroll_into_view_if_needed()
                 self._handle.click()
             except Exception as exc:
-                log_suppressed_exception("browser_driver.PlaywrightElement.click fallback", exc)
+                log_suppressed_exception("browser_driver.PlaywrightElement.click fallback", exc, level=logging.WARNING)
 
     def clear(self) -> None:
         try:
             self._handle.fill("")
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("clear: self._handle.fill(\"\")", exc, level=logging.WARNING)
         try:
             self._handle.evaluate(
                 "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); "
                 "el.dispatchEvent(new Event('change', {bubbles:true})); }"
             )
         except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightElement.clear js fallback", exc)
+            log_suppressed_exception("browser_driver.PlaywrightElement.clear js fallback", exc, level=logging.WARNING)
 
     def send_keys(self, value: str) -> None:
         text = "" if value is None else str(value)
         try:
             self._handle.fill(text)
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("send_keys: self._handle.fill(text)", exc, level=logging.WARNING)
         try:
             self._handle.type(text)
         except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightElement.send_keys type fallback", exc)
+            log_suppressed_exception("browser_driver.PlaywrightElement.send_keys type fallback", exc, level=logging.WARNING)
 
     def find_element(self, by: str, value: str):
         selector = _build_selector(by, value)
@@ -220,7 +221,7 @@ class PlaywrightDriver:
             self._page.set_default_navigation_timeout(timeout)
             self._page.set_default_timeout(timeout)
         except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightDriver.get set timeouts", exc)
+            log_suppressed_exception("browser_driver.PlaywrightDriver.get set timeouts", exc, level=logging.WARNING)
 
         try:
             self._page.goto(url, wait_until=wait_until, timeout=timeout)
@@ -260,16 +261,17 @@ class PlaywrightDriver:
         try:
             self._page.set_viewport_size({"width": width, "height": height})
         except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightDriver.set_window_size", exc)
+            log_suppressed_exception("browser_driver.PlaywrightDriver.set_window_size", exc, level=logging.WARNING)
 
     def refresh(self) -> None:
         try:
             self._page.reload(wait_until="domcontentloaded")
         except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightDriver.refresh", exc)
+            log_suppressed_exception("browser_driver.PlaywrightDriver.refresh", exc, level=logging.WARNING)
 
     def mark_cleanup_done(self) -> bool:
         """标记清理已完成，返回 True 表示可以执行清理，False 表示已被其他线程清理过。"""
+
         with self._cleanup_lock:
             if self._cleanup_done:
                 return False
@@ -284,11 +286,11 @@ class PlaywrightDriver:
         try:
             self._browser.close()
         except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightDriver.quit browser.close", exc)
+            log_suppressed_exception("browser_driver.PlaywrightDriver.quit browser.close", exc, level=logging.WARNING)
         try:
             self._playwright.stop()
         except Exception as exc:
-            log_suppressed_exception("browser_driver.PlaywrightDriver.quit playwright.stop", exc)
+            log_suppressed_exception("browser_driver.PlaywrightDriver.quit playwright.stop", exc, level=logging.WARNING)
 
 
 BrowserDriver = PlaywrightDriver
@@ -339,7 +341,7 @@ def graceful_terminate_process_tree(pids: Set[int], wait_seconds: float = 3.0) -
             )
             count += 1
         except Exception as exc:
-            log_suppressed_exception("browser_driver.graceful_terminate_process_tree taskkill", exc)
+            log_suppressed_exception("browser_driver.graceful_terminate_process_tree taskkill", exc, level=logging.WARNING)
     return count
 
 
@@ -366,7 +368,7 @@ def _collect_process_tree(root_pid: Optional[int]) -> Set[int]:
                         pids.add(child_pid)
                         queue.append(child_pid)
         except Exception as exc:
-            log_suppressed_exception("browser_driver._collect_process_tree wmic", exc)
+            log_suppressed_exception("browser_driver._collect_process_tree wmic", exc, level=logging.WARNING)
     return pids
 
 
@@ -430,7 +432,7 @@ def create_playwright_driver(
                     if parsed.password:
                         proxy_settings["password"] = parsed.password
                 except Exception as exc:
-                    log_suppressed_exception("browser_driver.create_playwright_driver parse proxy", exc)
+                    log_suppressed_exception("browser_driver.create_playwright_driver parse proxy", exc, level=logging.WARNING)
 
                 if get_proxy_source() in (PROXY_SOURCE_DEFAULT, PROXY_SOURCE_CUSTOM) and "username" not in proxy_settings:
                     try:
@@ -450,7 +452,7 @@ def create_playwright_driver(
                     width, height = [int(x) for x in HEADLESS_WINDOW_SIZE.split(",")]
                     context_args["viewport"] = {"width": width, "height": height}
                 except Exception as exc:
-                    log_suppressed_exception("browser_driver.create_playwright_driver parse headless size", exc)
+                    log_suppressed_exception("browser_driver.create_playwright_driver parse headless size", exc, level=logging.WARNING)
 
             context = browser_instance.new_context(**context_args)
             page = context.new_page()
@@ -477,7 +479,7 @@ def create_playwright_driver(
                     if not collected_pids:
                         logging.warning("[Action Log] 多次尝试后仍未捕获浏览器 PID，清理可能不完整")
                 except Exception as exc:
-                    log_suppressed_exception("browser_driver.create_playwright_driver collect pid fallback", exc)
+                    log_suppressed_exception("browser_driver.create_playwright_driver collect pid fallback", exc, level=logging.WARNING)
 
             driver.browser_pids = collected_pids
             logging.debug("[Action Log] 捕获浏览器 PID: %s", sorted(collected_pids) if collected_pids else "无")
@@ -488,6 +490,6 @@ def create_playwright_driver(
             try:
                 pw.stop()
             except Exception as exc:
-                log_suppressed_exception("browser_driver.create_playwright_driver pw.stop", exc)
+                log_suppressed_exception("browser_driver.create_playwright_driver pw.stop", exc, level=logging.WARNING)
 
     raise RuntimeError(f"无法启动任何浏览器: {last_exc}")

@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+
+
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 """GitHub 账号页面 - 登录与Issue提交"""
 
 import platform
@@ -146,8 +151,8 @@ class AvatarLoadWorker(QThread):
             resp = http_client.get(self._url, timeout=10)
             if resp.status_code == 200:
                 self.finished.emit(resp.content)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("run: resp = http_client.get(self._url, timeout=10)", exc, level=logging.WARNING)
 
 
 class StarCheckWorker(QThread):

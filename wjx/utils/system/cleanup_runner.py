@@ -1,7 +1,9 @@
 """异步清理任务执行器 - 后台回收浏览器实例等资源"""
 from __future__ import annotations
-
 import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
+
 import subprocess
 import threading
 import time
@@ -19,6 +21,8 @@ _NO_WINDOW = 0x08000000
 
 class CleanupRunner:
     """Run cleanup tasks in a single background worker to avoid blocking the UI.
+
+
 
     新增批量进程清理机制：
     - Worker 线程只需将 PID 放入待清理集合
@@ -132,8 +136,8 @@ class CleanupRunner:
                 time.sleep(delay)
             try:
                 task()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_worker: task()", exc, level=logging.WARNING)
 
 
 def kill_browser_processes() -> None:
@@ -150,8 +154,8 @@ def kill_browser_processes() -> None:
                     timeout=10,
                     creationflags=_NO_WINDOW,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_do_kill: subprocess.run( [\"taskkill\", \"/F\", \"/IM\", name], stdout=subprocess.DEVNULL, s...", exc, level=logging.WARNING)
         logger.info("浏览器进程清理完成")
 
     threading.Thread(target=_do_kill, daemon=True, name="BrowserKiller").start()

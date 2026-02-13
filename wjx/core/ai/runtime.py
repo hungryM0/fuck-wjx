@@ -1,6 +1,9 @@
 """AI 运行时辅助函数 - 调用 AI 模型生成答案"""
 import re
 from typing import Optional
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.network.browser_driver import By, BrowserDriver
 from wjx.utils.integrations.ai_service import generate_answer
@@ -9,6 +12,8 @@ from wjx.utils.app.config import _HTML_SPACE_RE
 
 class AIRuntimeError(RuntimeError):
     """AI 填空运行时错误（需要终止任务）。"""
+
+
 
 
 def _normalize_text(value: Optional[str]) -> str:
@@ -74,8 +79,8 @@ def generate_ai_answer(question_title: str) -> str:
         context_prompt = build_ai_context_prompt()
         if context_prompt:
             cleaned = f"{context_prompt}\n\n请回答以下问卷问题：{cleaned}"
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("generate_ai_answer: from wjx.core.persona.context import build_ai_context_prompt", exc, level=logging.WARNING)
 
     try:
         answer = generate_answer(cleaned)

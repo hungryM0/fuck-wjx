@@ -144,7 +144,7 @@ def _fill_droplist_via_click(driver: BrowserDriver, current: int, prob_config: U
     fill_option_additional_text(driver, current, selected_idx, fill_value)
 
 
-def droplist(driver: BrowserDriver, current: int, index: int, droplist_prob_config: List, droplist_option_fill_texts_config: List) -> None:
+def dropdown(driver: BrowserDriver, current: int, index: int, droplist_prob_config: List, droplist_option_fill_texts_config: List) -> None:
     """下拉题处理主函数"""
     prob_config = droplist_prob_config[index] if index < len(droplist_prob_config) else -1
     fill_entries = droplist_option_fill_texts_config[index] if index < len(droplist_option_fill_texts_config) else None

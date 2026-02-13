@@ -3,9 +3,12 @@ import random
 import re
 import time
 from typing import Any, List, Optional, Tuple
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.network.browser_driver import By, BrowserDriver
-from wjx.core.questions.utils import extract_text_from_element
+from wjx.core.questions.utils import extract_text_from_element, smooth_scroll_to_element
 from wjx.core.questions.types.multiple import (
     detect_multiple_choice_limit_range,
     detect_multiple_choice_limit,
@@ -17,6 +20,8 @@ from wjx.core.questions.types.multiple import (
 
 def _extract_reorder_required_from_text(text: Optional[str], total_options: Optional[int] = None) -> Optional[int]:
     """从文本提取排序题需要选择的数量"""
+
+
     if not text:
         return None
     normalized = text.strip()
@@ -66,8 +71,8 @@ def detect_reorder_required_count(driver: BrowserDriver, question_number: int, t
             continue
     try:
         fragments.append(container.text)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_suppressed_exception("detect_reorder_required_count: fragments.append(container.text)", exc, level=logging.ERROR)
     for fragment in fragments:
         required = _extract_reorder_required_from_text(fragment, total_options)
         if required:
@@ -104,10 +109,7 @@ def reorder(driver: BrowserDriver, current: int) -> None:
     if not order_items:
         return
     if container:
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", container)
-        except Exception:
-            pass
+        smooth_scroll_to_element(driver, container, "center")
     
     rank_mode = False
     if container:
@@ -135,8 +137,8 @@ def reorder(driver: BrowserDriver, current: int) -> None:
             aria_checked = (item.get_attribute("aria-checked") or "").lower()
             if data_checked in ("true", "checked") or aria_checked == "true":
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_is_item_selected: cls = (item.get_attribute(\"class\") or \"\").lower()", exc, level=logging.ERROR)
         try:
             badges = item.find_elements(
                 By.CSS_SELECTOR, ".ui-icon-number, .order-number, .order-index, .num, .sortnum, .sortnum-sel"
@@ -148,8 +150,8 @@ def reorder(driver: BrowserDriver, current: int) -> None:
                     text = ""
                 if text:
                     return True
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_is_item_selected: badges = item.find_elements( By.CSS_SELECTOR, \".ui-icon-number, .order-number...", exc, level=logging.ERROR)
         return False
 
     def _count_selected() -> int:
@@ -193,8 +195,8 @@ def reorder(driver: BrowserDriver, current: int) -> None:
                         selected_hidden += 1
                 if selected_hidden:
                     return selected_hidden
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_count_selected: if container is not None: count = len( container.find_elements( By.CSS_SELECT...", exc, level=logging.ERROR)
         count = 0
         for item in order_items:
             if _is_item_selected(item):
@@ -225,8 +227,8 @@ def reorder(driver: BrowserDriver, current: int) -> None:
             try:
                 if target is not None and hasattr(target, "click"):
                     target.click()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_native_click: if target is not None and hasattr(target, \"click\"): target.click()", exc, level=logging.ERROR)
 
         def _safe_dom_click(target) -> None:
             driver.execute_script(
@@ -343,15 +345,15 @@ def reorder(driver: BrowserDriver, current: int) -> None:
                         if _count_selected() > count_before:
                             _after_rank_click(True)
                             return True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_suppressed_exception("_click_item: if _count_selected() > count_before: _after_rank_click(True) return True", exc, level=logging.ERROR)
                     try:
                         fresh_check = _get_item_fresh()
                         if fresh_check and _is_item_selected(fresh_check):
                             _after_rank_click(True)
                             return True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_suppressed_exception("_click_item: fresh_check = _get_item_fresh()", exc, level=logging.ERROR)
                     time.sleep(0.05)
         for _ in range(6):
             base_item = _get_item_fresh()
@@ -361,8 +363,8 @@ def reorder(driver: BrowserDriver, current: int) -> None:
             for target in _click_targets(base_item):
                 try:
                     _native_click(target)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_click_item: _native_click(target)", exc, level=logging.ERROR)
 
                 deadline = time.time() + 0.45
                 while time.time() < deadline:
@@ -370,36 +372,36 @@ def reorder(driver: BrowserDriver, current: int) -> None:
                         if _count_selected() > count_before:
                             _after_rank_click(True)
                             return True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_suppressed_exception("_click_item: if _count_selected() > count_before: _after_rank_click(True) return True", exc, level=logging.ERROR)
                     try:
                         fresh_check = _get_item_fresh()
                         if fresh_check and _is_item_selected(fresh_check):
                             _after_rank_click(True)
                             return True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_suppressed_exception("_click_item: fresh_check = _get_item_fresh()", exc, level=logging.ERROR)
                     time.sleep(0.05)
 
                 try:
                     _safe_dom_click(target)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_click_item: _safe_dom_click(target)", exc, level=logging.ERROR)
                 deadline = time.time() + 0.45
                 while time.time() < deadline:
                     try:
                         if _count_selected() > count_before:
                             _after_rank_click(True)
                             return True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_suppressed_exception("_click_item: if _count_selected() > count_before: _after_rank_click(True) return True", exc, level=logging.ERROR)
                     try:
                         fresh_check = _get_item_fresh()
                         if fresh_check and _is_item_selected(fresh_check):
                             _after_rank_click(True)
                             return True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_suppressed_exception("_click_item: fresh_check = _get_item_fresh()", exc, level=logging.ERROR)
                     time.sleep(0.05)
 
                 try:
@@ -410,11 +412,11 @@ def reorder(driver: BrowserDriver, current: int) -> None:
                                 if _count_selected() > count_before:
                                     _after_rank_click(True)
                                     return True
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                log_suppressed_exception("_click_item: if _count_selected() > count_before: _after_rank_click(True) return True", exc, level=logging.ERROR)
                             time.sleep(0.05)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("_click_item: if _mouse_click_center(target): deadline = time.time() + 0.45 while time.time...", exc, level=logging.ERROR)
 
             time.sleep(0.06)
 
@@ -544,8 +546,8 @@ def reorder(driver: BrowserDriver, current: int) -> None:
                     li,
                     int(rank),
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_force_mark_rank_selected: driver.execute_script( r\"\"\" const li = arguments[0]; const rank = Number(argu...", exc, level=logging.ERROR)
 
         def _get_item_badge_text(li) -> str:
             if not li:
@@ -570,21 +572,21 @@ def reorder(driver: BrowserDriver, current: int) -> None:
             expected_rank = max(1, min(before + 1, plan_count))
             try:
                 item.click()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("reorder: item.click()", exc, level=logging.ERROR)
 
             deadline = time.time() + 0.65
             while time.time() < deadline:
                 try:
                     if _get_item_badge_text(item):
                         break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("reorder: if _get_item_badge_text(item): break", exc, level=logging.ERROR)
                 try:
                     if _count_selected() > before:
                         break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("reorder: if _count_selected() > before: break", exc, level=logging.ERROR)
                 time.sleep(0.05)
 
             selected_count = _count_selected()
@@ -694,6 +696,6 @@ def reorder(driver: BrowserDriver, current: int) -> None:
                 order,
                 effective_limit,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("reorder: order = list(range(len(order_items)))", exc, level=logging.ERROR)
     _wait_until_reorder_done(effective_limit)

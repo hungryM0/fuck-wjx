@@ -1,6 +1,8 @@
 """单选题处理"""
-import logging
 from typing import Any, List, Optional, Set, Union
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from wjx.network.browser_driver import By, BrowserDriver
 from wjx.core.persona.context import apply_persona_boost, record_answer
@@ -17,6 +19,8 @@ from wjx.core.stats.collector import stats_collector
 def single(driver: BrowserDriver, current: int, index: int, single_prob_config: List, single_option_fill_texts_config: List) -> None:
     """单选题处理主函数"""
     # 兼容不同模板下的单选题 DOM 结构，按优先级收集可点击的选项节点
+
+
     option_elements: List[Any] = []
     probe_xpaths = [
         f'//*[@id="div{current}"]/div[2]/div',
@@ -35,8 +39,8 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
             try:
                 if not elem.is_displayed():
                     continue
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("single: if not elem.is_displayed(): continue", exc, level=logging.ERROR)
             if elem not in seen:
                 seen.add(elem)
                 option_elements.append(elem)
@@ -49,8 +53,8 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
             try:
                 if not radio.is_displayed():
                     continue
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("single: if not radio.is_displayed(): continue", exc, level=logging.ERROR)
             if radio not in seen:
                 seen.add(radio)
                 option_elements.append(radio)
@@ -93,8 +97,8 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
                 inner_radio = target_elem.find_element(By.XPATH, ".//input[@type='radio']")
                 inner_radio.click()
                 clicked = True
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("single: inner_radio = target_elem.find_element(By.XPATH, \".//input[@type='radio']\")", exc, level=logging.ERROR)
     if not clicked:
         try:
             driver.find_element(

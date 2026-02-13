@@ -5,6 +5,9 @@ import os
 import sys
 from datetime import datetime
 import wjx.network.http_client as http_client
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QIcon
@@ -39,6 +42,8 @@ from wjx.ui.widgets.full_width_infobar import FullWidthInfoBar
 
 def get_resource_path(relative_path: str) -> str:
     """获取资源文件的绝对路径，兼容打包后的环境"""
+
+
     meipass = getattr(sys, '_MEIPASS', None)
     if meipass:
         return os.path.join(meipass, relative_path)
@@ -305,8 +310,8 @@ class AboutPage(ScrollArea):
                             dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
                             self._publishTimeLoaded.emit(dt.strftime("%Y-%m-%d"))
                         return
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_do_load: from wjx.utils.update.updater import UpdateManager", exc, level=logging.WARNING)
         
         threading.Thread(target=_do_load, daemon=True).start()
 
@@ -328,10 +333,10 @@ class AboutPage(ScrollArea):
                     balance = data.get("data", {}).get("balance", 0)
                     try:
                         self._ipBalanceLoaded.emit(float(balance))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as exc:
+                        log_suppressed_exception("_do_load: self._ipBalanceLoaded.emit(float(balance))", exc, level=logging.WARNING)
+            except Exception as exc:
+                log_suppressed_exception("_do_load: response = http_client.get( \"https://service.ipzan.com/userProduct-get\", para...", exc, level=logging.WARNING)
         
         threading.Thread(target=_do_load, daemon=True).start()
 

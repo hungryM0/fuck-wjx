@@ -2,6 +2,9 @@
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 try:
     from bs4 import BeautifulSoup
@@ -9,7 +12,6 @@ except ImportError:
     BeautifulSoup = None
 
 from wjx.utils.app.config import _HTML_SPACE_RE
-from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 def _normalize_html_text(value: Optional[str]) -> str:
@@ -20,6 +22,8 @@ def _normalize_html_text(value: Optional[str]) -> str:
 
 def extract_survey_title_from_html(html: str) -> Optional[str]:
     """尝试从问卷 HTML 文本中提取标题。"""
+
+
     if not BeautifulSoup:
         return None
     try:
@@ -126,7 +130,7 @@ def _question_div_has_shared_text_input(question_div) -> bool:
         if keyword_inputs:
             return True
     except Exception as exc:
-        log_suppressed_exception("survey.parser._question_div_has_shared_text_input keyword", exc)
+        log_suppressed_exception("survey.parser._question_div_has_shared_text_input keyword", exc, level=logging.ERROR)
     text_blob = _normalize_html_text(question_div.get_text(' ', strip=True))
     option_fill_keywords = ["请注明", "其他", "其他内容", "填空", "填写"]
     if any(keyword in text_blob for keyword in option_fill_keywords):
@@ -300,7 +304,7 @@ def _soup_question_is_location(question_div) -> bool:
         if question_div.find(class_="get_Local"):
             return True
     except Exception as exc:
-        log_suppressed_exception("survey.parser._soup_question_is_location get_Local", exc)
+        log_suppressed_exception("survey.parser._soup_question_is_location get_Local", exc, level=logging.ERROR)
     try:
         inputs = question_div.find_all("input")
     except Exception:
@@ -387,7 +391,7 @@ def _collect_matrix_option_texts(soup, question_div, question_number: int) -> Tu
                         if label_text:
                             break
             except Exception as exc:
-                log_suppressed_exception("survey.parser._extract_row_label selector", exc)
+                log_suppressed_exception("survey.parser._extract_row_label selector", exc, level=logging.ERROR)
         if not label_text:
             try:
                 for child in row.find_all(["label", "span", "div", "p"], limit=10):
@@ -398,7 +402,7 @@ def _collect_matrix_option_texts(soup, question_div, question_number: int) -> Tu
                     if label_text:
                         break
             except Exception as exc:
-                log_suppressed_exception("survey.parser._extract_row_label child", exc)
+                log_suppressed_exception("survey.parser._extract_row_label child", exc, level=logging.ERROR)
         return label_text
     table = None
     if question_div is not None:
@@ -477,13 +481,13 @@ def _collect_matrix_option_texts(soup, question_div, question_number: int) -> Tu
                 row_idx = int(match.group(1))
                 row_indices.append(row_idx)
             except Exception as exc:
-                log_suppressed_exception("survey.parser._collect_matrix_rows row_idx", exc)
+                log_suppressed_exception("survey.parser._collect_matrix_rows row_idx", exc, level=logging.ERROR)
             if match.group(2):
                 try:
                     col_idx = int(match.group(2))
                     col_indices.append(col_idx)
                 except Exception as exc:
-                    log_suppressed_exception("survey.parser._collect_matrix_rows col_idx", exc)
+                    log_suppressed_exception("survey.parser._collect_matrix_rows col_idx", exc, level=logging.ERROR)
         if row_indices:
             matrix_rows = max(row_indices)
             row_texts = [""] * matrix_rows
@@ -512,7 +516,7 @@ def _collect_matrix_option_texts(soup, question_div, question_number: int) -> Tu
                             merged[idx] = candidates[idx]
                     row_texts = merged
         except Exception as exc:
-            log_suppressed_exception("survey.parser._collect_matrix_rows merge", exc)
+            log_suppressed_exception("survey.parser._collect_matrix_rows merge", exc, level=logging.ERROR)
     header_row = soup.find(id=f"drv{question_number}_1") if soup else None
     if header_row:
         cells = header_row.find_all("td")
@@ -591,8 +595,8 @@ def _extract_multiple_choice_limits(question_div, question_number: int) -> Tuple
                     continue
             try:
                 fragments.append(question_div.get_text(" ", strip=True))
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception("_extract_multiple_choice_limits: fragments.append(question_div.get_text(\" \", strip=True))", exc, level=logging.ERROR)
 
             for fragment in fragments:
                 cand_min, cand_max = _extract_multi_limit_range_from_text(fragment)
@@ -743,7 +747,7 @@ def _count_text_inputs_in_soup(question_div) -> int:
                 if sibling_classes and any("textedit" in cls.lower() for cls in sibling_classes):
                     continue
             except Exception as exc:
-                log_suppressed_exception("survey.parser._count_text_inputs sibling", exc)
+                log_suppressed_exception("survey.parser._count_text_inputs sibling", exc, level=logging.ERROR)
         if tag_name == "textarea" or (tag_name == "input" and input_type in _TEXT_INPUT_ALLOWED_TYPES):
             count += 1
             continue
@@ -796,7 +800,7 @@ def _soup_question_looks_like_reorder(question_div) -> bool:
         if question_div.select_one(".sortnum, .sortnum-sel, .order-number, .order-index"):
             return True
     except Exception as exc:
-        log_suppressed_exception("survey.parser._soup_question_looks_like_reorder quick", exc)
+        log_suppressed_exception("survey.parser._soup_question_looks_like_reorder quick", exc, level=logging.ERROR)
     try:
         has_list_items = bool(question_div.select("ul li, ol li"))
         if not has_list_items:
@@ -886,19 +890,19 @@ def _extract_rating_option_count(question_div) -> int:
                 if match:
                     return int(match.group(1))
         except Exception as exc:
-            log_suppressed_exception("survey.parser._extract_rating_option_count modlen", exc)
+            log_suppressed_exception("survey.parser._extract_rating_option_count modlen", exc, level=logging.ERROR)
     try:
         options = question_div.select(".scale-rating ul li")
         if options:
             return len(options)
     except Exception as exc:
-        log_suppressed_exception("survey.parser._extract_rating_option_count scale-rating", exc)
+        log_suppressed_exception("survey.parser._extract_rating_option_count scale-rating", exc, level=logging.ERROR)
     try:
         options = question_div.select("a.rate-off, a.rate-on")
         if options:
             return len(options)
     except Exception as exc:
-        log_suppressed_exception("survey.parser._extract_rating_option_count rate-off", exc)
+        log_suppressed_exception("survey.parser._extract_rating_option_count rate-off", exc, level=logging.ERROR)
     return 0
 
 

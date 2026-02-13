@@ -24,18 +24,18 @@ from wjx.core.engine.runtime_control import _is_fast_mode, _sleep_with_stop
 from wjx.core.engine.submission import submit
 from wjx.core.persona.context import reset_context as _reset_answer_context
 from wjx.core.persona.generator import generate_persona, reset_persona, set_current_persona
-from wjx.core.questions.types.dropdown import droplist as _droplist_impl
+from wjx.core.questions.types.dropdown import dropdown as _dropdown_impl
 from wjx.core.questions.types.matrix import matrix as _matrix_impl
 from wjx.core.questions.types.multiple import multiple as _multiple_impl
 from wjx.core.questions.types.reorder import reorder as _reorder_impl
 from wjx.core.questions.types.scale import scale as _scale_impl
 from wjx.core.questions.types.score import score as _score_impl
 from wjx.core.questions.types.single import single as _single_impl
-from wjx.core.questions.types.slider import slider_question as _slider_question_impl, _resolve_slider_score
+from wjx.core.questions.types.slider import slider as _slider_impl, _resolve_slider_score
 from wjx.core.questions.types.text import (
     count_visible_text_inputs as _count_visible_text_inputs_driver,
     driver_question_is_location as _driver_question_is_location,
-    vacant as _vacant_impl,
+    text as _text_impl,
 )
 from wjx.core.questions.tendency import reset_tendency
 from wjx.core.survey.parser import _should_mark_as_multi_text, _should_treat_question_as_text_like
@@ -55,8 +55,8 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     total_question_count = sum(questions_per_page)
     fast_mode = _is_fast_mode()
     single_question_index = 0
-    vacant_question_index = 0
-    droplist_question_index = 0
+    text_question_index = 0
+    dropdown_question_index = 0
     multiple_question_index = 0
     matrix_question_index = 0
     scale_question_index = 0
@@ -130,8 +130,8 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 if is_location_question:
                     print(f"第{current_question_number}题为位置题，暂不支持，已跳过")
                 else:
-                    _text_idx = _config_entry[1] if _config_entry and _config_entry[0] == "text" else vacant_question_index
-                    _vacant_impl(
+                    _text_idx = _config_entry[1] if _config_entry and _config_entry[0] == "text" else text_question_index
+                    _text_impl(
                         driver,
                         current_question_number,
                         _text_idx,
@@ -141,7 +141,7 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                         state.text_ai_flags,
                         state.text_titles,
                     )
-                    vacant_question_index += 1
+                    text_question_index += 1
             elif question_type == "3":
                 _single_idx = _config_entry[1] if _config_entry and _config_entry[0] == "single" else single_question_index
                 _single_impl(driver, current_question_number, _single_idx, state.single_prob, state.single_option_fill_texts)
@@ -161,13 +161,13 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                 _matrix_idx = _config_entry[1] if _config_entry and _config_entry[0] == "matrix" else matrix_question_index
                 matrix_question_index = _matrix_impl(driver, current_question_number, _matrix_idx, state.matrix_prob)
             elif question_type == "7":
-                _drop_idx = _config_entry[1] if _config_entry and _config_entry[0] == "dropdown" else droplist_question_index
-                _droplist_impl(driver, current_question_number, _drop_idx, state.droplist_prob, state.droplist_option_fill_texts)
-                droplist_question_index += 1
+                _drop_idx = _config_entry[1] if _config_entry and _config_entry[0] == "dropdown" else dropdown_question_index
+                _dropdown_impl(driver, current_question_number, _drop_idx, state.droplist_prob, state.droplist_option_fill_texts)
+                dropdown_question_index += 1
             elif question_type == "8":
                 _slider_idx = _config_entry[1] if _config_entry and _config_entry[0] == "slider" else slider_question_index
                 slider_score = _resolve_slider_score(_slider_idx, state.slider_targets)
-                _slider_question_impl(driver, current_question_number, slider_score)
+                _slider_impl(driver, current_question_number, slider_score)
                 slider_question_index += 1
             elif is_reorder_question:
                 _reorder_impl(driver, current_question_number)
@@ -203,17 +203,17 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
                     )
 
                     if is_text_like_question:
-                        _vacant_impl(
+                        _text_impl(
                             driver,
                             current_question_number,
-                            vacant_question_index,
+                            text_question_index,
                             state.texts,
                             state.texts_prob,
                             state.text_entry_types,
                             state.text_ai_flags,
                             state.text_titles,
                         )
-                        vacant_question_index += 1
+                        text_question_index += 1
                         print(
                             f"第{current_question_number}题识别为"
                             f"{'多项填空' if is_multi_text_question else '填空'}，已按填空题处理"

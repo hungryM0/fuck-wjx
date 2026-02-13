@@ -1,6 +1,8 @@
 """运行参数页 - AI 提供商和 API Key 配置组件"""
-import logging
 from typing import Optional
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 from PySide6.QtCore import QObject, Qt, QThread
 from PySide6.QtWidgets import QSizePolicy, QPlainTextEdit, QVBoxLayout, QWidget
@@ -222,8 +224,8 @@ class RuntimeAISection(QObject):
         try:
             self.ai_enabled_card.switchButton.blockSignals(blocked)
             self.ai_provider_combo.blockSignals(blocked)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_set_ai_controls_blocked: self.ai_enabled_card.switchButton.blockSignals(blocked)", exc, level=logging.WARNING)
 
     def _set_ai_test_loading(self, loading: bool):
         self.ai_test_spinner.setVisible(loading)
@@ -232,11 +234,13 @@ class RuntimeAISection(QObject):
     def _show_ai_infobar(self, message: str, success: bool = True, duration: int = 2000):
         """安全地显示 InfoBar，关闭之前的避免动画冲突"""
         # 先关闭之前的 InfoBar
+
+
         if self._current_infobar is not None:
             try:
                 self._current_infobar.close()
-            except (RuntimeError, AttributeError):
-                pass  # InfoBar 可能已被销毁
+            except (RuntimeError, AttributeError) as exc:
+                log_suppressed_exception("_show_ai_infobar: self._current_infobar.close()", exc, level=logging.WARNING)
             self._current_infobar = None
         
         # 显示新的 InfoBar

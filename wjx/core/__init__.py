@@ -27,7 +27,7 @@ from wjx.core.questions.utils import (
     generate_random_generic_text,
 )
 from wjx.core.questions.types.text import (
-    vacant,
+    text,
     MULTI_TEXT_DELIMITER,
     fill_text_question_input,
     fill_contenteditable_element,
@@ -44,11 +44,11 @@ from wjx.core.questions.types.multiple import (
     detect_multiple_choice_limit,
     detect_multiple_choice_limit_range,
 )
-from wjx.core.questions.types.dropdown import droplist
+from wjx.core.questions.types.dropdown import dropdown
 from wjx.core.questions.types.matrix import matrix
 from wjx.core.questions.types.scale import scale
 from wjx.core.questions.types.score import score
-from wjx.core.questions.types.slider import slider_question, _resolve_slider_score
+from wjx.core.questions.types.slider import slider, _resolve_slider_score
 from wjx.core.questions.types.reorder import reorder, detect_reorder_required_count
 
 __all__ = [
@@ -75,7 +75,7 @@ __all__ = [
     "generate_random_mobile",
     "generate_random_generic_text",
     # question_text
-    "vacant",
+    "text",
     "MULTI_TEXT_DELIMITER",
     "fill_text_question_input",
     "fill_contenteditable_element",
@@ -92,7 +92,7 @@ __all__ = [
     "detect_multiple_choice_limit",
     "detect_multiple_choice_limit_range",
     # question_dropdown
-    "droplist",
+    "dropdown",
     # question_matrix
     "matrix",
     # question_scale
@@ -100,7 +100,7 @@ __all__ = [
     # question_score
     "score",
     # question_slider
-    "slider_question",
+    "slider",
     "_resolve_slider_score",
     # question_reorder
     "reorder",

@@ -22,6 +22,11 @@ import os
 import re
 import threading
 from typing import Any, Dict, Optional
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
+
+
 
 from wjx.core.stats.models import ResponseRecord
 from wjx.utils.app.runtime_paths import _get_project_root
@@ -130,8 +135,8 @@ class RawDataStorage:
             if os.path.exists(self._file_path):
                 try:
                     os.remove(self._file_path)
-                except OSError:
-                    pass  # 删除失败也不影响后续写入
+                except OSError as exc:
+                    log_suppressed_exception("open_session: os.remove(self._file_path)", exc, level=logging.WARNING)
             
             self._session_active = True
 

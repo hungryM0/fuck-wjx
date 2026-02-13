@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+
+
+import logging
+
 """
 应用配置常量
 
@@ -64,12 +68,12 @@ def _find_env_file() -> Optional[Path]:
             candidates.append(Path(meipass))
         try:
             candidates.append(Path(sys.executable).resolve().parent)
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.warning(f"_find_env_file: {exc}")
     try:
         candidates.append(Path(__file__).resolve().parent)
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.warning(f"_find_env_file: {exc}")
     candidates.append(Path.cwd())
 
     seen = set()
@@ -104,16 +108,30 @@ def _parse_env_file(path: Path) -> Dict[str, str]:
                     value = value[1:-1]
                 if key:
                     env_map[key] = value
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.warning(f"_parse_env_file: {exc}")
     return env_map
 
 
-_ENV_FILE_PATH = _find_env_file()
-_ENV_VARS = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
+# 延迟初始化环境变量，避免模块导入时的阻塞
+_ENV_FILE_PATH: Optional[Path] = None
+_ENV_VARS: Dict[str, str] = {}
+_ENV_INITIALIZED = False
+
+
+def _ensure_env_initialized():
+    """确保环境变量已初始化（延迟加载）"""
+    global _ENV_FILE_PATH, _ENV_VARS, _ENV_INITIALIZED
+    if not _ENV_INITIALIZED:
+        _ENV_FILE_PATH = _find_env_file()
+        _ENV_VARS = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
+        _ENV_INITIALIZED = True
 
 
 def _resolve_env_value(key: str, default: str) -> str:
+    # 延迟初始化环境变量
+    _ensure_env_initialized()
+
     env_value = os.environ.get(key)
     if env_value:
         return env_value

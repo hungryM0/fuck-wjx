@@ -1,5 +1,7 @@
 """主窗口模块 - 精简版，使用拆分后的组件"""
 from __future__ import annotations
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 import copy
 import logging
@@ -77,6 +79,8 @@ class MainWindow(FluentWindow):
     """主窗口，PowerToys 风格导航 + 圆角布局，支持主题动态切换。"""
 
     # 更新通知信号（用于跨线程通信）
+
+
     updateAvailable = Signal()
     # 最新版本信号
     isLatestVersion = Signal()
@@ -120,38 +124,30 @@ class MainWindow(FluentWindow):
         self.controller.on_ip_counter = None  # will be set after dashboard creation
         self.controller.card_code_provider = self._ask_card_code
 
+        # 立即初始化关键页面
         self.runtime_page = RuntimePage(self.controller, self)
-        self.result_page = ResultPage(self)
         self.question_page = QuestionPage(self)
         # QuestionPage 仅用作题目配置的数据载体，不作为主界面子页面展示；
         # 若不隐藏会以默认几何 (0,0,100,30) 叠在窗口左上角，造成标题栏错乱。
         self.question_page.hide()
         self.dashboard = DashboardPage(self.controller, self.question_page, self.runtime_page, self)
-        self.log_page = LogPage(self)
-        self.support_page = SupportPage(self)
-        self.qq_group_page = QQGroupPage(self)
-        self.about_page = AboutPage(self)
-        self.changelog_page = ChangelogPage(self)
-        self.changelog_detail_page = ChangelogDetailPage(self)
-        self.donate_page = DonatePage(self)
 
-        self.login_page = AccountPage(self)
-        self.login_page.loginSuccess.connect(self._update_github_avatar)
-        self.settings_page = SettingsPage(self)
+        # 延迟初始化非关键页面（懒加载）
+        self._result_page = None
+        self._log_page = None
+        self._support_page = None
+        self._qq_group_page = None
+        self._about_page = None
+        self._changelog_page = None
+        self._changelog_detail_page = None
+        self._donate_page = None
+        self._login_page = None
+        self._settings_page = None
 
+        # 设置对象名称
         self.dashboard.setObjectName("dashboard")
         self.question_page.setObjectName("question")
         self.runtime_page.setObjectName("runtime")
-        self.result_page.setObjectName("result")
-        self.log_page.setObjectName("logs")
-        self.support_page.setObjectName("support")
-        self.qq_group_page.setObjectName("qq_group")
-        self.about_page.setObjectName("about")
-        self.changelog_page.setObjectName("changelog")
-        self.changelog_detail_page.setObjectName("changelog_detail")
-        self.donate_page.setObjectName("donate")
-        self.login_page.setObjectName("login")
-        self.settings_page.setObjectName("settings")
 
         self._init_navigation()
         self._init_changelog_navigation()
@@ -301,21 +297,21 @@ class MainWindow(FluentWindow):
             if hasattr(self, '_network_manager') and self._network_manager:
                 try:
                     self._network_manager.blockSignals(True)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_suppressed_exception("closeEvent: self._network_manager.blockSignals(True)", exc, level=logging.WARNING)
             
             # 停止日志页面定时器
-            if hasattr(self.log_page, '_refresh_timer'):
-                self.log_page._refresh_timer.stop()
+            if self._log_page and hasattr(self._log_page, '_refresh_timer'):
+                self._log_page._refresh_timer.stop()
             
             # 停止联系表单轮询
-            if hasattr(self.support_page, 'contact_form'):
+            if self._support_page and hasattr(self._support_page, 'contact_form'):
                 try:
-                    self.support_page.contact_form.stop_status_polling()
-                except Exception:
-                    pass  # 清理失败时静默处理
-        except Exception:
-            pass  # 清理失败时静默处理
+                    self._support_page.contact_form.stop_status_polling()
+                except Exception as exc:
+                    log_suppressed_exception("closeEvent: self._support_page.contact_form.stop_status_polling()", exc, level=logging.WARNING)
+        except Exception as exc:
+            log_suppressed_exception("closeEvent: if hasattr(self, '_network_manager') and self._network_manager: try: self._ne...", exc, level=logging.WARNING)
         
         if not self._skip_save_on_close:
             settings = QSettings("FuckWjx", "Settings")
@@ -401,14 +397,14 @@ class MainWindow(FluentWindow):
     def _init_navigation(self):
         self.addSubInterface(self.dashboard, FluentIcon.HOME, "概览", NavigationItemPosition.TOP)
         self.addSubInterface(self.runtime_page, FluentIcon.DEVELOPER_TOOLS, "运行参数", NavigationItemPosition.TOP)
-        self.addSubInterface(self.result_page, FluentIcon.PIE_SINGLE, "结果分析", NavigationItemPosition.TOP)
-        self.addSubInterface(self.log_page, FluentIcon.INFO, "日志", NavigationItemPosition.TOP)
+        self.addSubInterface(self._get_result_page(), FluentIcon.PIE_SINGLE, "结果分析", NavigationItemPosition.TOP)
+        self.addSubInterface(self._get_log_page(), FluentIcon.INFO, "日志", NavigationItemPosition.TOP)
         # 登录页面（动态更新）
         self._login_nav_widget = None
         self._network_manager = QNetworkAccessManager(self)
         self._add_login_navigation(is_init=True)
         # 设置页面
-        self.addSubInterface(self.settings_page, FluentIcon.SETTING, "设置", NavigationItemPosition.BOTTOM)
+        self.addSubInterface(self._get_settings_page(), FluentIcon.SETTING, "设置", NavigationItemPosition.BOTTOM)
         # "更多"弹出式子菜单
         self.navigationInterface.addItem(
             routeKey="about_menu",
@@ -419,79 +415,172 @@ class MainWindow(FluentWindow):
             position=NavigationItemPosition.BOTTOM
         )
         # 将 support_page、about_page、changelog_page 添加到 stackedWidget 但不显示在导航栏
-        if self.stackedWidget.indexOf(self.support_page) == -1:
-            self.stackedWidget.addWidget(self.support_page)
-        if self.stackedWidget.indexOf(self.qq_group_page) == -1:
-            self.stackedWidget.addWidget(self.qq_group_page)
-        if self.stackedWidget.indexOf(self.about_page) == -1:
-            self.stackedWidget.addWidget(self.about_page)
-        if self.stackedWidget.indexOf(self.changelog_page) == -1:
-            self.stackedWidget.addWidget(self.changelog_page)
-        if self.stackedWidget.indexOf(self.donate_page) == -1:
-            self.stackedWidget.addWidget(self.donate_page)
+        # 这些页面会在首次访问时懒加载
         self.navigationInterface.setCurrentItem(self.dashboard.objectName())
+
+    def _get_result_page(self):
+        """懒加载结果页面"""
+        if self._result_page is None:
+            from wjx.ui.pages.workbench.result import ResultPage
+            self._result_page = ResultPage(self)
+            self._result_page.setObjectName("result")
+            if self.stackedWidget.indexOf(self._result_page) == -1:
+                self.stackedWidget.addWidget(self._result_page)
+        return self._result_page
+
+    def _get_log_page(self):
+        """懒加载日志页面"""
+        if self._log_page is None:
+            from wjx.ui.pages.workbench.log import LogPage
+            self._log_page = LogPage(self)
+            self._log_page.setObjectName("logs")
+            if self.stackedWidget.indexOf(self._log_page) == -1:
+                self.stackedWidget.addWidget(self._log_page)
+        return self._log_page
+
+    def _get_settings_page(self):
+        """懒加载设置页面"""
+        if self._settings_page is None:
+            from wjx.ui.pages.settings.settings import SettingsPage
+            self._settings_page = SettingsPage(self)
+            self._settings_page.setObjectName("settings")
+            if self.stackedWidget.indexOf(self._settings_page) == -1:
+                self.stackedWidget.addWidget(self._settings_page)
+        return self._settings_page
+
+    def _get_login_page(self):
+        """懒加载登录页面"""
+        if self._login_page is None:
+            from wjx.ui.pages.account.account import AccountPage
+            self._login_page = AccountPage(self)
+            self._login_page.loginSuccess.connect(self._update_github_avatar)
+            self._login_page.setObjectName("login")
+            if self.stackedWidget.indexOf(self._login_page) == -1:
+                self.stackedWidget.addWidget(self._login_page)
+        return self._login_page
+
+    def _get_support_page(self):
+        """懒加载支持页面"""
+        if self._support_page is None:
+            from wjx.ui.pages.more.support import SupportPage
+            self._support_page = SupportPage(self)
+            self._support_page.setObjectName("support")
+            if self.stackedWidget.indexOf(self._support_page) == -1:
+                self.stackedWidget.addWidget(self._support_page)
+        return self._support_page
+
+    def _get_qq_group_page(self):
+        """懒加载QQ群页面"""
+        if self._qq_group_page is None:
+            from wjx.ui.pages.more.qq_group import QQGroupPage
+            self._qq_group_page = QQGroupPage(self)
+            self._qq_group_page.setObjectName("qq_group")
+            if self.stackedWidget.indexOf(self._qq_group_page) == -1:
+                self.stackedWidget.addWidget(self._qq_group_page)
+        return self._qq_group_page
+
+    def _get_about_page(self):
+        """懒加载关于页面"""
+        if self._about_page is None:
+            from wjx.ui.pages.more.about import AboutPage
+            self._about_page = AboutPage(self)
+            self._about_page.setObjectName("about")
+            if self.stackedWidget.indexOf(self._about_page) == -1:
+                self.stackedWidget.addWidget(self._about_page)
+        return self._about_page
+
+    def _get_changelog_page(self):
+        """懒加载更新日志页面"""
+        if self._changelog_page is None:
+            from wjx.ui.pages.more.changelog import ChangelogPage
+            self._changelog_page = ChangelogPage(self)
+            self._changelog_page.setObjectName("changelog")
+            if self.stackedWidget.indexOf(self._changelog_page) == -1:
+                self.stackedWidget.addWidget(self._changelog_page)
+        return self._changelog_page
+
+    def _get_changelog_detail_page(self):
+        """懒加载更新日志详情页面"""
+        if self._changelog_detail_page is None:
+            from wjx.ui.pages.more.changelog import ChangelogDetailPage
+            self._changelog_detail_page = ChangelogDetailPage(self)
+            self._changelog_detail_page.setObjectName("changelog_detail")
+            if self.stackedWidget.indexOf(self._changelog_detail_page) == -1:
+                self.stackedWidget.addWidget(self._changelog_detail_page)
+        return self._changelog_detail_page
+
+    def _get_donate_page(self):
+        """懒加载捐助页面"""
+        if self._donate_page is None:
+            from wjx.ui.pages.more.donate import DonatePage
+            self._donate_page = DonatePage(self)
+            self._donate_page.setObjectName("donate")
+            if self.stackedWidget.indexOf(self._donate_page) == -1:
+                self.stackedWidget.addWidget(self._donate_page)
+        return self._donate_page
 
     def _init_changelog_navigation(self):
         """初始化更新日志页面导航"""
-        # 将详情页添加到 stackedWidget
-        if self.stackedWidget.indexOf(self.changelog_detail_page) == -1:
-            self.stackedWidget.addWidget(self.changelog_detail_page)
-        
+        changelog_page = self._get_changelog_page()
+        changelog_detail_page = self._get_changelog_detail_page()
+
         # 连接信号：点击列表项时切换到详情页
-        self.changelog_page.detailRequested.connect(self._show_changelog_detail)
+        changelog_page.detailRequested.connect(self._show_changelog_detail)
         # 连接信号：点击返回按钮时切换回列表页
-        self.changelog_detail_page.backRequested.connect(lambda: self.switchTo(self.changelog_page))
-    
+        changelog_detail_page.backRequested.connect(lambda: self.switchTo(changelog_page))
+
     def _show_changelog_detail(self, release: dict):
         """显示更新日志详情"""
-        self.changelog_detail_page.setRelease(release)
+        changelog_detail_page = self._get_changelog_detail_page()
+        changelog_detail_page.setRelease(release)
+        self.switchTo(changelog_detail_page)
         self.switchTo(self.changelog_detail_page)
 
     def _show_about_menu(self):
         """显示关于子菜单"""
         from wjx.utils.app.version import __VERSION__
-        
+
         menu = RoundMenu(parent=self)
-        
+
         # 版本信息（不可点击）
         version_action = Action(FluentIcon.INFO, f"问卷星速填 v{__VERSION__}")
         version_action.setEnabled(False)
         menu.addAction(version_action)
-        
+
         menu.addSeparator()
-        
+
         # 更新日志
         changelog_action = Action(FluentIcon.HISTORY, "更新日志")
-        changelog_action.triggered.connect(lambda: self.switchTo(self.changelog_page))
+        changelog_action.triggered.connect(lambda: self.switchTo(self._get_changelog_page()))
         menu.addAction(changelog_action)
-        
+
         # QQ群
         qq_group_action = Action(FluentIcon.CHAT, "QQ群")
-        qq_group_action.triggered.connect(lambda: self.switchTo(self.qq_group_page))
+        qq_group_action.triggered.connect(lambda: self.switchTo(self._get_qq_group_page()))
         menu.addAction(qq_group_action)
-        
+
         # 客服与支持
         support_action = Action(FluentIcon.HELP, "客服与支持")
-        support_action.triggered.connect(lambda: self.switchTo(self.support_page))
+        support_action.triggered.connect(lambda: self.switchTo(self._get_support_page()))
         menu.addAction(support_action)
-        
+
         # 捐助
         donate_action = Action(FluentIcon.HEART, "捐助")
-        donate_action.triggered.connect(lambda: self.switchTo(self.donate_page))
+        donate_action.triggered.connect(lambda: self.switchTo(self._get_donate_page()))
         menu.addAction(donate_action)
 
         # 关于
         about_action = Action(FluentIcon.INFO, "关于")
-        about_action.triggered.connect(lambda: self.switchTo(self.about_page))
+        about_action.triggered.connect(lambda: self.switchTo(self._get_about_page()))
         menu.addAction(about_action)
-        
+
         menu.addSeparator()
-        
+
         # 退出
         quit_action = Action(FluentIcon.CLOSE, "退出程序")
         quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
-        
+
         # 获取导航项的位置并显示菜单
         nav_item = self.navigationInterface.widget("about_menu")
         if nav_item:
@@ -501,13 +590,13 @@ class MainWindow(FluentWindow):
     def _add_login_navigation(self, is_init: bool = False):
         """添加登录导航项（根据登录状态显示不同内容）"""
         auth = get_github_auth()
-        
+
         # 移除旧的导航项（无论是 widget 还是普通 item）
         try:
             self.navigationInterface.removeWidget("login")
         except Exception:
             logging.debug("移除登录导航项失败", exc_info=True)
-        
+
         # 如果不是初始化，需要先移除设置和更多菜单，然后按顺序重新添加
         if not is_init:
             try:
@@ -518,24 +607,23 @@ class MainWindow(FluentWindow):
                 self.navigationInterface.removeWidget("about_menu")
             except Exception:
                 logging.debug("移除更多菜单导航项失败", exc_info=True)
-        
-        # 确保 login_page 在 stackedWidget 中
-        if self.stackedWidget.indexOf(self.login_page) == -1:
-            self.stackedWidget.addWidget(self.login_page)
-        
+
+        # 懒加载登录页面
+        login_page = self._get_login_page()
+
         if auth.is_logged_in and auth.user_info:
             # 已登录：显示头像和用户名
             avatar_url = auth.user_info.get("avatar_url", "")
             username = auth.username or "用户"
-            
+
             self._login_nav_widget = NavigationAvatarWidget(username, avatar_url, self)
             self.navigationInterface.addWidget(
                 "login",
                 self._login_nav_widget,
-                lambda: self.switchTo(self.login_page),
+                lambda: self.switchTo(login_page),
                 NavigationItemPosition.BOTTOM
             )
-            
+
             # 异步加载头像
             if avatar_url:
                 self._load_avatar(avatar_url)
@@ -545,19 +633,20 @@ class MainWindow(FluentWindow):
                 routeKey="login",
                 icon=FluentIcon.GITHUB,
                 text="登录",
-                onClick=lambda: self.switchTo(self.login_page),
+                onClick=lambda: self.switchTo(login_page),
                 position=NavigationItemPosition.BOTTOM
             )
             self._login_nav_widget = None
-        
+
         # 如果不是初始化，重新添加设置和更多菜单
         if not is_init:
+            settings_page = self._get_settings_page()
             # 重新添加设置导航项
             self.navigationInterface.addItem(
                 routeKey="settings",
                 icon=FluentIcon.SETTING,
                 text="设置",
-                onClick=lambda: self.switchTo(self.settings_page),
+                onClick=lambda: self.switchTo(settings_page),
                 position=NavigationItemPosition.BOTTOM
             )
             # 重新添加更多菜单
@@ -668,8 +757,11 @@ class MainWindow(FluentWindow):
         self.runtime_page.apply_config(cfg)
         self.dashboard.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], self.controller.questions_info)
-        # 初始刷新随机 IP 计数
-        refresh_ip_counter_display(self.controller.adapter)
+        # 后台异步刷新随机 IP 计数，避免阻塞启动
+        threading.Thread(
+            target=lambda: refresh_ip_counter_display(self.controller.adapter),
+            daemon=True
+        ).start()
 
     # ---------- controller callbacks ----------
     def _on_survey_parsed(self, info: List[Dict[str, Any]], title: str):
@@ -786,11 +878,31 @@ class MainWindow(FluentWindow):
         self._log_popup_message(title, message)
 
     def _check_update_on_startup(self):
-        """根据设置在启动时检查更新"""
+        """根据设置在启动时检查更新（后台异步执行）"""
         settings = QSettings("FuckWjx", "Settings")
         if get_bool_from_qsettings(settings.value("auto_check_update"), True):
-            from wjx.utils.update.updater import check_updates_on_startup
-            check_updates_on_startup(self)
+            from wjx.ui.workers.update_worker import UpdateCheckWorker
+
+            # 创建后台Worker
+            self._update_worker = UpdateCheckWorker(self)
+            self._update_worker.update_checked.connect(self._on_update_checked)
+            self._update_worker.check_failed.connect(self._on_update_check_failed)
+            self._update_worker.start()
+
+            logging.debug("已启动后台更新检查")
+
+    def _on_update_checked(self, has_update: bool, update_info: dict):
+        """更新检查完成的回调"""
+        if has_update:
+            self.update_info = update_info
+            self._show_update_notification()
+        else:
+            self._show_latest_version_badge()
+
+    def _on_update_check_failed(self, error_message: str):
+        """更新检查失败的回调"""
+        logging.debug(f"更新检查失败: {error_message}")
+        # 失败时不显示任何通知，静默处理
 
     def _show_update_notification(self):
         """显示更新通知（从后台线程安全调用）"""

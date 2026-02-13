@@ -1,8 +1,10 @@
 """配置文件加载与保存 - 读写 JSON 配置"""
 from __future__ import annotations
+import logging
+from wjx.utils.logging.log_utils import log_suppressed_exception
+
 
 import json
-import logging
 import os
 import random
 import sys
@@ -19,6 +21,8 @@ if TYPE_CHECKING:
 
 def get_runtime_directory() -> str:
     """获取运行时目录（项目根目录）"""
+
+
     if getattr(sys, "frozen", False):
         exe_dir = os.path.dirname(sys.executable)
         # 如果 exe 在 lib 目录中，返回上一级目录
@@ -268,8 +272,8 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         try:
             if isinstance(value, (list, tuple)) and len(value) >= 2:
                 return int(value[0]), int(value[1])
-        except Exception:
-            pass
+        except Exception as exc:
+            log_suppressed_exception("_tuple_pair: if isinstance(value, (list, tuple)) and len(value) >= 2: return int(value[0])...", exc, level=logging.WARNING)
         return 0, 0
 
     def _legacy_interval_pair(value: Any) -> Optional[Tuple[int, int]]:
