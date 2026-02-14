@@ -701,7 +701,6 @@ class DashboardPage(QWidget):
         return cfg
 
     def update_random_ip_counter(self, count: int, limit: int, custom_api: bool):
-        from wjx.network.proxy import _PREMIUM_RANDOM_IP_LIMIT
         # 检查是否已验证过卡密
         is_verified = RegistryManager.is_card_verified()
         if is_verified:
@@ -837,9 +836,12 @@ class DashboardPage(QWidget):
             return
         # 验证成功后处理解锁逻辑：在原有额度基础上增加卡密提供的额度
         if dialog.get_validation_result():
-            from wjx.network.proxy import _PREMIUM_RANDOM_IP_LIMIT, get_random_ip_limit
+            from wjx.network.proxy import get_random_ip_limit
             quota = dialog.get_validation_quota()
-            quota_to_add = max(1, int(quota or _PREMIUM_RANDOM_IP_LIMIT))
+            if quota is None:
+                self._toast("卡密验证返回缺少额度信息，拒绝解锁，请联系开发者。", "error")
+                return
+            quota_to_add = max(1, int(quota))
             # 读取当前额度上限，在此基础上增加
             current_limit = get_random_ip_limit()
             new_limit = current_limit + quota_to_add
