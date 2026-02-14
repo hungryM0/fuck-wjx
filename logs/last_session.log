@@ -1,0 +1,98 @@
+2026-02-14 21:31:41 [INFO] [Popup CONFIRM] 随机IP使用声明 | 启用随机IP提交前请确认：
+
+1) 代理来源于网络，确认启用视为已知悉风险并自愿承担后果；
+2) 禁止用于污染他人问卷数据，否则可能被封禁或承担法律责任；
+3) 随机IP维护成本高昂，如需大量使用需要付费。
+
+是否继续启用随机IP提交？
+2026-02-14 21:31:44 [INFO] 收到启动请求
+2026-02-14 21:31:44 [INFO] 验证题目配置...
+2026-02-14 21:31:44 [INFO] 开始配置任务：目标1份，1个线程
+2026-02-14 21:31:44 [INFO] 配置题目概率分布（共17题）
+2026-02-14 21:31:44 [INFO] 获取到代理: 121.206.211.229:40006
+2026-02-14 21:31:44 [INFO] 创建1个工作线程
+2026-02-14 21:31:44 [INFO] 启动所有工作线程
+2026-02-14 21:31:44 [INFO] 线程 1/1 已启动
+2026-02-14 21:31:44 [INFO] 任务启动完成，监控线程已启动
+2026-02-14 21:31:59 [INFO] 第14题识别为多项填空，已按填空题处理
+2026-02-14 21:32:00 [INFO] 第17题检测到需要选择 5 项并排序。
+2026-02-14 21:32:06 [OK]  已填写1份 - 失败0次 - 21:32:06
+2026-02-14 21:32:07 [INFO] 随机IP提交计数: 15/20
+2026-02-14 21:32:16 [INFO] 收到启动请求
+2026-02-14 21:32:16 [INFO] 验证题目配置...
+2026-02-14 21:32:16 [INFO] 开始配置任务：目标3份，1个线程
+2026-02-14 21:32:16 [INFO] 配置题目概率分布（共17题）
+2026-02-14 21:32:17 [INFO] 获取到代理: 1.183.123.137:40002
+2026-02-14 21:32:17 [INFO] 创建1个工作线程
+2026-02-14 21:32:17 [INFO] 启动所有工作线程
+2026-02-14 21:32:17 [INFO] 线程 1/1 已启动
+2026-02-14 21:32:17 [INFO] 任务启动完成，监控线程已启动
+2026-02-14 21:32:42 [INFO] 第14题识别为多项填空，已按填空题处理
+2026-02-14 21:32:42 [INFO] 第17题检测到需要选择 5 项并排序。
+2026-02-14 21:32:54 [OK]  已填写1份 - 失败0次 - 21:32:54
+2026-02-14 21:32:56 [INFO] 随机IP提交计数: 14/20
+2026-02-14 21:32:56 [INFO] 获取到代理: 36.25.224.57:40004
+2026-02-14 21:33:12 [INFO] 第14题识别为多项填空，已按填空题处理
+2026-02-14 21:33:13 [INFO] 第17题检测到需要选择 5 项并排序。
+2026-02-14 21:33:59 [WARNING] [Suppressed] browser_driver.PlaywrightElement.click fallback: ElementHandle.scroll_into_view_if_needed: Timeout 20000ms exceeded.
+Call log:
+  - attempting scroll into view action
+    2 × waiting for element to be stable
+      - element is not visible
+    - retrying scroll into view action
+    - waiting 20ms
+    2 × waiting for element to be stable
+      - element is not visible
+    - retrying scroll into view action
+      - waiting 100ms
+    38 × waiting for element to be stable
+       - element is not visible
+     - retrying scroll into view action
+       - waiting 500ms
+Traceback (most recent call last):
+  File "D:\codewriting_graduate\me_github\fuck-wjx\wjx\network\browser_driver.py", line 125, in click
+    self._handle.scroll_into_view_if_needed()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\python_env\miniconda3\envs\spider\Lib\site-packages\playwright\sync_api\_generated.py", line 2042, in scroll_into_view_if_needed
+    self._sync(self._impl_obj.scroll_into_view_if_needed(timeout=timeout))
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python_env\miniconda3\envs\spider\Lib\site-packages\playwright\_impl\_sync_base.py", line 115, in _sync
+    return task.result()
+           ~~~~~~~~~~~^^
+  File "D:\python_env\miniconda3\envs\spider\Lib\site-packages\playwright\_impl\_element_handle.py", line 113, in scroll_into_view_if_needed
+    await self._channel.send(
+        "scrollIntoViewIfNeeded", self._frame._timeout, locals_to_params(locals())
+    )
+  File "D:\python_env\miniconda3\envs\spider\Lib\site-packages\playwright\_impl\_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "D:\python_env\miniconda3\envs\spider\Lib\site-packages\playwright\_impl\_connection.py", line 559, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TimeoutError: ElementHandle.scroll_into_view_if_needed: Timeout 20000ms exceeded.
+Call log:
+  - attempting scroll into view action
+    2 × waiting for element to be stable
+      - element is not visible
+    - retrying scroll into view action
+    - waiting 20ms
+    2 × waiting for element to be stable
+      - element is not visible
+    - retrying scroll into view action
+      - waiting 100ms
+    38 × waiting for element to be stable
+       - element is not visible
+     - retrying scroll into view action
+       - waiting 500ms
+
+2026-02-14 21:34:05 [OK]  已填写2份 - 失败0次 - 21:34:05
+2026-02-14 21:34:06 [INFO] 随机IP提交计数: 13/20
+2026-02-14 21:34:06 [INFO] 获取到代理: 27.22.73.161:40029
+2026-02-14 21:34:21 [INFO] 第14题识别为多项填空，已按填空题处理
+2026-02-14 21:34:21 [INFO] 第17题检测到需要选择 5 项并排序。
+2026-02-14 21:34:32 [OK]  已填写3份 - 失败0次 - 21:34:32
+2026-02-14 21:34:32 [INFO] 随机IP提交计数: 12/20
+2026-02-14 21:34:32 [WARNING] scikit-learn 库未安装，无法执行 EFA
+2026-02-14 21:34:32 [INFO] EFA 未执行或只有单因子，使用全量 Alpha
