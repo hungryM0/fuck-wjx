@@ -91,20 +91,22 @@ class StatusPollingMixin:
         if self._status_timer is not None:
             self._status_timer.stop()
             self._status_timer = None
-        
-        # 停止 Worker
-        if self._worker is not None:
-            self._worker.stop()
-        
-        # 等待线程结束
-        if self._worker_thread is not None and self._worker_thread.isRunning():
-            self._worker_thread.quit()
-            self._worker_thread.wait(1000)
-            if self._worker_thread.isRunning():
-                self._worker_thread.terminate()
-        
+
+        worker = self._worker
+        thread = self._worker_thread
         self._worker = None
         self._worker_thread = None
+
+        # 非阻塞停止：只发停止请求并异步退出线程，避免 GUI 卡顿
+        if worker is not None:
+            worker.stop()
+        if thread is not None:
+            try:
+                thread.finished.connect(thread.deleteLater)
+            except Exception:
+                pass
+            if thread.isRunning():
+                thread.quit()
     
     def _on_status_loaded(self, text: str, color: str):
         """状态加载完成回调，子类应重写此方法来更新 UI"""

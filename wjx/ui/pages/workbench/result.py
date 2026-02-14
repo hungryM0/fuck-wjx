@@ -654,7 +654,12 @@ class ResultPage(QWidget):
             self._analysis_status_label.setText("暂无原始数据")
             return
 
-        # 如果有正在运行的分析线程，先等它结束
+        # 若分析仍在执行，直接返回，避免主线程同步等待导致卡顿
+        if self._analysis_thread is not None and self._analysis_thread.isRunning():
+            self._analysis_status_label.setText("分析中...")
+            self._analysis_status_label.setStyleSheet("color: #f59e0b;")
+            return
+
         self._cleanup_analysis_thread()
 
         self._analysis_status_label.setText("分析中...")
@@ -673,9 +678,13 @@ class ResultPage(QWidget):
 
     def _cleanup_analysis_thread(self) -> None:
         """清理旧的分析线程"""
-        if self._analysis_thread is not None and self._analysis_thread.isRunning():
-            self._analysis_thread.quit()
-            self._analysis_thread.wait(3000)
+        if self._analysis_thread is not None:
+            try:
+                self._analysis_thread.finished.connect(self._analysis_thread.deleteLater)
+            except Exception:
+                pass
+            if self._analysis_thread.isRunning():
+                self._analysis_thread.quit()
         self._analysis_thread = None
         self._analysis_worker = None
 

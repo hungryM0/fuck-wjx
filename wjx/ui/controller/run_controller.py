@@ -29,7 +29,6 @@ from wjx.utils.logging.log_utils import log_popup_confirm, log_popup_error, log_
 from wjx.network.proxy import (
     _fetch_new_proxy_batch,
     get_effective_proxy_api_url,
-    get_random_ip_limit,
     is_custom_proxy_api_active,
 )
 from wjx.utils.system.registry_manager import RegistryManager
@@ -256,6 +255,7 @@ class RunController(QObject):
         self._completion_cleanup_done = False
         self._cleanup_scheduled = False
         self._stopped_by_stop_run = False
+        self._starting = False
         self._uiCallbackQueued.connect(self._execute_ui_callback)
 
     def _execute_ui_callback(self, callback: object) -> None:
@@ -561,7 +561,7 @@ class RunController(QObject):
         import logging
         logging.info("收到启动请求")
 
-        if self.running:
+        if self.running or self._starting:
             logging.warning("任务已在运行中，忽略重复启动请求")
             return
 
@@ -605,12 +605,14 @@ class RunController(QObject):
         self._completion_cleanup_done = False
         self._cleanup_scheduled = False
         self._stopped_by_stop_run = False
+        self._starting = True
 
         logging.info(f"配置题目概率分布（共{len(config.question_entries)}题）")
         try:
             configure_probabilities(config.question_entries)
         except Exception as exc:
             logging.error(f"配置题目失败：{exc}")
+            self._starting = False
             self.runFailed.emit(str(exc))
             return
 
@@ -622,34 +624,60 @@ class RunController(QObject):
                 if q_num:
                     state.questions_metadata[q_num] = q_info
 
-        proxy_pool: List[str] = []
         if config.random_ip_enabled:
             # 检查是否已达随机IP上限
             if not is_custom_proxy_api_active():
                 count = RegistryManager.read_submit_count()
-                limit = int(get_random_ip_limit() or 0)
+                # 启动前做本地额度检查，避免在 GUI 线程同步请求默认额度 API
+                limit = int(RegistryManager.read_quota_limit(0) or 0)
                 if limit <= 0:
                     logging.warning("随机IP额度不可用，无法启动随机IP模式")
+                    self._starting = False
                     self.runFailed.emit("随机IP额度不可用（本地未初始化且默认额度API不可用），请稍后重试或改用自定义代理接口")
                     return
                 if count >= limit:
                     logging.warning(f"随机IP已达{limit}份上限，无法启动")
+                    self._starting = False
                     self.runFailed.emit(f"随机IP已达{limit}份上限，请关闭随机IP开关或解锁大额IP后再试")
                     return
-            
-            try:
-                proxy_pool = _fetch_new_proxy_batch(
-                    expected_count=max(1, config.threads),
-                    proxy_url=config.random_proxy_api or get_effective_proxy_api_url(),
-                    notify_on_area_error=False,
-                    stop_signal=self.stop_event,
-                )
-            except Exception as exc:
-                self.runFailed.emit(str(exc))
-                return
+            threading.Thread(
+                target=self._prefetch_proxies_and_start,
+                args=(config,),
+                daemon=True,
+                name="ProxyPrefetch",
+            ).start()
+            return
 
+        self._start_workers_with_proxy_pool(config, [])
+
+    def _prefetch_proxies_and_start(self, config: RuntimeConfig) -> None:
+        try:
+            proxy_pool = _fetch_new_proxy_batch(
+                expected_count=max(1, config.threads),
+                proxy_url=config.random_proxy_api or get_effective_proxy_api_url(),
+                notify_on_area_error=False,
+                stop_signal=self.stop_event,
+            )
+        except Exception as exc:
+            def _fail():
+                self._starting = False
+                self.runFailed.emit(str(exc))
+            self._dispatch_to_ui_async(_fail)
+            return
+
+        def _continue_start():
+            # 若预取期间任务已被中断，则不再继续启动
+            if self.stop_event.is_set():
+                self._starting = False
+                return
+            self._start_workers_with_proxy_pool(config, proxy_pool)
+
+        self._dispatch_to_ui_async(_continue_start)
+
+    def _start_workers_with_proxy_pool(self, config: RuntimeConfig, proxy_pool: List[str]) -> None:
         self._prepare_engine_state(config, proxy_pool)
         self.running = True
+        self._starting = False
         self.runStateChanged.emit(True)
         self._status_timer.start()
 
@@ -729,6 +757,10 @@ class RunController(QObject):
         )
 
     def stop_run(self):
+        if self._starting and not self.running:
+            self.stop_event.set()
+            self._starting = False
+            return
         if not self.running:
             return
         self.stop_event.set()

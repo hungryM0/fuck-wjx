@@ -184,6 +184,7 @@ class MainWindow(FluentWindow):
         self._latest_badge = None
         self._outdated_badge = None
         self._preview_badge = None
+        self._update_checking_spinner = None
         self._download_infobar = None
         self._download_progress_bar = None
         self._download_cancelled = False
@@ -884,6 +885,7 @@ class MainWindow(FluentWindow):
         settings = QSettings("FuckWjx", "Settings")
         if get_bool_from_qsettings(settings.value("auto_check_update"), True):
             from wjx.ui.workers.update_worker import UpdateCheckWorker
+            self._show_update_checking_placeholder()
 
             # 创建后台Worker
             self._update_worker = UpdateCheckWorker(self)
@@ -895,6 +897,8 @@ class MainWindow(FluentWindow):
 
     def _on_update_checked(self, has_update: bool, update_info: dict):
         """更新检查完成的回调"""
+        self._clear_update_checking_placeholder()
+        self._check_preview_version()
         if has_update:
             self.update_info = update_info
             self._show_update_notification()
@@ -903,8 +907,44 @@ class MainWindow(FluentWindow):
 
     def _on_update_check_failed(self, error_message: str):
         """更新检查失败的回调"""
+        self._clear_update_checking_placeholder()
+        self._check_preview_version()
         logging.debug(f"更新检查失败: {error_message}")
         # 失败时不显示任何通知，静默处理
+
+    def _show_update_checking_placeholder(self):
+        """更新检查期间在标题栏徽章位置显示转圈占位。"""
+        if self._update_checking_spinner:
+            return
+        for attr in ("_latest_badge", "_outdated_badge", "_preview_badge"):
+            badge = getattr(self, attr, None)
+            if badge is None:
+                continue
+            try:
+                self.titleBar.hBoxLayout.removeWidget(badge)
+                badge.deleteLater()
+            except Exception:
+                logging.debug("移除旧徽章失败", exc_info=True)
+            setattr(self, attr, None)
+        try:
+            spinner = IndeterminateProgressRing(parent=self.titleBar)
+            spinner.setFixedSize(16, 16)
+            spinner.setStrokeWidth(2)
+            self.titleBar.hBoxLayout.insertWidget(2, spinner, 0, Qt.AlignmentFlag.AlignVCenter)
+            self._update_checking_spinner = spinner
+        except Exception:
+            logging.debug("显示更新检查占位失败", exc_info=True)
+
+    def _clear_update_checking_placeholder(self):
+        spinner = self._update_checking_spinner
+        if spinner is None:
+            return
+        try:
+            self.titleBar.hBoxLayout.removeWidget(spinner)
+            spinner.deleteLater()
+        except Exception:
+            logging.debug("清理更新检查占位失败", exc_info=True)
+        self._update_checking_spinner = None
 
     def _show_update_notification(self):
         """显示更新通知（从后台线程安全调用）"""

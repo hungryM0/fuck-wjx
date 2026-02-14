@@ -704,12 +704,13 @@ class ContactForm(StatusPollingMixin, QWidget):
 
     def _apply_whitepiao_unlock(self):
         try:
-            from wjx.network.proxy import get_random_ip_limit, refresh_ip_counter_display
+            from wjx.network.proxy import refresh_ip_counter_display
             from wjx.utils.system.registry_manager import RegistryManager
         except Exception:
             return
 
-        current_limit = int(get_random_ip_limit() or 0)
+        # 仅做本地额度叠加，避免在 GUI 线程触发同步网络请求
+        current_limit = int(RegistryManager.read_quota_limit(0) or 0)
         RegistryManager.write_quota_limit(current_limit + 200)
 
         host = self._find_controller_host()

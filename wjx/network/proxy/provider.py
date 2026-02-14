@@ -821,8 +821,14 @@ def on_random_ip_toggle(gui: Any):
     enabled = bool(var.get() if var and hasattr(var, "get") else False)
     if not enabled:
         return
+    if is_custom_proxy_api_active():
+        if confirm_random_ip_usage(gui):
+            return
+        _set_random_ip_enabled(gui, False)
+        return
     count = RegistryManager.read_submit_count()
-    limit = int(get_random_ip_limit() or 0)
+    # 仅做开关即时检查：读取本地额度，避免在 GUI 线程触发同步网络请求
+    limit = int(RegistryManager.read_quota_limit(0) or 0)
     if limit <= 0:
         _invoke_popup(gui, "warning", "提示", "随机IP额度不可用（本地未初始化且默认额度API不可用）。")
         _set_random_ip_enabled(gui, False)

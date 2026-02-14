@@ -945,11 +945,11 @@ class AccountPage(ScrollArea):
         if self._device_code_worker:
             self._device_code_worker.stop()
             if self._device_code_worker.isRunning():
-                self._device_code_worker.wait(2000)
+                self._device_code_worker.quit()
         if self._token_poll_worker:
             self._token_poll_worker.stop()
             if self._token_poll_worker.isRunning():
-                self._token_poll_worker.wait(2000)
+                self._token_poll_worker.quit()
     
     def hideEvent(self, event):
         """页面隐藏时停止 workers"""

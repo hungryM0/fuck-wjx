@@ -61,6 +61,7 @@ from wjx.network.proxy import (
     on_random_ip_toggle,
     refresh_ip_counter_display,
     _validate_card,
+    get_random_ip_counter_snapshot_local,
 )
 
 
@@ -128,6 +129,7 @@ class DashboardPage(QWidget):
     """主页：左侧配置 + 底部状态，不再包含日志。"""
 
     _ipBalanceChecked = Signal(int)  # 发送剩余IP数信号
+    _debugResetFinished = Signal(object)  # 后台 reset 完成后回传结果
 
     def __init__(self, controller: RunController, question_page: QuestionPage, runtime_page: RuntimePage, parent=None):
         super().__init__(parent)
@@ -150,6 +152,7 @@ class DashboardPage(QWidget):
         self._ip_balance_fetching = False
         self._last_ip_balance_fetch_ts = 0.0
         self._ip_balance_fetch_interval_sec = 30.0
+        self._debug_reset_in_progress = False
         self._build_ui()
         self.config_drawer = ConfigDrawer(self, self._load_config_from_path)
         self._bind_events()
@@ -374,6 +377,7 @@ class DashboardPage(QWidget):
         self.controller.surveyParseFailed.connect(self._on_survey_parse_failed)
         # 连接 IP 余额检查信号
         self._ipBalanceChecked.connect(self._on_ip_balance_checked)
+        self._debugResetFinished.connect(self._on_debug_reset_finished)
         try:
             self.question_page.entriesChanged.connect(self._on_question_entries_changed)
         except Exception as exc:
@@ -407,44 +411,69 @@ class DashboardPage(QWidget):
 
     def _on_url_text_changed(self, text: str):
         """监听问卷链接输入框文本变化，检测 reset 命令（仅调试模式下可用）"""
-        if text.strip().lower() == "reset":
-            # 检查是否启用了调试模式
-            from PySide6.QtCore import QSettings
-            from wjx.utils.app.config import get_bool_from_qsettings
+        if text.strip().lower() != "reset":
+            return
 
-            settings = QSettings("FuckWjx", "Settings")
-            debug_mode = get_bool_from_qsettings(settings.value("debug_mode"), False)
+        # 检查是否启用了调试模式
+        from PySide6.QtCore import QSettings
+        from wjx.utils.app.config import get_bool_from_qsettings
 
-            if not debug_mode:
-                # 调试模式未启用，不执行重置
-                return
+        settings = QSettings("FuckWjx", "Settings")
+        debug_mode = get_bool_from_qsettings(settings.value("debug_mode"), False)
+        if not debug_mode:
+            return
 
-            # 重置额度和验证状态
-            from wjx.network.proxy import _get_default_quota_with_cache
-            # 从 API 获取默认额度
+        if self._debug_reset_in_progress:
+            self.url_edit.clear()
+            return
+
+        self._debug_reset_in_progress = True
+        self.url_edit.clear()
+        self._toast("正在后台重置随机IP额度...", "info", duration=-1, show_progress=True)
+
+        thread = threading.Thread(
+            target=self._run_debug_reset_worker,
+            daemon=True,
+            name="DebugResetWorker",
+        )
+        thread.start()
+
+    def _run_debug_reset_worker(self) -> None:
+        """后台执行 debug reset，避免阻塞 GUI。"""
+        from wjx.network.proxy import _get_default_quota_with_cache
+
+        payload: Dict[str, Any] = {"ok": False, "quota": None, "error": ""}
+        try:
             default_quota = _get_default_quota_with_cache()
             if default_quota is None:
-                logging.warning("调试重置：默认额度API不可用，保持 --/-- 状态")
-                self.url_edit.clear()
-                refresh_ip_counter_display(self.controller.adapter)
-                self._toast("默认额度API不可用，随机IP额度保持未初始化（--/--）", "warning", duration=3000)
+                payload["error"] = "default_quota_unavailable"
                 return
 
-            # 重置计数为 0
             RegistryManager.write_submit_count(0)
-            # 重置额度上限为默认值
             RegistryManager.write_quota_limit(default_quota)
-            # 清除验证标记
             RegistryManager.set_card_verified(False)
+            payload["ok"] = True
+            payload["quota"] = int(default_quota)
+        except Exception as exc:
+            payload["error"] = str(exc)
+            log_suppressed_exception("dashboard._run_debug_reset_worker", exc, level=logging.WARNING)
+        finally:
+            self._debugResetFinished.emit(payload)
 
-            # 清空输入框
-            self.url_edit.clear()
+    def _on_debug_reset_finished(self, payload: Any) -> None:
+        self._debug_reset_in_progress = False
+        data = payload if isinstance(payload, dict) else {}
+        success = bool(data.get("ok"))
+        quota = data.get("quota")
 
-            # 刷新显示
+        if not success:
+            logging.warning("调试重置：默认额度API不可用，保持 --/-- 状态")
             refresh_ip_counter_display(self.controller.adapter)
+            self._toast("默认额度API不可用，随机IP额度保持未初始化（--/--）", "warning", duration=3000)
+            return
 
-            # 显示提示
-            self._toast(f"已重置随机IP额度为 0/{default_quota}", "success", duration=2500)
+        refresh_ip_counter_display(self.controller.adapter)
+        self._toast(f"已重置随机IP额度为 0/{quota}", "success", duration=2500)
 
     def _on_parse_clicked(self):
         url = self.url_edit.text().strip()
@@ -747,11 +776,8 @@ class DashboardPage(QWidget):
         enabled = state != 0
         # 先同步检查限制，防止快速点击绕过
         if enabled:
-            from wjx.utils.system.registry_manager import RegistryManager
-            from wjx.network.proxy import get_random_ip_limit
-            count = RegistryManager.read_submit_count()
-            limit = int(get_random_ip_limit() or 0)
-            if limit <= 0:
+            count, limit, custom_api = get_random_ip_counter_snapshot_local()
+            if (not custom_api) and limit <= 0:
                 self._toast("随机IP额度不可用（本地未初始化且默认额度API不可用）", "warning")
                 self.random_ip_cb.blockSignals(True)
                 self.random_ip_cb.setChecked(False)
@@ -764,7 +790,7 @@ class DashboardPage(QWidget):
                     log_suppressed_exception("_on_random_ip_toggled disable: runtime random_ip_switch sync", exc, level=logging.WARNING)
                 refresh_ip_counter_display(self.controller.adapter)
                 return
-            if count >= limit:
+            if (not custom_api) and count >= limit:
                 self._toast(f"随机IP已达{limit}份限制，请验证卡密后再启用。", "warning")
                 self.random_ip_cb.blockSignals(True)
                 self.random_ip_cb.setChecked(False)
@@ -836,14 +862,13 @@ class DashboardPage(QWidget):
             return
         # 验证成功后处理解锁逻辑：在原有额度基础上增加卡密提供的额度
         if dialog.get_validation_result():
-            from wjx.network.proxy import get_random_ip_limit
             quota = dialog.get_validation_quota()
             if quota is None:
                 self._toast("卡密验证返回缺少额度信息，拒绝解锁，请联系开发者。", "error")
                 return
             quota_to_add = max(1, int(quota))
             # 读取当前额度上限，在此基础上增加
-            current_limit = get_random_ip_limit()
+            current_limit = int(RegistryManager.read_quota_limit(0) or 0)
             new_limit = current_limit + quota_to_add
             RegistryManager.write_quota_limit(new_limit)
             # 标记为已验证过卡密
