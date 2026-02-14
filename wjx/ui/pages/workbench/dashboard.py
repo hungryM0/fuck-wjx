@@ -1,11 +1,12 @@
 """主控制面板：卡片式配置区 + 底部状态条（不包含日志）"""
 import os
+import threading
 from typing import List, Dict, Any, Optional
 import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from PySide6.QtCore import Qt, QObject, QEvent
+from PySide6.QtCore import Qt, QObject, QEvent, Signal
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import (
     QWidget,
@@ -125,6 +126,8 @@ def _question_summary(entry: QuestionEntry) -> str:
 class DashboardPage(QWidget):
     """主页：左侧配置 + 底部状态，不再包含日志。"""
 
+    _ipBalanceChecked = Signal(int)  # 发送剩余IP数信号
+
     def __init__(self, controller: RunController, question_page: QuestionPage, runtime_page: RuntimePage, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
@@ -141,6 +144,7 @@ class DashboardPage(QWidget):
         self._ip_low_infobar: Optional[FullWidthInfoBar] = None
         self._ip_low_infobar_dismissed = False
         self._ip_low_threshold = 5000
+        self._api_balance_cache: Optional[float] = None  # 缓存 API 余额
         self._build_ui()
         self.config_drawer = ConfigDrawer(self, self._load_config_from_path)
         self._bind_events()
@@ -363,6 +367,8 @@ class DashboardPage(QWidget):
         # 连接问卷解析信号
         self.controller.surveyParsed.connect(self._on_survey_parsed)
         self.controller.surveyParseFailed.connect(self._on_survey_parse_failed)
+        # 连接 IP 余额检查信号
+        self._ipBalanceChecked.connect(self._on_ip_balance_checked)
         try:
             self.question_page.entriesChanged.connect(self._on_question_entries_changed)
         except Exception as exc:
@@ -822,20 +828,47 @@ class DashboardPage(QWidget):
             self._ip_low_infobar.hide()
 
     def _update_ip_low_infobar(self, count: int, limit: int, custom_api: bool):
+        """更新IP余额不足提示条，基于API余额换算的剩余IP数判断"""
         if not self._ip_low_infobar:
             return
         if custom_api:
             self._ip_low_infobar.hide()
             self._ip_low_infobar_dismissed = False
             return
-        remaining = max(0, int(limit) - int(count))
-        if remaining >= self._ip_low_threshold:
+
+        # 异步获取 API 余额并判断
+        def _fetch_and_check():
+            try:
+                import wjx.network.http_client as http_client
+                response = http_client.get(
+                    "https://service.ipzan.com/userProduct-get",
+                    params={"no": "20260112572376490874", "userId": "72FH7U4E0IG"},
+                    timeout=5,
+                )
+                data = response.json()
+                if data.get("code") in (0, 200) and data.get("status") in (200, "200", None):
+                    balance = data.get("data", {}).get("balance", 0)
+                    # 使用关于页相同的公式：剩余IP数 = balance / 0.0035
+                    remaining_ip = int(float(balance) / 0.0035)
+                    self._api_balance_cache = float(balance)
+                    # 发送信号到主线程更新 UI
+                    self._ipBalanceChecked.emit(remaining_ip)
+            except Exception as exc:
+                log_suppressed_exception("_fetch_and_check: API balance fetch failed", exc, level=logging.WARNING)
+
+        # 启动后台线程获取余额
+        threading.Thread(target=_fetch_and_check, daemon=True, name="IPBalanceCheck").start()
+
+    def _on_ip_balance_checked(self, remaining_ip: int):
+        """处理IP余额检查结果（在主线程中执行）"""
+        if not self._ip_low_infobar:
+            return
+        if remaining_ip < self._ip_low_threshold:
+            if not self._ip_low_infobar_dismissed:
+                self._ip_low_infobar.show()
+        else:
             self._ip_low_infobar.hide()
             self._ip_low_infobar_dismissed = False
-            return
-        if self._ip_low_infobar_dismissed:
-            return
-        self._ip_low_infobar.show()
 
     def _show_add_question_dialog(self):
         """新增题目 - 委托给 QuestionPage"""

@@ -424,8 +424,6 @@ class MainWindow(FluentWindow):
             from wjx.ui.pages.workbench.result import ResultPage
             self._result_page = ResultPage(self)
             self._result_page.setObjectName("result")
-            if self.stackedWidget.indexOf(self._result_page) == -1:
-                self.stackedWidget.addWidget(self._result_page)
         return self._result_page
 
     def _get_log_page(self):
@@ -434,8 +432,6 @@ class MainWindow(FluentWindow):
             from wjx.ui.pages.workbench.log import LogPage
             self._log_page = LogPage(self)
             self._log_page.setObjectName("logs")
-            if self.stackedWidget.indexOf(self._log_page) == -1:
-                self.stackedWidget.addWidget(self._log_page)
         return self._log_page
 
     def _get_settings_page(self):
@@ -444,8 +440,6 @@ class MainWindow(FluentWindow):
             from wjx.ui.pages.settings.settings import SettingsPage
             self._settings_page = SettingsPage(self)
             self._settings_page.setObjectName("settings")
-            if self.stackedWidget.indexOf(self._settings_page) == -1:
-                self.stackedWidget.addWidget(self._settings_page)
         return self._settings_page
 
     def _get_login_page(self):
