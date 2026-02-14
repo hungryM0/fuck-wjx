@@ -2,7 +2,7 @@
 import re
 from typing import List, Tuple
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
@@ -142,3 +142,4 @@ def _count_choice_inputs_driver(question_div) -> Tuple[int, int]:
         elif input_type == "radio":
             radio_count += 1
     return checkbox_count, radio_count
+

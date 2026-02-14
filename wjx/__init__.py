@@ -1,32 +1,15 @@
-"""Support modules for the WJX automation package."""
+"""WJX 包精简入口。"""
 
-# 导入子模块使其可以通过 wjx.* 访问
-from wjx import (
-    boot,
-    engine,
-    gui,
-)
+from wjx.utils.app.version import __VERSION__
 
-# 从新目录结构导入模块
-from wjx.network import browser_driver, random_ip
-from wjx.utils.app import config, version
-from wjx.utils.io import load_save
-from wjx.utils.logging import log_utils
-from wjx.utils.system import registry_manager
-from wjx.utils.update import updater
-from wjx.modes import timed_mode
+
+def main():
+    from wjx.main import main as _main
+
+    return _main()
+
 
 __all__ = [
-    "config",
-    "timed_mode",
-    "log_utils",
-    "random_ip",
-    "registry_manager",
-    "updater",
-    "version",
-    "engine",
-    "gui",
-    "boot",
-    "browser_driver",
-    "load_save",
+    "main",
+    "__VERSION__",
 ]

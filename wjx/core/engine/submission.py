@@ -9,7 +9,7 @@ import wjx.core.state as state
 import wjx.modes.duration_control as duration_control
 from wjx.core.engine.runtime_control import _is_fast_mode, _sleep_with_stop
 from wjx.core.questions.utils import extract_text_from_element as _extract_text_from_element
-from wjx.network.browser_driver import By, BrowserDriver, NoSuchElementException
+from wjx.network.browser import By, BrowserDriver, NoSuchElementException
 from wjx.utils.app.config import SUBMIT_CLICK_SETTLE_DELAY, SUBMIT_INITIAL_DELAY
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
@@ -264,3 +264,4 @@ def _is_device_quota_limit_page(driver: BrowserDriver) -> bool:
         return bool(driver.execute_script(script))
     except Exception:
         return False
+

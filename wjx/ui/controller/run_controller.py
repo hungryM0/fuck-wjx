@@ -12,21 +12,21 @@ import wjx.network.http_client as http_client
 
 from PySide6.QtCore import QObject, Signal, QTimer, QCoreApplication
 
-from wjx import engine
 import wjx.core.state as state
 from wjx.utils.app.config import DEFAULT_HTTP_HEADERS, DEFAULT_FILL_TEXT, STOP_FORCE_WAIT_SECONDS
 from wjx.utils.system.cleanup_runner import CleanupRunner
 from wjx.core.questions.config import QuestionEntry, configure_probabilities, validate_question_config
-from wjx.engine import (
+from wjx.core.engine import (
     create_playwright_driver,
     parse_survey_questions_from_html,
     _normalize_question_type_code,
     _extract_survey_title_from_html,
     _normalize_html_text,
+    run,
 )
 from wjx.utils.io.load_save import RuntimeConfig, load_config, save_config
 from wjx.utils.logging.log_utils import log_popup_confirm, log_popup_error, log_popup_info, log_popup_warning
-from wjx.network.random_ip import (
+from wjx.network.proxy import (
     _fetch_new_proxy_batch,
     get_effective_proxy_api_url,
     get_random_ip_limit,
@@ -655,7 +655,7 @@ class RunController(QObject):
             x = 50 + idx * 60
             y = 50 + idx * 60
             t = threading.Thread(
-                target=engine.run,
+                target=run,
                 args=(x, y, self.stop_event, self.adapter),
                 daemon=True,
                 name=f"Worker-{idx+1}"

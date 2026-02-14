@@ -25,7 +25,7 @@ from qfluentwidgets import (
 )
 
 from wjx.ui.widgets import StatusPollingMixin
-from wjx.network.random_ip import get_status, _format_status_payload
+from wjx.network.proxy import get_status, _format_status_payload
 from wjx.utils.io.load_save import get_assets_directory
 from wjx.utils.app.version import ISSUE_FEEDBACK_URL
 
@@ -380,3 +380,4 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
     def get_validation_quota(self) -> Optional[int]:
         """获取验证额度"""
         return self._validation_quota
+

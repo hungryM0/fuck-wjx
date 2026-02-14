@@ -6,7 +6,7 @@ import time
 import re
 from typing import Callable, Optional
 
-from wjx.network.browser_driver import BrowserDriver
+from wjx.network.browser import BrowserDriver
 
 DEFAULT_REFRESH_INTERVAL = 0.5
 _MIN_REFRESH_INTERVAL = 0.2
@@ -204,3 +204,4 @@ def wait_until_open(
 
         if stop_signal is not None and getattr(stop_signal, "wait", lambda *_: False)(interval):
             return False
+

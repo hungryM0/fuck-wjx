@@ -1,4 +1,4 @@
-from wjx.gui import main
+from wjx.main import main
 
 
 if __name__ == "__main__":

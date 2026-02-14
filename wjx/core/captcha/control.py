@@ -50,7 +50,7 @@ def _trigger_aliyun_captcha_stop(
             
             # 先检查当前随机IP状态和配额情况
             from wjx.utils.system.registry_manager import RegistryManager
-            from wjx.network.random_ip import get_random_ip_limit
+            from wjx.network.proxy import get_random_ip_limit
             
             var = getattr(gui_instance, "random_ip_enabled_var", None) if gui_instance else None
             is_enabled = bool(var.get() if var and hasattr(var, "get") else False)
@@ -125,7 +125,7 @@ def _trigger_aliyun_captcha_stop(
                         var.set(True)
                     
                     # 刷新显示
-                    from wjx.network.random_ip import refresh_ip_counter_display
+                    from wjx.network.proxy import refresh_ip_counter_display
                     refresh_ip_counter_display(gui_instance)
                     
                     logging.info("智能验证触发：用户已确认启用随机IP")
@@ -163,3 +163,4 @@ def _handle_aliyun_captcha_detected(gui_instance: Optional[Any], stop_signal: Op
         _trigger_aliyun_captcha_stop(gui_instance, stop_signal)
         return
     logging.warning("检测到阿里云智能验证，但已关闭“触发智能验证自动暂停”，将继续尝试后续提交。")
+

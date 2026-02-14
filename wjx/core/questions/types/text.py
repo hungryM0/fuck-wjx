@@ -5,7 +5,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
 from wjx.core.questions.utils import (
     weighted_index,
@@ -622,3 +622,4 @@ def _handle_single_text(driver: BrowserDriver, current: int, selected_answer: st
                 break
             except Exception:
                 continue
+

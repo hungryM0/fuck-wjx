@@ -2,7 +2,7 @@
 import time
 from typing import Any, List, Optional, Tuple, Union
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.core.persona.context import apply_persona_boost, record_answer
 from wjx.core.questions.utils import (
     weighted_index,
@@ -165,3 +165,4 @@ def dropdown(driver: BrowserDriver, current: int, index: int, droplist_prob_conf
             fill_option_additional_text(driver, current, selected_idx, fill_value)
             return
     _fill_droplist_via_click(driver, current, prob_config, fill_entries)
+

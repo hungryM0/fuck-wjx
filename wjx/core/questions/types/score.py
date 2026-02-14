@@ -4,7 +4,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver, NoSuchElementException
 from wjx.core.persona.context import record_answer
 from wjx.core.questions.tendency import get_tendency_index
 from wjx.core.stats.collector import stats_collector
@@ -20,8 +20,11 @@ def _is_valid_score_option(element) -> bool:
     try:
         element.find_element(By.XPATH, "ancestor::*[contains(@class,'evaluateTagWrap')]")
         return False
+    except NoSuchElementException:
+        # 这是正常分支：不在 evaluateTagWrap 中才是有效选项
+        pass
     except Exception as exc:
-        log_suppressed_exception("_is_valid_score_option: element.find_element(By.XPATH, \"ancestor::*[contains(@class,'evaluateTagWrap'...", exc, level=logging.ERROR)
+        log_suppressed_exception("_is_valid_score_option: check evaluateTagWrap", exc, level=logging.WARNING)
     return True
 
 
@@ -88,3 +91,4 @@ def score(driver: BrowserDriver, current: int, index: int, score_prob_config: Li
     stats_collector.record_score_choice(current, selected_index)
     # 记录作答上下文
     record_answer(current, "score", selected_indices=[selected_index])
+

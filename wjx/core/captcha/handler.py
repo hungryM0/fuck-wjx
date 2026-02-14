@@ -4,7 +4,7 @@ import threading
 import time
 from typing import Optional
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.utils.logging.log_utils import log_popup_warning
 
 
@@ -181,3 +181,4 @@ def handle_aliyun_captcha(
     if raise_on_detect:
         raise AliyunCaptchaBypassError("检测到阿里云智能验证，按配置直接放弃")
     return True
+

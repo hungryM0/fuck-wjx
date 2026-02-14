@@ -6,6 +6,7 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 
 import os
 import random
+import shutil
 import subprocess
 import sys
 import time
@@ -23,7 +24,7 @@ from playwright.sync_api import (
 import base64
 
 from wjx.utils.app.config import BROWSER_PREFERENCE, HEADLESS_WINDOW_SIZE
-from wjx.network.random_ip import (
+from wjx.network.proxy import (
     _normalize_proxy_address,
     get_proxy_source,
     PROXY_SOURCE_DEFAULT,
@@ -31,6 +32,8 @@ from wjx.network.random_ip import (
 )
 
 _PROXY_AUTH_B64 = "MTgxNzAxMTk4MDg6dFdKNWhMRG9Id3JIZ1RraWowelk="
+_WMIC_AVAILABLE: Optional[bool] = None
+_WMIC_MISSING_LOGGED = False
 
 
 class NoSuchElementException(Exception):
@@ -347,8 +350,16 @@ def graceful_terminate_process_tree(pids: Set[int], wait_seconds: float = 3.0) -
 
 def _collect_process_tree(root_pid: Optional[int]) -> Set[int]:
     """收集给定 PID 及其子进程 PID，使用 wmic 查询子进程。"""
+    global _WMIC_AVAILABLE, _WMIC_MISSING_LOGGED
     if not root_pid:
         return set()
+    if _WMIC_AVAILABLE is None:
+        _WMIC_AVAILABLE = bool(shutil.which("wmic"))
+    if not _WMIC_AVAILABLE:
+        if not _WMIC_MISSING_LOGGED:
+            logging.info("[Action Log] 当前系统未提供 wmic，跳过子进程树补全。")
+            _WMIC_MISSING_LOGGED = True
+        return {int(root_pid)}
     pids: Set[int] = {int(root_pid)}
     _no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     queue = [int(root_pid)]

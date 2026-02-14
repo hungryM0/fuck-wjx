@@ -9,7 +9,7 @@ from wjx.core.questions.utils import (
     extract_text_from_element as _extract_text_from_element,
     smooth_scroll_to_element as _smooth_scroll_to_element,
 )
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
@@ -231,3 +231,4 @@ def _click_next_page_button(driver: BrowserDriver) -> bool:
     except Exception as exc:
         log_suppressed_exception("navigation._click_next_page_button js fallback", exc)
     return False
+

@@ -7,7 +7,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
 
 
@@ -363,3 +363,4 @@ def resolve_prob_config(prob_config: Any, custom_weights: Any, prefer_custom: bo
     if prefer_custom and _prob_config_is_unset(prob_config) and _custom_weights_has_positive(custom_weights):
         return custom_weights
     return prob_config
+

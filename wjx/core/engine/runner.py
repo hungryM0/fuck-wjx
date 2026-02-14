@@ -26,12 +26,12 @@ from wjx.core.engine.runtime_control import (
 )
 from wjx.core.engine.submission import _is_device_quota_limit_page, _normalize_url_for_compare
 from wjx.core.stats.collector import stats_collector
-from wjx.network.browser_driver import (
+from wjx.network.browser import (
     BrowserDriver,
     ProxyConnectionError,
     TimeoutException,
 )
-from wjx.network.random_ip import _mask_proxy_for_log, _proxy_is_responsive, handle_random_ip_submission
+from wjx.network.proxy import _mask_proxy_for_log, _proxy_is_responsive, handle_random_ip_submission
 from wjx.network.session_policy import (
     _discard_unresponsive_proxy,
     _record_bad_proxy_and_maybe_pause,
@@ -628,3 +628,4 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     break
 
     _dispose_driver()
+

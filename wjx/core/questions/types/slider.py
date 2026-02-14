@@ -5,7 +5,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from wjx.network.browser_driver import By, BrowserDriver, NoSuchElementException
+from wjx.network.browser import By, BrowserDriver, NoSuchElementException
 from wjx.core.questions.utils import smooth_scroll_to_element
 from wjx.core.stats.collector import stats_collector
 
@@ -170,3 +170,4 @@ def slider(driver: BrowserDriver, current: int, score: Optional[float] = None) -
     if step_value > 0 and max_value > min_value:
         step_index = int(round((target_value - min_value) / step_value))
         stats_collector.record_slider_choice(current, step_index)
+

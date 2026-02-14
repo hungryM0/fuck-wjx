@@ -18,6 +18,20 @@ ORIGINAL_STDOUT = sys.stdout
 ORIGINAL_STDERR = sys.stderr
 ORIGINAL_EXCEPTHOOK = sys.excepthook
 _popup_handler: Optional[Callable[[str, str, str], Any]] = None
+_NOISY_LOG_PATTERNS = (
+    "QFluentWidgets Pro is now released",
+    "https://qfluentwidgets.com/pages/pro",
+)
+
+
+def _should_filter_noise(message: str) -> bool:
+    """过滤第三方库广告和无意义空行。"""
+    if message is None:
+        return True
+    text = str(message)
+    if not text.strip():
+        return True
+    return any(pattern in text for pattern in _NOISY_LOG_PATTERNS)
 
 
 def _safe_internal_log(message: str, exc: Optional[BaseException] = None) -> None:
@@ -63,11 +77,20 @@ class StreamToLogger:
         if message is None:
             return
         text = str(message)
+        if _should_filter_noise(text):
+            if self.stream:
+                try:
+                    self.stream.write(message)
+                except Exception as exc:
+                    _safe_internal_log("StreamToLogger.write failed", exc)
+            return
         self._buffer += text.replace("\r", "")
         if "\n" in self._buffer:
             parts = self._buffer.split("\n")
             self._buffer = parts.pop()
             for line in parts:
+                if _should_filter_noise(line):
+                    continue
                 self.logger.log(self.level, line)
         if self.stream:
             try:
@@ -76,9 +99,9 @@ class StreamToLogger:
                 _safe_internal_log("StreamToLogger.write failed", exc)
 
     def flush(self):
-        if self._buffer:
+        if self._buffer and not _should_filter_noise(self._buffer):
             self.logger.log(self.level, self._buffer)
-            self._buffer = ""
+        self._buffer = ""
         if self.stream:
             try:
                 self.stream.flush()
@@ -182,6 +205,9 @@ class LogBufferHandler(logging.Handler):
 
             # 过滤包含敏感信息的日志
             if self._should_filter_sensitive(message):
+                return
+            # 过滤无意义噪声日志（广告、空行）
+            if _should_filter_noise(message):
                 return
 
             # 清理 ANSI 转义序列

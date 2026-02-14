@@ -5,7 +5,7 @@ import time
 from typing import List, Optional, Tuple
 
 from wjx.core.engine.navigation import dismiss_resume_dialog_if_present, try_click_start_answer_button
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 
 
 def _count_questions_by_fieldset(driver: BrowserDriver) -> List[int]:
@@ -112,3 +112,4 @@ def detect(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None)
         return [1]
 
     return question_counts_per_page
+

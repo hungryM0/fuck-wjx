@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from wjx.utils.app.config import DEFAULT_RANDOM_UA_KEYS, USER_AGENT_PRESETS, BROWSER_PREFERENCE
-from wjx.network.random_ip import normalize_random_ip_enabled_value
+from wjx.network.proxy import normalize_random_ip_enabled_value
 
 if TYPE_CHECKING:
     from wjx.core.questions.config import QuestionEntry
@@ -436,3 +436,4 @@ class ConfigPersistenceMixin:
 
     def get_configs_directory(self) -> str:
         return _ensure_configs_dir()
+

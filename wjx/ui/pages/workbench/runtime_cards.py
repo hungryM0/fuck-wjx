@@ -154,8 +154,8 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
 
     def _load_area_options(self):
         try:
-            from wjx.data.area_codes import load_area_codes
-            from wjx.data.area_support import load_supported_area_codes
+            from wjx.core.services.area_service import load_area_codes
+            from wjx.core.services.area_service import load_supported_area_codes
             self._supported_area_codes, self._supported_has_all = load_supported_area_codes()
             self._area_data = load_area_codes(supported_only=True)
             if not self._area_data:
@@ -223,7 +223,7 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         self._apply_area_override(self.cityCombo.currentData())
 
     def _apply_area_override(self, area_code: Optional[str]) -> None:
-        from wjx.network.random_ip import set_proxy_area_code
+        from wjx.network.proxy import set_proxy_area_code
         if not self.areaRow.isVisible():
             set_proxy_area_code(None)
             return
@@ -242,7 +242,7 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         return str(city_code or "")
 
     def set_area_code(self, area_code: Optional[str]) -> None:
-        from wjx.network.random_ip import get_default_proxy_area_code
+        from wjx.network.proxy import get_default_proxy_area_code
         if area_code is None:
             area_code = get_default_proxy_area_code()
         area_code = str(area_code or "").strip()
@@ -297,7 +297,7 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
                 self.url = url
 
             def run(self):
-                from wjx.network.random_ip import test_custom_proxy_api
+                from wjx.network.proxy import test_custom_proxy_api
                 success, error, proxies = test_custom_proxy_api(self.url)
                 self.finished.emit(success, error, proxies)
 
@@ -337,7 +337,7 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
 
     def _on_api_edit_finished(self):
         """API地址输入完成时同步到全局变量"""
-        from wjx.network.random_ip import set_proxy_api_override
+        from wjx.network.proxy import set_proxy_api_override
         api_url = self.customApiEdit.text().strip()
         set_proxy_api_override(api_url if api_url else None)
 
@@ -445,3 +445,4 @@ class TimeRangeSettingCard(SettingCard):
     def setEnabled(self, enabled):
         self.minBtn.setEnabled(enabled)
         self.maxBtn.setEnabled(enabled)
+

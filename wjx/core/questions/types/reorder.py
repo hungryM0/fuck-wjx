@@ -7,7 +7,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.core.questions.utils import extract_text_from_element, smooth_scroll_to_element
 from wjx.core.questions.types.multiple import (
     detect_multiple_choice_limit_range,
@@ -699,3 +699,4 @@ def reorder(driver: BrowserDriver, current: int) -> None:
         except Exception as exc:
             log_suppressed_exception("reorder: order = list(range(len(order_items)))", exc, level=logging.ERROR)
     _wait_until_reorder_done(effective_limit)
+

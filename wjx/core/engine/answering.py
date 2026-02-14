@@ -39,7 +39,7 @@ from wjx.core.questions.types.text import (
 )
 from wjx.core.questions.tendency import reset_tendency
 from wjx.core.survey.parser import _should_mark_as_multi_text, _should_treat_question_as_text_like
-from wjx.network.browser_driver import BrowserDriver, By, NoSuchElementException
+from wjx.network.browser import BrowserDriver, By, NoSuchElementException
 
 
 def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> bool:
@@ -267,3 +267,4 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     submit(driver, stop_signal=active_stop)
     reset_persona()
     return True
+

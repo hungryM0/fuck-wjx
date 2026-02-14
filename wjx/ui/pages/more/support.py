@@ -7,7 +7,7 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 from wjx.ui.widgets.contact_form import ContactForm
-from wjx.network.random_ip import get_status, _format_status_payload
+from wjx.network.proxy import get_status, _format_status_payload
 
 
 class SupportPage(ScrollArea):
@@ -55,4 +55,5 @@ class SupportPage(ScrollArea):
         layout.addStretch(1)
 
         # 不再需要外部按钮/弹窗，表单直接内嵌
+
 

@@ -4,7 +4,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.core.persona.context import apply_persona_boost, record_answer
 from wjx.core.questions.utils import (
     weighted_index,
@@ -119,3 +119,4 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
     fill_entries = single_option_fill_texts_config[index] if index < len(single_option_fill_texts_config) else None
     fill_value = get_fill_text_from_config(fill_entries, selected_option - 1)
     fill_option_additional_text(driver, current, selected_option - 1, fill_value)
+

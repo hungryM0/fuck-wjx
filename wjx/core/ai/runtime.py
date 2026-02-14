@@ -5,7 +5,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from wjx.network.browser_driver import By, BrowserDriver
+from wjx.network.browser import By, BrowserDriver
 from wjx.utils.integrations.ai_service import generate_answer
 from wjx.utils.app.config import _HTML_SPACE_RE
 
@@ -89,3 +89,4 @@ def generate_ai_answer(question_title: str) -> str:
     if not answer or not str(answer).strip():
         raise AIRuntimeError("AI 未返回有效答案")
     return str(answer).strip()
+

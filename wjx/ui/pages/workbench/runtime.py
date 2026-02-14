@@ -278,13 +278,13 @@ class RuntimePage(ScrollArea):
         if not source or source == "None":
             source = "default"
         try:
-            from wjx.network.random_ip import set_proxy_source, set_proxy_api_override
+            from wjx.network.proxy import set_proxy_source, set_proxy_api_override
             if source == "custom":
                 api_url = self.custom_api_edit.text().strip()
                 set_proxy_api_override(api_url if api_url else None)
             set_proxy_source(source)
         except Exception as exc:
-            log_suppressed_exception("_on_proxy_source_changed: from wjx.network.random_ip import set_proxy_source, set_proxy_api_override", exc, level=logging.WARNING)
+            log_suppressed_exception("_on_proxy_source_changed: from wjx.network.proxy import set_proxy_source, set_proxy_api_override", exc, level=logging.WARNING)
 
     def _sync_random_ua(self, enabled: bool):
         try:
@@ -487,7 +487,7 @@ class RuntimePage(ScrollArea):
                 self.proxy_source_combo.setCurrentIndex(idx)
             self.custom_api_edit.setText(custom_api)
             self.random_ip_card.customApiRow.setVisible(proxy_source == "custom")
-            from wjx.network.random_ip import set_proxy_source, set_proxy_api_override
+            from wjx.network.proxy import set_proxy_source, set_proxy_api_override
             if proxy_source == "custom" and custom_api:
                 set_proxy_api_override(custom_api)
             set_proxy_source(proxy_source)
@@ -496,3 +496,4 @@ class RuntimePage(ScrollArea):
         except Exception as exc:
             log_suppressed_exception("apply_config: proxy_source = getattr(cfg, \"proxy_source\", \"default\")", exc, level=logging.WARNING)
         self.ai_section.apply_config(cfg)
+

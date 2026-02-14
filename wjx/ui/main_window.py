@@ -61,7 +61,7 @@ from wjx.utils.app.config import APP_ICON_RELATIVE_PATH, get_bool_from_qsettings
 from wjx.utils.io.load_save import RuntimeConfig, get_runtime_directory
 from wjx.utils.logging.log_utils import LOG_BUFFER_HANDLER, register_popup_handler
 from wjx.utils.app.version import __VERSION__, ISSUE_FEEDBACK_URL
-from wjx.network.random_ip import (
+from wjx.network.proxy import (
     get_status,
     _format_status_payload,
     refresh_ip_counter_display,
@@ -1173,3 +1173,4 @@ class MainWindow(FluentWindow):
 def create_window() -> MainWindow:
     """供入口调用的工厂函数。"""
     return MainWindow()
+

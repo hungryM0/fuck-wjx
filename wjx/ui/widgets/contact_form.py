@@ -704,7 +704,7 @@ class ContactForm(StatusPollingMixin, QWidget):
 
     def _apply_whitepiao_unlock(self):
         try:
-            from wjx.network.random_ip import get_random_ip_limit, refresh_ip_counter_display
+            from wjx.network.proxy import get_random_ip_limit, refresh_ip_counter_display
             from wjx.utils.system.registry_manager import RegistryManager
         except Exception:
             return
@@ -755,4 +755,5 @@ class ContactForm(StatusPollingMixin, QWidget):
                     runtime_page_obj.random_ip_switch.blockSignals(False)
                 except Exception as exc:
                     log_suppressed_exception("_apply_whitepiao_unlock: runtime_page_obj = cast(Any, runtime_page)", exc, level=logging.WARNING)
+
 

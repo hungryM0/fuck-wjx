@@ -1,6 +1,7 @@
 """主控制面板：卡片式配置区 + 底部状态条（不包含日志）"""
 import os
 import threading
+import time
 from typing import List, Dict, Any, Optional
 import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
@@ -54,7 +55,7 @@ from wjx.utils.io.qrcode_utils import decode_qrcode
 from wjx.core.questions.config import QuestionEntry, configure_probabilities
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
 from wjx.utils.system.registry_manager import RegistryManager
-from wjx.network.random_ip import (
+from wjx.network.proxy import (
     get_status,
     _format_status_payload,
     on_random_ip_toggle,
@@ -145,6 +146,10 @@ class DashboardPage(QWidget):
         self._ip_low_infobar_dismissed = False
         self._ip_low_threshold = 5000
         self._api_balance_cache: Optional[float] = None  # 缓存 API 余额
+        self._ip_balance_fetch_lock = threading.Lock()
+        self._ip_balance_fetching = False
+        self._last_ip_balance_fetch_ts = 0.0
+        self._ip_balance_fetch_interval_sec = 30.0
         self._build_ui()
         self.config_drawer = ConfigDrawer(self, self._load_config_from_path)
         self._bind_events()
@@ -415,7 +420,7 @@ class DashboardPage(QWidget):
                 return
 
             # 重置额度和验证状态
-            from wjx.network.random_ip import _get_default_quota_with_cache
+            from wjx.network.proxy import _get_default_quota_with_cache
             # 从 API 获取默认额度
             default_quota = _get_default_quota_with_cache()
 
@@ -690,7 +695,7 @@ class DashboardPage(QWidget):
         return cfg
 
     def update_random_ip_counter(self, count: int, limit: int, custom_api: bool):
-        from wjx.network.random_ip import _PREMIUM_RANDOM_IP_LIMIT
+        from wjx.network.proxy import _PREMIUM_RANDOM_IP_LIMIT
         # 检查是否已验证过卡密
         is_verified = RegistryManager.is_card_verified()
         if is_verified:
@@ -729,7 +734,7 @@ class DashboardPage(QWidget):
         # 先同步检查限制，防止快速点击绕过
         if enabled:
             from wjx.utils.system.registry_manager import RegistryManager
-            from wjx.network.random_ip import get_random_ip_limit
+            from wjx.network.proxy import get_random_ip_limit
             count = RegistryManager.read_submit_count()
             limit = max(1, get_random_ip_limit())
             if count >= limit:
@@ -804,7 +809,7 @@ class DashboardPage(QWidget):
             return
         # 验证成功后处理解锁逻辑：在原有额度基础上增加卡密提供的额度
         if dialog.get_validation_result():
-            from wjx.network.random_ip import _PREMIUM_RANDOM_IP_LIMIT, get_random_ip_limit
+            from wjx.network.proxy import _PREMIUM_RANDOM_IP_LIMIT, get_random_ip_limit
             quota = dialog.get_validation_quota()
             quota_to_add = max(1, int(quota or _PREMIUM_RANDOM_IP_LIMIT))
             # 读取当前额度上限，在此基础上增加
@@ -836,6 +841,19 @@ class DashboardPage(QWidget):
             self._ip_low_infobar_dismissed = False
             return
 
+        # 先用缓存快速更新，避免每次刷新都走网络
+        if self._api_balance_cache is not None:
+            cached_remaining = int(max(0.0, float(self._api_balance_cache)) / 0.0035)
+            self._on_ip_balance_checked(cached_remaining)
+
+        now = time.monotonic()
+        with self._ip_balance_fetch_lock:
+            # 正在请求或尚未到刷新间隔，直接跳过
+            if self._ip_balance_fetching or (now - self._last_ip_balance_fetch_ts) < self._ip_balance_fetch_interval_sec:
+                return
+            self._ip_balance_fetching = True
+            self._last_ip_balance_fetch_ts = now
+
         # 异步获取 API 余额并判断
         def _fetch_and_check():
             try:
@@ -854,7 +872,12 @@ class DashboardPage(QWidget):
                     # 发送信号到主线程更新 UI
                     self._ipBalanceChecked.emit(remaining_ip)
             except Exception as exc:
-                log_suppressed_exception("_fetch_and_check: API balance fetch failed", exc, level=logging.WARNING)
+                timeout_error_names = {"ReadTimeout", "ConnectTimeout", "PoolTimeout", "TimeoutException"}
+                level = logging.DEBUG if exc.__class__.__name__ in timeout_error_names else logging.WARNING
+                log_suppressed_exception("_fetch_and_check: API balance fetch failed", exc, level=level)
+            finally:
+                with self._ip_balance_fetch_lock:
+                    self._ip_balance_fetching = False
 
         # 启动后台线程获取余额
         threading.Thread(target=_fetch_and_check, daemon=True, name="IPBalanceCheck").start()
@@ -1065,3 +1088,4 @@ class DashboardPage(QWidget):
             else:
                 InfoBar.info("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
             return None
+

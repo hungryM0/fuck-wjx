@@ -5,7 +5,7 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
 import wjx.core.state as state
-from wjx.network.random_ip import _fetch_new_proxy_batch, _mask_proxy_for_log
+from wjx.network.proxy import _fetch_new_proxy_batch, _mask_proxy_for_log
 from wjx.utils.io.load_save import _select_user_agent_from_keys
 
 
@@ -81,3 +81,4 @@ def _discard_unresponsive_proxy(proxy_address: str) -> None:
             logging.debug(f"已移除无响应代理：{_mask_proxy_for_log(proxy_address)}")
         except ValueError as exc:
             log_suppressed_exception("_discard_unresponsive_proxy: state.proxy_ip_pool.remove(proxy_address)", exc, level=logging.WARNING)
+

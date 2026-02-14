@@ -6,7 +6,7 @@ import random
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from wjx.network.browser_driver import By, BrowserDriver, NoSuchElementException
+from wjx.network.browser import By, BrowserDriver, NoSuchElementException
 from wjx.utils.app.config import (
     _MULTI_LIMIT_ATTRIBUTE_NAMES,
     _MULTI_LIMIT_VALUE_KEYSET,
@@ -451,3 +451,4 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
     # 记录作答上下文
     selected_texts = [option_texts[i] for i in selected_indices if i < len(option_texts)]
     record_answer(current, "multiple", selected_indices=selected_indices, selected_texts=selected_texts)
+

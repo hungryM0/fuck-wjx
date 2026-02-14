@@ -359,19 +359,6 @@ def set_proxy_api_override(api_url: Optional[str]) -> str:
     return get_effective_proxy_api_url()
 
 
-def _get_runtime_directory(base_dir: Optional[str] = None) -> str:
-    import os
-    import sys
-
-    if base_dir:
-        return os.fspath(base_dir)
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
-    return parent_dir or current_dir
-
-
 def get_status() -> Any:
     """Fetch developer status endpoint."""
     response = http_client.get(STATUS_ENDPOINT, timeout=STATUS_TIMEOUT_SECONDS, headers=DEFAULT_HTTP_HEADERS, proxies={})

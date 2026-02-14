@@ -1,5 +1,6 @@
-"""网络相关模块"""
-from wjx.network.browser import (
+"""浏览器驱动子包。"""
+
+from wjx.network.browser.driver import (
     By,
     BrowserDriver,
     NoSuchElementException,
@@ -8,11 +9,8 @@ from wjx.network.browser import (
     ProxyConnectionError,
     TimeoutException,
     create_playwright_driver,
-)
-from wjx.network.proxy import (
-    on_random_ip_toggle,
-    ensure_random_ip_ready,
-    handle_random_ip_submission,
+    graceful_terminate_process_tree,
+    list_browser_pids,
 )
 
 __all__ = [
@@ -24,8 +22,7 @@ __all__ = [
     "ProxyConnectionError",
     "TimeoutException",
     "create_playwright_driver",
-    "on_random_ip_toggle",
-    "ensure_random_ip_ready",
-    "handle_random_ip_submission",
+    "graceful_terminate_process_tree",
+    "list_browser_pids",
 ]
 
