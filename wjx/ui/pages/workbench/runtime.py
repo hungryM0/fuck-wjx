@@ -174,10 +174,12 @@ class RuntimePage(ScrollArea):
 
         self.interval_card = TimeRangeSettingCard(
             FluentIcon.HISTORY, "提交间隔", "两次提交之间的等待时间范围",
+            max_seconds=300,
             parent=time_group
         )
         self.answer_card = TimeRangeSettingCard(
             FluentIcon.STOP_WATCH, "作答时长", "模拟作答所需的时间范围",
+            max_seconds=120,
             parent=time_group
         )
         self.timed_card = TimedModeSettingCard(
@@ -212,31 +214,17 @@ class RuntimePage(ScrollArea):
         self.thread_spin = self.thread_card.spinBox
         self.fail_stop_switch = self.fail_stop_card.switchButton
         self.pause_on_aliyun_switch = self.pause_on_aliyun_card.switchButton
-        self.interval_min_btn = self.interval_card.minBtn
-        self.interval_max_btn = self.interval_card.maxBtn
-        self.answer_min_btn = self.answer_card.minBtn
-        self.answer_max_btn = self.answer_card.maxBtn
         self.timed_switch = self.timed_card.switchButton
         self.random_ip_switch = self.random_ip_card.switchButton
         self.random_ua_switch = self.random_ua_card.switchButton
         self.proxy_source_combo = self.random_ip_card.proxyCombo
         self.custom_api_edit = self.random_ip_card.customApiEdit
 
-        # 时间秒数存储
-        self.interval_min_seconds = 0
-        self.interval_max_seconds = 0
-        self.answer_min_seconds = 0
-        self.answer_max_seconds = 0
-
     def _bind_events(self):
         self.random_ip_switch.checkedChanged.connect(self._on_random_ip_toggled)
         self.random_ua_switch.checkedChanged.connect(self._sync_random_ua)
         self.timed_switch.checkedChanged.connect(self._sync_timed_mode)
         self.timed_card.helpButton.clicked.connect(self._show_timed_mode_help)
-        self.interval_min_btn.clicked.connect(lambda: self._show_time_picker("interval_min"))
-        self.interval_max_btn.clicked.connect(lambda: self._show_time_picker("interval_max"))
-        self.answer_min_btn.clicked.connect(lambda: self._show_time_picker("answer_min"))
-        self.answer_max_btn.clicked.connect(lambda: self._show_time_picker("answer_max"))
         self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
 
     def _show_timed_mode_help(self):
@@ -375,50 +363,16 @@ class RuntimePage(ScrollArea):
         else:
             self.browser_combo.setIcon(QIcon())
 
-    def _show_time_picker(self, field: str):
-        """显示时间选择对话框"""
-        if field == "interval_min":
-            current_seconds = self.interval_min_seconds
-            title = "设置提交间隔最小值"
-        elif field == "interval_max":
-            current_seconds = self.interval_max_seconds
-            title = "设置提交间隔最大值"
-        elif field == "answer_min":
-            current_seconds = self.answer_min_seconds
-            title = "设置作答时长最小值"
-        else:
-            current_seconds = self.answer_max_seconds
-            title = "设置作答时长最大值"
 
-        result = pick_time_value(self.window() or self, title, current_seconds)
-        if not result:
-            return
-        total_seconds, text = result
-        if field == "interval_min":
-            self.interval_min_seconds = total_seconds
-            self.interval_min_btn.setText(text)
-        elif field == "interval_max":
-            self.interval_max_seconds = total_seconds
-            self.interval_max_btn.setText(text)
-        elif field == "answer_min":
-            self.answer_min_seconds = total_seconds
-            self.answer_min_btn.setText(text)
-        else:
-            self.answer_max_seconds = total_seconds
-            self.answer_max_btn.setText(text)
 
     def update_config(self, cfg: RuntimeConfig):
         cfg.target = max(1, self.target_spin.value())
         cfg.threads = max(1, self.thread_spin.value())
         cfg.browser_preference = self._get_selected_browser_preference()
-        cfg.submit_interval = (
-            max(0, self.interval_min_seconds),
-            max(self.interval_min_seconds, self.interval_max_seconds),
-        )
-        cfg.answer_duration = (
-            max(0, self.answer_min_seconds),
-            max(self.answer_min_seconds, self.answer_max_seconds),
-        )
+        interval_min, interval_max = self.interval_card.getRange()
+        cfg.submit_interval = (interval_min, interval_max)
+        answer_min, answer_max = self.answer_card.getRange()
+        cfg.answer_duration = (answer_min, answer_max)
         cfg.timed_mode_enabled = self.timed_switch.isChecked()
         cfg.random_ip_enabled = self.random_ip_switch.isChecked()
         cfg.random_ua_enabled = self.random_ua_switch.isChecked()
@@ -447,21 +401,13 @@ class RuntimePage(ScrollArea):
         except Exception as exc:
             log_suppressed_exception("apply_config: self._apply_browser_preference(getattr(cfg, \"browser_preference\", None))", exc, level=logging.WARNING)
 
-        interval_min_seconds = max(0, cfg.submit_interval[0])
-        self.interval_min_seconds = interval_min_seconds
-        self.interval_min_btn.setText(f"{interval_min_seconds // 60}分{interval_min_seconds % 60}秒")
+        interval_min = max(0, cfg.submit_interval[0])
+        interval_max = max(interval_min, cfg.submit_interval[1])
+        self.interval_card.setRange(interval_min, interval_max)
 
-        interval_max_seconds = max(cfg.submit_interval[0], cfg.submit_interval[1])
-        self.interval_max_seconds = interval_max_seconds
-        self.interval_max_btn.setText(f"{interval_max_seconds // 60}分{interval_max_seconds % 60}秒")
-
-        answer_min_seconds = max(0, cfg.answer_duration[0])
-        self.answer_min_seconds = answer_min_seconds
-        self.answer_min_btn.setText(f"{answer_min_seconds // 60}分{answer_min_seconds % 60}秒")
-
-        answer_max_seconds = max(cfg.answer_duration[0], cfg.answer_duration[1])
-        self.answer_max_seconds = answer_max_seconds
-        self.answer_max_btn.setText(f"{answer_max_seconds // 60}分{answer_max_seconds % 60}秒")
+        answer_min = max(0, cfg.answer_duration[0])
+        answer_max = max(answer_min, cfg.answer_duration[1])
+        self.answer_card.setRange(answer_min, answer_max)
 
         self.timed_switch.setChecked(cfg.timed_mode_enabled)
         self._sync_timed_mode(cfg.timed_mode_enabled)

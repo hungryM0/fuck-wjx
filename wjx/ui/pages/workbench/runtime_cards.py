@@ -425,24 +425,34 @@ class RandomUASettingCard(ExpandGroupSettingCard):
 
 
 class TimeRangeSettingCard(SettingCard):
-    """时间范围设置卡"""
+    """时间范围设置卡 - 使用双向滑块"""
 
-    def __init__(self, icon, title, content, parent=None):
+    def __init__(self, icon, title, content, max_seconds: int = 300, parent=None):
         super().__init__(icon, title, content, parent)
-        self.min_seconds = 0
-        self.max_seconds = 0
-
-        self.minBtn = PushButton("0分0秒", self)
-        self.minBtn.setMinimumWidth(90)
-        self.maxBtn = PushButton("0分0秒", self)
-        self.maxBtn.setMinimumWidth(90)
-
-        self.hBoxLayout.addWidget(self.minBtn, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addWidget(BodyLabel("~", self))
-        self.hBoxLayout.addWidget(self.maxBtn, 0, Qt.AlignmentFlag.AlignRight)
+        from wjx.ui.widgets.time_range_slider import TimeRangeSlider
+        
+        self.max_seconds = max_seconds
+        self.slider = TimeRangeSlider(
+            min_value=0,
+            max_value=max_seconds,
+            tick_interval=5,
+            parent=self
+        )
+        self.slider.setMinimumWidth(350)
+        
+        self.hBoxLayout.addWidget(self.slider, 0, Qt.AlignmentFlag.AlignRight)
         self.hBoxLayout.addSpacing(16)
 
     def setEnabled(self, enabled):
-        self.minBtn.setEnabled(enabled)
-        self.maxBtn.setEnabled(enabled)
+        super().setEnabled(enabled)
+        self.slider.setEnabled(enabled)
+    
+    def getRange(self) -> tuple:
+        """获取当前范围（秒）"""
+        return self.slider.getRange()
+    
+    def setRange(self, min_sec: int, max_sec: int):
+        """设置范围（秒）"""
+        self.slider.setRange(min_sec, max_sec)
+
 
