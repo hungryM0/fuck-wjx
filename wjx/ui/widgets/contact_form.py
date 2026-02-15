@@ -306,15 +306,40 @@ class ContactForm(StatusPollingMixin, QWidget):
         super().hideEvent(event)
 
     def closeEvent(self, event):
-        """关闭事件：停止轮询并断开信号"""
+        """关闭事件：停止轮询、关闭所有 InfoBar 并断开信号"""
         self.stop_status_polling()
+
+        # 关闭所有可能存在的 InfoBar，避免其内部线程导致崩溃
+        self._close_all_infobars()
+
         # 断开所有信号连接以避免回调析构警告
         try:
             self._sendFinished.disconnect()
             self._statusLoaded.disconnect()
         except Exception as exc:
-            log_suppressed_exception("closeEvent: self._sendFinished.disconnect()", exc, level=logging.WARNING)
+            log_suppressed_exception("closeEvent: disconnect signals", exc, level=logging.WARNING)
         super().closeEvent(event)
+
+    def __del__(self):
+        """析构函数：确保线程被清理"""
+        try:
+            self.stop_status_polling()
+        except Exception:
+            pass
+
+    def _close_all_infobars(self):
+        """关闭所有子 InfoBar 组件，避免线程泄漏"""
+        try:
+            from qfluentwidgets import InfoBar
+            # 遍历所有子组件，找到 InfoBar 并关闭
+            for child in self.findChildren(InfoBar):
+                try:
+                    child.close()
+                    child.deleteLater()
+                except Exception:
+                    pass
+        except Exception as exc:
+            log_suppressed_exception("_close_all_infobars", exc, level=logging.WARNING)
 
 
     def start_status_polling(self):

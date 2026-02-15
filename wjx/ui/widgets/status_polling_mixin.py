@@ -1,9 +1,8 @@
 """状态轮询 Mixin，用于对话框中的在线状态查询"""
+import threading
 from typing import Optional, Callable, Any
 
-from PySide6.QtCore import QThread, QTimer
-
-from wjx.ui.widgets.status_worker import StatusFetchWorker
+from PySide6.QtCore import QTimer
 
 
 class StatusPollingMixin:
@@ -19,10 +18,12 @@ class StatusPollingMixin:
     
     _status_fetcher: Optional[Callable]
     _status_formatter: Optional[Callable]
-    _worker_thread: Optional[QThread]
-    _worker: Optional[StatusFetchWorker]
     _status_timer: Optional[QTimer]
     _polling_interval: int
+    _status_lock: threading.Lock
+    _status_fetch_in_progress: bool
+    _status_stop_event: threading.Event
+    _status_session_id: int
     
     def _init_status_polling(
         self,
@@ -39,10 +40,12 @@ class StatusPollingMixin:
         """
         self._status_fetcher = status_fetcher
         self._status_formatter = status_formatter
-        self._worker_thread = None
-        self._worker = None
         self._status_timer = None
         self._polling_interval = interval_ms
+        self._status_lock = threading.Lock()
+        self._status_fetch_in_progress = False
+        self._status_stop_event = threading.Event()
+        self._status_session_id = 0
         
         # 连接信号（子类必须定义 _statusLoaded 信号）
         status_signal: Any = getattr(self, '_statusLoaded', None)
@@ -54,6 +57,11 @@ class StatusPollingMixin:
         if not callable(self._status_fetcher):
             self._on_status_loaded("未知：状态获取器未配置", "#666666")
             return
+
+        with self._status_lock:
+            self._status_session_id += 1
+            self._status_stop_event = threading.Event()
+            self._status_fetch_in_progress = False
         
         # 立即执行一次查询
         self._fetch_status_once()
@@ -66,48 +74,88 @@ class StatusPollingMixin:
     
     def _fetch_status_once(self):
         """执行一次状态查询"""
-        # 如果上一次查询还在进行，跳过
-        if self._worker_thread is not None and self._worker_thread.isRunning():
-            return
-        
-        # 创建新的 Worker 和 Thread
-        self._worker_thread = QThread(self)  # type: ignore[arg-type]
-        self._worker = StatusFetchWorker(self._status_fetcher, self._status_formatter)
-        self._worker.moveToThread(self._worker_thread)
-        
-        # 连接信号
-        status_signal: Any = getattr(self, '_statusLoaded', None)
-        if status_signal is not None:
-            self._worker.finished.connect(status_signal.emit)
-        self._worker.finished.connect(self._worker_thread.quit)
-        self._worker_thread.started.connect(self._worker.fetch)
-        
-        # 启动线程
-        self._worker_thread.start()
-    
+        with self._status_lock:
+            # 若当前轮询已停止，直接跳过
+            if self._status_stop_event.is_set():
+                return
+            # 如果上一次查询还在进行，跳过
+            if self._status_fetch_in_progress:
+                return
+            self._status_fetch_in_progress = True
+            session_id = self._status_session_id
+            stop_event = self._status_stop_event
+
+        thread = threading.Thread(
+            target=self._run_status_fetch,
+            args=(session_id, stop_event),
+            daemon=True,
+            name="StatusFetchWorker",
+        )
+        thread.start()
+
+    def _run_status_fetch(self, session_id: int, stop_event: threading.Event):
+        """后台线程：执行状态查询并通过信号回到 UI 线程。"""
+        text = "未知：状态未知"
+        color = "#666666"
+        try:
+            if stop_event.is_set():
+                return
+            result = self._status_fetcher() if callable(self._status_fetcher) else None
+            if stop_event.is_set():
+                return
+            if callable(self._status_formatter):
+                fmt_result = self._status_formatter(result)
+                if isinstance(fmt_result, tuple) and len(fmt_result) >= 2:
+                    text, color = str(fmt_result[0]), str(fmt_result[1])
+            else:
+                if isinstance(result, dict):
+                    online = result.get("online", None)
+                    message = str(result.get("message") or "").strip()
+                    if not message:
+                        if online is True:
+                            message = "系统正常运行中"
+                        elif online is False:
+                            message = "系统当前不在线"
+                        else:
+                            message = "状态未知"
+                    if online is True:
+                        text = f"在线：{message}"
+                    elif online is False:
+                        text = f"离线：{message}"
+                    else:
+                        text = f"未知：{message}"
+                    color = "#228B22" if online is True else ("#cc0000" if online is False else "#666666")
+                else:
+                    text = "未知：返回数据格式异常"
+                    color = "#666666"
+        except Exception:
+            text = "未知：状态获取失败"
+            color = "#666666"
+        finally:
+            should_emit = False
+            with self._status_lock:
+                # 只处理当前会话，避免旧线程覆盖新会话状态
+                if session_id == self._status_session_id:
+                    self._status_fetch_in_progress = False
+                    should_emit = not stop_event.is_set()
+            if should_emit:
+                status_signal: Any = getattr(self, "_statusLoaded", None)
+                if status_signal is not None:
+                    status_signal.emit(text, color)
+
     def _stop_status_polling(self):
-        """停止状态轮询并安全清理线程"""
+        """停止状态轮询并异步清理后台任务。"""
         # 停止定时器
         if self._status_timer is not None:
             self._status_timer.stop()
             self._status_timer = None
 
-        worker = self._worker
-        thread = self._worker_thread
-        self._worker = None
-        self._worker_thread = None
+        with self._status_lock:
+            self._status_stop_event.set()
+            self._status_fetch_in_progress = False
+            # 会话号自增，用于失效所有旧查询结果
+            self._status_session_id += 1
 
-        # 非阻塞停止：只发停止请求并异步退出线程，避免 GUI 卡顿
-        if worker is not None:
-            worker.stop()
-        if thread is not None:
-            try:
-                thread.finished.connect(thread.deleteLater)
-            except Exception:
-                pass
-            if thread.isRunning():
-                thread.quit()
-    
     def _on_status_loaded(self, text: str, color: str):
         """状态加载完成回调，子类应重写此方法来更新 UI"""
         raise NotImplementedError("子类必须实现 _on_status_loaded 方法")

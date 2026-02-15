@@ -30,6 +30,14 @@ class SupportPage(ScrollArea):
         except Exception as exc:
             log_suppressed_exception("showEvent: self.contact_form.start_status_polling()", exc, level=logging.WARNING)
 
+    def hideEvent(self, event):
+        """页面隐藏时停止轮询，避免线程泄漏"""
+        try:
+            self.contact_form.stop_status_polling()
+        except Exception as exc:
+            log_suppressed_exception("hideEvent: self.contact_form.stop_status_polling()", exc, level=logging.WARNING)
+        super().hideEvent(event)
+
     def _build_ui(self):
         layout = QVBoxLayout(self.view)
         layout.setContentsMargins(24, 24, 24, 24)
