@@ -66,6 +66,7 @@ for plugin in required_plugins:
 datas = [
     ('assets', 'assets'),
     ('wjx/assets', 'wjx/assets'),
+    ('wjx/ui/theme.json', 'wjx/ui'),  # 主题配置（深浅色适配）
     ('icon.ico', '.'),
 ] + qfw_datas + pyside_datas
 
@@ -103,8 +104,48 @@ a = Analysis(
         # 间接依赖的大垃圾（项目本身不用）
         "matplotlib",
         "mpl_toolkits",
-        "Pythonwin",
         "pyreadline3",
+        # === pywin32 全家桶（项目未使用，5.7 MB） ===
+        "Pythonwin",
+        "win32com",
+        "win32",
+        "pywin",
+        "pythoncom",
+        "pywintypes",
+        "win32api",
+        "win32con",
+        "win32traceutil",
+        "winerror",
+        "commctrl",
+        "pywin32_system32",
+        # === 打包后不需要的工具链（3.1 MB） ===
+        "setuptools",
+        "pkg_resources",
+        "_distutils_hack",
+        "distutils",
+        "pip",
+        # === 调试/测试模块（运行时不需要） ===
+        "unittest",
+        "doctest",
+        "pdb",
+        "pydoc",
+        "pydoc_data",
+        "test",
+        # === 项目未使用的 stdlib / 第三方 ===
+        "sqlite3",
+        "_sqlite3",
+        "click",
+        "xmlrpc",
+        "ftplib",
+        "cgi",
+        "socketserver",
+        "tarfile",
+        "pickletools",
+        "difflib",
+        "fileinput",
+        "rlcompleter",
+        "tty",
+        "plistlib",
         # PySide6 黑名单：排除未使用的大模块（防止依赖分析拉回来）
         "PySide6.QtWebEngine",
         "PySide6.QtWebEngineCore",
@@ -138,6 +179,8 @@ a = Analysis(
         "PySide6.QtRemoteObjects",
         "PySide6.QtScxml",
         "PySide6.QtStateMachine",
+        "PySide6.QtMultimedia",
+        "PySide6.QtMultimediaWidgets",
     ],
     noarchive=True,
     optimize=2,
@@ -156,12 +199,21 @@ _pyside6_keep = {
     'QtSvg.pyd', 'QtSvgWidgets.pyd', 'QtXml.pyd',
 }
 
+# 多媒体相关 DLL 黑名单（项目不需要音视频处理）
+_pyside6_multimedia_dlls = {
+    'swresample-4.dll', 'swscale-7.dll',
+    'opengl32sw.dll',
+}
+
 def _is_unwanted_pyside6(name):
     """判断是否为不需要的 PySide6 DLL"""
     basename = os.path.basename(name)
     # 保留白名单内的
     if basename in _pyside6_keep:
         return False
+    # 过滤已知不需要的多媒体 DLL
+    if basename.lower() in {x.lower() for x in _pyside6_multimedia_dlls}:
+        return True
     # 过滤 PySide6 目录下的 Qt6*.dll 和 Qt*.pyd
     if 'PySide6' in name or 'pyside6' in name.lower():
         if basename.startswith('Qt6') and basename.endswith('.dll'):
@@ -171,8 +223,10 @@ def _is_unwanted_pyside6(name):
         # 过滤 avcodec/avformat/avutil 等多媒体库
         if basename.startswith('av') and basename.endswith('.dll'):
             return True
-        # 过滤 opengl32sw.dll（软件 OpenGL 渲染，20MB）
-        if basename == 'opengl32sw.dll':
+        # 过滤 PySide6 子目录中重复的 MSVC 运行时（根目录已有一份）
+        if (basename.lower().startswith('msvcp') or
+            basename.lower().startswith('vcruntime') or
+            basename.lower().startswith('concrt')):
             return True
     return False
 
@@ -180,6 +234,9 @@ a.binaries = [b for b in a.binaries if not _is_unwanted_pyside6(b[0])]
 
 # 同时过滤 datas 中不需要的 PySide6 子目录（qml、translations 等）
 _pyside6_keep_data_dirs = {'plugins'}
+# 只保留实际需要的 Qt 插件
+_pyside6_keep_plugins = {'platforms', 'styles', 'imageformats', 'networkinformation', 'tls'}
+
 def _is_unwanted_pyside6_data(name):
     """过滤不需要的 PySide6 数据文件"""
     if 'PySide6' in name:
@@ -187,9 +244,14 @@ def _is_unwanted_pyside6_data(name):
         if len(parts) >= 2:
             subdir = parts[1] if parts[0] == 'PySide6' else None
             if subdir and subdir not in _pyside6_keep_data_dirs:
-                # qml、translations 等子目录不需要
-                if subdir in ('qml', 'translations', 'typesystems', 'glue'):
+                # qml、translations、support 等子目录不需要
+                if subdir in ('qml', 'translations', 'typesystems', 'glue', 'support'):
                     return True
+        # 过滤不需要的 Qt 插件子目录（generic、iconengines、multimedia 等）
+        if len(parts) >= 3 and parts[0] == 'PySide6' and parts[1] == 'plugins':
+            plugin_name = parts[2]
+            if plugin_name not in _pyside6_keep_plugins:
+                return True
     return False
 
 a.datas = [d for d in a.datas if not _is_unwanted_pyside6_data(d[0])]
