@@ -72,6 +72,12 @@ python fuck-wjx.py
 
 ---
 
+## macOS Support
+
+To view the source code supporting macOS, please switch to the [mac branch](https://github.com/hungryM0/fuck-wjx/tree/mac).
+
+---
+
 ## Community
 
 For questions or technical support, join our QQ Group:
@@ -111,3 +117,4 @@ Thanks to the following contributors for their support:
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=hungryM0/fuck-wjx&type=date&legend=top-left)](https://www.star-history.com/#hungryM0/fuck-wjx&type=date&legend=top-left)
+

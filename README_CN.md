@@ -72,6 +72,12 @@ python fuck-wjx.py
 
 ---
 
+## Mac 系统支持
+
+如果你需要查看支持 macOS 系统的源码，请切换到 [mac 分支](https://github.com/hungryM0/fuck-wjx/tree/mac)。
+
+---
+
 ## 交流群
 
 如有疑问或需要技术支持，可加入QQ群：
