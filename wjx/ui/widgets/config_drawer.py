@@ -113,6 +113,7 @@ class ConfigDrawer(QWidget):
 
     def _update_empty_state(self):
         has_items = self.list_widget.count() > 0
+        self.hint_label.setVisible(has_items)
         self.list_widget.setVisible(has_items)
         self.empty_label.setVisible(not has_items)
 
