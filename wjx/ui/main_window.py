@@ -99,7 +99,9 @@ class MainWindow(FluentWindow):
     def __init__(self, parent=None):
         self._boot_splash = None
         super().__init__(parent)
-        qconfig.load(os.path.join(get_runtime_directory(), "wjx", "ui", "theme.json"))
+        theme_path = get_resource_path(os.path.join("wjx", "ui", "theme.json"))
+        if os.path.exists(theme_path):
+            qconfig.load(theme_path)
         self._theme_sync_pending = False
         self._apply_theme_mode(qconfig.get(qconfig.themeMode))
         setThemeColor("#2563EB")

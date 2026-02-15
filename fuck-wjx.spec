@@ -80,7 +80,16 @@ pyside6_modules = [
     'PySide6.QtSvg',
     'PySide6.QtSvgWidgets',
 ]
-hiddenimports = qfw_hiddenimports + pyside6_modules + ['shiboken6']
+
+# qframelesswindow 在 Windows 上需要的 pywin32 模块（经源码验证）
+pywin32_modules = [
+    'win32api',    # win32_utils.py, __init__.py, window_effect.py
+    'win32con',    # win32_utils.py, __init__.py, window_effect.py
+    'win32gui',    # win32_utils.py, __init__.py, window_effect.py
+    'win32print',  # win32_utils.py
+]
+
+hiddenimports = qfw_hiddenimports + pyside6_modules + pywin32_modules + ['shiboken6']
 binaries += qfw_binaries + pyside_binaries
 
 a = Analysis(
@@ -105,19 +114,10 @@ a = Analysis(
         "matplotlib",
         "mpl_toolkits",
         "pyreadline3",
-        # === pywin32 全家桶（项目未使用，5.7 MB） ===
-        "Pythonwin",
-        "win32com",
-        "win32",
-        "pywin",
-        "pythoncom",
-        "pywintypes",
-        "win32api",
-        "win32con",
-        "win32traceutil",
-        "winerror",
-        "commctrl",
-        "pywin32_system32",
+        # === pywin32 可选组件（qframelesswindow 需要核心模块，只排除高级功能） ===
+        "Pythonwin",  # GUI IDE 组件
+        "win32com",   # COM 自动化
+        "win32traceutil",  # 调试工具
         # === 打包后不需要的工具链（3.1 MB） ===
         "setuptools",
         "pkg_resources",
@@ -139,7 +139,7 @@ a = Analysis(
         "ftplib",
         "cgi",
         "socketserver",
-        "tarfile",
+        # "tarfile",  # pandas.io.common 需要
         "pickletools",
         "difflib",
         "fileinput",
