@@ -103,12 +103,6 @@ def reorder(driver: BrowserDriver, current: int) -> None:
             break
     if not order_items:
         return
-    if container:
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", container)
-        except Exception:
-            pass
-
     rank_mode = False
     if container:
         try:
@@ -116,6 +110,25 @@ def reorder(driver: BrowserDriver, current: int) -> None:
             rank_mode = bool(sortnum_elements)
         except Exception:
             rank_mode = False
+    if container and not rank_mode:
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", container)
+        except Exception:
+            pass
+    rank_item_uids: List[str] = []
+    if rank_mode:
+        uid_seed = f"q{current}_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+        for idx, li in enumerate(order_items):
+            uid = f"{uid_seed}_{idx}"
+            rank_item_uids.append(uid)
+            try:
+                driver.execute_script(
+                    "if (arguments[0]) arguments[0].setAttribute('data-wjx-rank-uid', arguments[1]);",
+                    li,
+                    uid,
+                )
+            except Exception:
+                pass
 
     # ── 共用工具函数 ──
 
@@ -207,6 +220,25 @@ def reorder(driver: BrowserDriver, current: int) -> None:
         """rank_mode 下判断选项是否已选中（含 badge 检测）"""
         return _is_item_selected(item) or bool(_get_item_badge_text(item))
 
+    def _get_rank_item(option_idx: int):
+        if option_idx < 0 or option_idx >= len(order_items):
+            return None
+        uid = rank_item_uids[option_idx] if option_idx < len(rank_item_uids) else ""
+        if uid:
+            if container is not None:
+                try:
+                    return container.find_element(By.CSS_SELECTOR, f"li[data-wjx-rank-uid='{uid}']")
+                except Exception:
+                    pass
+            try:
+                return driver.find_element(By.CSS_SELECTOR, f"#div{current} li[data-wjx-rank-uid='{uid}']")
+            except Exception:
+                pass
+        try:
+            return order_items[option_idx]
+        except Exception:
+            return None
+
     def _force_mark_rank_selected(li, rank: int) -> None:
         """强制通过 DOM 操作标记排序项为已选中"""
         if not li:
@@ -238,117 +270,135 @@ def reorder(driver: BrowserDriver, current: int) -> None:
         except Exception:
             pass
 
-    def _robust_click_rank_item(li, option_idx: int) -> bool:
+    def _robust_click_rank_item(option_idx: int) -> bool:
         """增强的点击逻辑，多种方式尝试点击排序项"""
+        li = _get_rank_item(option_idx)
+        if not li:
+            return False
         if _is_rank_selected(li):
             return True
 
         page = getattr(driver, "page", None)
+        count_before = _count_selected()
 
-        # 方式1: Playwright 原生点击
-        if page:
-            for css in (
-                f"#div{current} ul > li:nth-child({option_idx + 1})",
-                f"#div{current} .ui-listview > li:nth-child({option_idx + 1})",
-            ):
-                try:
-                    page.click(css, timeout=800)
-                    time.sleep(0.15)
-                    if _is_rank_selected(li):
-                        return True
-                except Exception:
-                    pass
-
-        # 方式2: 元素直接点击
+        # 方式1: 元素直接点击
         try:
-            li.click()
-            time.sleep(0.15)
-            if _is_rank_selected(li):
-                return True
-        except Exception:
-            pass
-
-        # 方式3: JavaScript 模拟完整点击事件
-        try:
-            driver.execute_script(
-                r"""
-                const el = arguments[0];
-                if (!el) return;
-                el.scrollIntoView({block: 'center'});
-                el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
-                el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true}));
-                el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
-                el.click();
-                """,
-                li,
-            )
-            time.sleep(0.15)
-            if _is_rank_selected(li):
-                return True
-        except Exception:
-            pass
-
-        # 方式4: 点击内部元素
-        for inner_css in ("span", "div", "input[type='hidden']"):
-            try:
-                inner = li.find_element(By.CSS_SELECTOR, inner_css)
-                inner.click()
-                time.sleep(0.1)
-                if _is_rank_selected(li):
+            li = _get_rank_item(option_idx)
+            if li:
+                li.click()
+                time.sleep(0.06)
+                li = _get_rank_item(option_idx)
+                if li and _is_rank_selected(li) and _count_selected() >= count_before:
                     return True
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-        # 方式5: 鼠标坐标点击
-        if page:
-            try:
-                box = driver.execute_script(
-                    "const r = arguments[0].getBoundingClientRect(); return {x: r.left + r.width/2, y: r.top + r.height/2};",
+        # 方式2: JavaScript 模拟完整点击事件
+        try:
+            li = _get_rank_item(option_idx)
+            if li:
+                driver.execute_script(
+                    r"""
+                    const el = arguments[0];
+                    if (!el) return;
+                    el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
+                    el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true}));
+                    el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                    el.click();
+                    """,
                     li,
                 )
-                if box and box.get("x", 0) > 0 and box.get("y", 0) > 0:
-                    page.mouse.click(box["x"], box["y"])
-                    time.sleep(0.15)
-                    if _is_rank_selected(li):
+                time.sleep(0.06)
+                li = _get_rank_item(option_idx)
+                if li and _is_rank_selected(li) and _count_selected() >= count_before:
+                    return True
+        except Exception:
+            pass
+
+        # 方式3: 点击内部元素
+        for inner_css in ("span", "div", "input[type='hidden']"):
+            try:
+                li = _get_rank_item(option_idx)
+                if li:
+                    inner = li.find_element(By.CSS_SELECTOR, inner_css)
+                    inner.click()
+                    time.sleep(0.05)
+                    li = _get_rank_item(option_idx)
+                    if li and _is_rank_selected(li) and _count_selected() >= count_before:
                         return True
             except Exception:
                 pass
 
-        return _is_rank_selected(li)
+        # 方式4: 鼠标坐标点击
+        if page:
+            try:
+                li = _get_rank_item(option_idx)
+                if li:
+                    box = driver.execute_script(
+                        "const r = arguments[0].getBoundingClientRect(); return {x: r.left + r.width/2, y: r.top + r.height/2};",
+                        li,
+                    )
+                    if box and box.get("x", 0) > 0 and box.get("y", 0) > 0:
+                        page.mouse.click(box["x"], box["y"])
+                        time.sleep(0.06)
+                        li = _get_rank_item(option_idx)
+                        if li and _is_rank_selected(li) and _count_selected() >= count_before:
+                            return True
+            except Exception:
+                pass
 
-    def _rank_click_with_retry(item, option_idx: int, rank: int) -> None:
+        li = _get_rank_item(option_idx)
+        if not li:
+            return False
+        return _is_rank_selected(li) and _count_selected() >= count_before
+
+    def _rank_click_with_retry(option_idx: int, rank: int) -> None:
         """尝试点击排序项，失败则强制标记"""
+        item = _get_rank_item(option_idx)
+        if not item:
+            return
         if _is_rank_selected(item):
             return
         success = False
-        for _ in range(3):
-            if _robust_click_rank_item(item, option_idx):
+        for _ in range(2):
+            if _robust_click_rank_item(option_idx):
                 success = True
                 break
-            time.sleep(0.1)
-        if not success and not _is_rank_selected(item):
+            time.sleep(0.05)
+        item = _get_rank_item(option_idx)
+        if item is not None and not success and not _is_rank_selected(item):
             _force_mark_rank_selected(item, rank)
 
     def _rank_remedy_missing(click_indices: List[int]) -> None:
         """补救遗漏的排序项"""
         existing_ranks = []
         for idx in click_indices:
-            b = _get_item_badge_text(order_items[idx])
+            item = _get_rank_item(idx)
+            b = _get_item_badge_text(item)
             if b and b.isdigit():
                 existing_ranks.append(int(b))
         next_rank = max(existing_ranks) + 1 if existing_ranks else 1
 
-        for retry in range(3):
-            missing = [i for i in click_indices if not _is_rank_selected(order_items[i])]
+        for retry in range(2):
+            missing = []
+            for i in click_indices:
+                item = _get_rank_item(i)
+                if item is not None and not _is_rank_selected(item):
+                    missing.append(i)
             if not missing:
                 break
             for option_idx in missing:
-                item = order_items[option_idx]
-                if not _robust_click_rank_item(item, option_idx):
+                item = _get_rank_item(option_idx)
+                if item is None:
+                    continue
+                if not _robust_click_rank_item(option_idx):
+                    item = _get_rank_item(option_idx)
+                    if item is None:
+                        continue
                     _force_mark_rank_selected(item, next_rank)
                 next_rank += 1
-                time.sleep(0.15)
-            time.sleep(0.2)
+                time.sleep(0.04)
+            time.sleep(0.06)
 
     def _click_item(option_idx: int, item) -> bool:
         """非 rank_mode 通用点击逻辑"""
@@ -608,7 +658,8 @@ def reorder(driver: BrowserDriver, current: int) -> None:
 
     total_options = len(order_items)
     required_count = detect_reorder_required_count(driver, current, total_options)
-    min_select_limit, max_select_limit = detect_multiple_choice_limit_range(driver, current)
+    detected_min_limit, detected_max_limit = detect_multiple_choice_limit_range(driver, current)
+    min_select_limit, max_select_limit = detected_min_limit, detected_max_limit
 
     if rank_mode and container:
         fragments: List[str] = []
@@ -618,12 +669,22 @@ def reorder(driver: BrowserDriver, current: int) -> None:
             except Exception:
                 continue
         cand_min, cand_max = _extract_multi_limit_range_from_text("\n".join(fragments))
-        if cand_min is None and cand_max is None:
-            min_select_limit = None
-            max_select_limit = None
-        else:
-            min_select_limit = cand_min
-            max_select_limit = cand_max
+        if cand_min is not None:
+            if min_select_limit is None:
+                min_select_limit = cand_min
+            else:
+                min_select_limit = max(min_select_limit, cand_min)
+        if cand_max is not None:
+            if max_select_limit is None:
+                max_select_limit = cand_max
+            else:
+                max_select_limit = min(max_select_limit, cand_max)
+        if (
+            min_select_limit is not None
+            and max_select_limit is not None
+            and min_select_limit > max_select_limit
+        ):
+            min_select_limit, max_select_limit = detected_min_limit, detected_max_limit
 
     force_select_all = required_count is not None and required_count == total_options
     if force_select_all and max_select_limit is not None and required_count is not None and max_select_limit < required_count:
@@ -634,17 +695,14 @@ def reorder(driver: BrowserDriver, current: int) -> None:
     # ── 分支1: force_select_all ──
     if force_select_all:
         if rank_mode:
-            # rank_mode: 随机顺序点击所有选项
             candidate_indices = list(range(total_options))
             random.shuffle(candidate_indices)
-
             clicked_rank = 0
             for option_idx in candidate_indices:
                 clicked_rank += 1
-                _rank_click_with_retry(order_items[option_idx], option_idx, clicked_rank)
-
-            time.sleep(0.3)
-            selected_count = sum(1 for it in order_items if _is_rank_selected(it))
+                _rank_click_with_retry(option_idx, clicked_rank)
+            time.sleep(0.08)
+            selected_count = _count_selected()
             if selected_count < total_options:
                 _rank_remedy_missing(candidate_indices)
             return
@@ -689,14 +747,12 @@ def reorder(driver: BrowserDriver, current: int) -> None:
         click_plan = list(range(total_options))
         random.shuffle(click_plan)
         click_plan = click_plan[:plan_count]
-
         clicked_count = 0
         for option_idx in click_plan:
             clicked_count += 1
-            _rank_click_with_retry(order_items[option_idx], option_idx, clicked_count)
-
-        time.sleep(0.3)
-        selected_count = sum(1 for i in click_plan if _is_rank_selected(order_items[i]))
+            _rank_click_with_retry(option_idx, clicked_count)
+        time.sleep(0.08)
+        selected_count = _count_selected()
         if selected_count < plan_count:
             _rank_remedy_missing(click_plan)
         return
