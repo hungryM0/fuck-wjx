@@ -104,9 +104,12 @@ class QuestionWizardDialog(QDialog):
             max_int = min_int + 1
         return [min_int, max_int]
 
-    def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], parent=None):
+    def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], survey_title: Optional[str] = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("配置向导")
+        window_title = "配置向导"
+        if survey_title:
+            window_title = f"{window_title} - {_shorten_text(survey_title, 36)}"
+        self.setWindowTitle(window_title)
         self.resize(720, 640)
         self.entries = entries
         self.info = info or []

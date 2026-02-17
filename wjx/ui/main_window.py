@@ -782,7 +782,7 @@ class MainWindow(FluentWindow):
         if getattr(self.dashboard, "_open_wizard_after_parse", False):
             self.dashboard._open_wizard_after_parse = False
             pending_entries = copy.deepcopy(self.controller.question_entries)
-            accepted = self.dashboard._run_question_wizard(pending_entries, info)
+            accepted = self.dashboard._run_question_wizard(pending_entries, info, parsed_title)
             if accepted:
                 self.question_page.set_questions(info, pending_entries)
                 self.controller.question_entries = pending_entries

@@ -109,20 +109,25 @@ class CleanupRunner:
 
         用于强制停止时立即清理所有浏览器进程
 
-        优化：异步执行，不阻塞调用线程
+        优化：缩短去抖延迟而非立即执行，避免创建过多清理线程
         """
         with self._lock:
+            # 如果已有定时器，取消并缩短延迟到 0.05 秒（快速清理但仍保留去抖）
             if self._batch_timer:
                 self._batch_timer.cancel()
-                self._batch_timer = None
 
-        # 异步执行批量清理，不阻塞调用线程
-        cleanup_thread = threading.Thread(
-            target=self._execute_batch_cleanup,
-            daemon=True,
-            name="FlushPIDCleanup"
-        )
-        cleanup_thread.start()
+            # 如果没有待清理的 PID，直接返回
+            if not self._pending_pids:
+                self._batch_timer = None
+                return
+
+            # 设置短延迟定时器：0.05 秒后执行（给其他线程留出提交 PID 的时间）
+            self._batch_timer = threading.Timer(
+                0.05,  # 50ms 延迟，既快速又能聚合多个请求
+                self._execute_batch_cleanup
+            )
+            self._batch_timer.daemon = True
+            self._batch_timer.start()
 
     def _worker(self) -> None:
         """后台工作线程：处理普通清理任务队列"""
@@ -140,6 +145,7 @@ class CleanupRunner:
                 log_suppressed_exception("_worker: task()", exc, level=logging.WARNING)
 
 
+# TODO(清理): 疑似未使用，先保留，确认外部是否有引用再决定删除。
 def kill_browser_processes() -> None:
     """使用 taskkill 强制关闭所有浏览器进程（异步执行，不阻塞调用线程）。"""
 

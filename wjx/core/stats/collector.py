@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any
 
 from PySide6.QtCore import QObject, Signal
 
-from wjx.core.stats.models import ResponseRecord, SurveyStats
+from wjx.core.stats.models import ResponseRecord, SurveyStats, OptionStats
 from wjx.core.stats.raw_storage import raw_data_storage
 
 
@@ -202,76 +202,78 @@ class StatsCollector:
 
         # 遍历所有已记录的题目，补充配置元数据
         for q_num, q_stats in self._current_stats.questions.items():
-            # 如果已经有配置元数据，跳过
-            if q_stats.option_count is not None:
-                continue
-
             # 从 state.question_config_index_map 查找配置信息
             config_entry = state.question_config_index_map.get(q_num)
-            if not config_entry:
-                continue
+            if config_entry:
+                q_type, idx = config_entry
 
-            q_type, idx = config_entry
+                # 根据题型从对应的 state 变量中提取配置
+                if q_stats.option_count is None:
+                    if q_type == "single":
+                        if 0 <= idx < len(state.single_prob):
+                            prob_config = state.single_prob[idx]
+                            if isinstance(prob_config, list):
+                                q_stats.option_count = len(prob_config)
 
-            # 根据题型从对应的 state 变量中提取配置
-            if q_type == "single":
-                if 0 <= idx < len(state.single_prob):
-                    prob_config = state.single_prob[idx]
-                    if isinstance(prob_config, list):
-                        q_stats.option_count = len(prob_config)
+                    elif q_type == "multiple":
+                        if 0 <= idx < len(state.multiple_prob):
+                            prob_config = state.multiple_prob[idx]
+                            if isinstance(prob_config, list):
+                                q_stats.option_count = len(prob_config)
 
-            elif q_type == "multiple":
-                if 0 <= idx < len(state.multiple_prob):
-                    prob_config = state.multiple_prob[idx]
-                    if isinstance(prob_config, list):
-                        q_stats.option_count = len(prob_config)
+                    elif q_type == "dropdown":
+                        if 0 <= idx < len(state.droplist_prob):
+                            prob_config = state.droplist_prob[idx]
+                            if isinstance(prob_config, list):
+                                q_stats.option_count = len(prob_config)
 
-            elif q_type == "dropdown":
-                if 0 <= idx < len(state.droplist_prob):
-                    prob_config = state.droplist_prob[idx]
-                    if isinstance(prob_config, list):
-                        q_stats.option_count = len(prob_config)
+                    elif q_type == "scale":
+                        if 0 <= idx < len(state.scale_prob):
+                            prob_config = state.scale_prob[idx]
+                            if isinstance(prob_config, list):
+                                q_stats.option_count = len(prob_config)
 
-            elif q_type == "scale":
-                if 0 <= idx < len(state.scale_prob):
-                    prob_config = state.scale_prob[idx]
-                    if isinstance(prob_config, list):
-                        q_stats.option_count = len(prob_config)
+                    elif q_type == "score":
+                        # 评价题与量表题共用 scale_prob 配置列表
+                        if 0 <= idx < len(state.scale_prob):
+                            prob_config = state.scale_prob[idx]
+                            if isinstance(prob_config, list):
+                                q_stats.option_count = len(prob_config)
 
-            elif q_type == "score":
-                # 评价题与量表题共用 scale_prob 配置列表
-                if 0 <= idx < len(state.scale_prob):
-                    prob_config = state.scale_prob[idx]
-                    if isinstance(prob_config, list):
-                        q_stats.option_count = len(prob_config)
+                    elif q_type == "matrix":
+                        # 矩阵题：使用索引范围来确定行数
+                        if idx in matrix_index_ranges:
+                            end_idx = matrix_index_ranges[idx]
+                            row_count = end_idx - idx
 
-            elif q_type == "matrix":
-                # 矩阵题：使用索引范围来确定行数
-                if idx in matrix_index_ranges:
-                    end_idx = matrix_index_ranges[idx]
-                    row_count = end_idx - idx
+                            # 从第一行获取列数
+                            if idx < len(state.matrix_prob):
+                                first_row_config = state.matrix_prob[idx]
+                                if isinstance(first_row_config, list):
+                                    q_stats.matrix_cols = len(first_row_config)
 
-                    # 从第一行获取列数
-                    if idx < len(state.matrix_prob):
-                        first_row_config = state.matrix_prob[idx]
-                        if isinstance(first_row_config, list):
-                            q_stats.matrix_cols = len(first_row_config)
+                            q_stats.matrix_rows = row_count
 
-                    q_stats.matrix_rows = row_count
-
-            elif q_type == "slider":
-                # 滑块题暂时没有固定选项数，跳过
-                pass
+                    elif q_type == "slider":
+                        # 滑块题暂时没有固定选项数，跳过
+                        pass
 
             # 从 state.questions_metadata 中提取选项文本（如果有）
             q_metadata = getattr(state, 'questions_metadata', {}).get(q_num)
             if q_metadata:
                 option_texts = q_metadata.get('option_texts')
                 if option_texts and isinstance(option_texts, list):
-                    # 为已有的选项补充文本
-                    for idx, text in enumerate(option_texts):
-                        if idx in q_stats.options:
-                            q_stats.options[idx].option_text = str(text) if text else ""
+                    # 为所有选项补充文本（即使该选项还没被选择过）
+                    for opt_idx, text in enumerate(option_texts):
+                        opt_text = str(text) if text else ""
+                        if opt_idx not in q_stats.options:
+                            q_stats.options[opt_idx] = OptionStats(
+                                option_index=opt_idx,
+                                option_text=opt_text,
+                                count=0,
+                            )
+                        elif opt_text and not q_stats.options[opt_idx].option_text:
+                            q_stats.options[opt_idx].option_text = opt_text
 
     def discard_round(self) -> None:
         """提交失败：丢弃当前线程的暂存缓冲区"""

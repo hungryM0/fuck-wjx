@@ -138,6 +138,7 @@ class DashboardPage(QWidget):
         self.question_page = question_page
         self.runtime_page = runtime_page
         self._open_wizard_after_parse = False
+        self._survey_title = ""
         self._last_pause_reason = ""
         self._completion_notified = False
         self._pending_restart = False
@@ -706,6 +707,7 @@ class DashboardPage(QWidget):
     def update_question_meta(self, title: str, count: int):
         self.count_label.setText(f"{count} 题")
         self.title_label.setText(title or "已配置的题目")
+        self._survey_title = title or ""
         self._refresh_entry_table()
         self._sync_start_button_state()
 
@@ -1009,11 +1011,12 @@ class DashboardPage(QWidget):
                 entry = entries[idx]
                 entry.ai_enabled = bool(enabled) if entry.question_type == "text" else False
 
-    def _run_question_wizard(self, entries: List[QuestionEntry], info: List[Dict[str, Any]]) -> bool:
+    def _run_question_wizard(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], survey_title: Optional[str] = None) -> bool:
         if not entries:
             self._toast("请先解析问卷或手动添加题目", "warning")
             return False
-        dlg = QuestionWizardDialog(entries, info, self)
+        title = survey_title if survey_title is not None else self._survey_title
+        dlg = QuestionWizardDialog(entries, info, title, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._apply_wizard_results(entries, dlg)
             return True
