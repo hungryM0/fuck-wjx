@@ -82,7 +82,7 @@ python fuck-wjx.py
 
 如有疑问或需要技术支持，可加入QQ群：
 
-<img width="256" alt="qq" src="https://github.com/user-attachments/assets/7f25caaa-b157-4185-acae-78882f56871d" />
+<img width="256" alt="qq" src="assets/community_qr.jpg" />
 
 ---
 
@@ -110,7 +110,20 @@ python fuck-wjx.py
 
 ## 捐助
 
-<img width="250" alt="payment" src="assets/payment.png" />
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <img width="200" alt="wechat" src="assets/WeDonate.png" /><br/>
+        <strong style="color: #07C160;">微信赞赏</strong>
+      </td>
+      <td align="center">
+        <img width="200" alt="alipay" src="assets/AliDonate.jpg" /><br/>
+        <strong style="color: #1677FF;">支付宝</strong>
+      </td>
+    </tr>
+  </table>
+</div>
 
 ---
 

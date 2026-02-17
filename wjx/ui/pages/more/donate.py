@@ -1,10 +1,11 @@
 """捐助页面"""
 import sys
 import os
+from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QBoxLayout
 from qfluentwidgets import (
     ScrollArea,
     TitleLabel,
@@ -63,10 +64,10 @@ class DonatePage(ScrollArea):
         alipay_path = get_resource_path("assets/AliDonate.jpg")
 
         self.qr_row.addWidget(
-            self._build_qr_card("微信赞赏", wechat_path, "微信扫一扫")
+            self._build_qr_card("微信赞赏", wechat_path, "微信扫一扫", brand_color="#07C160")
         )
         self.qr_row.addWidget(
-            self._build_qr_card("支付宝赞赏", alipay_path, "支付宝扫一扫")
+            self._build_qr_card("支付宝", alipay_path, "支付宝扫一扫", brand_color="#1677FF")
         )
 
         layout.addLayout(self.qr_row)
@@ -82,17 +83,41 @@ class DonatePage(ScrollArea):
 
         self._update_layout()
 
-    def _build_qr_card(self, title: str, qr_path: str, tip_text: str) -> CardWidget:
+    def _build_qr_card(
+        self,
+        title: str,
+        qr_path: str,
+        tip_text: str,
+        brand_color: Optional[str] = None,
+    ) -> CardWidget:
         card = CardWidget(self)
-        card_layout = QVBoxLayout(card)
+
+        # 使用水平布局，左侧放装饰条，右侧放内容
+        main_layout = QHBoxLayout(card)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # 添加品牌色装饰条（独立的 QWidget）
+        if brand_color:
+            accent_bar = QWidget(card)
+            accent_bar.setFixedWidth(4)
+            accent_bar.setStyleSheet(f"background-color: {brand_color};")
+            main_layout.addWidget(accent_bar)
+
+        # 内容区域
+        content_widget = QWidget(card)
+        card_layout = QVBoxLayout(content_widget)
         card_layout.setContentsMargins(24, 20, 24, 20)
         card_layout.setSpacing(10)
         card_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        main_layout.addWidget(content_widget)
 
-        title_label = StrongBodyLabel(title, card)
+        title_label = StrongBodyLabel(title, content_widget)
+        if brand_color:
+            title_label.setStyleSheet(f"color: {brand_color}; font-weight: bold;")
         card_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        qr_label = QLabel(card)
+        qr_label = QLabel(content_widget)
         qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         qr_label.setStyleSheet(
             "border: 1px solid rgba(128,128,128,0.15); border-radius: 8px; padding: 4px;"
@@ -104,7 +129,7 @@ class DonatePage(ScrollArea):
             qr_label.setText(f"二维码未找到\n{os.path.basename(qr_path)}")
         card_layout.addWidget(qr_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        tip = CaptionLabel(tip_text, card)
+        tip = CaptionLabel(tip_text, content_widget)
         tip.setStyleSheet("color: #888;")
         card_layout.addWidget(tip, 0, Qt.AlignmentFlag.AlignHCenter)
 

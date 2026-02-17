@@ -29,6 +29,7 @@ from wjx.ui.widgets import StatusPollingMixin
 from wjx.network.proxy import get_status, _format_status_payload
 from wjx.utils.io.load_save import get_assets_directory
 from wjx.utils.app.version import ISSUE_FEEDBACK_URL
+from wjx.ui.pages.more.donate import DonatePage
 
 
 class CardValidateWorker(QThread):
@@ -242,30 +243,23 @@ class CardUnlockDialog(StatusPollingMixin, QDialog):
             log_suppressed_exception("_open_donate: confirm_box.yesButton.setText(\"继续\")", exc, level=logging.WARNING)
         if not confirm_box.exec():
             return
-        # 优先在应用内打开捐助页面（展示二维码）
+        # 打开捐助对话框
         try:
-            main_window = self.window()
-            if hasattr(main_window, "_get_donate_page") and hasattr(main_window, "_switch_to_more_page"):
-                donate_page = main_window._get_donate_page()
-                main_window._switch_to_more_page(donate_page)
-                return
+            donate_dialog = QDialog(self)
+            donate_dialog.setWindowTitle("支持作者")
+            donate_dialog.resize(800, 600)
+
+            layout = QVBoxLayout(donate_dialog)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            donate_page = DonatePage(donate_dialog)
+            layout.addWidget(donate_page)
+
+            donate_dialog.exec()
         except Exception as exc:
-            log_suppressed_exception("_open_donate: switch to donate page", exc, level=logging.WARNING)
-        # 兜底：打开本地二维码文件
-        try:
-            assets_dir = get_assets_directory()
-            wechat_path = os.path.join(assets_dir, "WeDonate.png")
-            alipay_path = os.path.join(assets_dir, "AliDonate.jpg")
-            if os.path.exists(wechat_path):
-                webbrowser.open(wechat_path)
-                return
-            if os.path.exists(alipay_path):
-                webbrowser.open(alipay_path)
-                return
-        except Exception as exc:
-            log_suppressed_exception("_open_donate: open local qr", exc, level=logging.WARNING)
-        # 兜底中的兜底：再打开仓库
-        webbrowser.open("https://github.com/hungryM0/fuck-wjx")
+            log_suppressed_exception("_open_donate: show donate dialog", exc, level=logging.WARNING)
+            # 兜底：打开 GitHub 仓库
+            webbrowser.open("https://github.com/hungryM0/fuck-wjx")
 
     def _show_card_edit_menu(self, pos):
         """显示卡密输入框的右键菜单"""

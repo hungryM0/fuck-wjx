@@ -203,10 +203,12 @@ class AboutPage(ScrollArea):
         # 贡献者
         contributors_layout = QHBoxLayout()
         contributors_layout.addWidget(BodyLabel("贡献者：", self))
-        contributor1_link = HyperlinkButton("https://github.com/shiahonb777", "@shiahonb777", self)
-        contributor2_link = HyperlinkButton("https://github.com/BingBuLiang", "@BingBuLiang", self)
+        contributor1_link = HyperlinkButton("https://github.com/hungryM0", "@HUNGRY_M0", self)
+        contributor2_link = HyperlinkButton("https://github.com/shiahonb777", "@shiahonb777", self)
+        contributor3_link = HyperlinkButton("https://github.com/BingBuLiang", "@BingBuLiang", self)
         contributors_layout.addWidget(contributor1_link)
         contributors_layout.addWidget(contributor2_link)
+        contributors_layout.addWidget(contributor3_link)
         contributors_layout.addStretch(1)
         credit_layout.addLayout(contributors_layout)
 

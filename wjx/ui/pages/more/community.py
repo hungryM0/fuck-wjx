@@ -4,7 +4,7 @@ import logging
 import webbrowser
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -137,7 +137,10 @@ class CommunityPage(ScrollArea):
         self.qq_qr_label = QLabel(card)
         self.qq_qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qq_qr_label.setStyleSheet(
-            "border: 1px solid rgba(128,128,128,0.15); border-radius: 8px; padding: 4px;"
+            "background: rgba(255,255,255,0.05); "
+            "border: 1px solid rgba(128,128,128,0.1); "
+            "border-radius: 12px; "
+            "padding: 12px;"
         )
         self.qq_qr_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.qq_qr_label.mousePressEvent = lambda ev: self._on_qr_clicked()
@@ -278,16 +281,16 @@ class CommunityPage(ScrollArea):
     def _load_qr_image(self):
         """加载QQ群二维码图片"""
         try:
-            path = os.path.join(get_assets_directory(), "QQ_group.jpg")
+            path = os.path.join(get_assets_directory(), "community_qr.jpg")
             if os.path.exists(path):
                 pixmap = QPixmap(path)
                 if not pixmap.isNull():
                     self._qq_pixmap = pixmap
                     self._apply_qq_qr_pixmap()
                 else:
-                    self.qq_qr_label.setText("二维码加载失败\nassets/QQ_group.jpg")
+                    self.qq_qr_label.setText("二维码加载失败\nassets/community_qr.jpg")
             else:
-                self.qq_qr_label.setText("二维码未找到\nassets/QQ_group.jpg")
+                self.qq_qr_label.setText("二维码未找到\nassets/community_qr.jpg")
         except Exception as exc:
             self.qq_qr_label.setText(f"加载失败：{exc}")
 
@@ -297,19 +300,35 @@ class CommunityPage(ScrollArea):
         base_width = 160 if self._compact else 180
         ratio = self._qq_pixmap.height() / self._qq_pixmap.width() if self._qq_pixmap.width() else 1
         height = max(160, int(base_width * ratio))
-        self.qq_qr_label.setFixedSize(base_width, height)
-        self.qq_qr_label.setPixmap(
-            self._qq_pixmap.scaled(
-                self.qq_qr_label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+        self.qq_qr_label.setFixedSize(base_width + 24, height + 24)
+        scaled = self._qq_pixmap.scaled(
+            base_width, height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         )
+        self.qq_qr_label.setPixmap(self._round_pixmap(scaled, radius=12))
+
+    def _round_pixmap(self, pixmap: QPixmap, radius: int = 12) -> QPixmap:
+        """圆角处理，避免直角二维码显得突兀"""
+        if pixmap.isNull():
+            return pixmap
+        output = QPixmap(pixmap.size())
+        output.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(output)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        path = QPainterPath()
+        rect = output.rect()
+        path.addRoundedRect(rect, radius, radius)
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+        return output
 
     def _on_qr_clicked(self):
         """点击二维码查看原图"""
         try:
-            path = os.path.join(get_assets_directory(), "QQ_group.jpg")
+            path = os.path.join(get_assets_directory(), "community_qr.jpg")
             if os.path.exists(path):
                 self._show_full_image(path)
         except Exception as exc:
@@ -365,7 +384,3 @@ class CommunityPage(ScrollArea):
             self.recruit_inner.setDirection(QBoxLayout.Direction.LeftToRight)
             self.qq_inner.setDirection(QBoxLayout.Direction.LeftToRight)
         self._apply_qq_qr_pixmap()
-
-
-# 兼容旧名称
-QQGroupPage = CommunityPage

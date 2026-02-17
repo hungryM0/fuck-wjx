@@ -82,7 +82,7 @@ To view the source code supporting macOS, please switch to the [mac branch](http
 
 For questions or technical support, join our QQ Group:
 
-<img width="256" alt="qq" src="https://github.com/user-attachments/assets/7f25caaa-b157-4185-acae-78882f56871d" />
+<img width="256" alt="qq" src="assets/community_qr.jpg" />
 
 ---
 
@@ -110,7 +110,20 @@ Thanks to the following contributors for their support:
 
 ## Donate
 
-<img width="250" alt="payment" src="assets/payment.png" />
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <img width="200" alt="wechat" src="assets/WeDonate.png" /><br/>
+        <strong style="color: #07C160;">WeChat Donate</strong>
+      </td>
+      <td align="center">
+        <img width="200" alt="alipay" src="assets/AliDonate.jpg" /><br/>
+        <strong style="color: #1677FF;">Alipay</strong>
+      </td>
+    </tr>
+  </table>
+</div>
 
 ---
 
