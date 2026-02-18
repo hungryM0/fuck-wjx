@@ -203,8 +203,6 @@ def configure_probabilities(entries: List[QuestionEntry]):
             getattr(entry, "custom_weights", None),
             prefer_custom=(getattr(entry, "distribution_mode", None) == "custom"),
         )
-        if probs is not entry.probabilities:
-            entry.probabilities = probs
         if entry.question_type == "single":
             state.question_config_index_map[question_num] = ("single", _idx_single)
             _idx_single += 1

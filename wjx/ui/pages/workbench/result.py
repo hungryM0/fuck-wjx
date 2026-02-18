@@ -408,8 +408,6 @@ class ResultPage(QWidget):
         # ─── 标题行 ───
         type_text = _TYPE_LABELS.get(q.question_type, q.question_type)
         title = f"第 {q.question_num} 题 ({type_text})"
-        if q.question_title:
-            title += f"：{q.question_title[:60]}"
 
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
@@ -417,6 +415,13 @@ class ResultPage(QWidget):
         title_row.addWidget(title_label)
         title_row.addStretch(1)
         v.addLayout(title_row)
+
+        # 题目内容单独展示，避免与标题挤在一行被截断
+        if q.question_title:
+            question_text_label = BodyLabel(str(q.question_title), card)
+            question_text_label.setWordWrap(True)
+            question_text_label.setStyleSheet("color: rgba(128,128,128,0.85);")
+            v.addWidget(question_text_label)
 
         v.addWidget(_Divider(card))
 

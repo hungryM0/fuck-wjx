@@ -1,5 +1,6 @@
 """主控制面板：卡片式配置区 + 底部状态条（不包含日志）"""
 import os
+import copy
 import threading
 import time
 from typing import List, Dict, Any, Optional
@@ -50,7 +51,7 @@ from wjx.ui.dialogs.card_unlock import CardUnlockDialog
 from wjx.ui.dialogs.contact import ContactDialog
 from wjx.ui.pages.workbench.question import QuestionPage, QuestionWizardDialog, TYPE_CHOICES, STRATEGY_CHOICES, _get_entry_type_label
 from wjx.ui.pages.workbench.runtime import RuntimePage
-from wjx.utils.io.load_save import RuntimeConfig, get_runtime_directory
+from wjx.utils.io.load_save import RuntimeConfig, build_default_config_filename, get_runtime_directory
 from wjx.utils.io.qrcode_utils import decode_qrcode
 from wjx.core.questions.config import QuestionEntry, configure_probabilities
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
@@ -574,18 +575,27 @@ class DashboardPage(QWidget):
         # 应用到界面
         self.runtime_page.apply_config(cfg)
         self.apply_config(cfg)
-        self.question_page.set_entries(cfg.question_entries or [], self.question_page.questions_info)
+        self.question_page.set_entries(cfg.question_entries or [], cfg.questions_info or [])
         self._refresh_entry_table()
+        try:
+            self.update_question_meta(cfg.survey_title or "", len(cfg.question_entries or []))
+        except Exception as exc:
+            log_suppressed_exception("_load_config_from_path: self.update_question_meta(...)", exc, level=logging.WARNING)
         self._sync_start_button_state()
         refresh_ip_counter_display(self.controller.adapter)
         self._toast("已载入配置", "success")
 
     def _on_save_config(self):
         cfg = self._build_config()
-        cfg.question_entries = list(self.question_page.get_entries())
+        # 运行时使用深拷贝，避免执行过程污染用户配置
+        cfg.question_entries = [copy.deepcopy(entry) for entry in self.question_page.get_entries()]
         cfg.questions_info = list(self.question_page.questions_info or [])
         self.controller.config = cfg
-        path, _ = QFileDialog.getSaveFileName(self, "保存配置", os.path.join(get_runtime_directory(), "configs", "config.json"), "JSON 文件 (*.json);;所有文件 (*.*)")
+        configs_dir = os.path.join(get_runtime_directory(), "configs")
+        os.makedirs(configs_dir, exist_ok=True)
+        default_name = build_default_config_filename(self._survey_title)
+        default_path = os.path.join(configs_dir, default_name)
+        path, _ = QFileDialog.getSaveFileName(self, "保存配置", default_path, "JSON 文件 (*.json);;所有文件 (*.*)")
         if not path:
             return
         try:
@@ -725,6 +735,7 @@ class DashboardPage(QWidget):
     def _build_config(self) -> RuntimeConfig:
         cfg = RuntimeConfig()
         cfg.url = self.url_edit.text().strip()
+        cfg.survey_title = str(self._survey_title or "")
         self.runtime_page.update_config(cfg)
         cfg.target = max(1, self.target_spin.value())
         cfg.threads = max(1, self.thread_spin.value())

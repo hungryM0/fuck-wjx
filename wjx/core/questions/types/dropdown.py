@@ -4,6 +4,13 @@ from typing import Any, List, Optional, Tuple, Union
 
 from wjx.network.browser import By, BrowserDriver
 from wjx.core.persona.context import apply_persona_boost, record_answer
+from wjx.core.questions.consistency import (
+    apply_demographic_consistency,
+    apply_single_like_consistency,
+    build_question_semantic,
+    record_demographic_answer,
+    record_consistency_answer,
+)
 from wjx.core.questions.utils import (
     weighted_index,
     normalize_droplist_probs,
@@ -130,6 +137,9 @@ def _fill_droplist_via_click(driver: BrowserDriver, current: int, prob_config: U
     # 画像约束：对匹配画像的选项加权
     click_option_texts = [text for _, _, text in filtered_options]
     probabilities = apply_persona_boost(click_option_texts, probabilities)
+    semantic = build_question_semantic(driver, current, click_option_texts)
+    probabilities = apply_single_like_consistency(probabilities, semantic)
+    probabilities = apply_demographic_consistency(probabilities, driver, current, click_option_texts)
     selected_idx = weighted_index(probabilities)
     _, selected_option, selected_text = filtered_options[selected_idx]
     try:
@@ -140,6 +150,8 @@ def _fill_droplist_via_click(driver: BrowserDriver, current: int, prob_config: U
     stats_collector.record_dropdown_choice(current, selected_idx)
     # 记录作答上下文
     record_answer(current, "dropdown", selected_indices=[selected_idx], selected_texts=[selected_text])
+    record_consistency_answer(semantic, [selected_idx])
+    record_demographic_answer(driver, current, click_option_texts, [selected_idx])
     fill_value = get_fill_text_from_config(fill_entries, selected_idx)
     fill_option_additional_text(driver, current, selected_idx, fill_value)
 
@@ -154,6 +166,9 @@ def dropdown(driver: BrowserDriver, current: int, index: int, droplist_prob_conf
         # 画像约束：对匹配画像的选项加权
         option_texts = [text for _, text in select_options]
         probabilities = apply_persona_boost(option_texts, probabilities)
+        semantic = build_question_semantic(driver, current, option_texts)
+        probabilities = apply_single_like_consistency(probabilities, semantic)
+        probabilities = apply_demographic_consistency(probabilities, driver, current, option_texts)
         selected_idx = weighted_index(probabilities)
         selected_value, selected_text = select_options[selected_idx]
         if _select_dropdown_option_via_js(driver, select_element, selected_value, selected_text):
@@ -161,6 +176,8 @@ def dropdown(driver: BrowserDriver, current: int, index: int, droplist_prob_conf
             stats_collector.record_dropdown_choice(current, selected_idx)
             # 记录作答上下文
             record_answer(current, "dropdown", selected_indices=[selected_idx], selected_texts=[selected_text])
+            record_consistency_answer(semantic, [selected_idx])
+            record_demographic_answer(driver, current, option_texts, [selected_idx])
             fill_value = get_fill_text_from_config(fill_entries, selected_idx)
             fill_option_additional_text(driver, current, selected_idx, fill_value)
             return

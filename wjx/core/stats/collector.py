@@ -261,6 +261,14 @@ class StatsCollector:
             # 从 state.questions_metadata 中提取选项文本（如果有）
             q_metadata = getattr(state, 'questions_metadata', {}).get(q_num)
             if q_metadata:
+                # 补充题目标题（用于结果页展示与导出）
+                if not q_stats.question_title:
+                    raw_title = q_metadata.get('title')
+                    if raw_title is not None:
+                        title_text = str(raw_title).strip()
+                        if title_text:
+                            q_stats.question_title = title_text
+
                 option_texts = q_metadata.get('option_texts')
                 if option_texts and isinstance(option_texts, list):
                     # 为所有选项补充文本（即使该选项还没被选择过）

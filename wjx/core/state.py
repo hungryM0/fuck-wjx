@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import wjx.modes.timed_mode as timed_mode
 
 url = ""
+survey_title = ""
 
 single_prob: List[Union[List[float], int, float, None]] = []
 droplist_prob: List[Union[List[float], int, float, None]] = []
@@ -31,15 +32,23 @@ questions_metadata: Dict[int, Dict[str, Any]] = {}
 
 _browser_semaphore: Optional[threading.Semaphore] = None
 _browser_semaphore_lock = threading.Lock()
+_browser_semaphore_max_instances = 0
 browser_preference: List[str] = []
 
 
 def _get_browser_semaphore(max_instances: int) -> threading.Semaphore:
     """获取或创建浏览器实例信号量，限制同时运行的浏览器数量"""
-    global _browser_semaphore
+    global _browser_semaphore, _browser_semaphore_max_instances
+    normalized = max(1, int(max_instances or 1))
     with _browser_semaphore_lock:
-        if _browser_semaphore is None:
-            _browser_semaphore = threading.Semaphore(max_instances)
+        # 并发配置变更后（例如 1 -> 3），需要重建信号量，
+        # 否则会沿用旧容量导致实际并发一直卡在初始值。
+        if (
+            _browser_semaphore is None
+            or _browser_semaphore_max_instances != normalized
+        ):
+            _browser_semaphore = threading.Semaphore(normalized)
+            _browser_semaphore_max_instances = normalized
         return _browser_semaphore
 
 

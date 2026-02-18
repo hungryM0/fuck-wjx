@@ -56,6 +56,7 @@ def get_assets_directory() -> str:
 __all__ = [
     "_sanitize_filename",
     "_select_user_agent_from_keys",
+    "build_default_config_filename",
     "RuntimeConfig",
     "serialize_question_entry",
     "deserialize_question_entry",
@@ -103,9 +104,18 @@ def _default_config_path() -> str:
     return os.path.join(get_runtime_directory(), "config.json")
 
 
+def build_default_config_filename(survey_title: Optional[str] = None) -> str:
+    """生成默认配置文件名（不包含时间戳）"""
+    title = _sanitize_filename(survey_title or "")
+    if title:
+        return f"{title}.json"
+    return "wjx_config.json"
+
+
 @dataclass
 class RuntimeConfig:
     url: str = ""
+    survey_title: str = ""
     target: int = 1
     threads: int = 1
     browser_preference: List[str] = field(default_factory=list)
@@ -237,6 +247,8 @@ def deserialize_question_entry(data: Dict[str, Any]) -> "QuestionEntry":
     custom_weights = data.get("custom_weights")
     if mode_raw == "custom" and _prob_config_is_unset(probabilities) and _custom_weights_has_positive(custom_weights):
         probabilities = custom_weights
+    if mode_raw == "custom" and (custom_weights is None or custom_weights == []) and isinstance(probabilities, list):
+        custom_weights = list(probabilities)
     return QuestionEntry(
         question_type=data.get("question_type") or "text",
         probabilities=probabilities,
@@ -308,6 +320,7 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
 
     config = RuntimeConfig()
     config.url = str(raw.get("url") or "")
+    config.survey_title = str(raw.get("survey_title") or "")
     config.target = _as_int(raw.get("target") or raw.get("target_num") or 1, 1)
     config.threads = _as_int(raw.get("threads") or raw.get("num_threads") or 1, 1)
     config.browser_preference = _browser_pref_list(raw.get("browser_preference") or raw.get("preferred_browser"))

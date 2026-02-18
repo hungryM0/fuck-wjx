@@ -106,7 +106,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
 
     # 初始化统计会话
     if state.url:
-        stats_collector.start_session(state.url)
+        stats_collector.start_session(state.url, getattr(state, "survey_title", None))
 
     def _register_driver(instance: BrowserDriver) -> None:
         if gui_instance and hasattr(gui_instance, 'active_drivers'):
@@ -186,11 +186,13 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             except Exception as exc:
                 log_suppressed_exception("runner._dispose_driver submit_pid_cleanup", exc, level=logging.WARNING)
 
-        # 【修复】同步停止 Playwright 实例（必须在同一工作线程中调用）
+        # 【关键】同步停止 Playwright 实例（必须在同一工作线程中调用）
         # Playwright Sync API 会在当前线程创建 asyncio 事件循环，
         # 如果 stop() 在其他线程调用，当前线程的事件循环不会被清理，
         # 导致下次 sync_playwright().start() 报错：
         # "using Playwright Sync API inside the asyncio loop"
+        #
+        # 注意：这里会阻塞 1-3 秒，但这是必须的，无法异步化
         try:
             playwright_instance.stop()
             logging.debug("已停止 playwright 实例")

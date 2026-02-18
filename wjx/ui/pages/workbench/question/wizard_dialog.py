@@ -463,7 +463,13 @@ class QuestionWizardDialog(QDialog):
             default_weight = int(round((slider_min + slider_max) / 2))
         else:
             default_weight = 1
-        weights = list(entry.custom_weights or [])
+        raw_weights: Any = entry.custom_weights
+        if not isinstance(raw_weights, (list, tuple)) or not raw_weights:
+            if isinstance(entry.probabilities, (list, tuple)):
+                raw_weights = entry.probabilities
+            else:
+                raw_weights = []
+        weights = list(raw_weights or [])
         if len(weights) < options:
             weights += [default_weight] * (options - len(weights))
         if all(w <= 0 for w in weights):

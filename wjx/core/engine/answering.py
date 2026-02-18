@@ -37,6 +37,7 @@ from wjx.core.questions.types.text import (
     driver_question_is_location as _driver_question_is_location,
     text as _text_impl,
 )
+from wjx.core.questions.consistency import reset_consistency_context
 from wjx.core.questions.tendency import reset_tendency
 from wjx.core.survey.parser import _should_mark_as_multi_text, _should_treat_question_as_text_like
 from wjx.network.browser import BrowserDriver, By, NoSuchElementException
@@ -50,6 +51,7 @@ def brush(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) 
     set_current_persona(persona)
     _reset_answer_context()
     reset_tendency()
+    reset_consistency_context()
     logging.debug("本轮画像：%s", persona.to_description())
     questions_per_page = detect(driver, stop_signal=stop_signal)
     total_question_count = sum(questions_per_page)

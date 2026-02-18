@@ -6,6 +6,13 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 
 from wjx.network.browser import By, BrowserDriver
 from wjx.core.persona.context import apply_persona_boost, record_answer
+from wjx.core.questions.consistency import (
+    apply_demographic_consistency,
+    apply_single_like_consistency,
+    build_question_semantic,
+    record_demographic_answer,
+    record_consistency_answer,
+)
 from wjx.core.questions.utils import (
     weighted_index,
     normalize_droplist_probs,
@@ -83,6 +90,9 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
     for elem in option_elements:
         option_texts.append(extract_text_from_element(elem))
     probabilities = apply_persona_boost(option_texts, probabilities)
+    semantic = build_question_semantic(driver, current, option_texts)
+    probabilities = apply_single_like_consistency(probabilities, semantic)
+    probabilities = apply_demographic_consistency(probabilities, driver, current, option_texts)
     target_index = weighted_index(probabilities)
     selected_option = target_index + 1
     target_elem = option_elements[target_index] if target_index < len(option_elements) else None
@@ -115,6 +125,8 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
     # 记录作答上下文（供后续题目参考）
     selected_text = option_texts[target_index] if target_index < len(option_texts) else ""
     record_answer(current, "single", selected_indices=[target_index], selected_texts=[selected_text])
+    record_consistency_answer(semantic, [target_index])
+    record_demographic_answer(driver, current, option_texts, [target_index])
 
     fill_entries = single_option_fill_texts_config[index] if index < len(single_option_fill_texts_config) else None
     fill_value = get_fill_text_from_config(fill_entries, selected_option - 1)

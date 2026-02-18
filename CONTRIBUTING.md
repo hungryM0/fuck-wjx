@@ -19,7 +19,7 @@
 - `core/`：核心业务逻辑。
   - `engine/`：执行引擎（driver/runtime_control/navigation/submission/runner 等）。
   - `survey/`：问卷解析与检测。
-  - `questions/`：题目配置与题型实现（`types/`）。
+  - `questions/`：题目配置与题型实现（`types/`），以及一致性校验（`consistency.py`）。
   - `captcha/`：验证码处理。
   - `ai/`：AI 运行时。
   - `persona/`：画像与上下文约束。

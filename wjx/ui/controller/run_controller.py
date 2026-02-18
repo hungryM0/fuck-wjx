@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import logging
+import copy
 from urllib.parse import urlparse
 import threading
 import time
@@ -157,7 +158,7 @@ class EngineGuiAdapter:
         优化策略：
         1. 立即刷新批量清理队列（不等待去抖延迟）
         2. 使用批量 taskkill 清理残留 PID
-        3. Fire-and-Forget 方式停止 Playwright 实例
+        3. 不再尝试调用 playwright.stop()（避免线程安全问题）
         """
         drivers = list(self.active_drivers or [])
         self.active_drivers.clear()
@@ -192,31 +193,6 @@ class EngineGuiAdapter:
             except Exception:
                 logging.debug("触发批量清理失败", exc_info=True)
 
-        # 【优化 3】Fire-and-Forget 方式停止 Playwright 实例
-        def _stop_playwright_instances():
-            cleaned_count = 0
-            for driver in drivers:
-                try:
-                    # 尝试标记为已清理（如果已被标记则返回 False，但我们仍然尝试清理）
-                    driver.mark_cleanup_done()
-                    driver._playwright.stop()
-                    cleaned_count += 1
-                except Exception as exc:
-                    # 如果已经被清理过，这里会抛异常，忽略即可
-                    logging.debug(f"停止 Playwright 实例失败（可能已被清理）: {exc}")
-
-            if cleaned_count > 0:
-                logging.debug(f"[兜底清理] 已停止 {cleaned_count} 个 playwright 实例")
-
-        # 在后台线程中停止 Playwright 实例，不阻塞 GUI
-        if drivers:
-            cleanup_thread = threading.Thread(
-                target=_stop_playwright_instances,
-                daemon=True,
-                name="PlaywrightCleanup"
-            )
-            cleanup_thread.start()
-
 
 
 class RunController(QObject):
@@ -235,6 +211,7 @@ class RunController(QObject):
         self.config = RuntimeConfig()
         self.questions_info: List[Dict[str, Any]] = []
         self.question_entries: List[QuestionEntry] = []
+        self.survey_title = ""
         self.stop_event = threading.Event()
         self.worker_threads: List[threading.Thread] = []
         # 先创建清理器，后续 adapter 需要引用
@@ -311,6 +288,7 @@ class RunController(QObject):
                 # 传入现有配置，以便复用已配置的题型权重
                 self.question_entries = self._build_default_entries(info, self.question_entries)
                 self.config.url = normalized_url
+                self.survey_title = title or ""
                 self.surveyParsed.emit(info, title or "")
             except Exception as exc:
                 friendly = str(exc) or "解析失败，请稍后重试"
@@ -372,15 +350,36 @@ class RunController(QObject):
         questions_info: List[Dict[str, Any]], 
         existing_entries: Optional[List[QuestionEntry]] = None
     ) -> List[QuestionEntry]:
-        """构建题目配置列表。如果 existing_entries 中有相同题型的配置，则优先复用其权重设置。"""
-        # 建立题型到已配置权重的映射
-        type_config_map: Dict[str, QuestionEntry] = {}
+        """构建题目配置列表。优先按题号/题目文本精确复用旧配置，避免同题型串台。"""
+        def _normalize_question_num(raw: Any) -> Optional[int]:
+            try:
+                if raw is None:
+                    return None
+                return int(raw)
+            except Exception:
+                return None
+
+        def _normalize_title(raw: Any) -> str:
+            try:
+                text = str(raw or "").strip()
+            except Exception:
+                return ""
+            if not text:
+                return ""
+            # 去掉所有空白，避免不同格式导致匹配失败
+            return "".join(text.split())
+
+        # 建立可复用配置映射（按题号、题目文本）
+        existing_by_num: Dict[int, QuestionEntry] = {}
+        existing_by_title: Dict[str, QuestionEntry] = {}
         if existing_entries:
             for entry in existing_entries:
-                q_type = entry.question_type
-                # 只保存每个题型的第一个配置作为参考
-                if q_type not in type_config_map:
-                    type_config_map[q_type] = entry
+                q_num = _normalize_question_num(getattr(entry, "question_num", None))
+                if q_num is not None and q_num not in existing_by_num:
+                    existing_by_num[q_num] = entry
+                title_key = _normalize_title(getattr(entry, "question_title", None))
+                if title_key and title_key not in existing_by_title:
+                    existing_by_title[title_key] = entry
         
         entries: List[QuestionEntry] = []
         for q in questions_info:
@@ -427,14 +426,31 @@ class RunController(QObject):
             else:
                 option_count = base_option_count
             
-            # 检查是否有已配置的相同题型，如果有则复用其权重配置
-            existing_config = type_config_map.get(q_type)
+            parsed_title_key = _normalize_title(title_text)
+
+            # 优先按题号匹配；题号可用时仍会校验题目标题，避免跨问卷误复用
+            existing_config: Optional[QuestionEntry] = None
+            parsed_question_num = _normalize_question_num(q.get("num"))
+            if parsed_question_num is not None:
+                candidate = existing_by_num.get(parsed_question_num)
+                if candidate and candidate.question_type == q_type:
+                    candidate_title_key = _normalize_title(getattr(candidate, "question_title", None))
+                    if parsed_title_key and candidate_title_key and candidate_title_key != parsed_title_key:
+                        candidate = None
+                    if candidate is not None:
+                        existing_config = candidate
+            if existing_config is None:
+                if parsed_title_key:
+                    candidate = existing_by_title.get(parsed_title_key)
+                    if candidate and candidate.question_type == q_type:
+                        existing_config = candidate
+
             if existing_config:
-                # 复用已配置的权重设置
-                probabilities: Any = existing_config.probabilities
+                # 复用已配置的权重设置（深拷贝，避免多题共享同一对象）
+                probabilities: Any = copy.deepcopy(existing_config.probabilities)
                 distribution = existing_config.distribution_mode or "random"
-                custom_weights = existing_config.custom_weights
-                texts = existing_config.texts
+                custom_weights = copy.deepcopy(existing_config.custom_weights)
+                texts = copy.deepcopy(existing_config.texts)
                 # 对于文本题，复用AI设置
                 ai_enabled_from_existing = getattr(existing_config, "ai_enabled", False) if q_type in ("text", "multi_text") else False
             else:
@@ -534,6 +550,9 @@ class RunController(QObject):
         fail_threshold = max(1, math.ceil(config.target / 4) + 1)
         # sync controller copies
         state.url = config.url
+        config_title = str(getattr(config, "survey_title", "") or "")
+        fallback_title = str(getattr(self, "survey_title", "") or "")
+        state.survey_title = config_title or fallback_title
         state.target_num = config.target
         state.num_threads = max(1, int(config.threads or 1))
         state.browser_preference = list(getattr(config, "browser_preference", []) or [])
@@ -591,6 +610,8 @@ class RunController(QObject):
         
         self.config = config
         self.question_entries = list(getattr(config, "question_entries", []) or [])
+        if not self.questions_info and getattr(config, "questions_info", None):
+            self.questions_info = list(getattr(config, "questions_info") or [])
         self.stop_event = threading.Event()
         self.adapter = EngineGuiAdapter(
             self._dispatch_to_ui,
@@ -710,6 +731,10 @@ class RunController(QObject):
         logging.info("任务启动完成，监控线程已启动")
 
     def _wait_for_threads(self, adapter_snapshot: Optional[EngineGuiAdapter] = None):
+        """等待所有工作线程结束
+
+        注意：这个方法在后台 Monitor 线程中运行，不会阻塞 GUI
+        """
         for t in self.worker_threads:
             t.join()
         self._on_run_finished(adapter_snapshot)
@@ -836,6 +861,8 @@ class RunController(QObject):
         cfg = load_config(path)
         self.config = cfg
         self.question_entries = cfg.question_entries
+        self.questions_info = list(getattr(cfg, "questions_info", None) or [])
+        self.survey_title = str(getattr(cfg, "survey_title", "") or "")
         return cfg
 
     def save_current_config(self, path: Optional[str] = None) -> str:
