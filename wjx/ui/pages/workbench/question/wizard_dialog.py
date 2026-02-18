@@ -245,7 +245,7 @@ class QuestionWizardDialog(QDialog):
             max_int = min_int + 1
         return [min_int, max_int]
 
-    def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], survey_title: Optional[str] = None, parent=None):
+    def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], survey_title: Optional[str] = None, parent=None, reliability_mode_enabled: bool = True):
         super().__init__(parent)
         window_title = "配置向导"
         if survey_title:
@@ -254,6 +254,7 @@ class QuestionWizardDialog(QDialog):
         self.resize(900, 800)
         self.entries = entries
         self.info = info or []
+        self.reliability_mode_enabled = reliability_mode_enabled
         self.slider_map: Dict[int, List[NoWheelSlider]] = {}
         self.matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]] = {}
         self.text_edit_map: Dict[int, List[LineEdit]] = {}
@@ -290,9 +291,10 @@ class QuestionWizardDialog(QDialog):
         _apply_label_color(intro, "#666666", "#bfbfbf")
         layout.addWidget(intro)
 
-        # 维度设置区域
+        # 维度设置区域（仅在信效度模式开启时显示）
         self._dimension_cards: List[DimensionCard] = []
-        self._build_dimension_section(layout)
+        if self.reliability_mode_enabled:
+            self._build_dimension_section(layout)
 
         # 滚动区域
         scroll = ScrollArea(self)
@@ -892,6 +894,10 @@ class QuestionWizardDialog(QDialog):
 
     def get_dimension_results(self) -> Dict[int, str]:
         """获取维度/分组结果 — 从维度卡片的多选状态推导每个题目的维度归属。"""
+        # 如果信效度模式未启用，所有题目都标记为未分组
+        if not self.reliability_mode_enabled:
+            return {idx: DIMENSION_UNGROUPED for idx in range(len(self.entries))}
+
         result: Dict[int, str] = {}
         total = len(self.entries)
 

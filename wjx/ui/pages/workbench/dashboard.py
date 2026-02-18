@@ -1277,7 +1277,9 @@ class DashboardPage(QWidget):
             self._toast("请先解析问卷或手动添加题目", "warning")
             return False
         title = survey_title if survey_title is not None else self._survey_title
-        dlg = QuestionWizardDialog(entries, info, title, self)
+        # 从运行参数页面获取信效度模式开关状态
+        reliability_mode_enabled = getattr(self.runtime_page.reliability_mode_switch, 'isChecked', lambda: True)()
+        dlg = QuestionWizardDialog(entries, info, title, self, reliability_mode_enabled=reliability_mode_enabled)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._apply_wizard_results(entries, dlg)
             return True

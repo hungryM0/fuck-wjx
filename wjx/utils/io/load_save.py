@@ -176,6 +176,7 @@ class RuntimeConfig:
     random_ua_ratios: Dict[str, int] = field(default_factory=lambda: {"wechat": 33, "mobile": 33, "pc": 34})  # 设备类型占比
     fail_stop_enabled: bool = True
     pause_on_aliyun_captcha: bool = True
+    reliability_mode_enabled: bool = True  # 信效度模式开关（控制维度设置是否可用）
     debug_mode: bool = False
     ai_enabled: bool = False
     ai_provider: str = "deepseek"
@@ -428,6 +429,7 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
 
     config.fail_stop_enabled = bool(raw.get("fail_stop_enabled", True))
     config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
+    config.reliability_mode_enabled = bool(raw.get("reliability_mode_enabled", True))
     config.debug_mode = bool(raw.get("debug_mode", False))
 
     ai_keys = {

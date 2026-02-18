@@ -132,6 +132,13 @@ class RuntimePage(ScrollArea):
         spin_width = self.target_card.suggestSpinBoxWidthForDigits(4)
         self.target_card.setSpinBoxWidth(spin_width)
         self.thread_card.setSpinBoxWidth(spin_width)
+
+        self.reliability_mode_card = SwitchSettingCard(
+            FluentIcon.CERTIFICATE, "针对信效度优化策略", "启用后配置向导将显示维度设置，用于提升问卷信效度",
+            parent=run_group
+        )
+        self.reliability_mode_card.setChecked(True)
+
         self.fail_stop_card = SwitchSettingCard(
             FluentIcon.CANCEL, "失败过多自动停止", "连续失败次数过多时自动停止运行",
             parent=run_group
@@ -149,6 +156,7 @@ class RuntimePage(ScrollArea):
         run_group.addSettingCard(self.target_card)
         run_group.addSettingCard(self.thread_card)
         run_group.addSettingCard(self.browser_card)
+        run_group.addSettingCard(self.reliability_mode_card)
         run_group.addSettingCard(self.fail_stop_card)
         run_group.addSettingCard(self.pause_on_aliyun_card)
         layout.addWidget(run_group)
@@ -212,6 +220,7 @@ class RuntimePage(ScrollArea):
         self.thread_spin = self.thread_card.spinBox
         self.fail_stop_switch = self.fail_stop_card.switchButton
         self.pause_on_aliyun_switch = self.pause_on_aliyun_card.switchButton
+        self.reliability_mode_switch = self.reliability_mode_card.switchButton
         self.timed_switch = self.timed_card.switchButton
         self.random_ip_switch = self.random_ip_card.switchButton
         self.random_ua_switch = self.random_ua_card.switchButton
@@ -378,6 +387,7 @@ class RuntimePage(ScrollArea):
         cfg.random_ua_ratios = self.random_ua_card.getRatios() if cfg.random_ua_enabled else {"wechat": 33, "mobile": 33, "pc": 34}
         cfg.fail_stop_enabled = self.fail_stop_switch.isChecked()
         cfg.pause_on_aliyun_captcha = self.pause_on_aliyun_switch.isChecked()
+        cfg.reliability_mode_enabled = self.reliability_mode_switch.isChecked()
         try:
             idx = self.proxy_source_combo.currentIndex()
             source = str(self.proxy_source_combo.itemData(idx)) if idx >= 0 else "default"
@@ -431,6 +441,7 @@ class RuntimePage(ScrollArea):
         self._sync_random_ua(self.random_ua_switch.isChecked())
         self.fail_stop_switch.setChecked(cfg.fail_stop_enabled)
         self.pause_on_aliyun_switch.setChecked(getattr(cfg, "pause_on_aliyun_captcha", True))
+        self.reliability_mode_switch.setChecked(getattr(cfg, "reliability_mode_enabled", True))
 
         try:
             proxy_source = getattr(cfg, "proxy_source", "default")
