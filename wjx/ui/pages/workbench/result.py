@@ -30,8 +30,8 @@ from wjx.core.stats.models import SurveyStats, QuestionStats
 from wjx.core.stats.persistence import save_stats, list_stats_files, load_stats, _ensure_stats_dir
 from wjx.core.stats.raw_storage import raw_data_storage
 from wjx.core.stats.analysis import AnalysisResult, run_analysis
-from wjx.ui.pages.workbench.result_metrics import alpha_level, bartlett_display_text, kmo_level
-from wjx.ui.pages.workbench.result_widgets import (
+from wjx.ui.pages.workbench.result_parts.metrics import alpha_level, bartlett_display_text, kmo_level
+from wjx.ui.pages.workbench.result_parts.widgets import (
     _BarRow,
     _Divider,
     _MatrixCell,
@@ -661,16 +661,7 @@ class ResultPage(QWidget):
         # Cronbach's Alpha 值
         if dim_info.cronbach_alpha is not None:
             alpha = dim_info.cronbach_alpha
-            if alpha >= 0.9:
-                color, desc = "#22c55e", "优秀"
-            elif alpha >= 0.8:
-                color, desc = "#22c55e", "良好"
-            elif alpha >= 0.7:
-                color, desc = "#f59e0b", "可接受"
-            elif alpha >= 0.6:
-                color, desc = "#f59e0b", "勉强可接受"
-            else:
-                color, desc = "#ef4444", "较差"
+            color, desc = alpha_level(alpha)
 
             alpha_value_label = StrongBodyLabel(f"α = {alpha:.3f}", widget)
             alpha_value_label.setStyleSheet(f"color: {color}; font-size: 16px;")

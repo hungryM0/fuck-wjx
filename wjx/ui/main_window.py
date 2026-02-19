@@ -31,9 +31,9 @@ from wjx.ui.dialogs.card_unlock import CardUnlockDialog
 from wjx.ui.dialogs.contact import ContactDialog
 
 from wjx.ui.controller import RunController
-from wjx.ui.main_window_lazy_pages import MainWindowLazyPagesMixin
-from wjx.ui.main_window_popup_compat import MainWindowPopupCompatMixin
-from wjx.ui.main_window_update import MainWindowUpdateMixin
+from wjx.ui.main_window_parts.lazy_pages import MainWindowLazyPagesMixin
+from wjx.ui.main_window_parts.popup_compat import MainWindowPopupCompatMixin
+from wjx.ui.main_window_parts.update import MainWindowUpdateMixin
 from wjx.utils.app.config import APP_ICON_RELATIVE_PATH, get_bool_from_qsettings
 from wjx.utils.io.load_save import RuntimeConfig, get_runtime_directory
 from wjx.utils.logging.log_utils import LOG_BUFFER_HANDLER, register_popup_handler, log_suppressed_exception

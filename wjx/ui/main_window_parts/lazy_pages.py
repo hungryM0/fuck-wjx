@@ -20,8 +20,6 @@ from wjx.utils.integrations.github_auth import get_github_auth
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QStackedWidget, QWidget
-    from qfluentwidgets import FluentIcon as _FluentIcon
-    from qfluentwidgets.common.icon import FluentIconBase
     from wjx.ui.pages.workbench.dashboard import DashboardPage
     from wjx.ui.pages.workbench.runtime import RuntimePage
 

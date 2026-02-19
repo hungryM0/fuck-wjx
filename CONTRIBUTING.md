@@ -32,19 +32,14 @@ wjx/
 │   └── state.py           # 运行状态与全局控制变量
 ├── ui/                    # 界面层
 │   ├── main_window.py     # 主窗口编排
-│   ├── main_window_lazy_pages.py
-│   ├── main_window_popup_compat.py
-│   ├── main_window_update.py
+│   ├── main_window_parts/ # 主窗口拆分模块（lazy_pages/popup_compat/update）
 │   ├── controller/        # 运行控制器（run_controller.py）
 │   ├── pages/             # 各页面（workbench/account/settings/more）
 │   │   └── workbench/
 │   │       ├── dashboard.py
-│   │       ├── dashboard_clipboard.py
-│   │       ├── dashboard_entries.py
-│   │       ├── dashboard_random_ip.py
+│   │       ├── dashboard_parts/ # dashboard 拆分模块（clipboard/entries/random_ip）
 │   │       ├── result.py
-│   │       ├── result_widgets.py
-│   │       └── result_metrics.py
+│   │       └── result_parts/ # result 拆分模块（widgets/metrics）
 │   ├── widgets/           # 通用 UI 组件
 │   ├── dialogs/           # 对话框
 │   ├── helpers/           # 界面辅助逻辑

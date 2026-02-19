@@ -39,9 +39,9 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import RoundMenu
 
-from wjx.ui.pages.workbench.dashboard_clipboard import DashboardClipboardMixin
-from wjx.ui.pages.workbench.dashboard_entries import DashboardEntriesMixin
-from wjx.ui.pages.workbench.dashboard_random_ip import DashboardRandomIPMixin
+from wjx.ui.pages.workbench.dashboard_parts.clipboard import DashboardClipboardMixin
+from wjx.ui.pages.workbench.dashboard_parts.entries import DashboardEntriesMixin
+from wjx.ui.pages.workbench.dashboard_parts.random_ip import DashboardRandomIPMixin
 from wjx.ui.widgets import ConfigDrawer
 from wjx.ui.widgets.full_width_infobar import FullWidthInfoBar
 from wjx.ui.widgets.no_wheel import NoWheelSpinBox
