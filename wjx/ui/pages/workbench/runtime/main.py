@@ -19,8 +19,8 @@ from qfluentwidgets import (
 )
 
 from wjx.ui.controller import RunController
-from wjx.ui.pages.workbench.runtime_ai import RuntimeAISection
-from wjx.ui.pages.workbench.runtime_cards import (
+from wjx.ui.pages.workbench.runtime.ai import RuntimeAISection
+from wjx.ui.pages.workbench.runtime.cards import (
     RandomIPSettingCard,
     RandomUASettingCard,
     TimeRangeSettingCard,
