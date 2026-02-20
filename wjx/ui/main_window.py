@@ -123,7 +123,6 @@ class MainWindow(
         self._changelog_page = None
         self._changelog_detail_page = None
         self._donate_page = None
-        self._login_page = None
         self._settings_page = None
 
         # 设置对象名称
@@ -133,8 +132,6 @@ class MainWindow(
 
         self._init_navigation()
         self._init_changelog_navigation()
-
-        self._init_github_avatar()
         # 设置侧边栏宽度和折叠策略（延迟到事件循环中，避免时序问题）
         self.navigationInterface.setExpandWidth(140)
         QTimer.singleShot(0, self._setup_sidebar_state)
@@ -285,13 +282,6 @@ class MainWindow(
                     self._boot_splash.cleanup()
                 except Exception as exc:
                     log_suppressed_exception("closeEvent: self._boot_splash.cleanup()", exc)
-
-            # 断开网络管理器的所有信号连接，避免回调对象析构警告
-            if hasattr(self, '_network_manager') and self._network_manager:
-                try:
-                    self._network_manager.blockSignals(True)
-                except Exception as exc:
-                    log_suppressed_exception("closeEvent: self._network_manager.blockSignals(True)", exc)
 
             # 停止日志页面定时器
             if self._log_page and hasattr(self._log_page, '_refresh_timer'):

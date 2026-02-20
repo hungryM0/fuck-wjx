@@ -33,7 +33,7 @@ wjx/
 │   ├── main_window.py     # 主窗口编排
 │   ├── main_window_parts/ # 主窗口拆分模块（lazy_pages/popup_compat/update）
 │   ├── controller/        # 运行控制器（run_controller.py）
-│   ├── pages/             # 各页面（workbench/account/settings/more）
+│   ├── pages/             # 各页面（workbench/settings/more）
 │   │   └── workbench/
 │   │       ├── dashboard.py
 │   │       ├── dashboard_parts/ # dashboard 拆分模块（clipboard/entries/random_ip）
