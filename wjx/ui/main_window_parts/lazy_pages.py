@@ -41,7 +41,6 @@ class MainWindowLazyPagesMixin:
     def _init_navigation(self):
         self.addSubInterface(self.dashboard, FluentIcon.HOME, "概览", NavigationItemPosition.TOP)
         self.addSubInterface(self.runtime_page, FluentIcon.DEVELOPER_TOOLS, "运行参数", NavigationItemPosition.TOP)
-        self.addSubInterface(self._get_result_page(), FluentIcon.PIE_SINGLE, "结果分析", NavigationItemPosition.TOP)
         self.addSubInterface(self._get_log_page(), FluentIcon.INFO, "日志", NavigationItemPosition.TOP)
         # 登录页面（动态更新）
         self._login_nav_widget = None
@@ -59,15 +58,6 @@ class MainWindowLazyPagesMixin:
             position=NavigationItemPosition.BOTTOM,
         )
         self.navigationInterface.setCurrentItem(self.dashboard.objectName())
-
-    def _get_result_page(self):
-        """懒加载结果页面"""
-        if self._result_page is None:
-            from wjx.ui.pages.workbench.result import ResultPage
-
-            self._result_page = ResultPage(self)
-            self._result_page.setObjectName("result")
-        return self._result_page
 
     def _get_log_page(self):
         """懒加载日志页面"""

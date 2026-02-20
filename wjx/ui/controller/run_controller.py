@@ -32,8 +32,6 @@ from wjx.network.proxy import (
     is_custom_proxy_api_active,
 )
 from wjx.utils.system.registry_manager import RegistryManager
-from wjx.core.stats.collector import stats_collector
-from wjx.core.stats.persistence import save_stats
 
 
 def _is_wjx_domain(url_value: str) -> bool:
@@ -207,7 +205,6 @@ class RunController(QObject):
     statusUpdated = Signal(str, int, int)
     pauseStateChanged = Signal(bool, str)
     cleanupFinished = Signal()
-    askSaveStats = Signal()  # 新增：询问用户是否保存统计数据
     _uiCallbackQueued = Signal(object)
 
     def __init__(self, parent=None):
@@ -817,13 +814,6 @@ class RunController(QObject):
         # 做一次最终状态刷新
         self._emit_status()
 
-        # 如果是用户手动停止（未达到目标份数），询问是否保存统计
-        current = getattr(state, "cur_num", 0)
-        target = getattr(state, "target_num", 0)
-        if target > 0 and current < target and current > 0:
-            # 延迟发送信号，确保UI状态已更新
-            QTimer.singleShot(100, self.askSaveStats.emit)
-
     def resume_run(self):
         """Resume execution after a pause (does not restart threads)."""
         if not self.running:
@@ -881,19 +871,4 @@ class RunController(QObject):
         self.config.question_entries = self.question_entries
         return save_config(self.config, path)
 
-    def _save_stats_if_available(self) -> Optional[str]:
-        """内部方法：保存统计数据（如果有）"""
-        try:
-            current_stats = stats_collector.get_current_stats()
-            if current_stats and current_stats.total_submissions > 0:
-                path = save_stats(current_stats)
-                logging.info(f"统计数据已保存到：{path}")
-                return path
-        except Exception as exc:
-            logging.error(f"保存统计数据失败：{exc}", exc_info=True)
-        return None
-
-    def save_stats_with_prompt(self) -> Optional[str]:
-        """UI调用：保存统计数据（通常在用户确认后调用）"""
-        return self._save_stats_if_available()
 

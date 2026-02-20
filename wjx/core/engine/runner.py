@@ -25,7 +25,6 @@ from wjx.core.engine.runtime_control import (
     _wait_if_paused,
 )
 from wjx.core.engine.submission import _is_device_quota_limit_page, _normalize_url_for_compare
-from wjx.core.stats.collector import stats_collector
 from wjx.network.browser import (
     BrowserDriver,
     ProxyConnectionError,
@@ -103,10 +102,6 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         logging.debug("随机IP已启用")
     if state.random_user_agent_enabled:
         logging.debug("随机UA已启用")
-
-    # 初始化统计会话
-    if state.url:
-        stats_collector.start_session(state.url, getattr(state, "survey_title", None))
 
     def _register_driver(instance: BrowserDriver) -> None:
         if gui_instance and hasattr(gui_instance, 'active_drivers'):
@@ -316,8 +311,6 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         logging.info(
                             f"[OK/Quota] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
-                        # 提交统计：将缓冲区的题目作答合并到主统计
-                        stats_collector.commit_round()
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
                             trigger_target_stop = True
@@ -345,8 +338,6 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
             while True:
                 if stop_signal.is_set():
                     break
-                # 开始新轮作答，清空统计缓冲区
-                stats_collector.start_round()
                 finished = brush(driver, stop_signal=stop_signal)
                 if stop_signal.is_set() or not finished:
                     break
@@ -459,8 +450,6 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         logging.info(
                             f"[OK] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
-                        # 提交统计：将缓冲区的题目作答合并到主统计
-                        stats_collector.commit_round()
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
                             trigger_target_stop = True
@@ -568,8 +557,6 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         logging.info(
                             f"[OK] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
-                        # 提交统计：将缓冲区的题目作答合并到主统计
-                        stats_collector.commit_round()
                         should_handle_random_ip = state.random_proxy_ip_enabled
                         if state.target_num > 0 and state.cur_num >= state.target_num:
                             trigger_target_stop = True

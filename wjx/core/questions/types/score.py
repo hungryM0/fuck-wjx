@@ -7,7 +7,6 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 from wjx.network.browser import By, BrowserDriver, NoSuchElementException
 from wjx.core.persona.context import record_answer
 from wjx.core.questions.tendency import get_tendency_index
-from wjx.core.stats.collector import stats_collector
 
 
 def _is_valid_score_option(element) -> bool:
@@ -88,7 +87,6 @@ def score(driver: BrowserDriver, current: int, index: int, score_prob_config: Li
         except Exception as exc:
             log_suppressed_exception("score: driver.execute_script(\"arguments[0].click();\", target)", exc, level=logging.ERROR)
     # 记录统计数据
-    stats_collector.record_score_choice(current, selected_index)
     # 记录作答上下文
     record_answer(current, "score", selected_indices=[selected_index])
 

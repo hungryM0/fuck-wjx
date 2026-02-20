@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 import wjx.core.state as state
 from wjx.utils.logging.log_utils import log_suppressed_exception
-from wjx.core.stats.collector import stats_collector
 
 
 def _is_fast_mode() -> bool:
@@ -28,9 +27,6 @@ def _handle_submission_failure(stop_signal: Optional[threading.Event]) -> bool:
     递增失败计数；当开启失败止损时超过阈值会触发停止。
     返回 True 表示已触发强制停止。
     """
-    # 记录失败统计
-    stats_collector.record_submission_failure()
-
     with state.lock:
         state.cur_fail += 1
         if state.stop_on_fail_enabled:

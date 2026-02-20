@@ -116,7 +116,6 @@ class MainWindow(
         self.dashboard = DashboardPage(self.controller, self.question_page, self.runtime_page, self)
 
         # 延迟初始化非关键页面（懒加载）
-        self._result_page = None
         self._log_page = None
         self._support_page = None
         self._community_page = None
@@ -428,7 +427,6 @@ class MainWindow(
         self.controller.statusUpdated.connect(self.dashboard.update_status)
         self.controller.pauseStateChanged.connect(self.dashboard.on_pause_state_changed)
         self.controller.cleanupFinished.connect(self.dashboard.on_cleanup_finished)
-        self.controller.askSaveStats.connect(self._on_ask_save_stats)  # 新增：询问保存统计
         self.controller.on_ip_counter = self.dashboard.update_random_ip_counter
 
     def _register_popups(self):
@@ -493,21 +491,6 @@ class MainWindow(
     def _on_survey_parse_failed(self, msg: str):
         self._toast(msg, "error")
         self.dashboard._open_wizard_after_parse = False
-
-    def _on_ask_save_stats(self):
-        """用户手动停止时询问是否保存统计数据"""
-        box = MessageBox("保存统计数据", "是否保存本次作答的统计数据？", self)
-        box.yesButton.setText("保存")
-        box.cancelButton.setText("不保存")
-        if box.exec() == QDialog.DialogCode.Accepted:
-            try:
-                path = self.controller.save_stats_with_prompt()
-                if path:
-                    self._toast("统计数据已保存", "success")
-                else:
-                    self._toast("没有统计数据可保存", "info")
-            except Exception as exc:
-                self._toast(f"保存失败：{exc}", "error")
 
     def _ask_card_code(self) -> Optional[str]:
         dialog = CardUnlockDialog(

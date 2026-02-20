@@ -27,7 +27,6 @@ wjx/
 │   ├── captcha/           # 验证码处理
 │   ├── ai/                # AI 运行时
 │   ├── persona/           # 画像与上下文约束
-│   ├── stats/             # 统计收集、持久化、分析
 │   ├── services/          # 核心服务层（如地区数据加载）
 │   └── state.py           # 运行状态与全局控制变量
 ├── ui/                    # 界面层
@@ -38,8 +37,6 @@ wjx/
 │   │   └── workbench/
 │   │       ├── dashboard.py
 │   │       ├── dashboard_parts/ # dashboard 拆分模块（clipboard/entries/random_ip）
-│   │       ├── result.py
-│   │       └── result_parts/ # result 拆分模块（widgets/metrics）
 │   ├── widgets/           # 通用 UI 组件
 │   ├── dialogs/           # 对话框
 │   ├── helpers/           # 界面辅助逻辑

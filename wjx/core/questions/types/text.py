@@ -15,7 +15,6 @@ from wjx.core.questions.utils import (
 )
 from wjx.core.ai.runtime import AIRuntimeError, generate_ai_answer, resolve_question_title_for_ai
 from wjx.core.persona.context import record_answer
-from wjx.core.stats.collector import stats_collector
 
 # 多项填空题分隔符
 MULTI_TEXT_DELIMITER = "||"
@@ -348,7 +347,6 @@ def text(
             raise AIRuntimeError(f"第{current}题 AI 生成失败：{exc}") from exc
         _handle_single_text(driver, current, selected_answer)
         # 记录统计数据（AI生成的答案）
-        stats_collector.record_text_answer(current, selected_answer)
         record_answer(current, "text", text_answer=selected_answer)
         return
 
@@ -358,13 +356,11 @@ def text(
     if entry_kind == "multi_text":
         _handle_multi_text(driver, current, selected_answer)
         # 记录统计数据
-        stats_collector.record_text_answer(current, selected_answer)
         record_answer(current, "text", text_answer=selected_answer)
         return
 
     _handle_single_text(driver, current, selected_answer)
     # 记录统计数据
-    stats_collector.record_text_answer(current, selected_answer)
     record_answer(current, "text", text_answer=selected_answer)
 
 

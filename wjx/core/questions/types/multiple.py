@@ -33,7 +33,6 @@ from wjx.core.questions.consistency import (
     pick_allowed_indices_for_random_multi,
     record_consistency_answer,
 )
-from wjx.core.stats.collector import stats_collector
 
 # 缓存检测到的多选限制
 _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
@@ -363,7 +362,6 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
             fill_value = get_fill_text_from_config(fill_entries, option_idx)
             fill_option_additional_text(driver, current, option_idx, fill_value)
         # 记录统计数据
-        stats_collector.record_multiple_choice(current, selected_indices)
         # 记录作答上下文
         selected_texts = [option_texts[i] for i in selected_indices if i < len(option_texts)]
         record_answer(current, "multiple", selected_indices=selected_indices, selected_texts=selected_texts)
@@ -413,7 +411,6 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
                 "第%d题（多选）：所有选项概率都 <= 0，已跳过本题作答；请在配置中至少保留一个 > 0%% 的选项。",
                 current,
             )
-        stats_collector.record_multiple_choice(current, [])
         return
     while sum(selection_mask) == 0 and attempts < max_attempts:
         selection_mask = [1 if random.random() < (prob / 100.0) else 0 for prob in selection_probabilities]
@@ -459,7 +456,6 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
         fill_option_additional_text(driver, current, option_idx, fill_value)
 
     # 记录统计数据
-    stats_collector.record_multiple_choice(current, selected_indices)
 
     # 记录作答上下文
     selected_texts = [option_texts[i] for i in selected_indices if i < len(option_texts)]

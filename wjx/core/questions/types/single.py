@@ -21,7 +21,6 @@ from wjx.core.questions.utils import (
     extract_text_from_element,
     smooth_scroll_to_element,
 )
-from wjx.core.stats.collector import stats_collector
 
 
 def _looks_like_single_option(element: Any) -> bool:
@@ -237,7 +236,6 @@ def single(driver: BrowserDriver, current: int, index: int, single_prob_config: 
         return
 
     # 记录统计数据
-    stats_collector.record_single_choice(current, target_index)
 
     # 记录作答上下文（供后续题目参考）
     selected_text = option_texts[target_index] if target_index < len(option_texts) else ""
