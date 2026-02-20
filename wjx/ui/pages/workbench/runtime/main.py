@@ -163,7 +163,7 @@ class RuntimePage(ScrollArea):
         time_group = SettingCardGroup("时间控制", self.view)
         # 在标题后添加小字提示（保持原标题字号）
         time_hint = BodyLabel("（其实问卷星官方并不会因为你提交过快就封你号）", time_group)
-        time_hint.setStyleSheet("color: blue; font-size: 12px;")
+        time_hint.setStyleSheet("color: green; font-size: 12px;")
         # 创建水平布局放置标题和提示
         title_container = QWidget(time_group)
         title_h_layout = QHBoxLayout(title_container)
