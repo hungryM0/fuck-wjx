@@ -19,6 +19,18 @@ from wjx.utils.logging.log_utils import (
 from wjx.utils.io.load_save import ConfigPersistenceMixin
 from wjx.utils.update.updater import check_for_updates, perform_update
 from wjx.utils.system.registry_manager import RegistryManager
+from wjx.utils.event_bus import (
+    bus as event_bus,
+    EventBus,
+    EVENT_TASK_STARTED,
+    EVENT_TASK_STOPPED,
+    EVENT_TASK_PAUSED,
+    EVENT_TASK_RESUMED,
+    EVENT_TARGET_REACHED,
+    EVENT_CAPTCHA_DETECTED,
+    EVENT_SUBMIT_SUCCESS,
+    EVENT_SUBMIT_FAILURE,
+)
 
 __all__ = [
     "DEFAULT_HTTP_HEADERS",
@@ -40,4 +52,15 @@ __all__ = [
     "check_for_updates",
     "perform_update",
     "RegistryManager",
+    # event_bus
+    "event_bus",
+    "EventBus",
+    "EVENT_TASK_STARTED",
+    "EVENT_TASK_STOPPED",
+    "EVENT_TASK_PAUSED",
+    "EVENT_TASK_RESUMED",
+    "EVENT_TARGET_REACHED",
+    "EVENT_CAPTCHA_DETECTED",
+    "EVENT_SUBMIT_SUCCESS",
+    "EVENT_SUBMIT_FAILURE",
 ]

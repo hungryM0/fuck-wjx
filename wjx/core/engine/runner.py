@@ -308,6 +308,10 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 with state.lock:
                     if state.target_num <= 0 or state.cur_num < state.target_num:
                         state.cur_num += 1
+                        # 同步更新 TaskContext（如果可用）
+                        if gui_instance and hasattr(gui_instance, 'task_ctx') and gui_instance.task_ctx:
+                            with gui_instance.task_ctx.lock:
+                                gui_instance.task_ctx.cur_num += 1
                         logging.info(
                             f"[OK/Quota] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
@@ -372,7 +376,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 if aliyun_detected:
                     driver_had_error = True
                     # 触发智能验证，标记为失败
-                    _handle_submission_failure(stop_signal)
+                    _handle_submission_failure(stop_signal, gui_instance)
                     _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
@@ -381,7 +385,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     driver_had_error = True
                     logging.warning("提交后检测到安全校验拦截提示，触发全局暂停")
                     # 触发智能验证，标记为失败
-                    _handle_submission_failure(stop_signal)
+                    _handle_submission_failure(stop_signal, gui_instance)
                     _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
@@ -411,7 +415,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         driver_had_error = True
                         logging.warning("提交后等待完成页期间命中安全校验提示，触发全局暂停")
                         # 触发智能验证，标记为失败
-                        _handle_submission_failure(stop_signal)
+                        _handle_submission_failure(stop_signal, gui_instance)
                         _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                         break
                     time.sleep(poll_interval)
@@ -431,7 +435,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                         driver_had_error = True
                         logging.warning("提交后未进入完成页且检测到阿里云智能验证，触发全局暂停")
                         # 触发智能验证，标记为失败
-                        _handle_submission_failure(stop_signal)
+                        _handle_submission_failure(stop_signal, gui_instance)
                         _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                         break
                     except Exception as exc:
@@ -447,6 +451,10 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 with state.lock:
                     if state.target_num <= 0 or state.cur_num < state.target_num:
                         state.cur_num += 1
+                        # 同步更新 TaskContext（如果可用）
+                        if gui_instance and hasattr(gui_instance, 'task_ctx') and gui_instance.task_ctx:
+                            with gui_instance.task_ctx.lock:
+                                gui_instance.task_ctx.cur_num += 1
                         logging.info(
                             f"[OK] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
@@ -471,7 +479,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
         except AliyunCaptchaBypassError:
             driver_had_error = True
             # 触发智能验证，标记为失败
-            _handle_submission_failure(stop_signal)
+            _handle_submission_failure(stop_signal, gui_instance)
             _handle_aliyun_captcha_detected(gui_instance, stop_signal)
             break
         except AIRuntimeError as exc:
@@ -530,7 +538,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 if aliyun_detected:
                     driver_had_error = True
                     # 触发智能验证，标记为失败
-                    _handle_submission_failure(stop_signal)
+                    _handle_submission_failure(stop_signal, gui_instance)
                     _handle_aliyun_captcha_detected(gui_instance, stop_signal)
                     break
 
@@ -554,6 +562,10 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 with state.lock:
                     if state.target_num <= 0 or state.cur_num < state.target_num:
                         state.cur_num += 1
+                        # 同步更新 TaskContext（如果可用）
+                        if gui_instance and hasattr(gui_instance, 'task_ctx') and gui_instance.task_ctx:
+                            with gui_instance.task_ctx.lock:
+                                gui_instance.task_ctx.cur_num += 1
                         logging.info(
                             f"[OK] 已填写{state.cur_num}份 - 失败{state.cur_fail}次 - {time.strftime('%H:%M:%S', time.localtime(time.time()))}"
                         )
@@ -574,7 +586,7 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                 continue
 
             driver_had_error = True
-            if _handle_submission_failure(stop_signal):
+            if _handle_submission_failure(stop_signal, gui_instance):
                 break
         except ProxyConnectionError as exc:
             driver_had_error = True
@@ -588,20 +600,20 @@ def run(window_x_pos, window_y_pos, stop_signal: threading.Event, gui_instance=N
                     break
                 stop_signal.wait(0.8)
                 continue
-            if _handle_submission_failure(stop_signal):
+            if _handle_submission_failure(stop_signal, gui_instance):
                 break
         except EmptySurveySubmissionError:
             driver_had_error = True
             if stop_signal.is_set():
                 break
-            if _handle_submission_failure(stop_signal):
+            if _handle_submission_failure(stop_signal, gui_instance):
                 break
         except Exception:
             driver_had_error = True
             if stop_signal.is_set():
                 break
             traceback.print_exc()
-            if _handle_submission_failure(stop_signal):
+            if _handle_submission_failure(stop_signal, gui_instance):
                 break
         finally:
             if driver_had_error:

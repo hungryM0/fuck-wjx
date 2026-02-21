@@ -14,6 +14,7 @@ import wjx.network.http_client as http_client
 from PySide6.QtCore import QObject, Signal, QTimer, QCoreApplication
 
 import wjx.core.state as state
+from wjx.core.task_context import TaskContext
 from wjx.utils.app.config import DEFAULT_HTTP_HEADERS, DEFAULT_FILL_TEXT, STOP_FORCE_WAIT_SECONDS
 from wjx.utils.system.cleanup_runner import CleanupRunner
 from wjx.core.questions.config import QuestionEntry, configure_probabilities, validate_question_config
@@ -32,6 +33,11 @@ from wjx.network.proxy import (
     is_custom_proxy_api_active,
 )
 from wjx.utils.system.registry_manager import RegistryManager
+from wjx.utils.event_bus import (
+    bus as _event_bus,
+    EVENT_TASK_STARTED,
+    EVENT_TASK_STOPPED,
+)
 
 
 def _is_wjx_domain(url_value: str) -> bool:
@@ -89,6 +95,7 @@ class EngineGuiAdapter:
         self._stop_signal = stop_signal
         self._card_code_provider = card_code_provider
         self.update_random_ip_counter = on_ip_counter
+        self.task_ctx: Optional[TaskContext] = None  # 任务上下文，由 RunController 在 start_run 时设置
         self._pause_event = threading.Event()
         self._pause_reason = ""
         self._cleanup_runner = cleanup_runner  # 用于异步清理浏览器
@@ -215,6 +222,8 @@ class RunController(QObject):
         self.survey_title = ""
         self.stop_event = threading.Event()
         self.worker_threads: List[threading.Thread] = []
+        # 当前任务上下文（每次 start_run 时重新构造）
+        self._task_ctx: Optional[TaskContext] = None
         # 先创建清理器，后续 adapter 需要引用
         self._cleanup_runner = CleanupRunner()
         self.adapter = EngineGuiAdapter(
@@ -547,38 +556,65 @@ class RunController(QObject):
             return None
         return result_container.get("value")
 
-    def _prepare_engine_state(self, config: RuntimeConfig, proxy_pool: List[str]) -> None:
+    def _prepare_engine_state(self, config: RuntimeConfig, proxy_pool: List[str]) -> TaskContext:
+        """构建本次任务的 TaskContext，并同步兼容性写入全局 state。"""
         fail_threshold = max(1, math.ceil(config.target / 4) + 1)
-        # sync controller copies
-        state.url = config.url
         config_title = str(getattr(config, "survey_title", "") or "")
         fallback_title = str(getattr(self, "survey_title", "") or "")
-        state.survey_title = config_title or fallback_title
-        state.target_num = config.target
-        state.num_threads = max(1, int(config.threads or 1))
-        state.browser_preference = list(getattr(config, "browser_preference", []) or [])
-        state.fail_threshold = fail_threshold
-        # 新一轮任务必须从 0 开始计数，否则进度会沿用上次完成值
+        survey_title = config_title or fallback_title
+
+        # ── 构建 TaskContext 实例 ─────────────────────────────────────────
+        ctx = TaskContext(
+            url=config.url,
+            survey_title=survey_title,
+            target_num=config.target,
+            num_threads=max(1, int(config.threads or 1)),
+            browser_preference=list(getattr(config, "browser_preference", []) or []),
+            fail_threshold=fail_threshold,
+            cur_num=0,
+            cur_fail=0,
+            stop_event=self.stop_event,
+            submit_interval_range_seconds=tuple(config.submit_interval),
+            answer_duration_range_seconds=tuple(config.answer_duration),
+            timed_mode_enabled=config.timed_mode_enabled,
+            timed_mode_refresh_interval=config.timed_mode_interval,
+            random_proxy_ip_enabled=config.random_ip_enabled,
+            proxy_ip_pool=list(proxy_pool) if config.random_ip_enabled else [],
+            random_user_agent_enabled=config.random_ua_enabled,
+            user_agent_pool_keys=list(config.random_ua_keys),
+            user_agent_ratios=dict(getattr(config, "random_ua_ratios", {"wechat": 33, "mobile": 33, "pc": 34})),
+            stop_on_fail_enabled=config.fail_stop_enabled,
+            pause_on_aliyun_captcha=bool(getattr(config, "pause_on_aliyun_captcha", True)),
+        )
+
+        # ── 向后兼容：同步写入全局 state（供尚未迁移的内部模块使用） ──────
+        state.url = ctx.url
+        state.survey_title = ctx.survey_title
+        state.target_num = ctx.target_num
+        state.num_threads = ctx.num_threads
+        state.browser_preference = list(ctx.browser_preference)
+        state.fail_threshold = ctx.fail_threshold
         state.cur_num = 0
         state.cur_fail = 0
         state.stop_event = self.stop_event
-        state.submit_interval_range_seconds = tuple(config.submit_interval)
-        state.answer_duration_range_seconds = tuple(config.answer_duration)
-        state.timed_mode_enabled = config.timed_mode_enabled
-        state.timed_mode_refresh_interval = config.timed_mode_interval
-        state.random_proxy_ip_enabled = config.random_ip_enabled
-        state.proxy_ip_pool = proxy_pool if config.random_ip_enabled else []
-        state.random_user_agent_enabled = config.random_ua_enabled
-        state.user_agent_pool_keys = config.random_ua_keys
-        state.user_agent_ratios = getattr(config, "random_ua_ratios", {"wechat": 33, "mobile": 33, "pc": 34})
-        state.stop_on_fail_enabled = config.fail_stop_enabled
-        state.pause_on_aliyun_captcha = bool(getattr(config, "pause_on_aliyun_captcha", True))
-        # sync module-level aliases used elsewhere in this file
+        state.submit_interval_range_seconds = ctx.submit_interval_range_seconds
+        state.answer_duration_range_seconds = ctx.answer_duration_range_seconds
+        state.timed_mode_enabled = ctx.timed_mode_enabled
+        state.timed_mode_refresh_interval = ctx.timed_mode_refresh_interval
+        state.random_proxy_ip_enabled = ctx.random_proxy_ip_enabled
+        state.proxy_ip_pool = list(ctx.proxy_ip_pool)
+        state.random_user_agent_enabled = ctx.random_user_agent_enabled
+        state.user_agent_pool_keys = list(ctx.user_agent_pool_keys)
+        state.user_agent_ratios = dict(ctx.user_agent_ratios)
+        state.stop_on_fail_enabled = ctx.stop_on_fail_enabled
+        state.pause_on_aliyun_captcha = ctx.pause_on_aliyun_captcha
         state._aliyun_captcha_stop_triggered = False
         state._aliyun_captcha_popup_shown = False
         state._target_reached_stop_triggered = False
 
-    def start_run(self, config: RuntimeConfig):
+        return ctx
+
+    def start_run(self, config: RuntimeConfig):  # noqa: C901
         import logging
         logging.info("收到启动请求")
 
@@ -631,21 +667,28 @@ class RunController(QObject):
         self._starting = True
 
         logging.info(f"配置题目概率分布（共{len(config.question_entries)}题）")
+        # 构建本次任务的上下文（尚未有 proxy_pool，后面在 _start_workers_with_proxy_pool 中注入）
+        # 这里先创建一个临时 ctx，供 configure_probabilities 写入题目配置
+        _tmp_ctx = TaskContext()
         try:
-            configure_probabilities(config.question_entries)
+            configure_probabilities(config.question_entries, ctx=_tmp_ctx)
         except Exception as exc:
             logging.error(f"配置题目失败：{exc}")
             self._starting = False
             self.runFailed.emit(str(exc))
             return
 
-        # 保存题目元数据到 state（用于统计展示时补充选项文本等信息）
-        state.questions_metadata = {}
+        # 保存题目元数据（用于统计展示时补充选项文本等信息）
+        _tmp_ctx.questions_metadata = {}
         if hasattr(self, 'questions_info') and self.questions_info:
             for q_info in self.questions_info:
                 q_num = q_info.get('num')
                 if q_num:
-                    state.questions_metadata[q_num] = q_info
+                    _tmp_ctx.questions_metadata[q_num] = q_info
+        # 同时写入全局 state（向后兼容）
+        state.questions_metadata = dict(_tmp_ctx.questions_metadata)
+        # 把临时 ctx 的题目配置结果缓存到实例，等 _start_workers_with_proxy_pool 内合并到正式 ctx
+        self._pending_question_ctx = _tmp_ctx
 
         if config.random_ip_enabled:
             # 检查是否已达随机IP上限
@@ -701,11 +744,38 @@ class RunController(QObject):
         self._dispatch_to_ui_async(_continue_start)
 
     def _start_workers_with_proxy_pool(self, config: RuntimeConfig, proxy_pool: List[str]) -> None:
-        self._prepare_engine_state(config, proxy_pool)
+        # 构建并注入完整的 TaskContext
+        ctx = self._prepare_engine_state(config, proxy_pool)
+        # 将之前所配置的题目概率内容合并入正式 ctx
+        pending = getattr(self, '_pending_question_ctx', None)
+        if pending is not None:
+            ctx.single_prob = pending.single_prob
+            ctx.droplist_prob = pending.droplist_prob
+            ctx.multiple_prob = pending.multiple_prob
+            ctx.matrix_prob = pending.matrix_prob
+            ctx.scale_prob = pending.scale_prob
+            ctx.slider_targets = pending.slider_targets
+            ctx.texts = pending.texts
+            ctx.texts_prob = pending.texts_prob
+            ctx.text_entry_types = pending.text_entry_types
+            ctx.text_ai_flags = pending.text_ai_flags
+            ctx.text_titles = pending.text_titles
+            ctx.single_option_fill_texts = pending.single_option_fill_texts
+            ctx.droplist_option_fill_texts = pending.droplist_option_fill_texts
+            ctx.multiple_option_fill_texts = pending.multiple_option_fill_texts
+            ctx.question_config_index_map = pending.question_config_index_map
+            ctx.questions_metadata = pending.questions_metadata
+            self._pending_question_ctx = None
+        self._task_ctx = ctx
+        # 将 TaskContext 传递给 adapter，供 runner.py 更新进度计数
+        self.adapter.task_ctx = ctx
+
         self.running = True
         self._starting = False
         self.runStateChanged.emit(True)
         self._status_timer.start()
+
+        _event_bus.emit(EVENT_TASK_STARTED, ctx=ctx)
 
         logging.info(f"创建{config.threads}个工作线程")
         threads: List[threading.Thread] = []
@@ -753,6 +823,7 @@ class RunController(QObject):
         already_stopped = getattr(self, '_stopped_by_stop_run', False)
         self._stopped_by_stop_run = False
         self._status_timer.stop()
+        _event_bus.emit(EVENT_TASK_STOPPED)
         if not already_stopped:
             self.running = False
             self.runStateChanged.emit(False)
@@ -827,9 +898,17 @@ class RunController(QObject):
             self.pauseStateChanged.emit(False, "")
 
     def _emit_status(self):
-        current = getattr(state, "cur_num", 0)
-        target = getattr(state, "target_num", 0)
-        fail = getattr(state, "cur_fail", 0)
+        # 优先从 TaskContext 读取（计数更实时），回退到全局 state（向后兼容）
+        ctx = self._task_ctx
+        current = getattr(ctx, "cur_num", None)
+        if current is None:
+            current = getattr(state, "cur_num", 0)
+        target = getattr(ctx, "target_num", None)
+        if target is None:
+            target = getattr(state, "target_num", 0)
+        fail = getattr(ctx, "cur_fail", None)
+        if fail is None:
+            fail = getattr(state, "cur_fail", 0)
         paused = False
         reason = ""
         try:

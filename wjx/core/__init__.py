@@ -3,6 +3,7 @@ from wjx.core.survey.parser import (
     parse_survey_questions_from_html,
     extract_survey_title_from_html,
 )
+from wjx.core.task_context import TaskContext
 from wjx.core.captcha.handler import (
     AliyunCaptchaBypassError,
     EmptySurveySubmissionError,
@@ -55,6 +56,8 @@ __all__ = [
     # survey_parser
     "parse_survey_questions_from_html",
     "extract_survey_title_from_html",
+    # task_context
+    "TaskContext",
     # captcha_handler
     "AliyunCaptchaBypassError",
     "EmptySurveySubmissionError",

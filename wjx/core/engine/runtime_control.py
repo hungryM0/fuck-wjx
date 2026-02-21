@@ -22,13 +22,17 @@ def _timed_mode_active() -> bool:
     return bool(state.timed_mode_enabled)
 
 
-def _handle_submission_failure(stop_signal: Optional[threading.Event]) -> bool:
+def _handle_submission_failure(stop_signal: Optional[threading.Event], gui_instance: Optional[Any] = None) -> bool:
     """
     递增失败计数；当开启失败止损时超过阈值会触发停止。
     返回 True 表示已触发强制停止。
     """
     with state.lock:
         state.cur_fail += 1
+        # 同步更新 TaskContext（如果可用）
+        if gui_instance and hasattr(gui_instance, 'task_ctx') and gui_instance.task_ctx:
+            with gui_instance.task_ctx.lock:
+                gui_instance.task_ctx.cur_fail += 1
         if state.stop_on_fail_enabled:
             print(f"已失败{state.cur_fail}次, 失败次数达到{int(state.fail_threshold)}次将强制停止")
         else:

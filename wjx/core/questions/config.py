@@ -1,6 +1,6 @@
 """题目配置数据结构 - 策略、概率、选项等参数定义"""
 from dataclasses import dataclass
-from typing import Any, List, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 import wjx.core.state as state
 from wjx.core.questions.types.text import MULTI_TEXT_DELIMITER
@@ -12,6 +12,9 @@ from wjx.core.questions.utils import (
 )
 from wjx.utils.app.config import DEFAULT_FILL_TEXT, LOCATION_QUESTION_LABEL, QUESTION_TYPE_LABELS
 from wjx.utils.logging.log_utils import log_suppressed_exception
+
+if TYPE_CHECKING:
+    from wjx.core.task_context import TaskContext
 
 
 def _infer_option_count(entry: "QuestionEntry") -> int:
@@ -165,22 +168,28 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
     return QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)
 
 
-def configure_probabilities(entries: List[QuestionEntry]):
-    state.single_prob = []
-    state.droplist_prob = []
-    state.multiple_prob = []
-    state.matrix_prob = []
-    state.scale_prob = []
-    state.slider_targets = []
-    state.texts = []
-    state.texts_prob = []
-    state.text_entry_types = []
-    state.text_ai_flags = []
-    state.text_titles = []
-    state.single_option_fill_texts = []
-    state.droplist_option_fill_texts = []
-    state.multiple_option_fill_texts = []
-    state.question_config_index_map = {}
+def configure_probabilities(
+    entries: List[QuestionEntry],
+    ctx: "Optional[TaskContext]" = None,
+):
+    # 确定写入目标：优先写入 TaskContext，回退写入全局 state（向后兼容）
+    _target = ctx if ctx is not None else state
+
+    _target.single_prob = []
+    _target.droplist_prob = []
+    _target.multiple_prob = []
+    _target.matrix_prob = []
+    _target.scale_prob = []
+    _target.slider_targets = []
+    _target.texts = []
+    _target.texts_prob = []
+    _target.text_entry_types = []
+    _target.text_ai_flags = []
+    _target.text_titles = []
+    _target.single_option_fill_texts = []
+    _target.droplist_option_fill_texts = []
+    _target.multiple_option_fill_texts = []
+    _target.question_config_index_map = {}
 
     # 各题型的当前索引,用于构建 question_config_index_map
     _idx_single = 0
@@ -205,25 +214,25 @@ def configure_probabilities(entries: List[QuestionEntry]):
             prefer_custom=(getattr(entry, "distribution_mode", None) == "custom"),
         )
         if entry.question_type == "single":
-            state.question_config_index_map[question_num] = ("single", _idx_single)
+            _target.question_config_index_map[question_num] = ("single", _idx_single)
             _idx_single += 1
-            state.single_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
-            state.single_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
+            _target.single_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
+            _target.single_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "dropdown":
-            state.question_config_index_map[question_num] = ("dropdown", _idx_dropdown)
+            _target.question_config_index_map[question_num] = ("dropdown", _idx_dropdown)
             _idx_dropdown += 1
-            state.droplist_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
-            state.droplist_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
+            _target.droplist_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
+            _target.droplist_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "multiple":
-            state.question_config_index_map[question_num] = ("multiple", _idx_multiple)
+            _target.question_config_index_map[question_num] = ("multiple", _idx_multiple)
             _idx_multiple += 1
             if not isinstance(probs, list):
                 raise ValueError("多选题必须提供概率列表，数值范围0-100")
-            state.multiple_prob.append([float(value) for value in probs])
-            state.multiple_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
+            _target.multiple_prob.append([float(value) for value in probs])
+            _target.multiple_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
         elif entry.question_type == "matrix":
             rows = max(1, entry.rows)
-            state.question_config_index_map[question_num] = ("matrix", _idx_matrix)
+            _target.question_config_index_map[question_num] = ("matrix", _idx_matrix)
             _idx_matrix += rows
             option_count = max(1, _infer_option_count(entry))
 
@@ -261,27 +270,27 @@ def configure_probabilities(entries: List[QuestionEntry]):
                     normalized_row = _normalize_row(raw_row)
                     if normalized_row is None:
                         normalized_row = [1.0 / option_count] * option_count
-                    state.matrix_prob.append(normalized_row)
+                    _target.matrix_prob.append(normalized_row)
                     last_row = raw_row if raw_row is not None else last_row
             elif isinstance(probs, list):
                 normalized = _normalize_row(probs)
                 if normalized is None:
                     normalized = [1.0 / option_count] * option_count
                 for _ in range(rows):
-                    state.matrix_prob.append(list(normalized))
+                    _target.matrix_prob.append(list(normalized))
             else:
                 for _ in range(rows):
-                    state.matrix_prob.append(-1)
+                    _target.matrix_prob.append(-1)
         elif entry.question_type in ("scale", "score"):
-            state.question_config_index_map[question_num] = (entry.question_type, _idx_scale)
+            _target.question_config_index_map[question_num] = (entry.question_type, _idx_scale)
             _idx_scale += 1
-            state.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
+            _target.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
         elif entry.question_type == "slider":
-            state.question_config_index_map[question_num] = ("slider", _idx_slider)
+            _target.question_config_index_map[question_num] = ("slider", _idx_slider)
             _idx_slider += 1
             mode = str(getattr(entry, "distribution_mode", "") or "").strip().lower()
             if mode == "random":
-                state.slider_targets.append(float("nan"))
+                _target.slider_targets.append(float("nan"))
                 continue
             target_value: Optional[float] = None
             if isinstance(entry.custom_weights, (list, tuple)) and entry.custom_weights:
@@ -299,13 +308,13 @@ def configure_probabilities(entries: List[QuestionEntry]):
                         target_value = None
             if target_value is None:
                 target_value = 50.0
-            state.slider_targets.append(target_value)
+            _target.slider_targets.append(target_value)
         elif entry.question_type in ("text", "multi_text"):
             if not getattr(entry, "is_location", False):
-                state.question_config_index_map[question_num] = ("text", _idx_text)
+                _target.question_config_index_map[question_num] = ("text", _idx_text)
                 _idx_text += 1
             else:
-                state.question_config_index_map[question_num] = ("location", -1)
+                _target.question_config_index_map[question_num] = ("location", -1)
             raw_values = entry.texts or []
             normalized_values: List[str] = []
             for item in raw_values:
@@ -325,11 +334,11 @@ def configure_probabilities(entries: List[QuestionEntry]):
                 normalized = normalize_probabilities([float(value) for value in probs])
             else:
                 normalized = normalize_probabilities([1.0] * len(normalized_values))
-            state.texts.append(normalized_values)
-            state.texts_prob.append(normalized)
-            state.text_entry_types.append(entry.question_type)
-            state.text_ai_flags.append(ai_enabled)
-            state.text_titles.append(str(getattr(entry, "question_title", "") or ""))
+            _target.texts.append(normalized_values)
+            _target.texts_prob.append(normalized)
+            _target.text_entry_types.append(entry.question_type)
+            _target.text_ai_flags.append(ai_enabled)
+            _target.text_titles.append(str(getattr(entry, "question_title", "") or ""))
 
 
 def validate_question_config(entries: List[QuestionEntry], questions_info: Optional[List[dict]] = None) -> Optional[str]:
