@@ -11,8 +11,19 @@
 - Python：3.8+
 - 安装依赖：`pip install -r requirements.txt`。
 - 从源码运行：`python fuck-wjx.py`。
+- 导入检测：`python test_wjx_imports.py`（扫描 `wjx/` 下所有 `.py` 文件的 `import` 是否报错）。
 
-## 当前目录结构（`wjx/`）
+## 仓库根目录
+
+```markdown
+仓库根目录
+├── fuck-wjx.py
+├── rthook_pyside6.py     # PySide6 打包钩子
+├── test_wjx_imports.py   # 导入检测脚本
+└── wjx/                  # 主代码目录
+```
+
+## 主代码目录结构（`wjx/`）
 
 ```markdown
 wjx/
@@ -54,8 +65,8 @@ wjx/
 ## PR 流程（推荐）
 1. Fork 仓库本仓库
 2. 开发时遵守现有分层：核心逻辑放 `wjx/core`，界面相关放 `wjx/ui`，网络放 `wjx/network`，通用工具放 `wjx/utils`
-3. 自测：至少手动跑一次核心流程（启动、加载问卷、配置、开始运行），确保无报错
-4. 提交：保持清晰提交信息，必要时补充中文注释和变更说明。
+3. 自测：运行 `python test_wjx_imports.py` 检查 import 和语法错误；至少手动跑一次核心流程（启动、加载问卷、配置、开始运行），确保无报错
+4. 提交：保持清晰提交信息，必要时补充中文注释和变更说明
 5. PR 描述：写明变更目的、主要改动点、测试方式与结果，关联相关 Issue（如有）
 
 ## 代码与文档风格
