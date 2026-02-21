@@ -57,9 +57,9 @@ class DashboardClipboardMixin:
                                     return True
 
                     # 处理直接拖入的图片数据（兼容微信 MIME）
-                    pil_image = self._extract_pil_image_from_clipboard(mime_data)
-                    if pil_image is not None:
-                        self._process_qrcode_image(pil_image)
+                    nd_image = self._extract_ndarray_from_clipboard(mime_data)
+                    if nd_image is not None:
+                        self._process_qrcode_image(nd_image)
                         event.acceptProposedAction()
                         return True
                 return False
@@ -75,7 +75,7 @@ class DashboardClipboardMixin:
                         clipboard = QApplication.clipboard()
                         mime_data = clipboard.mimeData(QClipboard.Mode.Clipboard)
                         # 剪贴板有图片时拦截粘贴，转为二维码解析（兼容微信剪贴板格式）
-                        pil_image = self._extract_pil_image_from_clipboard(mime_data, clipboard)
+                        pil_image = self._extract_ndarray_from_clipboard(mime_data, clipboard)
                         if pil_image is not None:
                             try:
                                 # 递增 ticket，使 _on_clipboard_changed 的延迟任务失效，避免重复触发
@@ -130,7 +130,7 @@ class DashboardClipboardMixin:
                 self._schedule_clipboard_parse(delay_ms=50, retries=retries - 1)
             return
 
-        pil_image = self._extract_pil_image_from_clipboard(mime_data, clipboard)
+        pil_image = self._extract_ndarray_from_clipboard(mime_data, clipboard)
         if pil_image is not None:
             try:
                 self._process_qrcode_image(pil_image)
@@ -150,32 +150,32 @@ class DashboardClipboardMixin:
             current = current.parentWidget()
         return False
 
-    def _qimage_to_pil(self, image):
-        """将 QImage 安全转换为 PIL Image。"""
-        from io import BytesIO
-
-        from PIL import Image
+    def _qimage_to_ndarray(self, image):
+        """将 QImage 安全转换为 OpenCV 兼容的 numpy ndarray (BGR)。"""
+        import numpy as np
         from PySide6.QtCore import QBuffer, QIODevice
         from PySide6.QtGui import QImage
 
         if not isinstance(image, QImage) or image.isNull():
             return None
-        buffer = QBuffer()
-        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-        if not image.save(buffer, b"PNG"):
-            buffer.close()
-            return None
-        buffer.close()
-        return Image.open(BytesIO(bytes(buffer.data())))  # type: ignore[arg-type]
+        # 统一转换为 RGBA8888 以获得固定字节布局
+        image = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        width, height = image.width(), image.height()
+        ptr = image.constBits()
+        arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4))
+        # RGBA -> BGR（OpenCV 默认格式）
+        return arr[:, :, [2, 1, 0]].copy()
 
-    def _extract_pil_image_from_clipboard(self, mime_data: QMimeData, clipboard: Optional[QClipboard] = None):
-        """从剪贴板数据提取 PIL Image，兼容微信常见图片格式。"""
+    def _extract_ndarray_from_clipboard(self, mime_data: QMimeData, clipboard: Optional[QClipboard] = None):
+        """从剪贴板数据提取 OpenCV numpy ndarray，兼容微信常见图片格式。"""
+        import numpy as np
+
         # 普通图片剪贴板（截图工具、浏览器等）
         if mime_data.hasImage():
             image = mime_data.imageData()
-            pil_image = self._qimage_to_pil(image)
-            if pil_image is not None:
-                return pil_image
+            nd = self._qimage_to_ndarray(image)
+            if nd is not None:
+                return nd
 
         # 微信等应用在 Windows 下可能使用自定义 MIME（PNG / DIB）
         windows_image_formats = [
@@ -187,14 +187,14 @@ class DashboardClipboardMixin:
         ]
         for fmt in windows_image_formats:
             try:
-                from io import BytesIO
-
-                from PIL import Image
-
+                import cv2
                 raw = mime_data.data(fmt)
                 if raw.isEmpty():
                     continue
-                return Image.open(BytesIO(bytes(raw)))  # type: ignore[arg-type]
+                buf = np.frombuffer(bytes(raw), dtype=np.uint8)
+                img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+                if img is not None:
+                    return img
             except Exception:
                 continue
 
@@ -202,11 +202,11 @@ class DashboardClipboardMixin:
         if clipboard is not None:
             try:
                 image = clipboard.image()
-                pil_image = self._qimage_to_pil(image)
-                if pil_image is not None:
-                    return pil_image
+                nd = self._qimage_to_ndarray(image)
+                if nd is not None:
+                    return nd
             except Exception as exc:
-                log_suppressed_exception("_extract_pil_image_from_clipboard: clipboard.image()", exc, level=logging.DEBUG)
+                log_suppressed_exception("_extract_ndarray_from_clipboard: clipboard.image()", exc, level=logging.DEBUG)
 
         return None
 

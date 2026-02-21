@@ -1,6 +1,5 @@
 playwright
-pyzbar
-Pillow
+opencv-python
 httpx
 packaging
 beautifulsoup4

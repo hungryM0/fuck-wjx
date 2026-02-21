@@ -3,48 +3,46 @@ import logging
 import os
 from typing import Optional, Union
 
-from PIL import Image
-from pyzbar.pyzbar import decode as pyzbar_decode
+import cv2
+import numpy as np
 
 
-def decode_qrcode(image_source: Union[str, Image.Image]) -> Optional[str]:
+def decode_qrcode(image_source: Union[str, np.ndarray]) -> Optional[str]:
     """
-    解码二维码图片,提取其中的链接
+    解码二维码图片，提取其中的链接。
 
     参数:
-        image_source: 图片文件路径(str)或PIL Image对象
+        image_source: 图片文件路径(str) 或 OpenCV/numpy 图像数组 (np.ndarray)
 
     返回:
-        str: 解码出的链接,如果解码失败返回None
+        str: 解码出的数据；如果解码失败返回 None
 
     示例:
         >>> url = decode_qrcode("qrcode.png")
-        >>> url = decode_qrcode(Image.open("qrcode.png"))
+        >>> url = decode_qrcode(cv2.imread("qrcode.png"))
     """
     try:
-        # 如果是文件路径,打开图片
         if isinstance(image_source, str):
             if not os.path.exists(image_source):
                 raise FileNotFoundError(f"图片文件不存在: {image_source}")
-            image = Image.open(image_source)
+            # cv2.imdecode 支持中文路径，比 cv2.imread 更健壮
+            buf = np.fromfile(image_source, dtype=np.uint8)
+            img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+            if img is None:
+                raise ValueError(f"无法读取图片: {image_source}")
+        elif isinstance(image_source, np.ndarray):
+            img = image_source
         else:
-            image = image_source
+            raise TypeError(f"不支持的图片类型: {type(image_source)}")
 
-        # 解码二维码
-        decoded_objects = pyzbar_decode(image)
+        detector = cv2.QRCodeDetector()
+        data, _, _ = detector.detectAndDecode(img)
 
-        if not decoded_objects:
-            return None
+        if data:
+            return data
 
-        # 获取第一个二维码的数据
-        qr_data = decoded_objects[0].data.decode("utf-8")
-
-        # 验证是否为有效URL
-        if qr_data.startswith(("http://", "https://", "www.")):
-            return qr_data
-
-        return qr_data
+        return None
 
     except Exception as e:
-        logging.error(f"二维码解码失败: {str(e)}")
+        logging.error(f"二维码解码失败: {e}")
         return None
