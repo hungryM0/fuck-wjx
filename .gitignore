@@ -3,14 +3,14 @@
 .github_token
 .clinerules/
 .claude/
+.gemini/
+.ruff_cache/
 desktop.ini
 push.bat
 .venv/
 control/
-fuck-wjx-old_version/
 AGENTS.md
 CLAUDE.md
-Cloudflare Workers/
 
 # 编译环境
 /build/
