@@ -1,9 +1,8 @@
-"""核心服务层模块。"""
-
-from wjx.core.services.area_service import load_area_codes, load_supported_area_codes
+"""核心服务层 - 封装业务逻辑供 Controller 调用"""
+from wjx.core.services.survey_service import parse_survey
+from wjx.core.services.proxy_service import prefetch_proxy_pool
 
 __all__ = [
-    "load_area_codes",
-    "load_supported_area_codes",
+    "parse_survey",
+    "prefetch_proxy_pool",
 ]
-
