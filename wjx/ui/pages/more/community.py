@@ -101,7 +101,7 @@ class CommunityPage(ScrollArea):
 
         # ── 页面标题 ──
         page_title = SubtitleLabel("社区", self.content_widget)
-        page_title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        page_title.setStyleSheet("font-size: 28px; font-weight: bold; letter-spacing: 2px;")
         cl.addWidget(page_title)
 
         cl.addSpacing(8)
@@ -120,10 +120,10 @@ class CommunityPage(ScrollArea):
 
         # ── Footer ──
         footer = CaptionLabel(
-            "欢迎加入社区，一起让 fuck-wjx 变得更好",
+            "欢迎加入社区，一起让这个项目变得更好",
             self.content_widget,
         )
-        footer.setStyleSheet("color: #888; font-size: 14px;")
+        footer.setStyleSheet("color: #888; font-size: 13px;")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cl.addSpacing(16)
         cl.addWidget(footer)
@@ -141,11 +141,11 @@ class CommunityPage(ScrollArea):
 
         # 左侧文字
         left = QVBoxLayout()
-        left.setSpacing(12)
-        left.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left.setSpacing(16)
+        left.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         title = StrongBodyLabel("加入 QQ 交流群", card)
-        title.setStyleSheet("font-size: 20px;")
+        title.setStyleSheet("font-size: 24px; letter-spacing: 2px;")
         left.addWidget(title)
 
         desc = BodyLabel(
@@ -154,14 +154,13 @@ class CommunityPage(ScrollArea):
             "以及与其他用户交流使用技巧和经验。",
             card,
         )
-        desc.setStyleSheet("font-size: 14px; line-height: 1.6;")
+        desc.setStyleSheet("font-size: 16px; line-height: 1.8; letter-spacing: 2px;")
         desc.setWordWrap(True)
         left.addWidget(desc)
 
         hint = CaptionLabel("点击二维码可查看大图", card)
-        hint.setStyleSheet("color: #888;")
+        hint.setStyleSheet("font-size: 14px; color: #888; letter-spacing: 1px;")
         left.addWidget(hint)
-        left.addStretch(1)
 
         self.qq_inner.addLayout(left, 1)
 
@@ -192,69 +191,54 @@ class CommunityPage(ScrollArea):
 
         # 左侧：描述
         left = QVBoxLayout()
-        left.setSpacing(12)
-        left.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left.setSpacing(16)
+        left.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        title = StrongBodyLabel("开源项目", card)
-        title.setStyleSheet("font-size: 20px;")
+        title = StrongBodyLabel("开源声明", card)
+        title.setStyleSheet("font-size: 24px; letter-spacing: 2px;")
         left.addWidget(title)
 
         desc = BodyLabel(
-            "本项目基于 GPL-3.0 许可证开源。\n"
-            "欢迎查看源代码、提出改进建议或直接贡献代码。",
+            "本项目基于 GPL-3.0 许可证公开全部源代码！\n"
+            "欢迎各位提出改进建议或直接贡献代码",
             card,
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 14px; line-height: 1.6;")
+        desc.setStyleSheet("font-size: 16px; line-height: 1.8; letter-spacing: 2px;")
         left.addWidget(desc)
 
         license_row = QHBoxLayout()
-        license_row.setSpacing(6)
-        license_label = CaptionLabel("许可证", card)
-        license_label.setStyleSheet("color: #888;")
+        license_row.setSpacing(8)
+        license_label = CaptionLabel("License：", card)
+        license_label.setStyleSheet("font-size: 14px; color: #888; letter-spacing: 1px;")
         license_row.addWidget(license_label)
         gpl = StrongBodyLabel("GPL-3.0", card)
-        gpl.setStyleSheet("font-size: 13px;")
+        gpl.setStyleSheet("font-size: 15px; letter-spacing: 1px;")
         license_row.addWidget(gpl)
         license_row.addStretch(1)
         left.addLayout(license_row)
 
-        left.addStretch(1)
-        self.os_inner.addLayout(left, 1)
-
-        # 右侧：按钮与理念
-        right = QVBoxLayout()
-        right.setSpacing(12)
-        right.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        right_title = StrongBodyLabel("项目地址", card)
-        right_title.setStyleSheet("font-size: 20px;")
-        right.addWidget(right_title)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(12)
-
         github_btn = PrimaryPushButton("GitHub 仓库", card, FluentIcon.GITHUB)
         github_btn.clicked.connect(lambda: webbrowser.open(_GITHUB_URL))
-        btn_row.addWidget(github_btn)
+        left.addWidget(github_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        star_btn = PushButton("Star 项目", card, FluentIcon.HEART)
-        star_btn.clicked.connect(lambda: webbrowser.open(_GITHUB_URL))
-        btn_row.addWidget(star_btn)
+        self.os_inner.addLayout(left, 1)
 
-        btn_row.addStretch(1)
-        right.addLayout(btn_row)
-
-        philosophy = CaptionLabel(
-            "开源不仅是代码公开，更是知识共享与社区协作。",
-            card,
-        )
-        philosophy.setWordWrap(True)
-        philosophy.setStyleSheet("color: #888; font-size: 13px;")
-        right.addWidget(philosophy)
-
-        right.addStretch(1)
-        self.os_inner.addLayout(right, 1)
+        # 右侧：应用图标
+        icon_label = QLabel(card)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_path = os.path.join(get_assets_directory(), "icon.png")
+        if os.path.exists(icon_path):
+            icon_pixmap = QPixmap(icon_path)
+            if not icon_pixmap.isNull():
+                icon_pixmap = icon_pixmap.scaled(
+                    120, 120,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                icon_label.setPixmap(icon_pixmap)
+        icon_label.setFixedSize(160, 160)
+        self.os_inner.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         return card
 
@@ -268,54 +252,50 @@ class CommunityPage(ScrollArea):
 
         # 左侧：招募说明
         left = QVBoxLayout()
-        left.setSpacing(12)
-        left.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left.setSpacing(16)
+        left.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        title = StrongBodyLabel("参与贡献", card)
-        title.setStyleSheet("font-size: 20px;")
+        title = StrongBodyLabel("✅ 参与开发贡献", card)
+        title.setStyleSheet("font-size: 24px; letter-spacing: 2px;")
         left.addWidget(title)
 
         desc = BodyLabel(
-            "我们正在寻找志同道合的开发者加入项共建。\n"
+            "我们正在寻找志同道合的开发者一起共创项目！\n"
             "无论你擅长开发、设计还是测试，都有你的位置。",
             card,
         )
-        desc.setStyleSheet("font-size: 14px; line-height: 1.6;")
+        desc.setStyleSheet("font-size: 16px; line-height: 1.8; letter-spacing: 2px;")
         desc.setWordWrap(True)
         left.addWidget(desc)
 
         skills = CaptionLabel(
-            "Python / PySide6  ·  UI/UX 设计  ·  测试与质量  ·  文档编写",
+            "Python ·  UI 设计 · 题型支持 · 文档编写",
             card,
         )
         skills.setWordWrap(True)
-        skills.setStyleSheet("color: #888;")
+        skills.setStyleSheet("font-size: 14px; color: #888; letter-spacing: 1px;")
         left.addWidget(skills)
 
-        left.addStretch(1)
         self.recruit_inner.addLayout(left, 1)
 
         # 右侧：参与方式 + 按钮
         right = QVBoxLayout()
-        right.setSpacing(12)
-        right.setAlignment(Qt.AlignmentFlag.AlignTop)
+        right.setSpacing(16)
+        right.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         right_title = StrongBodyLabel("如何参与", card)
-        right_title.setStyleSheet("font-size: 20px;")
+        right_title.setStyleSheet("font-size: 24px; letter-spacing: 2px;")
         right.addWidget(right_title)
 
         steps = BodyLabel(
             "1. Fork 并克隆仓库到本地\n"
-            "2. 创建分支，编码开发\n"
-            "3. 提交 Pull Request\n"
-            "4. 加入 QQ 群交流反馈",
+            "2. 编码开发\n"
+            "3. 在 GitHub 提交 Pull Request",
             card,
         )
-        steps.setStyleSheet("font-size: 14px; line-height: 1.6;")
+        steps.setStyleSheet("font-size: 16px; line-height: 1.8; letter-spacing: 2px;")
         steps.setWordWrap(True)
         right.addWidget(steps)
-
-        right.addStretch(1)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
@@ -326,9 +306,9 @@ class CommunityPage(ScrollArea):
         )
         btn_row.addWidget(guide_btn)
 
-        issues_btn = PushButton("浏览 Issues", card, FluentIcon.CHAT)
+        issues_btn = PushButton("提交 Issue", card, FluentIcon.CHAT)
         issues_btn.clicked.connect(
-            lambda: webbrowser.open(f"{_GITHUB_URL}/issues")
+            lambda: webbrowser.open(f"{_GITHUB_URL}/issues/new")
         )
         btn_row.addWidget(issues_btn)
         btn_row.addStretch(1)

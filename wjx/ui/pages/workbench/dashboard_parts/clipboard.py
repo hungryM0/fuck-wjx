@@ -191,7 +191,7 @@ class DashboardClipboardMixin:
                 raw = mime_data.data(fmt)
                 if raw.isEmpty():
                     continue
-                buf = np.frombuffer(bytes(raw), dtype=np.uint8)
+                buf = np.frombuffer(raw.data(), dtype=np.uint8)
                 img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
                 if img is not None:
                     return img
