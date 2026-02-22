@@ -44,6 +44,7 @@ class TaskContext:
     single_option_fill_texts: List[Optional[List[Optional[str]]]] = field(default_factory=list)
     droplist_option_fill_texts: List[Optional[List[Optional[str]]]] = field(default_factory=list)
     multiple_option_fill_texts: List[Optional[List[Optional[str]]]] = field(default_factory=list)
+    answer_rules: List[Dict[str, Any]] = field(default_factory=list)
 
     # 题号 → (配置题型, 在对应类型概率列表中的起始索引)
     question_config_index_map: Dict[int, Tuple[str, int]] = field(default_factory=dict)

@@ -27,12 +27,6 @@ from wjx.core.questions.utils import (
     extract_text_from_element,
 )
 from wjx.core.persona.context import apply_persona_boost, record_answer
-from wjx.core.questions.consistency import (
-    apply_multiple_consistency,
-    build_question_semantic,
-    pick_allowed_indices_for_random_multi,
-    record_consistency_answer,
-)
 
 # 缓存检测到的多选限制
 _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
@@ -348,11 +342,8 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
     for elem in option_elements:
         option_texts.append(extract_text_from_element(elem))
 
-    semantic = build_question_semantic(driver, current, option_texts)
-
     if selection_probabilities == -1 or (isinstance(selection_probabilities, list) and len(selection_probabilities) == 1 and selection_probabilities[0] == -1):
-        allowed_pool = pick_allowed_indices_for_random_multi(len(option_elements), semantic, min_required)
-        pool = allowed_pool if allowed_pool else list(range(len(option_elements)))
+        pool = list(range(len(option_elements)))
         max_select = min(max_allowed, len(pool))
         num_to_select = random.randint(min_required, max_select)
         selected_indices = random.sample(pool, num_to_select)
@@ -365,7 +356,6 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
         # 记录作答上下文
         selected_texts = [option_texts[i] for i in selected_indices if i < len(option_texts)]
         record_answer(current, "multiple", selected_indices=selected_indices, selected_texts=selected_texts)
-        record_consistency_answer(semantic, selected_indices)
         return
 
     if len(option_elements) != len(selection_probabilities):
@@ -398,7 +388,6 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
     # 多选题概率是 0-100 的百分比，加成后上限仍为 100
     boosted = apply_persona_boost(option_texts, selection_probabilities)
     selection_probabilities = [min(100.0, p) for p in boosted]
-    selection_probabilities = apply_multiple_consistency(selection_probabilities, semantic)
 
     selection_mask: List[int] = []
     attempts = 0
@@ -460,5 +449,4 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
     # 记录作答上下文
     selected_texts = [option_texts[i] for i in selected_indices if i < len(option_texts)]
     record_answer(current, "multiple", selected_indices=selected_indices, selected_texts=selected_texts)
-    record_consistency_answer(semantic, selected_indices)
 

@@ -47,6 +47,7 @@ wjx/
 │   │   ├── community.py   # 社区页（一级菜单）
 │   │   └── workbench/
 │   │       ├── dashboard.py
+│   │       ├── answer_rules.py   # 作答规则页（条件 -> 动作）
 │   │       ├── dashboard_parts/ # dashboard 拆分模块（clipboard/entries/random_ip）
 │   ├── widgets/           # 通用 UI 组件
 │   ├── dialogs/           # 对话框

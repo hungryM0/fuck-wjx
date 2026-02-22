@@ -46,6 +46,7 @@ from wjx.ui.widgets import ConfigDrawer
 from wjx.ui.widgets.full_width_infobar import FullWidthInfoBar
 from wjx.ui.widgets.no_wheel import NoWheelSpinBox
 from wjx.ui.controller import RunController
+from wjx.ui.pages.workbench.answer_rules import AnswerRulesPage
 from wjx.ui.pages.workbench.question import QuestionPage
 from wjx.ui.pages.workbench.runtime import RuntimePage
 from wjx.utils.io.load_save import RuntimeConfig, build_default_config_filename, get_runtime_directory
@@ -82,12 +83,20 @@ class DashboardPage(
     _ipBalanceChecked = Signal(int)  # 发送剩余IP数信号
     _debugResetFinished = Signal(object)  # 后台 reset 完成后回传结果
 
-    def __init__(self, controller: RunController, question_page: QuestionPage, runtime_page: RuntimePage, parent=None):
+    def __init__(
+        self,
+        controller: RunController,
+        question_page: QuestionPage,
+        runtime_page: RuntimePage,
+        answer_rules_page: AnswerRulesPage,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.controller = controller
         self.question_page = question_page
         self.runtime_page = runtime_page
+        self.answer_rules_page = answer_rules_page
         self._open_wizard_after_parse = False
         self._survey_title = ""
         self._last_pause_reason = ""
@@ -514,6 +523,7 @@ class DashboardPage(
         self.runtime_page.apply_config(cfg)
         self.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], cfg.questions_info or [])
+        self.answer_rules_page.set_questions_info(cfg.questions_info or [])
         self._refresh_entry_table()
         try:
             self.update_question_meta(cfg.survey_title or "", len(cfg.question_entries or []))
@@ -667,6 +677,11 @@ class DashboardPage(
         self.random_ua_cb.setChecked(bool(cfg.random_ua_enabled))
         self.random_ua_cb.blockSignals(False)
 
+        try:
+            self.answer_rules_page.set_rules(getattr(cfg, "answer_rules", []) or [])
+        except Exception as exc:
+            log_suppressed_exception("apply_config: self.answer_rules_page.set_rules(...)", exc, level=logging.WARNING)
+
         self._refresh_entry_table()
         self._sync_start_button_state()
 
@@ -695,6 +710,7 @@ class DashboardPage(
         cfg.threads = max(1, self.thread_spin.value())
         cfg.random_ip_enabled = self.random_ip_cb.isChecked()
         cfg.random_ua_enabled = self.random_ua_cb.isChecked()
+        cfg.answer_rules = list(self.answer_rules_page.get_rules() or [])
         return cfg
 
     def _toast(self, text: str, level: str = "info", duration: int = 2000, show_progress: bool = False):

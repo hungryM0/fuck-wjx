@@ -189,7 +189,7 @@ def brush(
     set_current_persona(persona)
     _reset_answer_context()
     reset_tendency()
-    reset_consistency_context()
+    reset_consistency_context(ctx.answer_rules)
     logging.debug("本轮画像：%s", persona.to_description())
     questions_per_page = detect(driver, stop_signal=stop_signal)
     total_question_count = sum(questions_per_page)

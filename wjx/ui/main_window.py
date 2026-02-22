@@ -26,6 +26,7 @@ from qfluentwidgets import (
 from wjx.ui.pages.workbench.dashboard import DashboardPage
 from wjx.ui.pages.workbench.runtime import RuntimePage
 from wjx.ui.pages.workbench.question import QuestionPage
+from wjx.ui.pages.workbench.answer_rules import AnswerRulesPage
 
 from wjx.ui.dialogs.card_unlock import CardUnlockDialog
 from wjx.ui.dialogs.contact import ContactDialog
@@ -110,10 +111,17 @@ class MainWindow(
         # 立即初始化关键页面
         self.runtime_page = RuntimePage(self.controller, self)
         self.question_page = QuestionPage(self)
+        self.answer_rules_page = AnswerRulesPage(self)
         # QuestionPage 仅用作题目配置的数据载体，不作为主界面子页面展示；
         # 若不隐藏会以默认几何 (0,0,100,30) 叠在窗口左上角，造成标题栏错乱。
         self.question_page.hide()
-        self.dashboard = DashboardPage(self.controller, self.question_page, self.runtime_page, self)
+        self.dashboard = DashboardPage(
+            self.controller,
+            self.question_page,
+            self.runtime_page,
+            self.answer_rules_page,
+            self,
+        )
 
         # 延迟初始化非关键页面（懒加载）
         self._log_page = None
@@ -129,6 +137,7 @@ class MainWindow(
         self.dashboard.setObjectName("dashboard")
         self.question_page.setObjectName("question")
         self.runtime_page.setObjectName("runtime")
+        self.answer_rules_page.setObjectName("answer_rules")
 
         self._init_navigation()
         self._init_changelog_navigation()
@@ -445,6 +454,8 @@ class MainWindow(
         self.runtime_page.apply_config(cfg)
         self.dashboard.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], self.controller.questions_info)
+        self.answer_rules_page.set_questions_info(self.controller.questions_info)
+        self.answer_rules_page.set_rules(getattr(cfg, "answer_rules", []) or [])
         # 先显示本地快照，避免启动阶段显示 --/--
         try:
             count, limit, custom_api = get_random_ip_counter_snapshot_local()
@@ -460,6 +471,7 @@ class MainWindow(
     # ---------- controller callbacks ----------
     def _on_survey_parsed(self, info: List[Dict[str, Any]], title: str):
         parsed_title = title or "问卷"
+        self.answer_rules_page.set_questions_info(info or [])
         if getattr(self.dashboard, "_open_wizard_after_parse", False):
             self.dashboard._open_wizard_after_parse = False
             pending_entries = copy.deepcopy(self.controller.question_entries)

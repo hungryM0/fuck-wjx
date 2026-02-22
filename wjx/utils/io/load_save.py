@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from wjx.utils.app.config import DEFAULT_RANDOM_UA_KEYS, USER_AGENT_PRESETS, BROWSER_PREFERENCE
+from wjx.core.questions.consistency import normalize_rule_dict
 from wjx.network.proxy import normalize_random_ip_enabled_value
 
 if TYPE_CHECKING:
@@ -184,6 +185,7 @@ class RuntimeConfig:
     ai_base_url: str = ""
     ai_model: str = ""
     ai_system_prompt: str = ""
+    answer_rules: List[Dict[str, Any]] = field(default_factory=list)
     question_entries: List[QuestionEntry] = field(default_factory=list)
     questions_info: Optional[List[Dict[str, Any]]] = field(default_factory=list)
     _ai_config_present: bool = field(default=False, init=False, repr=False)
@@ -435,6 +437,13 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
     config.reliability_mode_enabled = bool(raw.get("reliability_mode_enabled", True))
     config.debug_mode = bool(raw.get("debug_mode", False))
+    config.answer_rules = []
+    raw_rules = raw.get("answer_rules")
+    if isinstance(raw_rules, list):
+        for item in raw_rules:
+            normalized_rule = normalize_rule_dict(item)
+            if normalized_rule:
+                config.answer_rules.append(normalized_rule)
 
     ai_keys = {
         "ai_enabled",
