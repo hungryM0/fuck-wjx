@@ -10,7 +10,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QObject, Signal, QTimer, QCoreApplication
 
-import wjx.core.state as state
 from wjx.core.task_context import TaskContext
 from wjx.utils.app.config import DEFAULT_FILL_TEXT, STOP_FORCE_WAIT_SECONDS
 from wjx.utils.system.cleanup_runner import CleanupRunner
@@ -519,7 +518,7 @@ class RunController(QObject):
         return result_container.get("value")
 
     def _prepare_engine_state(self, config: RuntimeConfig, proxy_pool: List[str]) -> TaskContext:
-        """构建本次任务的 TaskContext，并同步兼容性写入全局 state。"""
+        """构建本次任务的 TaskContext。"""
         fail_threshold = max(1, math.ceil(config.target / 4) + 1)
         config_title = str(getattr(config, "survey_title", "") or "")
         fallback_title = str(getattr(self, "survey_title", "") or "")
@@ -549,31 +548,6 @@ class RunController(QObject):
             pause_on_aliyun_captcha=bool(getattr(config, "pause_on_aliyun_captcha", True)),
         )
 
-        # ── 向后兼容：同步写入全局 state（供尚未迁移的内部模块使用） ──────
-        state.url = ctx.url
-        state.survey_title = ctx.survey_title
-        state.target_num = ctx.target_num
-        state.num_threads = ctx.num_threads
-        state.browser_preference = list(ctx.browser_preference)
-        state.fail_threshold = ctx.fail_threshold
-        state.cur_num = 0
-        state.cur_fail = 0
-        state.stop_event = self.stop_event
-        state.submit_interval_range_seconds = ctx.submit_interval_range_seconds
-        state.answer_duration_range_seconds = ctx.answer_duration_range_seconds
-        state.timed_mode_enabled = ctx.timed_mode_enabled
-        state.timed_mode_refresh_interval = ctx.timed_mode_refresh_interval
-        state.random_proxy_ip_enabled = ctx.random_proxy_ip_enabled
-        state.proxy_ip_pool = list(ctx.proxy_ip_pool)
-        state.random_user_agent_enabled = ctx.random_user_agent_enabled
-        state.user_agent_pool_keys = list(ctx.user_agent_pool_keys)
-        state.user_agent_ratios = dict(ctx.user_agent_ratios)
-        state.stop_on_fail_enabled = ctx.stop_on_fail_enabled
-        state.pause_on_aliyun_captcha = ctx.pause_on_aliyun_captcha
-        state._aliyun_captcha_stop_triggered = False
-        state._aliyun_captcha_popup_shown = False
-        state._target_reached_stop_triggered = False
-
         return ctx
 
     def start_run(self, config: RuntimeConfig):  # noqa: C901
@@ -584,14 +558,6 @@ class RunController(QObject):
             logging.warning("任务已在运行中，忽略重复启动请求")
             return
 
-        # 仅在确认要启动新一轮任务时再重置全局进度状态
-        # 避免“正在运行时误点开始”把当前任务状态清零。
-        state.cur_num = 0
-        state.cur_fail = 0
-        state.target_num = max(1, int(getattr(config, "target", 1) or 1))
-        state._target_reached_stop_triggered = False
-        state._aliyun_captcha_stop_triggered = False
-        state._aliyun_captcha_popup_shown = False
         if not getattr(config, "question_entries", None):
             logging.error("未配置任何题目，无法启动")
             self.runFailed.emit('未配置任何题目，无法开始执行（请先在"题目配置"页添加/配置题目）')
@@ -657,8 +623,6 @@ class RunController(QObject):
                 q_num = q_info.get('num')
                 if q_num:
                     _tmp_ctx.questions_metadata[q_num] = q_info
-        # 同时写入全局 state（向后兼容）
-        state.questions_metadata = dict(_tmp_ctx.questions_metadata)
         # 把临时 ctx 的题目配置结果缓存到实例，等 _start_workers_with_proxy_pool 内合并到正式 ctx
         self._pending_question_ctx = _tmp_ctx
 
@@ -873,17 +837,10 @@ class RunController(QObject):
             self.pauseStateChanged.emit(False, "")
 
     def _emit_status(self):
-        # 优先从 TaskContext 读取（计数更实时），回退到全局 state（向后兼容）
         ctx = self._task_ctx
-        current = getattr(ctx, "cur_num", None)
-        if current is None:
-            current = getattr(state, "cur_num", 0)
-        target = getattr(ctx, "target_num", None)
-        if target is None:
-            target = getattr(state, "target_num", 0)
-        fail = getattr(ctx, "cur_fail", None)
-        if fail is None:
-            fail = getattr(state, "cur_fail", 0)
+        current = getattr(ctx, "cur_num", 0)
+        target = getattr(ctx, "target_num", 0)
+        fail = getattr(ctx, "cur_fail", 0)
         paused = False
         reason = ""
         try:

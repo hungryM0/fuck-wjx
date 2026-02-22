@@ -323,19 +323,11 @@ def run(
         gui_instance: EngineGuiAdapter 实例
         ctx: 任务上下文（传入后使用 ctx 配置，不再依赖全局 state）
     """
-    # 向后兼容：如果没传 ctx，从 gui_instance 获取
+    # 如果没传 ctx，从 gui_instance 获取
     if ctx is None and gui_instance and hasattr(gui_instance, 'task_ctx'):
         ctx = gui_instance.task_ctx
-    # 最终兜底：从全局 state 构造（不推荐，仅为过渡期兼容）
     if ctx is None:
-        import wjx.core.state as state
-        logging.warning("run() 未收到 TaskContext，将从全局 state 构造（已弃用）")
-        ctx = TaskContext(
-            url=state.url,
-            target_num=state.target_num,
-            num_threads=state.num_threads,
-            stop_event=stop_signal,
-        )
+        raise ValueError("run() 必须传入 TaskContext，全局 state 兼容层已移除")
 
     timed_mode_on = _timed_mode_active(ctx)
     try:

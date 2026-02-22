@@ -49,7 +49,6 @@ from wjx.ui.controller import RunController
 from wjx.ui.pages.workbench.question import QuestionPage
 from wjx.ui.pages.workbench.runtime import RuntimePage
 from wjx.utils.io.load_save import RuntimeConfig, build_default_config_filename, get_runtime_directory
-from wjx.core.questions.config import configure_probabilities
 from wjx.network.proxy import (
     refresh_ip_counter_display,
 )
@@ -565,14 +564,6 @@ class DashboardPage(
             self._last_progress = 0
             self._completion_notified = False
             self.status_label.setText(f"已提交 0/{cfg.target} 份 | 失败 0 次")
-        try:
-            configure_probabilities(
-                cfg.question_entries,
-                reliability_mode_enabled=getattr(cfg, "reliability_mode_enabled", True),
-            )
-        except Exception as exc:
-            self._toast(str(exc), "error")
-            return
         self.controller.start_run(cfg)
 
     def update_status(self, text: str, current: int, target: int):

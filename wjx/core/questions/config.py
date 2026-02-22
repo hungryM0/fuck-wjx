@@ -2,7 +2,6 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
-import wjx.core.state as state
 from wjx.core.questions.types.text import MULTI_TEXT_DELIMITER
 from wjx.core.questions.utils import (
     normalize_option_fill_texts as _normalize_option_fill_texts,
@@ -176,11 +175,10 @@ _RELIABILITY_GLOBAL_DIMENSION = "__reliability__"
 
 def configure_probabilities(
     entries: List[QuestionEntry],
-    ctx: "Optional[TaskContext]" = None,
+    ctx: "TaskContext",
     reliability_mode_enabled: bool = True,
 ):
-    # 确定写入目标：优先写入 TaskContext，回退写入全局 state（向后兼容）
-    _target = ctx if ctx is not None else state
+    _target = ctx
 
     _target.single_prob = []
     _target.droplist_prob = []

@@ -86,17 +86,7 @@ def submit(
     仅保留最基础的行为：可选等待 -> 点击提交 -> 可选稳定等待。
     不再做弹窗确认/验证码检测/JS 强行触发等兜底逻辑。
     """
-    if ctx is not None:
-        fast_mode = _is_fast_mode(ctx)
-    else:
-        # 向后兼容：无 ctx 时从全局 state 读取（已弃用）
-        import wjx.core.state as _state
-        fast_mode = (
-            not _state.duration_control_enabled
-            and not _state.random_proxy_ip_enabled
-            and _state.submit_interval_range_seconds == (0, 0)
-            and _state.answer_duration_range_seconds == (0, 0)
-        )
+    fast_mode = _is_fast_mode(ctx) if ctx is not None else True
     settle_delay = 0 if fast_mode else SUBMIT_CLICK_SETTLE_DELAY
     pre_submit_delay = 0 if fast_mode else SUBMIT_INITIAL_DELAY
 

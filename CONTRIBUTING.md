@@ -38,8 +38,7 @@ wjx/
 │   ├── captcha/           # 验证码处理
 │   ├── ai/                # AI 运行时
 │   ├── persona/           # 画像与上下文约束
-│   ├── services/          # 核心服务层（如地区数据加载）
-│   └── state.py           # 运行状态与全局控制变量
+│   └── services/          # 核心服务层（如地区数据加载）
 ├── ui/                    # 界面层
 │   ├── main_window.py     # 主窗口编排
 │   ├── main_window_parts/ # 主窗口拆分模块（lazy_pages/popup_compat/update）

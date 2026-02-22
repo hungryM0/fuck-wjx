@@ -12,7 +12,6 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-import wjx.core.state as state
 from wjx.network.browser import By, BrowserDriver
 
 # 语义关键词（可按需扩展）
@@ -381,7 +380,7 @@ def resolve_question_context(
     option_texts: Sequence[str],
 ) -> Tuple[str, List[str], str]:
     question_text = resolve_question_text(driver, question_number)
-    meta = getattr(state, "questions_metadata", {}).get(question_number, {}) if question_number else {}
+    meta: dict = {}
     meta_title = _normalize_text(meta.get("title")) if isinstance(meta, dict) else ""
     meta_options: List[str] = []
     if isinstance(meta, dict):
