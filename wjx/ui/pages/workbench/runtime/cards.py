@@ -2,13 +2,14 @@
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QStringListModel
 from PySide6.QtGui import QIntValidator
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCompleter, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action,
     BodyLabel,
     ComboBox,
+    EditableComboBox,
     ExpandGroupSettingCard,
     FluentIcon,
     HyperlinkButton,
@@ -23,6 +24,36 @@ from qfluentwidgets import (
     SwitchButton,
     TransparentToolButton,
 )
+
+
+class SearchableComboBox(EditableComboBox):
+    """带搜索过滤的下拉框：聚焦时展开全量列表，打字时按包含关系过滤。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._str_model = QStringListModel(self)
+        completer = QCompleter(self._str_model, self)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.setCompleter(completer)
+
+    def addItem(self, text, icon=None, userData=None):
+        super().addItem(text, icon, userData)
+        self._sync_model()
+
+    def clear(self):
+        super().clear()
+        self._sync_model()
+
+    def _sync_model(self):
+        self._str_model.setStringList([item.text for item in self.items])
+
+    def _onComboTextChanged(self, text: str):
+        # 打字时关闭全量菜单，交给 completer 过滤
+        if text:
+            self._closeComboMenu()
+        super()._onComboTextChanged(text)
+
 
 class RandomIPSettingCard(ExpandGroupSettingCard):
     """随机IP设置卡 - 包含代理源选择"""
@@ -66,8 +97,8 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         area_layout = QHBoxLayout(self.areaRow)
         area_layout.setContentsMargins(0, 0, 0, 0)
         area_label = BodyLabel("指定地区", self.areaRow)
-        self.provinceCombo = ComboBox(self.areaRow)
-        self.cityCombo = ComboBox(self.areaRow)
+        self.provinceCombo = SearchableComboBox(self.areaRow)
+        self.cityCombo = SearchableComboBox(self.areaRow)
         self.provinceCombo.setMinimumWidth(160)
         self.cityCombo.setMinimumWidth(200)
         area_layout.addWidget(area_label)
