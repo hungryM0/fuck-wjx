@@ -227,7 +227,7 @@ class RuntimePage(ScrollArea):
 
     def _bind_events(self):
         self.random_ip_switch.checkedChanged.connect(self._on_random_ip_toggled)
-        self.random_ua_switch.checkedChanged.connect(self._sync_random_ua)
+        self.random_ua_switch.checkedChanged.connect(self._on_random_ua_toggled)
         self.timed_switch.checkedChanged.connect(self._sync_timed_mode)
         self.timed_card.helpButton.clicked.connect(self._show_timed_mode_help)
         self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
@@ -263,6 +263,15 @@ class RuntimePage(ScrollArea):
                 dashboard._on_random_ip_toggled(2 if enabled else 0)
             finally:
                 self.random_ip_switch.blockSignals(False)
+
+    def _on_random_ua_toggled(self, enabled: bool):
+        main_win = self.window()
+        dashboard = getattr(main_win, "dashboard", None)
+        if dashboard is not None and hasattr(dashboard, "random_ua_cb"):
+            dashboard.random_ua_cb.blockSignals(True)
+            dashboard.random_ua_cb.setChecked(enabled)
+            dashboard.random_ua_cb.blockSignals(False)
+        self._sync_random_ua(enabled)
 
     def _on_proxy_source_changed(self):
         """代理源选择变化时更新设置"""
