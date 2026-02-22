@@ -132,7 +132,7 @@ class RuntimePage(ScrollArea):
         self.thread_card.setSpinBoxWidth(spin_width)
 
         self.reliability_mode_card = SwitchSettingCard(
-            FluentIcon.CERTIFICATE, "针对信效度优化策略", "启用后配置向导将显示维度设置，用于提升问卷信效度",
+            FluentIcon.CERTIFICATE, "针对信效度优化策略", "启用后量表/矩阵/评价题将共享答题倾向，提升问卷信效度",
             parent=run_group
         )
         self.reliability_mode_card.setChecked(True)

@@ -31,7 +31,7 @@ def reset_tendency() -> None:
 
     这样每份问卷会重新生成倾向，不同问卷之间仍然是随机的。
     """
-    _thread_local.dimension_bases: Dict[str, int] = {}
+    _thread_local.dimension_bases = {}
 
 
 def _generate_base_index(option_count: int, probabilities: Union[List[float], int, None]) -> int:
@@ -76,6 +76,7 @@ def get_tendency_index(
     option_count: int,
     probabilities: Union[List[float], int, None],
     dimension: Optional[str] = None,
+    is_reverse: bool = False,
 ) -> int:
     """获取带有一致性倾向的选项索引。
 
@@ -86,6 +87,7 @@ def get_tendency_index(
         option_count: 该题的选项数量（比如5分量表就是5）
         probabilities: 概率配置列表，或 -1 表示随机
         dimension: 题目所属维度，None 或 DIMENSION_UNGROUPED 表示未分组
+        is_reverse: 是否为反向题，True 时翻转基准偏好
 
     Returns:
         选中的选项索引（0-based）
@@ -98,6 +100,7 @@ def get_tendency_index(
         return _random_by_probabilities(option_count, probabilities)
 
     # 获取该维度的基准偏好
+    assert dimension is not None  # 已通过 _is_ungrouped 过滤，此处 dimension 必为 str
     bases: Dict[str, int] = getattr(_thread_local, 'dimension_bases', {})
     if not isinstance(bases, dict):
         bases = {}
@@ -108,11 +111,16 @@ def get_tendency_index(
     if base is None:
         # 该维度首次遇到：生成基准偏好并存入
         base = _generate_base_index(option_count, probabilities)
+        if is_reverse:
+            base = (option_count - 1) - base
         bases[dimension] = base
         return base
 
-    # 后续调用：应用一致性约束
-    return _apply_consistency(base, option_count, probabilities)
+    # 后续调用：反向题翻转基准后再应用一致性约束
+    effective_base = base
+    if is_reverse:
+        effective_base = (option_count - 1) - min(base, option_count - 1)
+    return _apply_consistency(effective_base, option_count, probabilities)
 
 
 def _apply_consistency(

@@ -128,10 +128,16 @@ class DashboardEntriesMixin:
             if 0 <= idx < len(entries):
                 entry = entries[idx]
                 entry.ai_enabled = bool(enabled) if entry.question_type == "text" else False
-        dimension_updates = dlg.get_dimension_results()
-        for idx, dimension in dimension_updates.items():
+        reverse_updates = dlg.get_reverse_results()
+        for idx, rev_val in reverse_updates.items():
             if 0 <= idx < len(entries):
-                entries[idx].dimension = dimension
+                entry = entries[idx]
+                if isinstance(rev_val, list):
+                    # 矩阵题：按行存储
+                    entry.row_reverse_flags = [bool(v) for v in rev_val]
+                    entry.is_reverse = any(entry.row_reverse_flags)
+                else:
+                    entry.is_reverse = bool(rev_val)
 
     def _run_question_wizard(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], survey_title: Optional[str] = None) -> bool:
         if not entries:

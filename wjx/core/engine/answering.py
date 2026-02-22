@@ -88,14 +88,16 @@ class _QuestionDispatcher:
 
     def _handle_scale(self, driver, q_num, idx, ctx: TaskContext, question_div=None):
         dim = ctx.question_dimension_map.get(q_num)
+        is_rev = ctx.question_reverse_map.get(q_num, False)
         if question_div is not None and _driver_question_looks_like_rating(question_div):
-            _score_impl(driver, q_num, idx, ctx.scale_prob, dimension=dim)
+            _score_impl(driver, q_num, idx, ctx.scale_prob, dimension=dim, is_reverse=is_rev)
         else:
-            _scale_impl(driver, q_num, idx, ctx.scale_prob, dimension=dim)
+            _scale_impl(driver, q_num, idx, ctx.scale_prob, dimension=dim, is_reverse=is_rev)
 
     def _handle_matrix(self, driver, q_num, idx, ctx: TaskContext):
         dim = ctx.question_dimension_map.get(q_num)
-        return _matrix_impl(driver, q_num, idx, ctx.matrix_prob, dimension=dim)
+        is_rev = ctx.question_reverse_map.get(q_num, False)
+        return _matrix_impl(driver, q_num, idx, ctx.matrix_prob, dimension=dim, is_reverse=is_rev)
 
     def _handle_dropdown(self, driver, q_num, idx, ctx: TaskContext):
         _dropdown_impl(driver, q_num, idx, ctx.droplist_prob, ctx.droplist_option_fill_texts)
@@ -254,6 +256,9 @@ def brush(
             question_type = question_div.get_attribute("type")
 
             # 检测说明页/阅读材料：有 type 属性但无可交互控件
+            if question_type is None:
+                logging.debug("跳过第%d题（type 属性为空）", current_question_number)
+                continue
             if _driver_question_looks_like_description(question_div, question_type):
                 logging.debug("跳过第%d题（说明页/阅读材料，type=%s）", current_question_number, question_type)
                 continue

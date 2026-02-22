@@ -536,8 +536,8 @@ class RunController(QObject):
             cur_num=0,
             cur_fail=0,
             stop_event=self.stop_event,
-            submit_interval_range_seconds=tuple(config.submit_interval),
-            answer_duration_range_seconds=tuple(config.answer_duration),
+            submit_interval_range_seconds=(int(config.submit_interval[0]), int(config.submit_interval[1])),
+            answer_duration_range_seconds=(int(config.answer_duration[0]), int(config.answer_duration[1])),  # type: ignore[arg-type]
             timed_mode_enabled=config.timed_mode_enabled,
             timed_mode_refresh_interval=config.timed_mode_interval,
             random_proxy_ip_enabled=config.random_ip_enabled,
@@ -627,7 +627,8 @@ class RunController(QObject):
         self._cleanup_scheduled = False
         self._stopped_by_stop_run = False
         self._starting = True
-        proxy_answer_duration = (0, 0) if config.timed_mode_enabled else tuple(config.answer_duration or (0, 0))
+        _ad = config.answer_duration or (0, 0)
+        proxy_answer_duration: Tuple[int, int] = (0, 0) if config.timed_mode_enabled else (int(_ad[0]), int(_ad[1]))
         try:
             set_proxy_occupy_minute_by_answer_duration(proxy_answer_duration)
         except Exception:
@@ -638,7 +639,11 @@ class RunController(QObject):
         # 这里先创建一个临时 ctx，供 configure_probabilities 写入题目配置
         _tmp_ctx = TaskContext()
         try:
-            configure_probabilities(config.question_entries, ctx=_tmp_ctx)
+            configure_probabilities(
+                config.question_entries,
+                ctx=_tmp_ctx,
+                reliability_mode_enabled=getattr(config, "reliability_mode_enabled", True),
+            )
         except Exception as exc:
             logging.error(f"配置题目失败：{exc}")
             self._starting = False
@@ -731,6 +736,8 @@ class RunController(QObject):
             ctx.droplist_option_fill_texts = pending.droplist_option_fill_texts
             ctx.multiple_option_fill_texts = pending.multiple_option_fill_texts
             ctx.question_config_index_map = pending.question_config_index_map
+            ctx.question_dimension_map = pending.question_dimension_map
+            ctx.question_reverse_map = pending.question_reverse_map
             ctx.questions_metadata = pending.questions_metadata
             self._pending_question_ctx = None
         self._task_ctx = ctx

@@ -245,6 +245,8 @@ def serialize_question_entry(entry: QuestionEntry) -> Dict[str, Any]:
         "option_fill_texts": entry.option_fill_texts,
         "fillable_option_indices": entry.fillable_option_indices,
         "is_location": getattr(entry, "is_location", False),
+        "is_reverse": bool(getattr(entry, "is_reverse", False)),
+        "row_reverse_flags": list(getattr(entry, "row_reverse_flags", []) or []),
     }
 
 
@@ -308,6 +310,8 @@ def deserialize_question_entry(data: Dict[str, Any]) -> "QuestionEntry":
         option_fill_texts=data.get("option_fill_texts"),
         fillable_option_indices=data.get("fillable_option_indices"),
         is_location=bool(data.get("is_location")),
+        is_reverse=bool(data.get("is_reverse", False)),
+        row_reverse_flags=[bool(v) for v in (data.get("row_reverse_flags") or [])],
     )
 
 

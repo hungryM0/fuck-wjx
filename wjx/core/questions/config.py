@@ -1,5 +1,5 @@
 """题目配置数据结构 - 策略、概率、选项等参数定义"""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 import wjx.core.state as state
@@ -82,6 +82,8 @@ class QuestionEntry:
     fillable_option_indices: Optional[List[int]] = None
     is_location: bool = False
     dimension: Optional[str] = None  # 题目所属维度（如"满意度"、"信任感"等），None 表示未分组
+    is_reverse: bool = False  # 是否为反向题（用于信效度一致性约束时翻转基准）
+    row_reverse_flags: List[bool] = field(default_factory=list)  # 矩阵题每行的反向标记（空列表时回退到 is_reverse）
 
     def summary(self) -> str:
         def _mode_text(mode: Optional[str]) -> str:
@@ -168,9 +170,14 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
     return QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)
 
 
+# 信效度模式下所有量表/矩阵/评价题共享的全局维度标识
+_RELIABILITY_GLOBAL_DIMENSION = "__reliability__"
+
+
 def configure_probabilities(
     entries: List[QuestionEntry],
     ctx: "Optional[TaskContext]" = None,
+    reliability_mode_enabled: bool = True,
 ):
     # 确定写入目标：优先写入 TaskContext，回退写入全局 state（向后兼容）
     _target = ctx if ctx is not None else state
@@ -191,6 +198,7 @@ def configure_probabilities(
     _target.multiple_option_fill_texts = []
     _target.question_config_index_map = {}
     _target.question_dimension_map = {}
+    _target.question_reverse_map = {}
 
     # 各题型的当前索引,用于构建 question_config_index_map
     _idx_single = 0
@@ -234,7 +242,13 @@ def configure_probabilities(
         elif entry.question_type == "matrix":
             rows = max(1, entry.rows)
             _target.question_config_index_map[question_num] = ("matrix", _idx_matrix)
-            _target.question_dimension_map[question_num] = entry.dimension
+            _target.question_dimension_map[question_num] = _RELIABILITY_GLOBAL_DIMENSION if reliability_mode_enabled else None
+            # 矩阵题：优先用 row_reverse_flags（每行独立），否则用 is_reverse 广播到所有行
+            _row_flags = getattr(entry, "row_reverse_flags", [])
+            if _row_flags:
+                _target.question_reverse_map[question_num] = list(_row_flags)
+            else:
+                _target.question_reverse_map[question_num] = bool(getattr(entry, "is_reverse", False))
             _idx_matrix += rows
             option_count = max(1, _infer_option_count(entry))
 
@@ -285,7 +299,8 @@ def configure_probabilities(
                     _target.matrix_prob.append(-1)
         elif entry.question_type in ("scale", "score"):
             _target.question_config_index_map[question_num] = (entry.question_type, _idx_scale)
-            _target.question_dimension_map[question_num] = entry.dimension
+            _target.question_dimension_map[question_num] = _RELIABILITY_GLOBAL_DIMENSION if reliability_mode_enabled else None
+            _target.question_reverse_map[question_num] = getattr(entry, "is_reverse", False)
             _idx_scale += 1
             _target.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
         elif entry.question_type == "slider":

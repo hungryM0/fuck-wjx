@@ -566,7 +566,10 @@ class DashboardPage(
             self._completion_notified = False
             self.status_label.setText(f"已提交 0/{cfg.target} 份 | 失败 0 次")
         try:
-            configure_probabilities(cfg.question_entries)
+            configure_probabilities(
+                cfg.question_entries,
+                reliability_mode_enabled=getattr(cfg, "reliability_mode_enabled", True),
+            )
         except Exception as exc:
             self._toast(str(exc), "error")
             return
