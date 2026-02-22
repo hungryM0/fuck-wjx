@@ -209,7 +209,14 @@ class DashboardPage(
         exec_layout = QVBoxLayout(exec_card)
         exec_layout.setContentsMargins(12, 12, 12, 12)
         exec_layout.setSpacing(10)
-        exec_layout.addWidget(SubtitleLabel("执行设置", self))
+        
+        # 头部标题与跳转按钮
+        title_row = QHBoxLayout()
+        title_row.addWidget(SubtitleLabel("快捷设置", self))
+        title_row.addStretch(1)
+        self.more_settings_btn = HyperlinkButton(FluentIcon.SETTING, "", "前往“运行参数”页仔细调整", self)
+        title_row.addWidget(self.more_settings_btn)
+        exec_layout.addLayout(title_row)
 
         spin_row = QHBoxLayout()
         spin_row.addWidget(BodyLabel("目标份数：", self))
@@ -221,12 +228,15 @@ class DashboardPage(
         spin_row.addSpacing(12)
         spin_row.addWidget(BodyLabel("并发数（提交速度）：", self))
         self.thread_spin = NoWheelSpinBox(self)
-        self.thread_spin.setRange(1, 12)
+        self.thread_spin.setRange(1, 8)
         self.thread_spin.setMinimumWidth(140)
         self.thread_spin.setMinimumHeight(36)
         spin_row.addWidget(self.thread_spin)
         spin_row.addStretch(1)
         exec_layout.addLayout(spin_row)
+
+        self.random_ua_cb = CheckBox("启用随机 UA（模拟微信/PC浏览器访问）", self)
+        exec_layout.addWidget(self.random_ua_cb)
 
         self.random_ip_cb = CheckBox("启用随机 IP 提交（在触发智能验证时开启）", self)
         exec_layout.addWidget(self.random_ip_cb)
@@ -338,7 +348,9 @@ class DashboardPage(
         self.target_spin.valueChanged.connect(lambda v: self.runtime_page.target_spin.setValue(int(v)))
         self.thread_spin.valueChanged.connect(lambda v: self.runtime_page.thread_spin.setValue(int(v)))
         self.random_ip_cb.stateChanged.connect(self._on_random_ip_toggled)
+        self.random_ua_cb.stateChanged.connect(self._on_random_ua_toggled)
         self.card_btn.clicked.connect(self._on_card_code_clicked)
+        self.more_settings_btn.clicked.connect(self._go_to_runtime_page)
         # 监听问卷链接输入框的文本变化（用于检测 reset 命令）
         self.url_edit.textChanged.connect(self._on_url_text_changed)
         # 监听剪贴板变化，自动处理粘贴的图片
@@ -652,12 +664,33 @@ class DashboardPage(
         self.url_edit.setText(cfg.url)
         self.target_spin.setValue(max(1, int(cfg.target or 1)))
         self.thread_spin.setValue(max(1, int(cfg.threads or 1)))
-        # 阻塞信号避免加载配置时触发弹窗
+        # 阻塞信号避免加载配置时触发弹窗或多余同步
         self.random_ip_cb.blockSignals(True)
         self.random_ip_cb.setChecked(bool(cfg.random_ip_enabled))
         self.random_ip_cb.blockSignals(False)
+
+        self.random_ua_cb.blockSignals(True)
+        self.random_ua_cb.setChecked(bool(cfg.random_ua_enabled))
+        self.random_ua_cb.blockSignals(False)
+
         self._refresh_entry_table()
         self._sync_start_button_state()
+
+    def _go_to_runtime_page(self):
+        main_win = self.window()
+        if hasattr(main_win, "switchTo") and hasattr(main_win, "runtime_page"):
+            main_win.switchTo(main_win.runtime_page)
+
+    def _on_random_ua_toggled(self, state: int):
+        is_checked = (state == Qt.CheckState.Checked.value)
+        try:
+            self.runtime_page.random_ua_switch.blockSignals(True)
+            self.runtime_page.random_ua_switch.setChecked(is_checked)
+            self.runtime_page.random_ua_switch.blockSignals(False)
+            if hasattr(self.runtime_page, "_sync_random_ua"):
+                self.runtime_page._sync_random_ua(is_checked)
+        except Exception as exc:
+            log_suppressed_exception("_on_random_ua_toggled dashboard", exc, level=logging.WARNING)
 
     def _build_config(self) -> RuntimeConfig:
         cfg = RuntimeConfig()
@@ -667,6 +700,7 @@ class DashboardPage(
         cfg.target = max(1, self.target_spin.value())
         cfg.threads = max(1, self.thread_spin.value())
         cfg.random_ip_enabled = self.random_ip_cb.isChecked()
+        cfg.random_ua_enabled = self.random_ua_cb.isChecked()
         return cfg
 
     def _toast(self, text: str, level: str = "info", duration: int = 2000, show_progress: bool = False):
