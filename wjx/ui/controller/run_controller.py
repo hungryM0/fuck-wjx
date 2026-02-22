@@ -23,6 +23,7 @@ from wjx.utils.io.load_save import RuntimeConfig, load_config, save_config
 from wjx.network.proxy import (
     get_effective_proxy_api_url,
     is_custom_proxy_api_active,
+    set_proxy_occupy_minute_by_answer_duration,
 )
 from wjx.utils.system.registry_manager import RegistryManager
 from wjx.utils.event_bus import (
@@ -626,6 +627,11 @@ class RunController(QObject):
         self._cleanup_scheduled = False
         self._stopped_by_stop_run = False
         self._starting = True
+        proxy_answer_duration = (0, 0) if config.timed_mode_enabled else tuple(config.answer_duration or (0, 0))
+        try:
+            set_proxy_occupy_minute_by_answer_duration(proxy_answer_duration)
+        except Exception:
+            logging.debug("同步随机IP占用时长失败", exc_info=True)
 
         logging.info(f"配置题目概率分布（共{len(config.question_entries)}题）")
         # 构建本次任务的上下文（尚未有 proxy_pool，后面在 _start_workers_with_proxy_pool 中注入）
