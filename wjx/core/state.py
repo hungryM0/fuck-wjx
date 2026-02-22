@@ -31,6 +31,12 @@ multiple_option_fill_texts: List[Optional[List[Optional[str]]]] = []
 # 用于在问卷存在条件跳转（隐藏题目）时，仍能正确查找每道题的概率配置
 question_config_index_map: Dict[int, Tuple[str, int]] = {}
 
+# 题号 → 维度名称（None 表示未分组）
+question_dimension_map: Dict[int, Optional[str]] = {}
+
+# 题号 → 是否为反向题（scale/score 为 bool；matrix 为 List[bool]）
+question_reverse_map: Dict[int, Any] = {}
+
 # 题目元数据（从 HTML 解析得到，用于统计展示时补充选项文本等信息）
 # 题号 → 题目信息字典（包含 option_texts, row_texts 等）
 questions_metadata: Dict[int, Dict[str, Any]] = {}

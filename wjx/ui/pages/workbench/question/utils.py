@@ -21,7 +21,7 @@ def _shorten_text(text: str, limit: int = 80) -> str:
 def _apply_label_color(label: QLabel, light: str, dark: str) -> None:
     """为标签设置浅色/深色主题颜色。"""
     try:
-        label.setTextColor(QColor(light), QColor(dark))
+        getattr(label, 'setTextColor')(QColor(light), QColor(dark))
     except AttributeError as e:
         # setTextColor 方法不存在，使用样式表作为备选方案
         logger.debug(f"setTextColor 方法不可用，使用样式表: {e}")
