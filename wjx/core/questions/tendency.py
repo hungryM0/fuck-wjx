@@ -9,10 +9,12 @@
 
 增强（画像融合）：当存在虚拟画像时，基准偏好由画像的 satisfaction_tendency
 决定，而非完全随机。这样画像越"满意"的人物，量表题越倾向选高分。
+
+潜变量模式：支持基于心理测量学的潜变量模型，可精确控制 Cronbach's Alpha。
 """
 import random
 import threading
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
@@ -88,8 +90,16 @@ def get_tendency_index(
     probabilities: Union[List[float], int, None],
     dimension: Optional[str] = None,
     is_reverse: bool = False,
+    # 新增：潜变量模式支持
+    psycho_plan: Optional[Any] = None,
+    question_index: Optional[int] = None,
+    row_index: Optional[int] = None,
 ) -> int:
     """获取带有一致性倾向的选项索引。
+
+    支持两种模式：
+    1. 简单倾向模式（默认）：同维度内的题目共享基准 ±1 波动
+    2. 潜变量模式：基于心理测量学模型，可精确控制 Cronbach's Alpha
 
     按维度隔离基准偏好：同维度内的题目共享基准 ±1 波动，
     不同维度之间独立生成基准。未分组的题目走纯随机。
@@ -99,12 +109,28 @@ def get_tendency_index(
         probabilities: 概率配置列表，或 -1 表示随机
         dimension: 题目所属维度，None 或 DIMENSION_UNGROUPED 表示未分组
         is_reverse: 是否为反向题，True 时翻转基准偏好
+        psycho_plan: 潜变量计划（可选），如果提供则使用潜变量模式
+        question_index: 题目索引（潜变量模式需要）
+        row_index: 矩阵题行索引（可选，仅矩阵题需要）
 
     Returns:
         选中的选项索引（0-based）
     """
     if option_count <= 0:
         return 0
+
+    # 优先使用潜变量模式（如果提供了计划）
+    if psycho_plan is not None and question_index is not None:
+        choice = _get_psychometric_answer(
+            psycho_plan, question_index, row_index, option_count, is_reverse
+        )
+        if choice is not None:
+            return choice
+        # 如果潜变量模式失败，回退到简单模式
+        logging.debug(
+            "潜变量模式未找到答案（题%d 行%s），回退到简单模式",
+            question_index, row_index
+        )
 
     # 未分组 → 纯随机/纯概率，不做一致性约束，但仍需处理反向题
     if _is_ungrouped(dimension):
@@ -115,7 +141,7 @@ def get_tendency_index(
 
     # 获取该维度的基准偏好
     assert dimension is not None  # 已通过 _is_ungrouped 过滤，此处 dimension 必为 str
-    bases: Dict[str, int] = getattr(_thread_local, 'dimension_bases', {})
+    bases: Dict[str, float] = getattr(_thread_local, 'dimension_bases', {})
     if not isinstance(bases, dict):
         bases = {}
         _thread_local.dimension_bases = bases
@@ -185,3 +211,45 @@ def _apply_consistency(
         if pivot <= running:
             return candidates[i]
     return candidates[-1]
+
+
+def _get_psychometric_answer(
+    plan: Any,
+    question_index: int,
+    row_index: Optional[int],
+    option_count: int,
+    is_reverse: bool,
+) -> Optional[int]:
+    """从潜变量计划中获取答案
+    
+    Args:
+        plan: PsychometricPlan 对象
+        question_index: 题目索引（0-based，配置列表中的索引）
+        row_index: 矩阵题行索引（可选）
+        option_count: 选项数量
+        is_reverse: 是否为反向题
+        
+    Returns:
+        选项索引（0-based），如果未找到则返回 None
+    """
+    try:
+        choice = plan.get_choice(question_index, row_index)
+        if choice is None:
+            return None
+        
+        # 确保选项索引在有效范围内
+        choice = max(0, min(option_count - 1, choice))
+        
+        # 反向题翻转
+        if is_reverse:
+            choice = (option_count - 1) - choice
+        
+        return choice
+    except Exception as exc:
+        log_suppressed_exception(
+            f"_get_psychometric_answer: question_index={question_index}, row_index={row_index}",
+            exc,
+            level=logging.WARNING
+        )
+        return None
+

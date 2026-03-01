@@ -177,7 +177,9 @@ class RuntimeConfig:
     random_ua_ratios: Dict[str, int] = field(default_factory=lambda: {"wechat": 33, "mobile": 33, "pc": 34})  # 设备类型占比
     fail_stop_enabled: bool = True
     pause_on_aliyun_captcha: bool = True
-    reliability_mode_enabled: bool = True  # 信效度模式开关（控制维度设置是否可用）
+    reliability_mode_enabled: bool = True  # 信效度模式总开关
+    reliability_mode_type: str = "simple"  # 信效度模式类型：simple（简单倾向）或 psychometric（潜变量模型）
+    psycho_target_alpha: float = 0.85  # 潜变量模式的目标 Cronbach's Alpha（0.70-0.95）
     headless_mode: bool = False
     debug_mode: bool = False
     ai_enabled: bool = False
@@ -251,6 +253,8 @@ def serialize_question_entry(entry: QuestionEntry) -> Dict[str, Any]:
         "is_location": getattr(entry, "is_location", False),
         "is_reverse": bool(getattr(entry, "is_reverse", False)),
         "row_reverse_flags": list(getattr(entry, "row_reverse_flags", []) or []),
+        "psycho_enabled": bool(getattr(entry, "psycho_enabled", False)),
+        "psycho_bias": str(getattr(entry, "psycho_bias", "center") or "center"),
     }
 
 
@@ -317,6 +321,8 @@ def deserialize_question_entry(data: Dict[str, Any]) -> "QuestionEntry":
         is_location=bool(data.get("is_location")),
         is_reverse=bool(data.get("is_reverse", False)),
         row_reverse_flags=[bool(v) for v in (data.get("row_reverse_flags") or [])],
+        psycho_enabled=bool(data.get("psycho_enabled", False)),
+        psycho_bias=str(data.get("psycho_bias") or "center"),
     )
 
 
@@ -439,6 +445,11 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.fail_stop_enabled = bool(raw.get("fail_stop_enabled", True))
     config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
     config.reliability_mode_enabled = bool(raw.get("reliability_mode_enabled", True))
+    config.reliability_mode_type = str(raw.get("reliability_mode_type") or "simple")
+    if config.reliability_mode_type not in ("simple", "psychometric"):
+        config.reliability_mode_type = "simple"
+    config.psycho_target_alpha = float(raw.get("psycho_target_alpha") or 0.85)
+    config.psycho_target_alpha = max(0.70, min(0.95, config.psycho_target_alpha))
     config.debug_mode = bool(raw.get("debug_mode", False))
     config.answer_rules = []
     raw_rules = raw.get("answer_rules")

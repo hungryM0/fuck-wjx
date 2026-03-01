@@ -99,6 +99,10 @@ class QuestionEntry:
     dimension: Optional[str] = None  # 题目所属维度（如"满意度"、"信任感"等），None 表示未分组
     is_reverse: bool = False  # 是否为反向题（用于信效度一致性约束时翻转基准）
     row_reverse_flags: List[bool] = field(default_factory=list)  # 矩阵题每行的反向标记（空列表时回退到 is_reverse）
+    
+    # 潜变量模式专用字段
+    psycho_enabled: bool = False  # 是否启用潜变量模式
+    psycho_bias: str = "center"   # 偏向：left/center/right（仅潜变量模式）
 
     def summary(self) -> str:
         def _mode_text(mode: Optional[str]) -> str:

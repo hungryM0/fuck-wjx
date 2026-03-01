@@ -6,9 +6,11 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
+    ComboBox,
     FluentIcon,
     PopupTeachingTip,
     ScrollArea,
+    SettingCard,
     SettingCardGroup,
     TeachingTipTailPosition,
 )
@@ -68,6 +70,31 @@ class RuntimePage(ScrollArea):
         )
         self.reliability_mode_card.setChecked(True)
 
+        # 信效度模式类型选择（使用自定义卡片）
+        self.reliability_type_card = SettingCard(
+            FluentIcon.SETTING,
+            "信效度模式",
+            "选择信效度保证的实现方式",
+            run_group
+        )
+        # 添加下拉框
+        self.reliability_type_combo = ComboBox(self.reliability_type_card)
+        self.reliability_type_combo.addItems(["简单倾向模式（快速）", "潜变量模型（精确）"])
+        self.reliability_type_combo.setCurrentIndex(0)
+        self.reliability_type_combo.setFixedWidth(200)
+        self.reliability_type_card.hBoxLayout.addWidget(self.reliability_type_combo)
+        self.reliability_type_card.hBoxLayout.addSpacing(16)
+        self.reliability_type_card.setVisible(False)  # 默认隐藏，开启信效度时显示
+
+        # 目标 Alpha 设置（仅潜变量模式显示）
+        self.alpha_card = SpinBoxSettingCard(
+            FluentIcon.CERTIFICATE,
+            "目标 Cronbach's Alpha",
+            "设置期望的信效度系数（0.70-0.95，推荐0.85）",
+            min_val=70, max_val=95, default=85, parent=run_group
+        )
+        self.alpha_card.setVisible(False)  # 默认隐藏
+
         self.fail_stop_card = SwitchSettingCard(
             FluentIcon.CANCEL, "失败过多自动停止", "连续失败次数过多时自动停止运行",
             parent=run_group
@@ -93,6 +120,8 @@ class RuntimePage(ScrollArea):
         run_group.addSettingCard(self.target_card)
         run_group.addSettingCard(self.thread_card)
         run_group.addSettingCard(self.reliability_mode_card)
+        run_group.addSettingCard(self.reliability_type_card)
+        run_group.addSettingCard(self.alpha_card)
         run_group.addSettingCard(self.fail_stop_card)
         run_group.addSettingCard(self.pause_on_aliyun_card)
         run_group.addSettingCard(self.headless_card)
@@ -170,6 +199,8 @@ class RuntimePage(ScrollArea):
         self.timed_switch.checkedChanged.connect(self._sync_timed_mode)
         self.timed_card.helpButton.clicked.connect(self._show_timed_mode_help)
         self.proxy_source_combo.currentIndexChanged.connect(self._on_proxy_source_changed)
+        self.reliability_mode_switch.checkedChanged.connect(self._on_reliability_mode_toggled)
+        self.reliability_type_combo.currentIndexChanged.connect(self._on_reliability_type_changed)
 
     def _show_timed_mode_help(self):
         """显示定时模式说明"""
@@ -241,6 +272,20 @@ class RuntimePage(ScrollArea):
         except Exception as exc:
             log_suppressed_exception("_sync_timed_mode: self.interval_card.setEnabled(not enabled)", exc, level=logging.WARNING)
 
+    def _on_reliability_mode_toggled(self, enabled: bool):
+        """信效度模式开关切换"""
+        self.reliability_type_card.setVisible(enabled)
+        if enabled:
+            self._on_reliability_type_changed(self.reliability_type_combo.currentIndex())
+        else:
+            self.alpha_card.setVisible(False)
+
+    def _on_reliability_type_changed(self, index: int):
+        """信效度模式类型切换"""
+        # 0: 简单模式, 1: 潜变量模式
+        is_psychometric = (index == 1)
+        self.alpha_card.setVisible(is_psychometric)
+
     def update_config(self, cfg: RuntimeConfig):
         cfg.target = max(1, self.target_spin.value())
         cfg.threads = max(1, self.thread_spin.value())
@@ -256,6 +301,8 @@ class RuntimePage(ScrollArea):
         cfg.fail_stop_enabled = self.fail_stop_switch.isChecked()
         cfg.pause_on_aliyun_captcha = self.pause_on_aliyun_switch.isChecked()
         cfg.reliability_mode_enabled = self.reliability_mode_switch.isChecked()
+        cfg.reliability_mode_type = "psychometric" if self.reliability_type_combo.currentIndex() == 1 else "simple"
+        cfg.psycho_target_alpha = self.alpha_card.spinBox.value() / 100.0  # 转换为 0.70-0.95
         cfg.headless_mode = self.headless_card.switchButton.isChecked()
         try:
             idx = self.proxy_source_combo.currentIndex()
@@ -307,6 +354,18 @@ class RuntimePage(ScrollArea):
         self.fail_stop_switch.setChecked(cfg.fail_stop_enabled)
         self.pause_on_aliyun_switch.setChecked(getattr(cfg, "pause_on_aliyun_captcha", True))
         self.reliability_mode_switch.setChecked(getattr(cfg, "reliability_mode_enabled", True))
+        
+        # 应用信效度模式类型
+        reliability_type = getattr(cfg, "reliability_mode_type", "simple")
+        self.reliability_type_combo.setCurrentIndex(1 if reliability_type == "psychometric" else 0)
+        
+        # 应用目标 Alpha
+        alpha_value = int(getattr(cfg, "psycho_target_alpha", 0.85) * 100)
+        self.alpha_card.spinBox.setValue(alpha_value)
+        
+        # 同步可见性
+        self._on_reliability_mode_toggled(self.reliability_mode_switch.isChecked())
+        
         self.headless_card.setChecked(getattr(cfg, "headless_mode", False))
 
         try:

@@ -161,6 +161,14 @@ class DashboardEntriesMixin:
                     entry.is_reverse = any(entry.row_reverse_flags)
                 else:
                     entry.is_reverse = bool(rev_val)
+        
+        # 应用潜变量模式配置
+        psycho_updates = dlg.get_psycho_results()
+        for idx, psycho_config in psycho_updates.items():
+            if 0 <= idx < len(entries):
+                entry = entries[idx]
+                entry.psycho_enabled = psycho_config.get("psycho_enabled", False)
+                entry.psycho_bias = psycho_config.get("psycho_bias", "center")
 
     def _run_question_wizard(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], survey_title: Optional[str] = None) -> bool:
         if not entries:
@@ -204,12 +212,20 @@ class DashboardEntriesMixin:
         self.entry_table.setRowCount(len(entries))
         self.count_label.setText(f"{len(entries)} 题")
         for idx, entry in enumerate(entries):
+            # 序号列（从1开始）
+            seq_item = QTableWidgetItem(str(idx + 1))
+            seq_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.entry_table.setItem(idx, 0, seq_item)
+            
+            # 类型列
             type_label = _get_entry_type_label(entry)
-            summary = question_summary(entry)
             type_item = QTableWidgetItem(type_label)
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.entry_table.setItem(idx, 0, type_item)
-            self.entry_table.setItem(idx, 1, QTableWidgetItem(summary))
+            self.entry_table.setItem(idx, 1, type_item)
+            
+            # 策略列
+            summary = question_summary(entry)
+            self.entry_table.setItem(idx, 2, QTableWidgetItem(summary))
         self._sync_start_button_state()
 
     def _checked_rows(self) -> List[int]:

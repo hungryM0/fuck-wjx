@@ -1,5 +1,5 @@
 """WizardSectionsMixin：各题型配置区 UI 构建方法，供 QuestionWizardDialog 通过多继承引入。"""
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QButtonGroup
@@ -9,6 +9,10 @@ from wjx.ui.widgets.no_wheel import NoWheelSlider
 from wjx.core.questions.config import QuestionEntry
 from wjx.utils.app.config import DEFAULT_FILL_TEXT
 from wjx.ui.helpers.ai_fill import ensure_ai_ready
+from wjx.ui.pages.workbench.question.psycho_config import (
+    PSYCHO_SUPPORTED_TYPES,
+    build_psycho_config_row,
+)
 
 from .utils import _shorten_text, _apply_label_color, _bind_slider_input
 
@@ -38,10 +42,11 @@ class WizardSectionsMixin:
     reverse_check_map: Dict[int, Any]
     entries: List[Any]
     slider_map: Dict[int, Any]
+    psycho_check_map: Dict[int, Any]  # 潜变量模式复选框
+    psycho_bias_map: Dict[int, Any]   # 潜变量偏向下拉框
 
     def _resolve_matrix_weights(self, entry: Any, rows: int, columns: int) -> List[List[float]]: ...
     def _resolve_slider_bounds(self, idx: int, entry: Any) -> Tuple[int, int]: ...
-    def window(self) -> Optional[QWidget]: ...
 
     def _build_text_section(self, idx: int, entry: QuestionEntry, card: CardWidget, card_layout: QVBoxLayout) -> None:
         self._has_content = True
@@ -163,6 +168,13 @@ class WizardSectionsMixin:
         columns = max(1, int(entry.option_count or len(option_texts) or 1))
         if len(row_texts) < rows:
             row_texts += [""] * (rows - len(row_texts))
+
+        # 潜变量模式配置（矩阵题支持）
+        if entry.question_type in PSYCHO_SUPPORTED_TYPES:
+            psycho_row = build_psycho_config_row(
+                card, entry, self.psycho_check_map, self.psycho_bias_map, idx
+            )
+            card_layout.addLayout(psycho_row)
 
         hint = BodyLabel("矩阵量表：每一行都需要单独设置配比", card)
         hint.setStyleSheet("font-size: 12px;")
@@ -290,6 +302,13 @@ class WizardSectionsMixin:
             slider_hint.setStyleSheet("font-size: 12px;")
             _apply_label_color(slider_hint, "#666666", "#bfbfbf")
             card_layout.addWidget(slider_hint)
+
+        # 潜变量模式配置（支持的题型）
+        if entry.question_type in PSYCHO_SUPPORTED_TYPES:
+            psycho_row = build_psycho_config_row(
+                card, entry, self.psycho_check_map, self.psycho_bias_map, idx
+            )
+            card_layout.addLayout(psycho_row)
 
         if self.reliability_mode_enabled and entry.question_type in ("scale", "score"):
             rev_row = QHBoxLayout()

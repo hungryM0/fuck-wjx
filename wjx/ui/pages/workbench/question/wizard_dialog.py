@@ -19,6 +19,7 @@ from qfluentwidgets import (
     PrimaryPushButton,
     LineEdit,
     CheckBox,
+    ComboBox,
 )
 
 from wjx.ui.widgets.no_wheel import NoWheelSlider
@@ -37,8 +38,7 @@ from .wizard_sections import WizardSectionsMixin, _TEXT_RANDOM_NONE
 class QuestionWizardDialog(WizardSectionsMixin, QDialog):
     """配置向导：用滑块快速设置权重/概率，编辑填空题答案。"""
 
-    @staticmethod
-    def _resolve_matrix_weights(entry: QuestionEntry, rows: int, columns: int) -> List[List[float]]:
+    def _resolve_matrix_weights(self, entry: QuestionEntry, rows: int, columns: int) -> List[List[float]]:
         """解析矩阵题的配比配置，返回按行的默认权重。"""
         def _clean_row(raw_row: Any) -> Optional[List[float]]:
             if not isinstance(raw_row, (list, tuple)):
@@ -86,7 +86,7 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         except Exception:
             return float(default)
 
-    def _resolve_slider_bounds(self, idx: int, entry: QuestionEntry) -> List[int]:
+    def _resolve_slider_bounds(self, idx: int, entry: QuestionEntry) -> tuple[int, int]:
         min_val = 0.0
         max_val = 10.0
 
@@ -107,7 +107,7 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         max_int = int(round(max_val))
         if max_int <= min_int:
             max_int = min_int + 1
-        return [min_int, max_int]
+        return (min_int, max_int)
 
     def __init__(self, entries: List[QuestionEntry], info: List[Dict[str, Any]], survey_title: Optional[str] = None, parent=None, reliability_mode_enabled: bool = True):
         super().__init__(parent)
@@ -131,6 +131,9 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         self.text_random_name_check_map: Dict[int, CheckBox] = {}
         self.text_random_mobile_check_map: Dict[int, CheckBox] = {}
         self.text_random_group_map: Dict[int, QButtonGroup] = {}
+        # 潜变量模式配置映射表
+        self.psycho_check_map: Dict[int, CheckBox] = {}
+        self.psycho_bias_map: Dict[int, ComboBox] = {}
         self._entry_snapshots: List[QuestionEntry] = [copy.deepcopy(entry) for entry in entries]
         self._has_content = False
 
@@ -364,3 +367,8 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         for idx, cbs in self.matrix_reverse_check_map.items():
             result[idx] = [cb.isChecked() for cb in cbs]
         return result
+
+    def get_psycho_results(self) -> Dict[int, Dict[str, Any]]:
+        """获取潜变量模式配置结果"""
+        from wjx.ui.pages.workbench.question.psycho_config import get_psycho_results
+        return get_psycho_results(self.psycho_check_map, self.psycho_bias_map)
