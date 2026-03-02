@@ -37,7 +37,10 @@ def build_bias_weights(option_count: int, bias: str) -> List[float]:
         # center: 越靠近中间越高
         center = (count - 1) / 2.0
         linear = [1.0 - abs(i - center) / center for i in range(count)]
-    # 指数曲线：power=8 让低端快速衰减到接近 0
-    raw = [math.pow(v, 8) for v in linear]
-    max_val = max(raw) or 1.0
+    # 居中用3次曲线（两端适度衰减），左右倾向用8次曲线（极端压制低端）
+    power = 3 if bias == "center" else 8
+    raw = [math.pow(v, power) for v in linear]
+    max_val = max(raw)
+    if not max_val:
+        return [round(100 / count)] * count
     return [round(v / max_val * 100) for v in raw]

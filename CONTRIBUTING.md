@@ -12,6 +12,7 @@
 - 安装依赖：`pip install -r requirements.txt`。
 - 从源码运行：`python fuck-wjx.py`。
 - 导入检测：`python test_wjx_imports.py`（扫描 `wjx/` 下所有 `.py` 文件的 `import` 是否报错）。
+- 死代码检测：`python test_wjx_deadcode.py`（基于 vulture，扫描 `wjx/` 下未引用的死代码）。
 
 ## 仓库根目录
 
