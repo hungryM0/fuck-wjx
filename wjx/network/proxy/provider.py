@@ -181,23 +181,34 @@ def _handle_area_quality_failure(stop_signal: Optional[threading.Event] = None) 
             log_suppressed_exception("random_ip._handle_area_quality_failure set stop_signal", exc)
 
 
-def _apply_area_to_proxy_url(url: str, area_code: Optional[str]) -> str:
-    if area_code is None:
-        return url
+def _apply_query_param(url: str, param_name: str, param_value: str, insert_after: Optional[str] = None) -> str:
+    """通用的 URL 查询参数操作函数"""
     try:
         split = urlsplit(url)
     except Exception:
         return url
-    query_items = [(k, v) for k, v in parse_qsl(split.query, keep_blank_values=True) if k.lower() != "area"]
-    normalized_area = _normalize_area_code(area_code)
-    if normalized_area:
+    query_items = [(k, v) for k, v in parse_qsl(split.query, keep_blank_values=True) if k.lower() != param_name.lower()]
+
+    if insert_after:
         insert_at = len(query_items)
         for idx, (key, _) in enumerate(query_items):
-            if str(key).lower() == "format":
+            if str(key).lower() == insert_after.lower():
                 insert_at = idx + 1
                 break
-        query_items.insert(insert_at, ("area", normalized_area))
+        query_items.insert(insert_at, (param_name, param_value))
+    else:
+        query_items.append((param_name, param_value))
+
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query_items, doseq=True), split.fragment))
+
+
+def _apply_area_to_proxy_url(url: str, area_code: Optional[str]) -> str:
+    if area_code is None:
+        return url
+    normalized_area = _normalize_area_code(area_code)
+    if not normalized_area:
+        return url
+    return _apply_query_param(url, "area", normalized_area, insert_after="format")
 
 
 def _is_province_level_area_code(area_code: str) -> bool:
@@ -224,26 +235,14 @@ def _is_ipzan_core_extract_url(url: str) -> bool:
 def _apply_minute_to_proxy_url(url: str, minute: int) -> str:
     if not _is_ipzan_core_extract_url(url):
         return url
-    try:
-        split = urlsplit(url)
-    except Exception:
-        return url
     safe_minute = int(minute) if int(minute) in _IPZAN_MINUTE_OPTIONS else 1
-    query_items = [(k, v) for k, v in parse_qsl(split.query, keep_blank_values=True) if k.lower() != "minute"]
-    query_items.append(("minute", str(safe_minute)))
-    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query_items, doseq=True), split.fragment))
+    return _apply_query_param(url, "minute", str(safe_minute))
 
 
 def _apply_pool_to_proxy_url(url: str, pool: Optional[str]) -> str:
     if not pool or not _is_ipzan_core_extract_url(url):
         return url
-    try:
-        split = urlsplit(url)
-    except Exception:
-        return url
-    query_items = [(k, v) for k, v in parse_qsl(split.query, keep_blank_values=True) if k.lower() != "pool"]
-    query_items.append(("pool", pool))
-    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query_items, doseq=True), split.fragment))
+    return _apply_query_param(url, "pool", pool)
 
 
 def get_default_proxy_area_code() -> str:

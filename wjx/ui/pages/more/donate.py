@@ -1,5 +1,4 @@
 """捐助页面"""
-import sys
 import os
 from typing import Optional
 
@@ -14,14 +13,7 @@ from qfluentwidgets import (
     CardWidget,
     StrongBodyLabel,
 )
-
-
-def get_resource_path(relative_path: str) -> str:
-    """获取资源文件的绝对路径，兼容打包后的环境"""
-    meipass = getattr(sys, '_MEIPASS', None)
-    if meipass:
-        return os.path.join(meipass, relative_path)
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), relative_path)
+from wjx.utils.app.runtime_paths import _get_resource_path as get_resource_path
 
 
 class DonatePage(ScrollArea):

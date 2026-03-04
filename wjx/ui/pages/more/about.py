@@ -1,8 +1,6 @@
 """关于页面"""
 import threading
 import webbrowser
-import os
-import sys
 from datetime import datetime
 import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
@@ -36,16 +34,7 @@ from qfluentwidgets import (
 
 from wjx.utils.app.version import __VERSION__, GITHUB_OWNER, GITHUB_REPO
 from wjx.ui.widgets.full_width_infobar import FullWidthInfoBar
-
-
-def get_resource_path(relative_path: str) -> str:
-    """获取资源文件的绝对路径，兼容打包后的环境"""
-
-
-    meipass = getattr(sys, '_MEIPASS', None)
-    if meipass:
-        return os.path.join(meipass, relative_path)
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), relative_path)
+from wjx.utils.app.runtime_paths import _get_resource_path as get_resource_path
 
 
 class AboutPage(ScrollArea):

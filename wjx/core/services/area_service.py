@@ -14,12 +14,23 @@ def _read_asset_text(filename: str) -> str:
         return ""
 
 
+# 模块级缓存
+_AREA_CODES_CACHE: Dict[str, Any] | None = None
+_SUPPORTED_CODES_CACHE: Tuple[Set[str], bool] | None = None
+
+
 def load_supported_area_codes() -> Tuple[Set[str], bool]:
     """返回支持的地区编码集合，以及是否包含 all 标记。"""
+    global _SUPPORTED_CODES_CACHE
+
+    if _SUPPORTED_CODES_CACHE is not None:
+        return _SUPPORTED_CODES_CACHE
+
     codes: Set[str] = set()
     has_all = False
     content = _read_asset_text("area.txt")
     if not content:
+        _SUPPORTED_CODES_CACHE = (codes, has_all)
         return codes, has_all
 
     for raw_line in content.splitlines():
@@ -37,16 +48,22 @@ def load_supported_area_codes() -> Tuple[Set[str], bool]:
             continue
         if code.isdigit() and len(code) == 6:
             codes.add(code)
+
+    _SUPPORTED_CODES_CACHE = (codes, has_all)
     return codes, has_all
 
 
 def load_area_codes(supported_only: bool = False) -> List[Dict[str, Any]]:
     """读取省市区编码。"""
-    try:
-        payload = json.loads(_read_asset_text("area_codes_2022.json") or "{}")
-    except Exception:
-        return []
-    provinces = payload.get("provinces")
+    global _AREA_CODES_CACHE
+
+    if _AREA_CODES_CACHE is None:
+        try:
+            _AREA_CODES_CACHE = json.loads(_read_asset_text("area_codes_2022.json") or "{}")
+        except Exception:
+            _AREA_CODES_CACHE = {}
+
+    provinces = _AREA_CODES_CACHE.get("provinces")
     if not isinstance(provinces, list):
         return []
     if not supported_only:
