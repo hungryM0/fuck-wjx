@@ -500,8 +500,9 @@ class DashboardPage(
             self._toast("文件不存在，可能已被删除", "warning")
             return
         try:
-            cfg = self.controller.load_saved_config(path)
+            cfg = self.controller.load_saved_config(path, strict=True)
         except Exception as exc:
+            logging.error("手动载入配置失败: %s", exc, exc_info=True)
             self._toast(f"载入失败：{exc}", "error")
             return
         # 应用到界面
@@ -736,4 +737,3 @@ class DashboardPage(
             else:
                 InfoBar.info("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
             return None
-

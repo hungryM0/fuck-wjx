@@ -70,29 +70,35 @@ def handle_aliyun_captcha(
             return False
 
     def _verification_button_text_visible() -> bool:
-        """检测页面/iframe 中是否出现可见的"智能验证/开始验证"按钮或文案。"""
+        """检测页面/iframe 中是否出现可见的高置信验证文案。"""
         script = r"""
             (() => {
-                const texts = [
-                    '智能验证', '开始验证', '点击开始智能验证',
-                    '需要安全校验', '请重新提交', '安全校验',
-                    '验证', '人机验证', '滑动验证'
+                const textPatterns = [
+                    /请完成安全验证/,
+                    /点击开始智能验证/,
+                    /需要安全校验/,
+                    /请重新提交/,
+                    /人机验证/,
+                    /滑动验证/,
+                    /安全验证失败/
                 ];
-                const visible = (el) => {
-                    if (!el) return false;
-                    const style = window.getComputedStyle(el);
+                const visible = (el, win) => {
+                    if (!el || !win) return false;
+                    const style = win.getComputedStyle(el);
                     if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
                     const rect = el.getBoundingClientRect();
                     return rect.width > 0 && rect.height > 0;
                 };
                 const checkDoc = (doc) => {
+                    const win = doc.defaultView;
+                    if (!win) return false;
                     const nodes = doc.querySelectorAll('button, a, span, div, p');
                     for (const el of nodes) {
-                        if (!visible(el)) continue;
+                        if (!visible(el, win)) continue;
                         const txt = (el.innerText || el.textContent || '').trim();
                         if (!txt) continue;
-                        for (const t of texts) {
-                            if (txt.includes(t)) return true;
+                        for (const p of textPatterns) {
+                            if (p.test(txt)) return true;
                         }
                     }
                     return false;
@@ -115,23 +121,29 @@ def handle_aliyun_captcha(
             (() => {
                 const ids = [
                     'aliyunCaptcha-window-popup',
+                    'aliyunCaptcha-title',
                     'aliyunCaptcha-checkbox',
+                    'aliyunCaptcha-checkbox-wrapper',
+                    'aliyunCaptcha-checkbox-body',
                     'aliyunCaptcha-checkbox-icon',
                     'aliyunCaptcha-checkbox-left',
                     'aliyunCaptcha-checkbox-text',
-                    'aliyunCaptcha-loading'
+                    'aliyunCaptcha-loading',
+                    'aliyunCaptcha-certifyId'
                 ];
-                const visible = (el) => {
-                    if (!el) return false;
-                    const style = window.getComputedStyle(el);
+                const visible = (el, win) => {
+                    if (!el || !win) return false;
+                    const style = win.getComputedStyle(el);
                     if (style.display === 'none' || style.visibility === 'hidden') return false;
                     const rect = el.getBoundingClientRect();
                     return rect.width > 0 && rect.height > 0;
                 };
                 const checkDoc = (doc) => {
+                    const win = doc.defaultView;
+                    if (!win) return false;
                     for (const id of ids) {
                         const el = doc.getElementById(id);
-                        if (visible(el)) return true;
+                        if (visible(el, win)) return true;
                     }
                     return false;
                 };
@@ -150,13 +162,22 @@ def handle_aliyun_captcha(
 
     def _wait_for_challenge() -> bool:
         end_time = time.time() + max(timeout, 3)
+        weak_text_hits = 0
         while time.time() < end_time:
             if stop_signal and stop_signal.is_set():
                 return False
-            if _challenge_visible() or _verification_button_text_visible():
+            if _challenge_visible() or _element_exists():
                 return True
+            if _verification_button_text_visible():
+                weak_text_hits += 1
+                if weak_text_hits >= 2:
+                    return True
+            else:
+                weak_text_hits = 0
             time.sleep(0.15)
-        return _challenge_visible() or _verification_button_text_visible()
+        if _challenge_visible() or _element_exists():
+            return True
+        return bool(weak_text_hits >= 2 and _verification_button_text_visible())
 
     # 先用简单的元素存在性检测作为补充
     def _element_exists() -> bool:
@@ -169,7 +190,7 @@ def handle_aliyun_captcha(
                 continue
         return False
 
-    challenge_detected = _wait_for_challenge() or _element_exists()
+    challenge_detected = _wait_for_challenge()
     if not challenge_detected:
         logging.debug("未检测到阿里云智能验证弹窗")
         return False

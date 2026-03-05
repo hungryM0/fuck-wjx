@@ -54,18 +54,75 @@ def _submission_blocked_by_security_check(driver: BrowserDriver) -> bool:
 
     script = r"""
         return (() => {
-            const text = (document.body?.innerText || '').replace(/\s+/g, '');
-            if (!text) return false;
-            const markers = [
-                '需要安全校验',
-                '请重新提交',
-                '安全校验',
-                '安全验证',
-                '智能验证',
-                '人机验证',
-                '滑动验证',
+            const popupIds = [
+                'aliyunCaptcha-window-popup',
+                'aliyunCaptcha-title',
+                'aliyunCaptcha-checkbox-wrapper',
+                'aliyunCaptcha-checkbox-body',
+                'aliyunCaptcha-checkbox-icon',
+                'aliyunCaptcha-checkbox-left',
+                'aliyunCaptcha-checkbox-text',
+                'aliyunCaptcha-certifyId',
             ];
-            return markers.some(marker => text.includes(marker));
+
+            const textPatterns = [
+                /请完成安全验证/,
+                /点击开始智能验证/,
+                /需要安全校验/,
+                /请重新提交/,
+                /人机验证/,
+                /滑动验证/,
+                /安全验证失败/,
+            ];
+
+            const visible = (el, win) => {
+                if (!el || !win) return false;
+                const style = win.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
+
+            const docHasVisibleCaptchaDom = (doc) => {
+                const win = doc.defaultView;
+                if (!win) return false;
+                for (const id of popupIds) {
+                    const el = doc.getElementById(id);
+                    if (visible(el, win)) return true;
+                }
+                return false;
+            };
+
+            const docHasStrongSecurityText = (doc) => {
+                const nodes = doc.querySelectorAll('button, a, span, div, p');
+                for (const el of nodes) {
+                    const win = doc.defaultView;
+                    if (!visible(el, win)) continue;
+                    const txt = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+                    if (!txt) continue;
+                    for (const p of textPatterns) {
+                        if (p.test(txt)) return true;
+                    }
+                }
+                return false;
+            };
+
+            const scanDoc = (doc) => {
+                if (!doc) return false;
+                if (docHasVisibleCaptchaDom(doc)) return true;
+                if (docHasStrongSecurityText(doc)) return true;
+                return false;
+            };
+
+            if (scanDoc(document)) return true;
+            const frames = Array.from(document.querySelectorAll('iframe'));
+            for (const frame of frames) {
+                try {
+                    const doc = frame.contentDocument || frame.contentWindow?.document;
+                    if (scanDoc(doc)) return true;
+                } catch (e) {}
+            }
+            return false;
         })();
     """
     try:
