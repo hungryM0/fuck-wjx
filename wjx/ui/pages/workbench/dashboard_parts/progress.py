@@ -1,13 +1,14 @@
 """DashboardPage 运行状态与进度展示相关方法。"""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
+    IndeterminateProgressBar,
     MessageBox,
     PrimaryPushButton,
     ProgressBar,
@@ -30,6 +31,7 @@ class DashboardProgressMixin:
         controller: RunController
         status_label: StrongBodyLabel
         progress_bar: ProgressBar
+        progress_indeterminate_bar: IndeterminateProgressBar
         progress_pct: StrongBodyLabel
         start_btn: PrimaryPushButton
         resume_btn: PrimaryPushButton
@@ -50,6 +52,7 @@ class DashboardProgressMixin:
         _show_end_toast_after_cleanup: bool
         _last_progress: int
         _last_pause_reason: str
+        _main_progress_indeterminate: bool
 
         def _sync_start_button_state(self, running: Optional[bool] = None) -> None: ...
         def _has_question_entries(self) -> bool: ...
@@ -60,10 +63,41 @@ class DashboardProgressMixin:
     def _init_progress_state(self):
         self._thread_progress_rows = {}
         self._thread_view_current = self.THREAD_VIEW_QUESTION_LIST
-        self._thread_clear_timer = QTimer(self)
+        self._main_progress_indeterminate = False
+        self._thread_clear_timer = QTimer(cast(QObject, self))
         self._thread_clear_timer.setSingleShot(True)
         self._thread_clear_timer.setInterval(4000)
         self._thread_clear_timer.timeout.connect(self._clear_thread_progress_rows)
+
+    def _controller_initializing(self) -> bool:
+        checker = getattr(self.controller, "is_initializing", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        return False
+
+    def _set_main_progress_indeterminate(self, enabled: bool) -> None:
+        flag = bool(enabled)
+        if flag == bool(getattr(self, "_main_progress_indeterminate", False)):
+            return
+        self._main_progress_indeterminate = flag
+        bar = getattr(self, "progress_bar", None)
+        indeterminate_bar = getattr(self, "progress_indeterminate_bar", None)
+        if flag:
+            if bar is not None:
+                bar.hide()
+            if indeterminate_bar is not None:
+                indeterminate_bar.show()
+            self.progress_pct.setText("...")
+        else:
+            if indeterminate_bar is not None:
+                indeterminate_bar.hide()
+            if bar is not None:
+                bar.show()
+                bar.setRange(0, 100)
+                bar.setValue(max(0, min(100, int(getattr(self, "_last_progress", 0) or 0))))
 
     def _build_thread_progress_panel(self, parent: QWidget) -> QWidget:
         self.thread_progress_panel = QWidget(parent)
@@ -72,6 +106,7 @@ class DashboardProgressMixin:
         thread_panel_layout.setSpacing(6)
         thread_panel_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.thread_progress_hint = BodyLabel("线程进度会在任务开始后显示", self.thread_progress_panel)
+        self.thread_progress_hint.setWordWrap(True)
         self.thread_progress_hint.setStyleSheet("color: #6b6b6b;")
         thread_panel_layout.addWidget(self.thread_progress_hint)
         self.thread_progress_rows_container = QWidget(self.thread_progress_panel)
@@ -136,7 +171,10 @@ class DashboardProgressMixin:
         top_row.setSpacing(10)
         self.status_label = StrongBodyLabel("等待配置...", self)
         self.progress_bar = ProgressBar(self)
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_indeterminate_bar = IndeterminateProgressBar(start=True, parent=self)
+        self.progress_indeterminate_bar.hide()
         self.progress_pct = StrongBodyLabel("0%", self)
         self.progress_pct.setMinimumWidth(50)
         self.progress_pct.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -151,6 +189,7 @@ class DashboardProgressMixin:
 
         top_row.addWidget(self.status_label)
         top_row.addWidget(self.progress_bar, 1)
+        top_row.addWidget(self.progress_indeterminate_bar, 1)
         top_row.addWidget(self.progress_pct)
         top_row.addWidget(self.start_btn)
         top_row.addWidget(self.resume_btn)
@@ -164,6 +203,14 @@ class DashboardProgressMixin:
         self.stop_btn.clicked.connect(lambda: self.controller.stop_run())
 
     def update_status(self, text: str, current: int, target: int):
+        if self._controller_initializing():
+            self.status_label.setText("正在初始化")
+            self._set_main_progress_indeterminate(True)
+            self.progress_pct.setText("...")
+            self._last_progress = 0
+            return
+
+        self._set_main_progress_indeterminate(False)
         self.status_label.setText(text)
         progress = 0
         if target > 0:
@@ -185,6 +232,8 @@ class DashboardProgressMixin:
     def _clear_thread_progress_rows(self):
         while self.thread_progress_rows_layout.count():
             item = self.thread_progress_rows_layout.takeAt(0)
+            if item is None:
+                continue
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
@@ -260,6 +309,25 @@ class DashboardProgressMixin:
     def update_thread_progress(self, payload: dict):
         if not isinstance(payload, dict):
             return
+        if bool(payload.get("initializing")):
+            self._set_main_progress_indeterminate(True)
+            if self._thread_progress_rows:
+                self._clear_thread_progress_rows()
+            init_logs = payload.get("initialization_logs")
+            lines = []
+            if isinstance(init_logs, list):
+                for item in init_logs:
+                    text = str(item or "").strip()
+                    if text:
+                        lines.append(text)
+            self.thread_progress_hint.show()
+            if lines:
+                self.thread_progress_hint.setText("\n".join(lines))
+            else:
+                self.thread_progress_hint.setText(str(payload.get("initializing_text") or "正在初始化..."))
+            return
+
+        self._set_main_progress_indeterminate(False)
         thread_rows = payload.get("threads")
         if not isinstance(thread_rows, list):
             return
@@ -330,15 +398,24 @@ class DashboardProgressMixin:
         if not running:
             self.resume_btn.setEnabled(False)
             self.resume_btn.hide()
+            self._set_main_progress_indeterminate(False)
         if running:
             self._thread_clear_timer.stop()
             self._clear_thread_progress_rows()
-            self.thread_progress_hint.setText("正在准备线程进度...")
+            if self._controller_initializing():
+                self.thread_progress_hint.setText("正在初始化...")
+                self.status_label.setText("正在初始化")
+                self._set_main_progress_indeterminate(True)
+                self.progress_pct.setText("...")
+            else:
+                self.thread_progress_hint.setText("正在准备线程进度...")
+                self._set_main_progress_indeterminate(False)
             self._set_thread_view(self.THREAD_VIEW_PROGRESS)
             self._completion_notified = False
             self.start_btn.setText("执行中...")
             self.start_btn.setEnabled(False)
-            self._toast("已启动任务", "success", 1500)
+            if not self._controller_initializing():
+                self._toast("已启动任务", "success", 1500)
         else:
             if self._thread_progress_rows:
                 self._thread_clear_timer.start()

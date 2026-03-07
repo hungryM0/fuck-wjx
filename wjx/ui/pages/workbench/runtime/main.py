@@ -93,7 +93,7 @@ class RuntimePage(ScrollArea):
             "开启后浏览器在后台运行，不显示窗口，可提高并发性能",
             parent=run_group,
         )
-        self.headless_card.setChecked(False)
+        self.headless_card.setChecked(True)
 
         run_group.addSettingCard(self.target_card)
         run_group.addSettingCard(self.thread_card)
@@ -404,7 +404,7 @@ class RuntimePage(ScrollArea):
 
         self._suppress_headless_tip = True
         try:
-            self.headless_card.setChecked(getattr(cfg, "headless_mode", False))
+            self.headless_card.setChecked(getattr(cfg, "headless_mode", True))
             self._apply_thread_limit_by_headless(self.headless_card.isChecked())
         finally:
             self._suppress_headless_tip = False
