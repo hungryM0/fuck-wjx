@@ -5,7 +5,7 @@ import logging
 import subprocess
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSettings, QTimer, Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -19,7 +19,7 @@ from qfluentwidgets import (
     ProgressBar,
 )
 
-from wjx.utils.app.config import DOWNLOAD_SOURCES, get_bool_from_qsettings
+from wjx.utils.app.config import DOWNLOAD_SOURCES, app_settings, get_bool_from_qsettings
 from wjx.utils.app.version import __VERSION__
 
 
@@ -38,7 +38,7 @@ class MainWindowUpdateMixin:
 
     def _check_update_on_startup(self):
         """根据设置在启动时检查更新（后台异步执行）"""
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         if get_bool_from_qsettings(settings.value("auto_check_update"), True):
             from wjx.ui.workers.update_worker import UpdateCheckWorker
 

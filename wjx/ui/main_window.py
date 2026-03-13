@@ -8,7 +8,7 @@ import sys
 import threading
 from typing import Any, Dict, List
 
-from PySide6.QtCore import Qt, QTimer, QSettings, Signal, QEvent
+from PySide6.QtCore import Qt, QTimer, Signal, QEvent
 from PySide6.QtGui import QIcon, QGuiApplication, QColor
 from PySide6.QtWidgets import QDialog, QFileDialog
 from qfluentwidgets import (
@@ -37,7 +37,7 @@ from wjx.ui.controller import RunController
 from wjx.ui.main_window_parts.lazy_pages import MainWindowLazyPagesMixin
 from wjx.ui.main_window_parts.popup_compat import MainWindowPopupCompatMixin
 from wjx.ui.main_window_parts.update import MainWindowUpdateMixin
-from wjx.utils.app.config import APP_ICON_RELATIVE_PATH, get_bool_from_qsettings
+from wjx.utils.app.config import APP_ICON_RELATIVE_PATH, app_settings, get_bool_from_qsettings
 from wjx.utils.io.load_save import RuntimeConfig, get_runtime_directory
 from wjx.utils.logging.log_utils import LOG_BUFFER_HANDLER, register_popup_handler, log_suppressed_exception
 from wjx.utils.app.version import __VERSION__
@@ -96,7 +96,7 @@ class MainWindow(
         self._enable_window_material_effect()
 
         # 应用窗口置顶设置
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         if get_bool_from_qsettings(settings.value("window_topmost"), False):
             self.apply_topmost_state(True, show=False)
 
@@ -286,7 +286,7 @@ class MainWindow(
     def _setup_sidebar_state(self):
         """设置侧边栏折叠状态（在事件循环中调用以避免时序问题）"""
         try:
-            settings = QSettings("FuckWjx", "Settings")
+            settings = app_settings()
             always_expand = get_bool_from_qsettings(settings.value("sidebar_always_expand"), True)
             self.navigationInterface.setCollapsible(not always_expand)
             if always_expand:
@@ -300,7 +300,7 @@ class MainWindow(
         if self._sidebar_expanded:
             return
         self._sidebar_expanded = True
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         always_expand = get_bool_from_qsettings(settings.value("sidebar_always_expand"), True)
         if not always_expand:
             return
@@ -334,7 +334,7 @@ class MainWindow(
             log_suppressed_exception("closeEvent: 清理资源时出错", exc)
         
         if not self._skip_save_on_close:
-            settings = QSettings("FuckWjx", "Settings")
+            settings = app_settings()
             ask_save = get_bool_from_qsettings(settings.value("ask_save_on_close"), True)
             if ask_save:
                 # 询问用户是否保存配置
@@ -410,7 +410,7 @@ class MainWindow(
         super().closeEvent(e)
 
     def _init_community_hint_badge_state(self):
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         self._community_hint_pending = get_bool_from_qsettings(
             settings.value(self._community_hint_setting_key),
             False,
@@ -419,7 +419,7 @@ class MainWindow(
 
     def _set_community_hint_pending(self, pending: bool):
         self._community_hint_pending = bool(pending)
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         settings.setValue(self._community_hint_setting_key, self._community_hint_pending)
         self._refresh_community_hint_badge()
 

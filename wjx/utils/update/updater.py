@@ -18,21 +18,20 @@ except ImportError:  # pragma: no cover
     version = None
 
 try:
-    from PySide6.QtCore import QSettings
+    from PySide6.QtCore import QSettings as _QSettings  # noqa: F401 — 仅用于可用性检查
+    _HAS_QSETTINGS = True
 except ImportError:
-    QSettings = None
+    _HAS_QSETTINGS = False
 
 from wjx.utils.app.version import __VERSION__, GITHUB_API_URL, GITHUB_RELEASES_URL
-from wjx.utils.app.config import DOWNLOAD_SOURCES, DEFAULT_DOWNLOAD_SOURCE
+from wjx.utils.app.config import DOWNLOAD_SOURCES, DEFAULT_DOWNLOAD_SOURCE, app_settings
 
 
 def _get_download_source() -> str:
     """获取当前选择的下载源 key（兼容旧键 github_mirror）"""
-
-
-    if QSettings is not None:
+    if _HAS_QSETTINGS:
         try:
-            settings = QSettings("FuckWjx", "Settings")
+            settings = app_settings()
             value = str(settings.value("download_source", "")).strip()
             if value:
                 return value
@@ -43,20 +42,20 @@ def _get_download_source() -> str:
                 settings.remove("github_mirror")
                 return legacy_value
         except Exception as exc:
-            log_suppressed_exception("_get_download_source: settings = QSettings(\"FuckWjx\", \"Settings\")", exc, level=logging.WARNING)
+            log_suppressed_exception("_get_download_source", exc, level=logging.WARNING)
     return DEFAULT_DOWNLOAD_SOURCE
 
 
 def _set_download_source(source_key: str) -> None:
     """保存当前选择的下载源 key"""
-    if QSettings is not None:
+    if _HAS_QSETTINGS:
         try:
-            settings = QSettings("FuckWjx", "Settings")
+            settings = app_settings()
             settings.setValue("download_source", source_key)
             settings.remove("github_mirror")
             logging.debug(f"已切换下载源为: {source_key}")
         except Exception as exc:
-            log_suppressed_exception("_set_download_source: settings = QSettings(\"FuckWjx\", \"Settings\")", exc, level=logging.WARNING)
+            log_suppressed_exception("_set_download_source", exc, level=logging.WARNING)
 
 
 def _get_next_download_source(current_key: str) -> Optional[str]:

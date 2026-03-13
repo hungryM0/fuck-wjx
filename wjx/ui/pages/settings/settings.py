@@ -5,7 +5,7 @@ import logging
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication
 from qfluentwidgets import (
     ScrollArea,
@@ -20,7 +20,7 @@ from qfluentwidgets import (
 )
 
 from wjx.ui.widgets.setting_cards import SwitchSettingCard
-from wjx.utils.app.config import DOWNLOAD_SOURCES, DEFAULT_DOWNLOAD_SOURCE, get_bool_from_qsettings
+from wjx.utils.app.config import DOWNLOAD_SOURCES, DEFAULT_DOWNLOAD_SOURCE, app_settings, get_bool_from_qsettings
 
 
 class SettingsPage(ScrollArea):
@@ -42,7 +42,7 @@ class SettingsPage(ScrollArea):
         layout.setSpacing(16)
 
         # 从设置中读取配置
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
 
         # 界面外观组
         self.appearance_group = SettingCardGroup("界面外观", self.view)
@@ -95,7 +95,7 @@ class SettingsPage(ScrollArea):
             self.update_group
         )
         # 从设置中读取，默认开启
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         self.auto_update_card.setChecked(get_bool_from_qsettings(settings.value("auto_check_update"), True))
         self.update_group.addSettingCard(self.auto_update_card)
 
@@ -183,7 +183,7 @@ class SettingsPage(ScrollArea):
         btn.blockSignals(False)
 
     def _apply_sidebar_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         if persist:
             settings.setValue("sidebar_always_expand", checked)
         win = self.window()
@@ -209,7 +209,7 @@ class SettingsPage(ScrollArea):
                 log_suppressed_exception("_apply_sidebar_state: if checked: nav.setCollapsible(False) nav.expand() else: nav.setCollapsible(T...", exc, level=logging.WARNING)
 
     def _apply_topmost_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         if persist:
             settings.setValue("window_topmost", checked)
         win = self.window()
@@ -226,7 +226,7 @@ class SettingsPage(ScrollArea):
             )
 
     def _apply_ask_save_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         if persist:
             settings.setValue("ask_save_on_close", checked)
         if show_tip:
@@ -239,7 +239,7 @@ class SettingsPage(ScrollArea):
             )
 
     def _apply_auto_update_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         if persist:
             settings.setValue("auto_check_update", checked)
         if show_tip:
@@ -255,7 +255,7 @@ class SettingsPage(ScrollArea):
         """应用调试模式设置"""
         from wjx.utils.logging.log_utils import set_debug_mode
         
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         if persist:
             settings.setValue("debug_mode", checked)
         
@@ -340,7 +340,7 @@ class SettingsPage(ScrollArea):
         if not box.exec():
             return
 
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         for key in ("sidebar_always_expand", "window_topmost", "ask_save_on_close", "auto_check_update", "debug_mode"):
             settings.remove(key)
 
@@ -371,7 +371,7 @@ class SettingsPage(ScrollArea):
         """下载源选择变化"""
         idx = self.download_source_combo.currentIndex()
         source_key = str(self.download_source_combo.itemData(idx)) if idx >= 0 else DEFAULT_DOWNLOAD_SOURCE
-        settings = QSettings("FuckWjx", "Settings")
+        settings = app_settings()
         settings.setValue("download_source", source_key)
         settings.remove("github_mirror")
         source_label = DOWNLOAD_SOURCES.get(source_key, {}).get("label", source_key)

@@ -71,7 +71,9 @@ wjx/
 │   │   └── driver.py      # 浏览器驱动封装
 │   ├── proxy/
 │   │   ├── auth.py        # 随机IP鉴权、会话与令牌刷新
-│   │   ├── provider.py    # 代理获取、URL构建、代理源管理
+│   │   ├── source.py      # 代理源配置管理（源切换、地区、API覆盖、占用时长）
+│   │   ├── pool.py        # 代理池和租约管理（租约构建、TTL检查、健康检查）
+│   │   ├── provider.py    # 代理获取主逻辑（批量获取、解析、API测试）
 │   │   ├── quota.py       # 额度管理（以后端会话与默认额度缓存为准）
 │   │   └── gui_bridge.py  # GUI交互桥接（弹窗、线程派发、开关控制）
 │   ├── http_client.py     # 请求策略

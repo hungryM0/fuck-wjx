@@ -5,7 +5,7 @@ import time
 from typing import Any, Optional, Tuple
 import logging
 
-from wjx.network.proxy.provider import _map_answer_seconds_to_proxy_minute
+from wjx.network.proxy.source import _map_answer_seconds_to_proxy_minute
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
 _COMPLETION_MARKERS = (

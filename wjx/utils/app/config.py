@@ -18,6 +18,12 @@ from typing import Dict, Optional
 _ENV_FILE_NAME = ".env"
 
 
+def app_settings():
+    """获取应用级 QSettings 实例（组织名和应用名统一管理）。"""
+    from PySide6.QtCore import QSettings
+    return QSettings("FuckWjx", "Settings")
+
+
 def get_bool_from_qsettings(value, default: bool = False) -> bool:
     """
     正确读取 QSettings 中的布尔值（兼容字符串返回值）
@@ -228,6 +234,23 @@ STOP_FORCE_WAIT_SECONDS = 0.3
 PROXY_MAX_PROXIES = 80
 PROXY_HEALTH_CHECK_URL = "https://www.wjx.cn"
 PROXY_HEALTH_CHECK_TIMEOUT = 15
+PROXY_STATUS_TIMEOUT_SECONDS = 5
+PROXY_TTL_GRACE_SECONDS = 20
+PROXY_MINUTE_OPTIONS = (1, 3, 5, 10, 15, 30)
+PROXY_QUOTA_COST_MAP = {
+    1: 1,
+    3: 2,
+    5: 3,
+    10: 5,
+    15: 8,
+    30: 20,
+}
+# 代理源常量
+PROXY_SOURCE_DEFAULT = "default"
+PROXY_SOURCE_CUSTOM = "custom"
+# 默认代理池类型
+PROXY_POOL_ORDINARY = "ordinary"
+PROXY_POOL_QUALITY = "quality"
 # ==================== API 端点配置 ====================
 CONTACT_API_URL = _resolve_env_value("CONTACT_API_URL", _DEFAULT_CONTACT_API)
 AUTH_TRIAL_ENDPOINT = _resolve_env_value("AUTH_TRIAL_ENDPOINT", _DEFAULT_AUTH_TRIAL)

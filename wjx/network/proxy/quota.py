@@ -15,7 +15,7 @@ def get_random_ip_limit() -> int:
 
 
 def get_random_ip_counter_snapshot_local() -> tuple[int, int, bool]:
-    from wjx.network.proxy.provider import is_custom_proxy_api_active
+    from wjx.network.proxy.source import is_custom_proxy_api_active
 
     if is_custom_proxy_api_active():
         return 0, 0, True
@@ -30,7 +30,7 @@ def get_random_ip_counter_snapshot_local() -> tuple[int, int, bool]:
 def normalize_random_ip_enabled_value(desired_enabled: bool) -> bool:
     if not desired_enabled:
         return False
-    from wjx.network.proxy.provider import is_custom_proxy_api_active
+    from wjx.network.proxy.source import is_custom_proxy_api_active
 
     if is_custom_proxy_api_active():
         return True

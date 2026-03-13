@@ -1,63 +1,63 @@
-"""随机 IP / 代理管理 - 获取和切换代理 IP"""
-from datetime import datetime, timezone
+"""随机 IP / 代理管理 - 代理获取主逻辑"""
 import json
 import logging
 import re
 import threading
-import time
 from urllib.parse import parse_qsl, urlsplit
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set
 
 import wjx.network.http_client as http_client
 from wjx.network.proxy.auth import extract_proxy, format_random_ip_error
 from wjx.core.task_context import ProxyLease
 from wjx.utils.app.config import (
     DEFAULT_HTTP_HEADERS,
-    IP_EXTRACT_ENDPOINT,
-    PROXY_HEALTH_CHECK_TIMEOUT,
-    PROXY_HEALTH_CHECK_URL,
     PROXY_MAX_PROXIES,
+    PROXY_POOL_ORDINARY,
+    PROXY_SOURCE_CUSTOM,
+    PROXY_SOURCE_DEFAULT,
+    PROXY_STATUS_TIMEOUT_SECONDS,
     STATUS_ENDPOINT,
 )
 from wjx.utils.logging.log_utils import (
-    log_suppressed_exception,
     log_popup_error,
+    log_suppressed_exception,
 )
 
-STATUS_TIMEOUT_SECONDS = 5
-_proxy_api_url_override: Optional[str] = None
-_proxy_area_code_override: Optional[str] = None
+# 从 source.py 导入配置管理函数
+from wjx.network.proxy.source import (
+    _normalize_area_code,
+    _resolve_default_pool_by_area,
+    get_effective_proxy_api_url,
+    get_proxy_area_code,
+    get_proxy_occupy_minute,
+    get_proxy_source,
+    is_custom_proxy_api_active,
+)
 
-# 代理源常量
-PROXY_SOURCE_DEFAULT = "default"
-PROXY_SOURCE_CUSTOM = "custom"
+# 从 pool.py 导入租约和代理池函数
+from wjx.network.proxy.pool import (
+    _build_default_proxy_lease,
+    _build_default_proxy_leases_from_batch,
+    _build_proxy_lease,
+    _mask_proxy_for_log,
+)
 
-_current_proxy_source: str = PROXY_SOURCE_DEFAULT
 _IP_PORT_RE = re.compile(
     r'(?:https?://)?'
     r'(?:([^\s:@/,]+):([^\s:@/,]+)@)?'
     r'((?:\d{1,3}\.){3}\d{1,3})'
     r':(\d{2,5})'
 )
-_PROXY_MINUTE_OPTIONS: Tuple[int, ...] = (1, 3, 5, 10, 15, 30)
-_IP_QUOTA_COST_MAP = {
-    1: 1,
-    3: 2,
-    5: 3,
-    10: 5,
-    15: 8,
-    30: 20,
-}
-_proxy_occupy_minute: int = 1
-_DEFAULT_POOL_ORDINARY = "ordinary"
-_DEFAULT_POOL_QUALITY = "quality"
-_ORDINARY_POOL_PROVINCE_CODES: Set[str] = {
-    "110000", "120000", "130000", "140000", "150000", "210000", "220000",
-    "230000", "320000", "330000", "340000", "350000", "360000", "370000",
-    "410000", "420000", "430000", "440000", "460000", "500000", "510000",
-    "610000", "620000", "640000",
-}
-_PROXY_TTL_GRACE_SECONDS = 20
+
+_FATAL_PATTERNS = [
+    (r"白名单", "请先添加当前IP到代理商白名单"),
+    (r"secret.*密匙错误", "API密钥错误，请检查配置"),
+    (r"套餐余量不足", "套餐余量不足，请充值"),
+    (r"套餐已过期", "套餐已过期，请续费"),
+    (r"套餐被禁用", "套餐已被禁用，请联系代理商"),
+    (r"身份未认证", "请先完成实名认证"),
+    (r"用户被禁用", "账号已被禁用，请联系代理商"),
+]
 
 
 class AreaProxyQualityError(RuntimeError):
@@ -68,258 +68,10 @@ class ProxyApiFatalError(RuntimeError):
     """代理API致命错误（需要用户干预）时抛出。"""
 
 
-def set_proxy_source(source: str) -> None:
-    global _current_proxy_source
-    _current_proxy_source = source
-    logging.debug(f"代理源已切换为: {source}")
-
-
-def get_proxy_source() -> str:
-    return _current_proxy_source
-
-
-def _to_non_negative_int(value: Any, default: int = 0) -> int:
-    try:
-        parsed = int(value)
-    except Exception:
-        return max(0, int(default))
-    return max(0, parsed)
-
-
-def _normalize_expected_proxy_count(expected_count: Any) -> int:
-    try:
-        parsed = int(expected_count)
-    except Exception:
-        parsed = 1
-    return max(1, min(PROXY_MAX_PROXIES, parsed))
-
-
-def _parse_expire_at_to_ts(expire_at: Optional[str]) -> float:
-    text = str(expire_at or "").strip()
-    if not text:
-        return 0.0
-    try:
-        parsed = datetime.fromisoformat(text)
-    except Exception:
-        logging.debug("代理 expire_at 解析失败：%s", text, exc_info=True)
-        return 0.0
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return float(parsed.astimezone(timezone.utc).timestamp())
-
-
-def _build_proxy_lease(
-    proxy_address: Optional[str],
-    *,
-    expire_at: Optional[str] = None,
-    poolable: bool = True,
-    source: str = "",
-) -> Optional[ProxyLease]:
-    normalized = _normalize_proxy_address(proxy_address)
-    if not normalized:
-        return None
-    expire_text = str(expire_at or "").strip()
-    return ProxyLease(
-        address=normalized,
-        expire_at=expire_text,
-        expire_ts=_parse_expire_at_to_ts(expire_text),
-        poolable=bool(poolable),
-        source=str(source or "").strip(),
-    )
-
-
-def _coerce_proxy_lease(item: Any, *, source: str = "") -> Optional[ProxyLease]:
-    if isinstance(item, ProxyLease):
-        normalized = _normalize_proxy_address(item.address)
-        if not normalized:
-            return None
-        if normalized == item.address:
-            return item
-        return ProxyLease(
-            address=normalized,
-            expire_at=item.expire_at,
-            expire_ts=float(item.expire_ts or 0.0),
-            poolable=bool(item.poolable),
-            source=item.source,
-        )
-    if isinstance(item, str):
-        return _build_proxy_lease(item, source=source)
-    if isinstance(item, dict):
-        address = item.get("address") or item.get("proxy") or item.get("host")
-        expire_at = item.get("expire_at")
-        poolable = bool(item.get("poolable", True))
-        item_source = str(item.get("source") or source or "").strip()
-        if address and item.get("port") and isinstance(address, str) and ":" not in address:
-            address = f"{address}:{item.get('port')}"
-        return _build_proxy_lease(address, expire_at=expire_at, poolable=poolable, source=item_source)
-    return None
-
-
-def _proxy_lease_address(item: Any) -> str:
-    lease = _coerce_proxy_lease(item)
-    return lease.address if lease is not None else ""
-
-
-def get_proxy_required_ttl_seconds(answer_duration_range_seconds: Optional[Tuple[int, int]]) -> int:
-    max_seconds = 0
-    if isinstance(answer_duration_range_seconds, (list, tuple)):
-        if len(answer_duration_range_seconds) >= 2:
-            max_seconds = _to_non_negative_int(answer_duration_range_seconds[1], 0)
-        elif len(answer_duration_range_seconds) >= 1:
-            max_seconds = _to_non_negative_int(answer_duration_range_seconds[0], 0)
-    return max(0, int(max_seconds)) + _PROXY_TTL_GRACE_SECONDS
-
-
-def proxy_lease_has_sufficient_ttl(lease: Optional[ProxyLease], *, required_ttl_seconds: int) -> bool:
-    if lease is None:
-        return False
-    expire_ts = float(getattr(lease, "expire_ts", 0.0) or 0.0)
-    if expire_ts <= 0:
-        return True
-    return (expire_ts - time.time()) >= max(0, int(required_ttl_seconds or 0))
-
-
-def _map_answer_seconds_to_proxy_minute(total_seconds: int) -> int:
-    seconds = max(0, int(total_seconds))
-    if seconds < 60:
-        return 1
-    if seconds <= 180:
-        return 3
-    if seconds <= 300:
-        return 5
-    if seconds <= 600:
-        return 10
-    if seconds <= 900:
-        return 15
-    return 30
-
-
-def get_proxy_minute_by_answer_seconds(total_seconds: int) -> int:
-    minute = int(_map_answer_seconds_to_proxy_minute(total_seconds))
-    if minute not in _PROXY_MINUTE_OPTIONS:
-        return 1
-    return minute
-
-
-def get_quota_cost_by_minute(minute: int) -> int:
-    safe_minute = int(minute) if int(minute) in _PROXY_MINUTE_OPTIONS else 1
-    return int(_IP_QUOTA_COST_MAP.get(safe_minute, 1))
-
-
-def set_proxy_occupy_minute_by_answer_duration(answer_duration_range_seconds: Optional[Tuple[int, int]]) -> int:
-    global _proxy_occupy_minute
-    min_seconds = max_seconds = 0
-    if isinstance(answer_duration_range_seconds, (list, tuple)):
-        if len(answer_duration_range_seconds) >= 1:
-            min_seconds = _to_non_negative_int(answer_duration_range_seconds[0], 0)
-        max_seconds = _to_non_negative_int(answer_duration_range_seconds[1], min_seconds) if len(answer_duration_range_seconds) >= 2 else min_seconds
-    max_seconds = max(max_seconds, min_seconds)
-    minute = get_proxy_minute_by_answer_seconds(max_seconds)
-    _proxy_occupy_minute = minute
-    logging.debug("已根据作答时长更新代理 minute=%s（min=%s秒, max=%s秒）", minute, min_seconds, max_seconds)
-    return minute
-
-
-def get_proxy_occupy_minute() -> int:
-    minute = int(_proxy_occupy_minute or 1)
-    if minute not in _PROXY_MINUTE_OPTIONS:
-        return 1
-    return minute
-
-
-def _validate_proxy_api_url(api_url: Optional[str]) -> str:
-    try:
-        cleaned = str(api_url or "").strip()
-    except Exception:
-        cleaned = ""
-    if not cleaned:
-        return ""
-    if not (cleaned.lower().startswith("http://") or cleaned.lower().startswith("https://")):
-        raise ValueError("随机IP提取接口必须以 http:// 或 https:// 开头")
-    return cleaned
-
-
-def _normalize_area_code(area_code: Optional[str]) -> str:
-    try:
-        cleaned = str(area_code or "").strip()
-    except Exception:
-        cleaned = ""
-    if not cleaned or not cleaned.isdigit() or len(cleaned) != 6:
-        return ""
-    return cleaned
-
-
-def _is_area_quality_retry_payload(payload: Any) -> bool:
-    if not isinstance(payload, dict):
-        return False
-    return (
-        str(payload.get("code")) == "-1"
-        and str(payload.get("status")) == "200"
-        and str(payload.get("message") or "").strip() == "请重试"
-        and payload.get("data") is None
-    )
-
-
-def _handle_area_quality_failure(stop_signal: Optional[threading.Event] = None) -> None:
-    log_popup_error("地区代理不可用", "当前地区IP质量差，建议切换其他地区")
-    if stop_signal:
-        try:
-            if not stop_signal.is_set():
-                stop_signal.set()
-        except Exception as exc:
-            log_suppressed_exception("random_ip._handle_area_quality_failure set stop_signal", exc)
-
-
-def _is_province_level_area_code(area_code: str) -> bool:
-    return bool(area_code) and len(area_code) == 6 and area_code.isdigit() and area_code.endswith("0000")
-
-
-def _resolve_default_pool_by_area(area_code: Optional[str]) -> Optional[str]:
-    normalized_area = _normalize_area_code(area_code)
-    if not normalized_area:
-        return None
-    if _is_province_level_area_code(normalized_area) and normalized_area in _ORDINARY_POOL_PROVINCE_CODES:
-        return _DEFAULT_POOL_ORDINARY
-    return _DEFAULT_POOL_QUALITY
-
-
-def get_default_proxy_area_code() -> str:
-    return _normalize_area_code(_proxy_area_code_override) or ""
-
-
-def get_effective_proxy_api_url() -> str:
-    override = (_proxy_api_url_override or "").strip()
-    return override or IP_EXTRACT_ENDPOINT
-
-
-def is_custom_proxy_api_active() -> bool:
-    if _current_proxy_source != PROXY_SOURCE_DEFAULT:
-        return True
-    return bool((_proxy_api_url_override or "").strip())
-
-
-def get_proxy_area_code() -> Optional[str]:
-    return _proxy_area_code_override
-
-
-def set_proxy_area_code(area_code: Optional[str]) -> Optional[str]:
-    global _proxy_area_code_override
-    if area_code is None:
-        _proxy_area_code_override = None
-        return None
-    _proxy_area_code_override = _normalize_area_code(area_code)
-    return _proxy_area_code_override
-
-
-def set_proxy_api_override(api_url: Optional[str]) -> str:
-    global _proxy_api_url_override
-    cleaned = _validate_proxy_api_url(api_url)
-    _proxy_api_url_override = cleaned or None
-    return get_effective_proxy_api_url()
-
+# ==================== 状态查询 ====================
 
 def get_status() -> Any:
-    response = http_client.get(STATUS_ENDPOINT, timeout=STATUS_TIMEOUT_SECONDS, headers=DEFAULT_HTTP_HEADERS, proxies={})
+    response = http_client.get(STATUS_ENDPOINT, timeout=PROXY_STATUS_TIMEOUT_SECONDS, headers=DEFAULT_HTTP_HEADERS, proxies={})
     response.raise_for_status()
     return response.json()
 
@@ -336,16 +88,14 @@ def _format_status_payload(payload: Any) -> tuple[str, str]:
     return f"{prefix}：{message}", color
 
 
-def _proxy_api_candidates(expected_count: int, proxy_url: Optional[str]) -> List[str]:
-    url = proxy_url or get_effective_proxy_api_url()
-    if not url:
-        raise RuntimeError("自定义代理API地址不能为空，请先在设置中填写API地址")
-    if "{num}" in url:
-        return [url.format(num=max(1, expected_count))]
-    if "num=" in url.lower() or "count=" in url.lower():
-        return [url]
-    separator = "&" if "?" in url else "?"
-    return [f"{url}{separator}num={max(1, expected_count)}", url]
+# ==================== 代理解析 ====================
+
+def _normalize_expected_proxy_count(expected_count: Any) -> int:
+    try:
+        parsed = int(expected_count)
+    except Exception:
+        parsed = 1
+    return max(1, min(PROXY_MAX_PROXIES, parsed))
 
 
 def _extract_proxy_from_string(s: str) -> Optional[str]:
@@ -418,6 +168,29 @@ def _parse_proxy_payload(text: str) -> List[str]:
     return unique
 
 
+# ==================== 错误检测 ====================
+
+def _is_area_quality_retry_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return (
+        str(payload.get("code")) == "-1"
+        and str(payload.get("status")) == "200"
+        and str(payload.get("message") or "").strip() == "请重试"
+        and payload.get("data") is None
+    )
+
+
+def _handle_area_quality_failure(stop_signal: Optional[threading.Event] = None) -> None:
+    log_popup_error("地区代理不可用", "当前地区IP质量差，建议切换其他地区")
+    if stop_signal:
+        try:
+            if not stop_signal.is_set():
+                stop_signal.set()
+        except Exception as exc:
+            log_suppressed_exception("random_ip._handle_area_quality_failure set stop_signal", exc)
+
+
 def _is_default_batch_extract_payload(payload: Any) -> bool:
     return isinstance(payload, dict) and isinstance(payload.get("items"), list)
 
@@ -432,22 +205,24 @@ def _extract_custom_api_error(data: Any) -> Optional[str]:
     message = str(data.get("message") or "").strip()
     if not message:
         return None
-
-    import re
-    FATAL_PATTERNS = [
-        (r"白名单", "请先添加当前IP到代理商白名单"),
-        (r"secret.*密匙错误", "API密钥错误，请检查配置"),
-        (r"套餐余量不足", "套餐余量不足，请充值"),
-        (r"套餐已过期", "套餐已过期，请续费"),
-        (r"套餐被禁用", "套餐已被禁用，请联系代理商"),
-        (r"身份未认证", "请先完成实名认证"),
-        (r"用户被禁用", "账号已被禁用，请联系代理商"),
-    ]
-
-    for pattern, user_msg in FATAL_PATTERNS:
+    for pattern, user_msg in _FATAL_PATTERNS:
         if re.search(pattern, message, re.IGNORECASE):
             return user_msg
     return None
+
+
+# ==================== API 候选和测试 ====================
+
+def _proxy_api_candidates(expected_count: int, proxy_url: Optional[str]) -> List[str]:
+    url = proxy_url or get_effective_proxy_api_url()
+    if not url:
+        raise RuntimeError("自定义代理API地址不能为空，请先在设置中填写API地址")
+    if "{num}" in url:
+        return [url.format(num=max(1, expected_count))]
+    if "num=" in url.lower() or "count=" in url.lower():
+        return [url]
+    separator = "&" if "?" in url else "?"
+    return [f"{url}{separator}num={max(1, expected_count)}", url]
 
 
 def _extract_minute_from_url(url: str) -> Optional[int]:
@@ -467,7 +242,8 @@ def _check_minute_conflict(url: str) -> Optional[str]:
     minute = _extract_minute_from_url(url)
     if minute is None:
         return "建议在自定义API地址中添加 minute 参数（如 &minute=5）以确保代理时长足够"
-    max_seconds = _proxy_occupy_minute * 60
+    occupy_minute = get_proxy_occupy_minute()
+    max_seconds = occupy_minute * 60
     if minute * 60 < max_seconds:
         return f"代理时长 ({minute}分钟) 小于最大作答时长 ({max_seconds}秒 ≈ {max_seconds/60:.1f}分钟)，可能导致作答过程中代理失效"
     return None
@@ -511,127 +287,7 @@ def test_custom_proxy_api(url: str) -> tuple[bool, str, List[str]]:
         return False, f"解析失败: {e}", []
 
 
-def _normalize_proxy_address(proxy_address: Optional[str]) -> Optional[str]:
-    if not proxy_address:
-        return None
-    normalized = proxy_address.strip()
-    if not normalized:
-        return None
-    if "://" not in normalized:
-        normalized = f"http://{normalized}"
-    return normalized
-
-
-def _format_host_port(hostname: str, port: Optional[int]) -> str:
-    if not hostname:
-        return ""
-    if port is None:
-        return hostname
-    if ":" in hostname and not hostname.startswith("["):
-        return f"[{hostname}]:{port}"
-    return f"{hostname}:{port}"
-
-
-def _build_default_proxy_address(payload: dict) -> Optional[str]:
-    lease = _build_default_proxy_lease(payload)
-    return lease.address if lease is not None else None
-
-
-def _build_default_proxy_lease(payload: dict) -> Optional[ProxyLease]:
-    if not isinstance(payload, dict):
-        return None
-    host = str(payload.get("host") or "").strip()
-    port = _to_non_negative_int(payload.get("port"), 0)
-    if not host or port <= 0:
-        return None
-    account = str(payload.get("account") or "").strip()
-    password = str(payload.get("password") or "").strip()
-    raw = f"{account}:{password}@{host}:{port}" if account and password else f"{host}:{port}"
-    expire_at = str(payload.get("expire_at") or "").strip()
-    poolable = True
-    if not expire_at:
-        logging.warning("默认随机IP响应缺少 expire_at，该代理仅允许立即使用，不会进入代理池")
-        poolable = False
-    return _build_proxy_lease(raw, expire_at=expire_at, poolable=poolable, source=PROXY_SOURCE_DEFAULT)
-
-
-def _build_default_proxy_leases_from_batch(payload: dict) -> List[ProxyLease]:
-    if not isinstance(payload, dict):
-        return []
-    raw_items = payload.get("items")
-    if not isinstance(raw_items, list):
-        return []
-    leases: List[ProxyLease] = []
-    for raw in raw_items:
-        if not isinstance(raw, dict):
-            continue
-        lease = _build_default_proxy_lease(raw)
-        if lease is None:
-            continue
-        leases.append(lease)
-        logging.info("获取到代理: %s", _mask_proxy_for_log(lease.address))
-    return leases
-
-
-def _mask_proxy_for_log(proxy_address: Optional[str]) -> str:
-    if not proxy_address:
-        return ""
-    text = str(proxy_address).strip()
-    if not text:
-        return ""
-    if get_proxy_source() != PROXY_SOURCE_DEFAULT:
-        return text
-    candidate = text if "://" in text else f"http://{text}"
-    try:
-        parsed = urlsplit(candidate)
-        host_port = _format_host_port(parsed.hostname or "", parsed.port)
-        if host_port:
-            return host_port
-    except Exception as exc:
-        log_suppressed_exception("random_ip._mask_proxy_for_log parse proxy", exc)
-    raw = text
-    if "://" in raw:
-        raw = raw.split("://", 1)[1]
-    raw = raw.split("/", 1)[0]
-    if "@" in raw:
-        raw = raw.split("@", 1)[1]
-    return raw
-
-
-def _proxy_is_responsive(proxy_address: str, skip_for_default: bool = True) -> bool:
-    masked_proxy = _mask_proxy_for_log(proxy_address)
-    if skip_for_default and get_proxy_source() == PROXY_SOURCE_DEFAULT:
-        logging.debug(f"默认代理源，跳过健康检查: {masked_proxy}")
-        return True
-    proxy_address = _normalize_proxy_address(proxy_address) or ""
-    if not proxy_address:
-        return False
-    proxies = {"http": proxy_address, "https": proxy_address}
-    try:
-        start = time.perf_counter()
-        response = http_client.get(PROXY_HEALTH_CHECK_URL, proxies=proxies, timeout=PROXY_HEALTH_CHECK_TIMEOUT)
-        elapsed = time.perf_counter() - start
-    except Exception as exc:
-        logging.debug(f"代理 {masked_proxy} 验证失败: {exc}")
-        return False
-    if response.status_code >= 400:
-        logging.warning(f"代理 {masked_proxy} 返回状态码 {response.status_code}")
-        return False
-    logging.debug(f"代理 {masked_proxy} 验证通过，耗时 {elapsed:.2f}s")
-    return True
-
-
-def _proxy_is_responsive_fast(proxy_address: str) -> bool:
-    proxy_address = _normalize_proxy_address(proxy_address) or ""
-    if not proxy_address:
-        return False
-    proxies = {"http": proxy_address, "https": proxy_address}
-    try:
-        response = http_client.get(PROXY_HEALTH_CHECK_URL, proxies=proxies, timeout=3)
-        return response.status_code < 400
-    except Exception:
-        return False
-
+# ==================== 核心获取函数 ====================
 
 def _fetch_new_proxy_batch(
     expected_count: int = 1,
@@ -646,14 +302,14 @@ def _fetch_new_proxy_batch(
     if is_custom:
         if not is_custom_proxy_api_active():
             raise RuntimeError("自定义代理API地址未配置，请在设置中填写API地址")
-        proxy_url = _proxy_api_url_override
+        proxy_url = get_effective_proxy_api_url()
         logging.info(f"使用自定义代理API: {proxy_url}")
 
     area_code = get_proxy_area_code()
     has_area = bool(_normalize_area_code(area_code))
     if current_source == PROXY_SOURCE_DEFAULT and not is_custom:
         minute = int(get_proxy_occupy_minute() or 1)
-        pool = _resolve_default_pool_by_area(area_code) or _DEFAULT_POOL_ORDINARY
+        pool = _resolve_default_pool_by_area(area_code) or PROXY_POOL_ORDINARY
         fetched: List[ProxyLease] = []
         errors: List[str] = []
         remaining = expected_count
@@ -740,5 +396,3 @@ def _fetch_new_proxy_batch(
     if not normalized:
         raise RuntimeError("随机IP接口返回为空")
     return normalized[:expected_count]
-
-

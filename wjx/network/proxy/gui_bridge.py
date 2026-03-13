@@ -155,7 +155,7 @@ def confirm_random_ip_usage(gui: Any) -> bool:
 
 def _build_counter_snapshot() -> tuple[int, int]:
     global _counter_refresh_cache
-    from wjx.network.proxy.provider import is_custom_proxy_api_active
+    from wjx.network.proxy.source import is_custom_proxy_api_active
 
     if not is_custom_proxy_api_active() and has_authenticated_session():
         now = time.monotonic()
@@ -199,7 +199,7 @@ def _open_quota_request_dialog(gui: Any, default_type: str = "额度申请") -> 
 
 
 def on_random_ip_toggle(gui: Any) -> None:
-    from wjx.network.proxy.provider import is_custom_proxy_api_active
+    from wjx.network.proxy.source import is_custom_proxy_api_active
 
     if gui is None:
         return
@@ -297,7 +297,7 @@ def show_quota_request_dialog(gui: Any = None, *, require_confirm: bool = True) 
 
 
 def refresh_ip_counter_display(gui: Any) -> None:
-    from wjx.network.proxy.provider import is_custom_proxy_api_active
+    from wjx.network.proxy.source import is_custom_proxy_api_active
 
     load_session_for_startup()
     if gui is None:
@@ -315,7 +315,7 @@ def refresh_ip_counter_display(gui: Any) -> None:
 
 
 def handle_random_ip_submission(gui: Any, stop_signal: Optional[threading.Event]) -> None:
-    from wjx.network.proxy.provider import is_custom_proxy_api_active
+    from wjx.network.proxy.source import is_custom_proxy_api_active
 
     if gui is None or is_custom_proxy_api_active():
         return
