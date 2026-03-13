@@ -290,7 +290,7 @@ class DashboardProgressMixin:
         name_label = StrongBodyLabel(thread_name, row_widget)
         status_label = BodyLabel("等待中", row_widget)
         status_label.setStyleSheet("color: #6b6b6b;")
-        counter_label = BodyLabel("成功 0 | 失败 0", row_widget)
+        counter_label = BodyLabel("成功 0 | 提交失败 0", row_widget)
         counter_label.setStyleSheet("color: #6b6b6b;")
         header_layout.addWidget(name_label)
         header_layout.addWidget(status_label)
@@ -422,7 +422,7 @@ class DashboardProgressMixin:
             step_busy = status_text in self._THREAD_BUSY_STATUSES
 
             row["status"].setText(status_text)
-            row["counter"].setText(f"成功 {success_count} | 失败 {fail_count}")
+            row["counter"].setText(f"成功 {success_count} | 提交失败 {fail_count}")
             self._set_thread_step_busy(row, step_busy)
             row["step_bar"].setValue(step_percent)
             row["step_value"].setText(f"{step_current}/{step_total}" if step_total > 0 else "0/0")

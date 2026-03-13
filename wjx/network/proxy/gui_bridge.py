@@ -173,6 +173,12 @@ def _build_counter_snapshot() -> tuple[int, int]:
                 total = int(snapshot["total_quota"])
                 _counter_refresh_cache = (used, total, time.monotonic())
                 return used, total
+            except RandomIPAuthError as exc:
+                log_suppressed_exception("_build_counter_snapshot: get_fresh_quota_snapshot", exc, level=logging.DEBUG)
+                if exc.detail.startswith("refresh_token_persist_failed"):
+                    raise
+                snapshot = get_quota_snapshot()
+                return int(snapshot["used_quota"]), int(snapshot["total_quota"])
             except Exception as exc:
                 log_suppressed_exception("_build_counter_snapshot: get_fresh_quota_snapshot", exc, level=logging.DEBUG)
                 snapshot = get_quota_snapshot()
@@ -305,7 +311,18 @@ def refresh_ip_counter_display(gui: Any) -> None:
 
     def _compute_and_update():
         custom_api = is_custom_proxy_api_active()
-        count, limit = _build_counter_snapshot()
+        try:
+            count, limit = _build_counter_snapshot()
+        except RandomIPAuthError as exc:
+            message = format_random_ip_error(exc)
+            logging.error("随机IP会话刷新后保存失败：%s", message)
+            _set_random_ip_enabled(gui, False)
+            _invoke_popup(gui, "error", "随机IP登录状态保存失败", message)
+            count, limit, _ = get_random_ip_counter_snapshot_local()
+        except Exception as exc:
+            message = format_random_ip_error(exc)
+            logging.warning("刷新随机IP计数失败：%s", message)
+            count, limit, _ = get_random_ip_counter_snapshot_local()
         _apply_counter_snapshot_to_gui(gui, used=count, total=limit, custom_api=custom_api)
 
     if threading.current_thread() is threading.main_thread():

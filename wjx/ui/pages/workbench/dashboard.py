@@ -605,7 +605,10 @@ class DashboardPage(
             self.progress_pct.setText("0%")
             self._last_progress = 0
             self._completion_notified = False
-            self.status_label.setText(f"已提交 0/{cfg.target} 份 | 失败 0 次")
+            if cfg.random_ip_enabled:
+                self.status_label.setText(f"已提交 0/{cfg.target} 份 | 提交连续失败 0 次 | 代理异常 0/5 次")
+            else:
+                self.status_label.setText(f"已提交 0/{cfg.target} 份 | 提交连续失败 0 次")
         self.controller.start_run(cfg)
 
     def update_question_meta(self, title: str, count: int):

@@ -796,6 +796,9 @@ class RunControllerRuntimeMixin:
         target = getattr(ctx, "target_num", 0)
         fail = getattr(ctx, "cur_fail", 0)
         device_quota_fail_count = getattr(ctx, "device_quota_fail_count", 0)
+        bad_proxy_streak = getattr(ctx, "_consecutive_bad_proxy_count", 0)
+        max_bad_proxy_streak = getattr(ctx, "MAX_CONSECUTIVE_BAD_PROXIES", 0)
+        random_proxy_enabled = bool(getattr(ctx, "random_proxy_ip_enabled", False))
         paused = False
         reason = ""
         try:
@@ -806,7 +809,9 @@ class RunControllerRuntimeMixin:
             reason = ""
 
         status_prefix = "已暂停" if paused else "已提交"
-        status = f"{status_prefix} {current}/{target} 份 | 连续失败 {fail} 次"
+        status = f"{status_prefix} {current}/{target} 份 | 提交连续失败 {fail} 次"
+        if random_proxy_enabled:
+            status = f"{status} | 代理异常 {int(bad_proxy_streak or 0)}/{int(max_bad_proxy_streak or 0)} 次"
         if int(device_quota_fail_count or 0) > 0:
             status = f"{status} | 设备限制拦截 {int(device_quota_fail_count or 0)} 次"
         if paused and reason:
@@ -834,6 +839,8 @@ class RunControllerRuntimeMixin:
                 "num_threads": int(num_threads or 0),
                 "per_thread_target": int(per_thread_target or 0),
                 "device_quota_fail_count": int(device_quota_fail_count or 0),
+                "bad_proxy_streak": int(bad_proxy_streak or 0),
+                "max_bad_proxy_streak": int(max_bad_proxy_streak or 0),
                 "initializing": False,
             }
         )

@@ -29,6 +29,7 @@ _DEVICE_SECRET_KEY = "random_ip/device_id"
 _REFRESH_SECRET_KEY = "random_ip/refresh_token"
 _TOKEN_EARLY_REFRESH_SECONDS = 60
 _LOG_BODY_PREVIEW_LIMIT = 320
+_REFRESH_PERSIST_FAILED_DETAIL = "refresh_token_persist_failed"
 _SENSITIVE_PREVIEW_PATTERNS = (
     (re.compile(r'("?(?:access_token|refresh_token|account|password)"?\s*:\s*")[^"]*(")', re.IGNORECASE), r"\1***\2"),
     (re.compile(r"(Authorization\s*:\s*Bearer\s+)[^\s]+", re.IGNORECASE), r"\1***"),
@@ -161,17 +162,56 @@ def _persist_session_locked() -> None:
     set_secret(_REFRESH_SECRET_KEY, _session.refresh_token)
 
 
-def _set_session(new_session: RandomIPSession) -> RandomIPSession:
+def _verify_persisted_session(session: RandomIPSession) -> None:
+    settings = _get_settings()
+    failures: List[str] = []
+    expected_device_id = str(session.device_id or "").strip()
+    expected_user_id = int(session.user_id or 0)
+    expected_refresh_expires_at = _serialize_datetime(session.refresh_expires_at)
+    expected_refresh_token = str(session.refresh_token or "").strip()
+
+    persisted_device_id = str(settings.value(_settings_key("device_id")) or "").strip()
+    if persisted_device_id != expected_device_id:
+        failures.append("settings.device_id")
+
+    persisted_user_id = _to_non_negative_int(settings.value(_settings_key("user_id")), -1)
+    if persisted_user_id != expected_user_id:
+        failures.append("settings.user_id")
+
+    persisted_refresh_expires_at = _serialize_datetime(_parse_datetime(settings.value(_settings_key("refresh_expires_at"))))
+    if persisted_refresh_expires_at != expected_refresh_expires_at:
+        failures.append("settings.refresh_expires_at")
+
+    if get_secret(_DEVICE_SECRET_KEY).strip() != expected_device_id:
+        failures.append("secure_store.device_id")
+
+    if get_secret(_REFRESH_SECRET_KEY).strip() != expected_refresh_token:
+        failures.append("secure_store.refresh_token")
+
+    if failures:
+        logging.error("随机IP会话持久化校验失败：%s", ", ".join(failures))
+        raise RandomIPAuthError(f"{_REFRESH_PERSIST_FAILED_DETAIL}:{','.join(failures)}")
+
+
+def _set_session(new_session: RandomIPSession, *, verify_auth_persistence: bool = False) -> RandomIPSession:
     global _session
     with _session_lock:
         _ensure_loaded()
-        _session = replace(
+        previous_session = _session
+        candidate = replace(
             new_session,
             total_quota=max(int(new_session.total_quota or 0), int(new_session.remaining_quota or 0)),
             remaining_quota=max(0, int(new_session.remaining_quota or 0)),
         )
-        _persist_session_locked()
-        return _session
+        _session = candidate
+        try:
+            _persist_session_locked()
+            if verify_auth_persistence:
+                _verify_persisted_session(candidate)
+            return _session
+        except Exception:
+            _session = previous_session
+            raise
 
 
 def _read_session() -> RandomIPSession:
@@ -265,6 +305,8 @@ def format_random_ip_error(exc: BaseException) -> str:
         return "领取试用过于频繁，请稍后再试"
     if detail == "invalid_refresh_token":
         return "登录状态已失效，请重新领取试用或申请随机IP额度"
+    if detail.startswith(_REFRESH_PERSIST_FAILED_DETAIL):
+        return "登录状态刷新后未能安全保存到本机，已停止继续使用随机IP，请重新领取试用或申请随机IP额度"
     if detail == "device_banned":
         return "当前设备已被封禁，请联系开发者"
     if detail == "user_banned":
@@ -452,7 +494,12 @@ def activate_trial() -> RandomIPSession:
     if int(getattr(response, "status_code", 0) or 0) != 200:
         raise _extract_error_payload(response)
     session = _parse_session_response(response)
-    return _set_session(session)
+    try:
+        return _set_session(session, verify_auth_persistence=True)
+    except RandomIPAuthError as exc:
+        if exc.detail.startswith(_REFRESH_PERSIST_FAILED_DETAIL):
+            clear_session()
+        raise
 
 
 def _should_refresh(session: RandomIPSession, *, force: bool = False) -> bool:
@@ -516,7 +563,12 @@ def refresh_session(*, force: bool = False) -> RandomIPSession:
                     clear_session()
                 raise error
             refreshed = _parse_session_response(response, fallback_session=session)
-            return _set_session(refreshed)
+            try:
+                return _set_session(refreshed, verify_auth_persistence=True)
+            except RandomIPAuthError as exc:
+                if exc.detail.startswith(_REFRESH_PERSIST_FAILED_DETAIL):
+                    clear_session()
+                raise
         finally:
             with _refresh_singleflight_cond:
                 _refresh_in_flight = False
