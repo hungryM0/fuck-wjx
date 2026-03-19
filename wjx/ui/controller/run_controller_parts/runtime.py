@@ -139,9 +139,9 @@ class RunControllerRuntimeMixin:
         fallback_title = str(getattr(self, "survey_title", "") or "")
         survey_title = config_title or fallback_title
         try:
-            psycho_target_alpha = float(getattr(config, "psycho_target_alpha", 0.85) or 0.85)
+            psycho_target_alpha = float(getattr(config, "psycho_target_alpha", 0.9) or 0.9)
         except Exception:
-            psycho_target_alpha = 0.85
+            psycho_target_alpha = 0.9
         psycho_target_alpha = max(0.70, min(0.95, psycho_target_alpha))
         reliability_priority_mode = str(
             getattr(config, "reliability_priority_mode", "reliability_first") or "reliability_first"

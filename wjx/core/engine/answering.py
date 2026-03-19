@@ -162,9 +162,9 @@ def _build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
         return None
 
     try:
-        target_alpha = float(getattr(ctx, "psycho_target_alpha", 0.85) or 0.85)
+        target_alpha = float(getattr(ctx, "psycho_target_alpha", 0.9) or 0.9)
     except Exception:
-        target_alpha = 0.85
+        target_alpha = 0.9
     target_alpha = max(0.70, min(0.95, target_alpha))
 
     return build_psychometric_plan(
@@ -369,7 +369,7 @@ def brush(
         logging.info(
             "本轮启用心理测量计划：题目数=%d，目标α=%.2f",
             len(getattr(psycho_plan, "items", []) or []),
-            float(getattr(ctx, "psycho_target_alpha", 0.85) or 0.85),
+            float(getattr(ctx, "psycho_target_alpha", 0.9) or 0.9),
         )
     questions_per_page = detect(driver, stop_signal=stop_signal)
     headless_mode = _is_headless_mode(ctx)

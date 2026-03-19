@@ -80,7 +80,7 @@ class PsychometricPlan:
 
 def build_psychometric_plan(
     psycho_items: List[Tuple[int, str, int, str, Optional[int]]],
-    target_alpha: float = 0.85,
+    target_alpha: float = 0.9,
 ) -> Optional[PsychometricPlan]:
     """构建信效度生成计划"""
     if not psycho_items:
