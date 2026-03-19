@@ -96,7 +96,7 @@ def _trigger_aliyun_captcha_stop(
                 return
 
             quota_exceeded = is_quota_exhausted(
-                {"authenticated": True, "used_quota": int(used or 0), "total_quota": int(total or 0)}
+                {"authenticated": True, "used_quota": float(used or 0.0), "total_quota": float(total or 0.0)}
             )
 
             # 根据配额情况构建不同的提示消息

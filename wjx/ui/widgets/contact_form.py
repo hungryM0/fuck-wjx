@@ -41,14 +41,22 @@ from qfluentwidgets import (
 from wjx.ui.widgets.status_polling_mixin import StatusPollingMixin
 from wjx.ui.helpers.image_attachments import ImageAttachmentManager
 import wjx.network.http_client as http_client
-from wjx.network.proxy.auth import get_session_snapshot
+from wjx.network.proxy.auth import format_quota_value, get_session_snapshot
 from wjx.utils.app.config import CONTACT_API_URL, EMAIL_VERIFY_ENDPOINT
 from wjx.utils.app.version import __VERSION__
 
 REQUEST_MESSAGE_TYPE = "额度申请"
-DONATION_AMOUNT_OPTIONS = ["8.88", "10.24", "11.45", "20.26", "50", "78.91"]
+DONATION_AMOUNT_OPTIONS = ["8.88", "11.45", "20.26", "50", "78.91", "114.51"]
 DONATION_AMOUNT_BLOCK_MESSAGE = "该金额下开发者已亏本💔"
 MAX_REQUEST_QUOTA = 19999
+REQUEST_QUOTA_STEP = Decimal("0.5")
+DONATION_AMOUNT_RULES = [
+    (Decimal("13000"), Decimal("114.51")),
+    (Decimal("8000"), Decimal("78.91")),
+    (Decimal("3500"), Decimal("50")),
+    (Decimal("2000"), Decimal("20.26")),
+    (Decimal("1500"), Decimal("11.45")),
+]
 
 
 class PasteOnlyLineEdit(LineEdit):
@@ -226,9 +234,12 @@ class ContactForm(StatusPollingMixin, QWidget):
         self.quantity_edit = LineEdit(self)
         self.quantity_edit.setPlaceholderText("按需填写")
         self.quantity_edit.setMaximumWidth(90)
-        self.quantity_edit.setMaxLength(len(str(MAX_REQUEST_QUOTA)))
-        self.quantity_edit.setValidator(QIntValidator(1, 19999, self))
+        self.quantity_edit.setMaxLength(len(str(MAX_REQUEST_QUOTA)) + 2)
+        quantity_validator = QDoubleValidator(0.0, float(MAX_REQUEST_QUOTA), 1, self)
+        quantity_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.quantity_edit.setValidator(quantity_validator)
         self.quantity_edit.textChanged.connect(self._on_quantity_changed)
+        self.quantity_edit.editingFinished.connect(self._on_quantity_editing_finished)
 
         self.urgency_label = BodyLabel("问卷紧急程度：", self)
         self.urgency_combo = ComboBox(self)
@@ -851,17 +862,22 @@ class ContactForm(StatusPollingMixin, QWidget):
         normalized_text = (text or "").strip()
         if not normalized_text:
             self._last_valid_quantity_text = ""
-        elif normalized_text.isdigit():
-            quantity = int(normalized_text)
-            if quantity <= MAX_REQUEST_QUOTA:
-                self._last_valid_quantity_text = normalized_text
-            else:
+        else:
+            quantity = self._parse_quantity_value(normalized_text)
+            if quantity is not None and quantity <= Decimal(str(MAX_REQUEST_QUOTA)):
+                self._last_valid_quantity_text = self._normalize_quantity_text(normalized_text)
+            elif quantity is not None and quantity > Decimal(str(MAX_REQUEST_QUOTA)):
                 self.quantity_edit.blockSignals(True)
                 try:
                     self.quantity_edit.setText(self._last_valid_quantity_text)
                 finally:
                     self.quantity_edit.blockSignals(False)
                 return
+        self._refresh_amount_options()
+        self._sync_amount_rule_warning()
+
+    def _on_quantity_editing_finished(self):
+        self._normalize_quantity_if_needed()
         self._refresh_amount_options()
         self._sync_amount_rule_warning()
 
@@ -909,20 +925,28 @@ class ContactForm(StatusPollingMixin, QWidget):
                 self._update_send_button_state()
                 return
             self._normalize_amount_if_needed()
+            self._normalize_quantity_if_needed()
             amount_text = (self.amount_edit.currentText() or "").strip()
             quantity_text = (self.quantity_edit.text() or "").strip()
             verify_code = (self.verify_code_edit.text() or "").strip()
             request_amount_text = amount_text
-            request_quota_text = quantity_text
+            request_quota_text = self._normalize_quantity_text(quantity_text)
             request_urgency_text = (self.urgency_combo.currentText() or "").strip()
             if not quantity_text:
                 InfoBar.warning("", "请输入申请额度", parent=self, position=InfoBarPosition.TOP, duration=2000)
                 return
-            if not quantity_text.isdigit() or int(quantity_text) <= 0:
-                InfoBar.warning("", "申请额度必须为正整数", parent=self, position=InfoBarPosition.TOP, duration=2000)
+            quantity_value = self._parse_quantity_value(quantity_text)
+            if quantity_value is None:
+                InfoBar.warning("", "申请额度必须 >= 0，且只能填 0.5 的倍数", parent=self, position=InfoBarPosition.TOP, duration=2200)
                 return
-            if int(quantity_text) > MAX_REQUEST_QUOTA:
-                InfoBar.warning("", f"申请额度不能超过 {MAX_REQUEST_QUOTA}", parent=self, position=InfoBarPosition.TOP, duration=2000)
+            if quantity_value > Decimal(str(MAX_REQUEST_QUOTA)):
+                InfoBar.warning(
+                    "",
+                    f"申请额度不能超过 {format_quota_value(MAX_REQUEST_QUOTA)}",
+                    parent=self,
+                    position=InfoBarPosition.TOP,
+                    duration=2000,
+                )
                 return
             if amount_text and not self._is_amount_allowed(amount_text, quantity_text):
                 self._show_amount_rule_infobar()
@@ -1099,12 +1123,45 @@ class ContactForm(StatusPollingMixin, QWidget):
             return win
         return None
 
-    def _parse_quantity_value(self, text: Optional[str] = None) -> int:
+    def _parse_quantity_value(self, text: Optional[str] = None) -> Optional[Decimal]:
         raw_text = (self.quantity_edit.text() if text is None else text) or ""
         raw_text = raw_text.strip()
-        if not raw_text.isdigit():
-            return 0
-        return int(raw_text)
+        if not raw_text:
+            return None
+        try:
+            value = Decimal(raw_text)
+        except (InvalidOperation, ValueError):
+            return None
+        if value < 0:
+            return None
+        scaled = value / REQUEST_QUOTA_STEP
+        if scaled != scaled.to_integral_value():
+            return None
+        return value
+
+    def _normalize_quantity_text(self, text: str) -> str:
+        quantity = self._parse_quantity_value(text)
+        if quantity is None:
+            return (text or "").strip()
+        return format_quota_value(quantity)
+
+    def _normalize_quantity_if_needed(self) -> None:
+        raw_text = (self.quantity_edit.text() or "").strip()
+        if not raw_text:
+            return
+        quantity = self._parse_quantity_value(raw_text)
+        if quantity is None:
+            return
+        normalized_text = self._normalize_quantity_text(raw_text)
+        if quantity > Decimal(str(MAX_REQUEST_QUOTA)):
+            normalized_text = self._last_valid_quantity_text
+        if normalized_text == raw_text:
+            return
+        self.quantity_edit.blockSignals(True)
+        try:
+            self.quantity_edit.setText(normalized_text)
+        finally:
+            self.quantity_edit.blockSignals(False)
 
     def _normalize_amount_text(self, text: str) -> str:
         raw_text = (text or "").strip()
@@ -1116,39 +1173,65 @@ class ContactForm(StatusPollingMixin, QWidget):
             return raw_text
         return format(normalized.normalize(), "f").rstrip("0").rstrip(".") or "0"
 
-    def _get_allowed_amount_options(self, quantity: int) -> list[str]:
-        hidden_amounts: set[str] = set()
-        if quantity > 3000:
-            hidden_amounts.update({"8.88", "10.24"})
-        if quantity > 5000:
-            hidden_amounts.add("11.45")
-        if quantity > 10000:
-            hidden_amounts.add("20.26")
-        return [amount for amount in DONATION_AMOUNT_OPTIONS if amount not in hidden_amounts]
+    def _parse_amount_value(self, text: Optional[str] = None) -> Optional[Decimal]:
+        raw_text = (self.amount_edit.currentText() if text is None else text) or ""
+        raw_text = raw_text.strip()
+        if not raw_text:
+            return None
+        try:
+            value = Decimal(raw_text)
+        except (InvalidOperation, ValueError):
+            return None
+        if value <= 0:
+            return None
+        return value
+
+    def _get_minimum_allowed_amount(self, quantity: Decimal) -> Optional[Decimal]:
+        for min_quantity, min_amount in DONATION_AMOUNT_RULES:
+            if quantity >= min_quantity:
+                return min_amount
+        return self._parse_amount_value(DONATION_AMOUNT_OPTIONS[0])
+
+    def _get_allowed_amount_options(self, quantity: Decimal) -> list[str]:
+        minimum_allowed_amount = self._get_minimum_allowed_amount(quantity)
+        if minimum_allowed_amount is None:
+            return DONATION_AMOUNT_OPTIONS[:]
+        return [
+            amount
+            for amount in DONATION_AMOUNT_OPTIONS
+            if (self._parse_amount_value(amount) or Decimal("0")) >= minimum_allowed_amount
+        ]
 
     def _is_amount_allowed(self, amount_text: str, quantity_text: Optional[str] = None) -> bool:
-        normalized_amount = self._normalize_amount_text(amount_text)
-        if not normalized_amount:
+        amount_value = self._parse_amount_value(amount_text)
+        if amount_value is None:
             return True
 
-        quantity = self._parse_quantity_value(quantity_text)
-        allowed_amounts = {self._normalize_amount_text(amount) for amount in self._get_allowed_amount_options(quantity)}
-        blocked_preset_amounts = {self._normalize_amount_text(amount) for amount in DONATION_AMOUNT_OPTIONS} - allowed_amounts
-
-        if normalized_amount in blocked_preset_amounts:
-            return False
-        return True
+        quantity = self._parse_quantity_value(quantity_text) or Decimal("0")
+        minimum_allowed_amount = self._get_minimum_allowed_amount(quantity)
+        if minimum_allowed_amount is None:
+            return True
+        return amount_value >= minimum_allowed_amount
 
     def _refresh_amount_options(self) -> None:
         current_text = (self.amount_edit.currentText() or "").strip()
-        allowed_amounts = self._get_allowed_amount_options(self._parse_quantity_value())
+        allowed_amounts = self._get_allowed_amount_options(self._parse_quantity_value() or Decimal("0"))
 
         previous_block_state = self.amount_edit.blockSignals(True)
         try:
             self.amount_edit.clear()
             for amount in allowed_amounts:
                 self.amount_edit.addItem(amount)
-            self.amount_edit.setText(current_text)
+            if not current_text:
+                self.amount_edit._currentIndex = -1
+                self.amount_edit.setText("")
+            else:
+                current_index = self.amount_edit.findText(current_text)
+                if current_index >= 0:
+                    self.amount_edit.setCurrentIndex(current_index)
+                else:
+                    self.amount_edit._currentIndex = -1
+                    self.amount_edit.setText(current_text)
         finally:
             self.amount_edit.blockSignals(previous_block_state)
 

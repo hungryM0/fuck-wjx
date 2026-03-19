@@ -80,7 +80,7 @@ class DashboardPage(
 ):
     """主页：左侧配置 + 底部状态，不再包含日志。"""
 
-    _ipBalanceChecked = Signal(int)  # 发送剩余IP数信号
+    _ipBalanceChecked = Signal(float)  # 发送剩余IP数信号
 
     def __init__(
         self,
@@ -106,6 +106,7 @@ class DashboardPage(
         self._progress_infobar: Optional[InfoBar] = None  # 存储进度消息条的引用
         self._ip_low_infobar: Optional[FullWidthInfoBar] = None
         self._ip_cost_infobar: Optional[FullWidthInfoBar] = None
+        self._ip_benefit_infobar: Optional[FullWidthInfoBar] = None
         self._ip_low_infobar_dismissed = False
         self._ip_low_threshold = 5000
         self._api_balance_cache: Optional[float] = None  # 缓存 API 余额
@@ -287,6 +288,19 @@ class DashboardPage(
         self._ip_cost_infobar.addWidget(self._ip_cost_adjust_link)
         self._ip_cost_infobar.hide()
         exec_layout.addWidget(self._ip_cost_infobar)
+
+        self._ip_benefit_infobar = FullWidthInfoBar(
+            icon=InfoBarIcon.SUCCESS,
+            title="",
+            content="当前使用的是限时福利代理源，仅支持 1 分钟以内的作答时长，按 0.5 倍消耗速率扣减随机IP额度。",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=False,
+            position=InfoBarPosition.NONE,
+            duration=-1,
+            parent=exec_card,
+        )
+        self._ip_benefit_infobar.hide()
+        exec_layout.addWidget(self._ip_benefit_infobar)
         layout.addWidget(exec_card)
 
         switch_row = QHBoxLayout()
@@ -390,6 +404,7 @@ class DashboardPage(
         self.random_ip_cb.stateChanged.connect(self._on_random_ip_toggled)
         self.card_btn.clicked.connect(self._on_request_quota_clicked)
         self.more_settings_btn.clicked.connect(self._go_to_runtime_page)
+        self.runtime_page.random_ip_card.proxyCombo.currentIndexChanged.connect(lambda _v: self._refresh_ip_cost_infobar())
         self.runtime_page.answer_card.valueChanged.connect(lambda _v: self._refresh_ip_cost_infobar())
         self.runtime_page.timed_card.switchButton.checkedChanged.connect(lambda _v: self._refresh_ip_cost_infobar())
         # 监听剪贴板变化，自动处理粘贴的图片
@@ -634,6 +649,7 @@ class DashboardPage(
 
         self._refresh_entry_table()
         self._sync_start_button_state()
+        self._refresh_ip_cost_infobar()
 
     def _go_to_runtime_page(self):
         main_win = self.window()

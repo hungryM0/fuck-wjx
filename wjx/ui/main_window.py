@@ -511,7 +511,7 @@ class MainWindow(
         self.controller.cleanupFinished.connect(self.dashboard.on_cleanup_finished)
         self.controller.on_ip_counter = self._on_random_ip_counter_update
 
-    def _on_random_ip_counter_update(self, count: int, limit: int, custom_api: bool) -> None:
+    def _on_random_ip_counter_update(self, count: float, limit: float, custom_api: bool) -> None:
         try:
             self.dashboard.update_random_ip_counter(count, limit, custom_api)
         except Exception as exc:

@@ -55,6 +55,7 @@ from wjx.network.proxy.gui_bridge import (
     refresh_ip_counter_display,
     show_random_ip_activation_dialog,
 )
+from wjx.network.proxy.auth import format_quota_value
 
 __all__ = [
     "AreaProxyQualityError",
@@ -79,6 +80,7 @@ __all__ = [
     "get_proxy_required_ttl_seconds",
     "get_proxy_source",
     "get_quota_cost_by_minute",
+    "format_quota_value",
     "get_random_ip_counter_snapshot_local",
     "get_random_ip_limit",
     "get_status",

@@ -11,13 +11,13 @@ from wjx.network.proxy.auth import (
 )
 
 
-def get_random_ip_limit() -> int:
+def get_random_ip_limit() -> float:
     snapshot = get_session_snapshot()
-    total_quota = int(snapshot.get("total_quota") or 0)
-    return max(0, total_quota)
+    total_quota = float(snapshot.get("total_quota") or 0.0)
+    return max(0.0, total_quota)
 
 
-def get_random_ip_counter_snapshot_local() -> tuple[int, int, bool]:
+def get_random_ip_counter_snapshot_local() -> tuple[float, float, bool]:
     from wjx.network.proxy.source import is_custom_proxy_source
 
     if is_custom_proxy_source():
@@ -25,9 +25,9 @@ def get_random_ip_counter_snapshot_local() -> tuple[int, int, bool]:
 
     if has_authenticated_session() or has_incomplete_session():
         snapshot = get_quota_snapshot()
-        return int(snapshot["used_quota"]), int(snapshot["total_quota"]), False
+        return float(snapshot["used_quota"]), float(snapshot["total_quota"]), False
 
-    return 0, 0, False
+    return 0.0, 0.0, False
 
 
 def normalize_random_ip_enabled_value(desired_enabled: bool) -> bool:

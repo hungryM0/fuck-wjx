@@ -90,7 +90,7 @@ class RuntimePage(ScrollArea):
 
         self.reliability_card = ReliabilitySettingCard(parent=run_group)
         self.reliability_card.setChecked(True)
-        self.reliability_card.set_alpha(0.85)
+        self.reliability_card.set_alpha(0.9)
         self.reliability_card.set_priority_mode(ReliabilitySettingCard.PRIORITY_RELIABILITY_FIRST)
 
         self.headless_card = SwitchSettingCard(
@@ -187,6 +187,22 @@ class RuntimePage(ScrollArea):
             log_suppressed_exception("_current_proxy_required_minute", exc, level=logging.WARNING)
             return 1
 
+    def _current_proxy_required_minute_for_benefit(self) -> int:
+        """限时福利兼容性判断按用户输入作答时长计算，不叠加安全缓冲。"""
+        try:
+            from wjx.network.proxy import get_proxy_minute_by_answer_seconds
+            from wjx.utils.app.config import PROXY_TTL_GRACE_SECONDS
+
+            _, answer_max = self.answer_card.getRange()
+            raw_answer_seconds = max(0, int(answer_max))
+            # get_proxy_minute_by_answer_seconds() 内部会自动加缓冲秒，这里先减掉，
+            # 等价于“按用户输入时长本身判断”，避免 50 秒被提示为 3 分钟。
+            normalized_seconds = max(0, raw_answer_seconds - int(PROXY_TTL_GRACE_SECONDS))
+            return int(get_proxy_minute_by_answer_seconds(normalized_seconds))
+        except Exception as exc:
+            log_suppressed_exception("_current_proxy_required_minute_for_benefit", exc, level=logging.WARNING)
+            return 1
+
     def _show_benefit_proxy_limit_tip(self, minute: int) -> None:
         parent = self.window() or self.view
         InfoBar.warning(
@@ -201,7 +217,7 @@ class RuntimePage(ScrollArea):
         if self._get_selected_proxy_source() != _PROXY_SOURCE_BENEFIT:
             self._last_benefit_proxy_compatible = None
             return True
-        minute = self._current_proxy_required_minute()
+        minute = self._current_proxy_required_minute_for_benefit()
         compatible = minute <= 1
         previous = self._last_benefit_proxy_compatible
         self._last_benefit_proxy_compatible = compatible
@@ -438,7 +454,7 @@ class RuntimePage(ScrollArea):
         self._sync_random_ua(self.random_ua_card.switchButton.isChecked())
         self.reliability_card.switchButton.setChecked(getattr(cfg, "reliability_mode_enabled", True))
         try:
-            self.reliability_card.set_alpha(getattr(cfg, "psycho_target_alpha", 0.85))
+            self.reliability_card.set_alpha(getattr(cfg, "psycho_target_alpha", 0.9))
             self.reliability_card.set_priority_mode(
                 getattr(cfg, "reliability_priority_mode", ReliabilitySettingCard.PRIORITY_RELIABILITY_FIRST)
             )

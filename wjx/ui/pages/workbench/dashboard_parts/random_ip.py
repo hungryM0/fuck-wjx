@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 from qfluentwidgets import FluentIcon
 
 from wjx.network.proxy.auth import (
@@ -14,6 +14,9 @@ from wjx.network.proxy.auth import (
     is_quota_exhausted,
 )
 from wjx.network.proxy import (
+    PROXY_SOURCE_BENEFIT,
+    format_quota_value,
+    get_proxy_source,
     _format_status_payload,
     get_proxy_minute_by_answer_seconds,
     get_quota_cost_by_minute,
@@ -40,12 +43,16 @@ class DashboardRandomIPMixin:
         card_btn: PushButton
         random_ip_hint: BodyLabel
         random_ip_cb: CheckBox
+        random_ip_loading_ring: Any
+        random_ip_loading_label: BodyLabel
         controller: RunController
         runtime_page: RuntimePage
         _ip_low_infobar: Optional[FullWidthInfoBar]
         _ip_cost_infobar: Optional[FullWidthInfoBar]
+        _ip_benefit_infobar: Optional[FullWidthInfoBar]
         _ip_low_infobar_dismissed: bool
-        _ip_low_threshold: int
+        _ip_low_threshold: float
+        _ip_cost_adjust_link: Any
         _api_balance_cache: Optional[float]
         _ip_balance_fetch_lock: threading.Lock
         _ip_balance_fetching: bool
@@ -82,13 +89,13 @@ class DashboardRandomIPMixin:
         except Exception as exc:
             log_suppressed_exception("set_random_ip_loading runtime", exc, level=logging.WARNING)
 
-    def update_random_ip_counter(self, count: int, limit: int, custom_api: bool):
+    def update_random_ip_counter(self, count: float, limit: float, custom_api: bool):
         snapshot = get_session_snapshot()
         authenticated = bool(snapshot.get("authenticated")) and has_authenticated_session()
         session_incomplete = bool(snapshot.get("session_incomplete")) and has_incomplete_session()
         unknown_local_quota = has_unknown_local_quota(snapshot)
-        used = max(0, int(count or 0))
-        total = max(0, int(limit or 0))
+        used = max(0.0, float(count or 0.0))
+        total = max(0.0, float(limit or 0.0))
         quota_exhausted = is_quota_exhausted(
             {"authenticated": authenticated, "user_id": int(snapshot.get("user_id") or 0), "used_quota": used, "total_quota": total}
         )
@@ -131,7 +138,7 @@ class DashboardRandomIPMixin:
             self._update_ip_low_infobar(count, limit, custom_api)
             self._update_ip_cost_infobar(custom_api)
             return
-        self.random_ip_hint.setText(f"{used}/{total}")
+        self.random_ip_hint.setText(f"{format_quota_value(used)}/{format_quota_value(total)}")
         if quota_exhausted:
             self.random_ip_hint.setStyleSheet("color:red;")
         else:
@@ -159,11 +166,40 @@ class DashboardRandomIPMixin:
             custom_api = False
         self._update_ip_cost_infobar(bool(custom_api))
 
+    def _set_ip_cost_infobar_state(self, *, title: str, content: str = "", show_adjust_link: bool = False) -> None:
+        """统一更新高消耗额度提示条的文案与附加操作。"""
+        if not self._ip_cost_infobar:
+            return
+
+        self._ip_cost_infobar.title = title
+        self._ip_cost_infobar.content = content
+
+        if hasattr(self._ip_cost_infobar, "titleLabel"):
+            self._ip_cost_infobar.titleLabel.setVisible(bool(title))
+        if hasattr(self._ip_cost_infobar, "contentLabel"):
+            self._ip_cost_infobar.contentLabel.setVisible(bool(content))
+
+        if hasattr(self, "_ip_cost_adjust_link"):
+            cast(Any, self)._ip_cost_adjust_link.setVisible(bool(show_adjust_link))
+
+        if hasattr(self._ip_cost_infobar, "_adjustText"):
+            self._ip_cost_infobar._adjustText()
+        self._ip_cost_infobar.show()
+
     def _update_ip_cost_infobar(self, custom_api: bool) -> None:
         if not self._ip_cost_infobar:
             return
+        if self._ip_benefit_infobar:
+            self._ip_benefit_infobar.hide()
         if custom_api:
             self._ip_cost_infobar.hide()
+            return
+
+        current_source = str(get_proxy_source() or "").strip().lower()
+        if current_source == PROXY_SOURCE_BENEFIT:
+            self._ip_cost_infobar.hide()
+            if self._ip_benefit_infobar:
+                self._ip_benefit_infobar.show()
             return
 
         try:
@@ -190,17 +226,10 @@ class DashboardRandomIPMixin:
             f"将按 {quota_cost} 倍消耗速率扣减随机IP额度。"
         )
         try:
-            # InfoBar 初始化时 title/content 都是空，会把对应 QLabel 设为隐藏。
-            # 这里动态更新文本时，必须同步恢复标签可见性。
-            self._ip_cost_infobar.title = content
-            self._ip_cost_infobar.content = ""
-            if hasattr(self._ip_cost_infobar, "titleLabel"):
-                self._ip_cost_infobar.titleLabel.setVisible(True)
-            if hasattr(self._ip_cost_infobar, "contentLabel"):
-                self._ip_cost_infobar.contentLabel.setVisible(False)
-            if hasattr(self._ip_cost_infobar, "_adjustText"):
-                self._ip_cost_infobar._adjustText()
-            self._ip_cost_infobar.show()
+            self._set_ip_cost_infobar_state(
+                title=content,
+                show_adjust_link=True,
+            )
         except Exception as exc:
             log_suppressed_exception("_update_ip_cost_infobar", exc, level=logging.WARNING)
 
@@ -245,7 +274,7 @@ class DashboardRandomIPMixin:
         if self._ip_low_infobar:
             self._ip_low_infobar.hide()
 
-    def _update_ip_low_infobar(self, count: int, limit: int, custom_api: bool):
+    def _update_ip_low_infobar(self, count: float, limit: float, custom_api: bool):
         """更新随机IP余额不足提示条。"""
         if not self._ip_low_infobar:
             return
@@ -257,16 +286,17 @@ class DashboardRandomIPMixin:
             self._ip_low_infobar.hide()
             self._ip_low_infobar_dismissed = False
             return
-        remaining = max(0, int(limit or 0) - int(count or 0))
-        threshold = max(5, min(50, int(limit or 0) // 5 if int(limit or 0) > 0 else 5))
+        remaining = max(0.0, float(limit or 0.0) - float(count or 0.0))
+        limit_value = max(0.0, float(limit or 0.0))
+        threshold = max(5.0, min(50.0, limit_value / 5 if limit_value > 0 else 5.0))
         self._ip_low_threshold = threshold
         self._on_ip_balance_checked(remaining if remaining <= threshold else threshold + 1)
 
-    def _on_ip_balance_checked(self, remaining_ip: int):
+    def _on_ip_balance_checked(self, remaining_ip: float):
         """处理IP余额检查结果（在主线程中执行）"""
         if not self._ip_low_infobar:
             return
-        threshold = max(5, min(50, int(getattr(self, "_ip_low_threshold", 20) or 20)))
+        threshold = max(5.0, min(50.0, float(getattr(self, "_ip_low_threshold", 20.0) or 20.0)))
         if remaining_ip < threshold:
             if not self._ip_low_infobar_dismissed:
                 self._ip_low_infobar.show()

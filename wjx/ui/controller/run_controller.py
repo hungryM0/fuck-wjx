@@ -39,7 +39,7 @@ class EngineGuiAdapter:
         dispatcher: Callable[[Callable[[], None]], None],
         stop_signal: threading.Event,
         quota_request_form_opener: Optional[Callable[[], bool]] = None,
-        on_ip_counter: Optional[Callable[[int, int, bool], None]] = None,
+        on_ip_counter: Optional[Callable[[float, float, bool], None]] = None,
         on_random_ip_loading: Optional[Callable[[bool, str], None]] = None,
         message_handler: Optional[Callable[[str, str, str], None]] = None,
         confirm_handler: Optional[Callable[[str, str], bool]] = None,
@@ -107,7 +107,7 @@ class EngineGuiAdapter:
         self,
         *,
         quota_request_form_opener: Optional[Callable[[], bool]] = None,
-        on_ip_counter: Optional[Callable[[int, int, bool], None]] = None,
+        on_ip_counter: Optional[Callable[[float, float, bool], None]] = None,
         on_random_ip_loading: Optional[Callable[[bool, str], None]] = None,
         message_handler: Optional[Callable[[str, str, str], None]] = None,
         confirm_handler: Optional[Callable[[str, str], bool]] = None,
@@ -127,14 +127,14 @@ class EngineGuiAdapter:
                 return False
         return False
 
-    def update_random_ip_counter(self, used: int, total: int, custom_api: bool) -> None:
+    def update_random_ip_counter(self, used: float, total: float, custom_api: bool) -> None:
         callback = self._on_ip_counter
         if not callable(callback):
             return
 
         def _apply() -> None:
             try:
-                callback(int(used), int(total), bool(custom_api))
+                callback(float(used), float(total), bool(custom_api))
             except Exception:
                 logging.info("更新随机IP计数失败", exc_info=True)
 

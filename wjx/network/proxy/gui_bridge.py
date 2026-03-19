@@ -12,6 +12,7 @@ from wjx.network.proxy.auth import (
     RandomIPAuthError,
     activate_trial,
     format_random_ip_error,
+    format_quota_value,
     get_fresh_quota_snapshot,
     get_quota_snapshot,
     get_session_snapshot,
@@ -33,7 +34,7 @@ from wjx.utils.logging.log_utils import (
 
 _COUNTER_REFRESH_TTL_SECONDS = 2.0
 _counter_refresh_lock = threading.Lock()
-_counter_refresh_cache: Optional[tuple[int, int, float]] = None
+_counter_refresh_cache: Optional[tuple[float, float, float]] = None
 _INCOMPLETE_SESSION_RETRY_LATER_DETAILS = {
     "site_daily_limit_exceeded",
     "upstream_rejected",
@@ -41,10 +42,10 @@ _INCOMPLETE_SESSION_RETRY_LATER_DETAILS = {
 }
 
 
-def _apply_counter_snapshot_to_gui(gui: Any, *, used: int, total: int, custom_api: bool = False) -> None:
+def _apply_counter_snapshot_to_gui(gui: Any, *, used: float, total: float, custom_api: bool = False) -> None:
     def _apply() -> None:
-        safe_used = max(0, int(used or 0))
-        safe_total = max(0, int(total or 0))
+        safe_used = max(0.0, float(used or 0.0))
+        safe_total = max(0.0, float(total or 0.0))
         gui.update_random_ip_counter(safe_used, safe_total, bool(custom_api))
         if not custom_api and safe_total > 0 and safe_used >= safe_total:
             _set_random_ip_enabled(gui, False)
@@ -156,7 +157,7 @@ def confirm_random_ip_usage(gui: Any) -> bool:
     return True
 
 
-def _build_counter_snapshot() -> tuple[int, int]:
+def _build_counter_snapshot() -> tuple[float, float]:
     global _counter_refresh_cache
     from wjx.network.proxy.source import is_custom_proxy_source
 
@@ -172,8 +173,8 @@ def _build_counter_snapshot() -> tuple[int, int]:
                 return cached[0], cached[1]
             try:
                 snapshot = get_fresh_quota_snapshot()
-                used = int(snapshot["used_quota"])
-                total = int(snapshot["total_quota"])
+                used = float(snapshot["used_quota"])
+                total = float(snapshot["total_quota"])
                 _counter_refresh_cache = (used, total, time.monotonic())
                 return used, total
             except RandomIPAuthError as exc:
@@ -181,13 +182,13 @@ def _build_counter_snapshot() -> tuple[int, int]:
                 if exc.detail.startswith("session_persist_failed"):
                     raise
                 snapshot = get_quota_snapshot()
-                return int(snapshot["used_quota"]), int(snapshot["total_quota"])
+                return float(snapshot["used_quota"]), float(snapshot["total_quota"])
             except Exception as exc:
                 logging.warning("随机IP额度校验异常，改用本地快照：error=%s", exc)
                 snapshot = get_quota_snapshot()
-                return int(snapshot["used_quota"]), int(snapshot["total_quota"])
+                return float(snapshot["used_quota"]), float(snapshot["total_quota"])
     count, limit, _custom_api = get_random_ip_counter_snapshot_local()
-    return int(count), int(limit)
+    return float(count), float(limit)
 
 
 def on_random_ip_toggle(gui: Any) -> None:
@@ -227,8 +228,8 @@ def on_random_ip_toggle(gui: Any) -> None:
         except Exception as refresh_exc:
             log_suppressed_exception("on_random_ip_toggle refresh counter", refresh_exc)
         return
-    used_quota = int(snapshot.get("used_quota") or 0)
-    total_quota = int(snapshot.get("total_quota") or 0)
+    used_quota = float(snapshot.get("used_quota") or 0.0)
+    total_quota = float(snapshot.get("total_quota") or 0.0)
     _counter_refresh_cache = (used_quota, total_quota, time.monotonic())
     _apply_counter_snapshot_to_gui(gui, used=used_quota, total=total_quota, custom_api=False)
     if is_quota_exhausted({"authenticated": True, **snapshot}):
@@ -260,12 +261,17 @@ def _try_activate_trial(gui: Any = None) -> tuple[bool, bool]:
         _invoke_popup(gui, "error", "领取试用失败", f"领取试用失败：{exc}")
         return False, False
 
-    total_quota = max(int(session.total_quota or 0), 0)
-    used_quota = max(0, int(session.used_quota or 0))
+    total_quota = max(float(session.total_quota or 0.0), 0.0)
+    used_quota = max(0.0, float(session.used_quota or 0.0))
     _counter_refresh_cache = (used_quota, total_quota, time.monotonic())
     _apply_counter_snapshot_to_gui(gui, used=used_quota, total=total_quota, custom_api=False)
     if total_quota > 0:
-        _invoke_popup(gui, "info", "试用已领取", f"已领取免费试用，当前随机IP已用/总额度：{used_quota}/{total_quota}。")
+        _invoke_popup(
+            gui,
+            "info",
+            "试用已领取",
+            f"已领取免费试用，当前随机IP已用/总额度：{format_quota_value(used_quota)}/{format_quota_value(total_quota)}。",
+        )
     else:
         _invoke_popup(gui, "info", "试用已领取", "已领取免费试用，随机IP账号已绑定到当前设备。")
     return True, False

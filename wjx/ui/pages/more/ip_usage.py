@@ -9,6 +9,7 @@ import logging
 from wjx.network.proxy.auth import (
     RandomIPAuthError,
     claim_easter_egg_bonus,
+    format_quota_value,
     format_random_ip_error,
     has_authenticated_session,
 )
@@ -771,10 +772,14 @@ class IpUsagePage(ScrollArea):
             else:
                 result = claim_easter_egg_bonus()
                 claimed = bool(result.get("claimed"))
-                bonus_quota = int(result.get("bonus_quota") or 0)
+                bonus_quota = float(result.get("bonus_quota") or 0.0)
                 detail = str(result.get("detail") or "").strip()
                 if claimed and bonus_quota > 0:
-                    payload = {"level": "success", "message": f"🎉恭喜发现彩蛋，额度+{bonus_quota}", "play_confetti": True}
+                    payload = {
+                        "level": "success",
+                        "message": f"🎉恭喜发现彩蛋，额度+{format_quota_value(bonus_quota)}",
+                        "play_confetti": True,
+                    }
                 elif claimed:
                     payload = {"level": "success", "message": "🎉恭喜发现彩蛋，隐藏福利已到账", "play_confetti": True}
                 elif detail in {"bonus_already_claimed", "easter_egg_already_claimed"}:

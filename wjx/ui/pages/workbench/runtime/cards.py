@@ -2,7 +2,7 @@
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, QStringListModel, Signal
+from PySide6.QtCore import QObject, QThread, Qt, QStringListModel, Signal
 from PySide6.QtGui import QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import QButtonGroup, QCompleter, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -59,6 +59,25 @@ _MUNICIPALITY_PROVINCE_CODES = {"110000", "120000", "310000", "500000"}
 _PROXY_SOURCE_DEFAULT = "default"
 _PROXY_SOURCE_BENEFIT = "benefit"
 _PROXY_SOURCE_CUSTOM = "custom"
+
+
+class _BenefitAreaPrefetchWorker(QObject):
+    """后台预加载限时福利地区，避免切换代理源时阻塞 UI。"""
+
+    finished = Signal(bool, str)
+
+    def __init__(self, force_refresh: bool = False):
+        super().__init__()
+        self._force_refresh = bool(force_refresh)
+
+    def run(self):
+        try:
+            from wjx.core.services.area_service import load_benefit_supported_areas
+
+            load_benefit_supported_areas(force_refresh=self._force_refresh)
+            self.finished.emit(True, "")
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
 
 
 class RandomIPSettingCard(ExpandGroupSettingCard):
@@ -125,7 +144,7 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         layout.addWidget(self.areaRow)
 
         self.benefitHintLabel = BodyLabel(
-            "限时福利仅支持 1 分钟代理，只能选择不限地区或具体城市。",
+            "限时福利仅支持 1 分钟以内的作答时长，且只能支持少部分特定城市。如有更高需求请切换至默认或自备代理源",
             self._groupContainer,
         )
         self.benefitHintLabel.setStyleSheet("color: #D46B08; font-size: 12px;")
@@ -180,7 +199,13 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         self._cities_by_province = {}
         self._province_index_by_code = {}
         self._area_source = _PROXY_SOURCE_DEFAULT
+        self._benefit_prefetch_done = False
+        self._benefit_prefetch_running = False
+        self._benefit_prefetch_thread: Optional[QThread] = None
+        self._benefit_prefetch_worker: Optional[_BenefitAreaPrefetchWorker] = None
+        self._pending_benefit_area_code: Optional[str] = None
         self._load_area_options(_PROXY_SOURCE_DEFAULT)
+        self._start_benefit_area_prefetch()
         self.areaRow.setVisible(True)
         self.provinceCombo.currentIndexChanged.connect(self._on_province_changed)
         self.cityCombo.currentIndexChanged.connect(self._on_city_changed)
@@ -228,11 +253,58 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         if source == _PROXY_SOURCE_CUSTOM:
             self._apply_area_override(None)
         else:
-            self._load_area_options(source)
-            self.set_area_code(current_area)
+            if source == _PROXY_SOURCE_BENEFIT and not self._benefit_prefetch_done:
+                self._pending_benefit_area_code = current_area
+                if not self._benefit_prefetch_running:
+                    self._start_benefit_area_prefetch()
+                self._area_source = _PROXY_SOURCE_BENEFIT
+                self.provinceCombo.clear()
+                self.provinceCombo.addItem("正在加载可用城市...", userData="")
+                self.cityCombo.clear()
+                self.cityCombo.setEnabled(False)
+                self._apply_area_override("")
+            else:
+                self._load_area_options(source)
+                self.set_area_code(current_area)
         # 刷新布局 - 重新触发展开/收起来更新高度
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._refreshLayout)
+
+    def _start_benefit_area_prefetch(self, force_refresh: bool = False) -> None:
+        if self._benefit_prefetch_running:
+            return
+        if self._benefit_prefetch_done and not force_refresh:
+            return
+        self._benefit_prefetch_running = True
+        self._benefit_prefetch_thread = QThread(self)
+        self._benefit_prefetch_worker = _BenefitAreaPrefetchWorker(force_refresh=force_refresh)
+        self._benefit_prefetch_worker.moveToThread(self._benefit_prefetch_thread)
+        self._benefit_prefetch_thread.started.connect(self._benefit_prefetch_worker.run)
+        self._benefit_prefetch_worker.finished.connect(self._on_benefit_prefetch_finished)
+        self._benefit_prefetch_worker.finished.connect(self._benefit_prefetch_thread.quit)
+        self._benefit_prefetch_worker.finished.connect(self._benefit_prefetch_worker.deleteLater)
+        self._benefit_prefetch_thread.finished.connect(self._benefit_prefetch_thread.deleteLater)
+        self._benefit_prefetch_thread.finished.connect(self._on_benefit_prefetch_thread_finished)
+        self._benefit_prefetch_thread.start()
+
+    def _on_benefit_prefetch_finished(self, success: bool, error: str) -> None:
+        self._benefit_prefetch_running = False
+        self._benefit_prefetch_done = bool(success)
+        if not success:
+            logging.warning("限时福利地区预加载失败: %s", error)
+        if self._get_selected_source() != _PROXY_SOURCE_BENEFIT:
+            return
+        target_area_code = self._pending_benefit_area_code
+        self._pending_benefit_area_code = None
+        self._load_area_options(_PROXY_SOURCE_BENEFIT)
+        self.set_area_code(target_area_code)
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(0, self._refreshLayout)
+
+    def _on_benefit_prefetch_thread_finished(self) -> None:
+        self._benefit_prefetch_thread = None
+        self._benefit_prefetch_worker = None
 
     def _load_area_options(self, source: Optional[str] = None):
         source = str(source or self._get_selected_source() or _PROXY_SOURCE_DEFAULT).strip().lower()
@@ -633,9 +705,10 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
 
         alpha_label = BodyLabel("目标 Cronbach's α 系数", self._groupContainer)
         self.alphaEdit = LineEdit(self._groupContainer)
-        self.alphaEdit.setPlaceholderText("0.70 - 0.95（默认 0.85）")
+        self.alphaEdit.setPlaceholderText("0.70 - 0.95（默认 0.9）")
         self.alphaEdit.setFixedWidth(120)
         self.alphaEdit.setFixedHeight(36)
+        self.alphaEdit.setText("0.9")
 
         # 仅允许 0.70 - 0.95 的两位小数
         validator = QDoubleValidator(0.70, 0.95, 2, self.alphaEdit)
@@ -694,17 +767,17 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
     def get_alpha(self) -> float:
         """读取并裁剪目标 Alpha 值，落在 0.70-0.95 之间。
 
-        输入非法或为空时回退到 0.85。
+        输入非法或为空时回退到 0.9。
         """
 
         text = (self.alphaEdit.text() or "").strip()
         try:
             value = float(text)
         except Exception:
-            value = 0.85
+            value = 0.9
 
         if value != value:  # NaN 兜底
-            value = 0.85
+            value = 0.9
 
         value = max(0.70, min(0.95, value))
         return value
@@ -715,12 +788,12 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
         try:
             num = float(value)
         except Exception:
-            num = 0.85
+            num = 0.9
         num = max(0.70, min(0.95, num))
         # 保留两位小数，去掉多余 0
         text = f"{num:.2f}".rstrip("0").rstrip(".")
         if not text:
-            text = "0.85"
+            text = "0.9"
         if self.alphaEdit.text() != text:
             self.alphaEdit.setText(text)
 

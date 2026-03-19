@@ -93,7 +93,7 @@ class TaskContext:
     questions_metadata: Dict[int, Dict[str, Any]] = field(default_factory=dict)
 
     # 心理测量计划目标 Alpha（0.70-0.95）
-    psycho_target_alpha: float = 0.85
+    psycho_target_alpha: float = 0.9
     reliability_priority_mode: str = "reliability_first"
 
     # ── 并发 / 浏览器配置 ─────────────────────────────────────────────────

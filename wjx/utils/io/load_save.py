@@ -157,7 +157,7 @@ class RuntimeConfig:
     pause_on_aliyun_captcha: bool = True
     reliability_mode_enabled: bool = True  # 信效度生成总开关
     reliability_priority_mode: str = "reliability_first"  # reliability_first/ratio_first
-    psycho_target_alpha: float = 0.85  # 心理测量计划目标 Cronbach's Alpha（0.70-0.95）
+    psycho_target_alpha: float = 0.9  # 心理测量计划目标 Cronbach's Alpha（0.70-0.95）
     headless_mode: bool = True
     ai_mode: str = "free"
     ai_provider: str = "deepseek"
@@ -445,7 +445,7 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.reliability_priority_mode = str(raw.get("reliability_priority_mode") or "reliability_first").strip().lower()
     if config.reliability_priority_mode not in ("reliability_first", "ratio_first"):
         config.reliability_priority_mode = "reliability_first"
-    config.psycho_target_alpha = _as_float(raw.get("psycho_target_alpha") or 0.85, 0.85)
+    config.psycho_target_alpha = _as_float(raw.get("psycho_target_alpha") or 0.9, 0.9)
     config.psycho_target_alpha = max(0.70, min(0.95, config.psycho_target_alpha))
     config.headless_mode = _as_bool(raw.get("headless_mode", True), True)
     config.answer_rules = []
