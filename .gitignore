@@ -1,13 +1,12 @@
 # 开发环境
 *.code-workspace
-.github_token
-.clinerules/
+.claude/
+.codex/
 desktop.ini
 push.bat
 .venv/
-control/
-fuck-wjx-old_version/
 AGENTS.md
+CLAUDE.md
 
 # 编译环境
 build/

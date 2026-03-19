@@ -1,92 +1,34 @@
-# fuck-wjx
+<div align="center">
+  <img src="assets/icon.png" alt="fuck-wjx" width="120" height="120" />
+  <h1>fuck-wjx-mac</h1>
+  <p>A macOS version of the WenJuanXing auto-fill tool.</p>
 
-English | [简体中文](./README_CN.md)
+  English | [简体中文](./README_CN.md)
+</div>
 
 > Inspired by [Zemelee/wjx](https://github.com/Zemelee/wjx) - give that repo a star⭐
-
-A GUI tool for auto-filling WenJuanXing (wjx.cn) surveys with custom answer distributions. College students' lifesaver 🎓
 
 > [!WARNING]
 > **For learning and testing only.** Ensure you have authorization. **DO NOT pollute others' survey data!**
 
-<img width="689" height="626" alt="gui" src="https://github.com/user-attachments/assets/dab85fed-1b28-4d45-8adf-37bb2770cf28" />
+## Disclaimer
 
----
+**This macOS branch is community-driven. The original author does not provide long-term support or troubleshooting for macOS.** 
+PRs for bug fixes or compatibility improvements are welcome.
 
-## ✨ Features
+## Run & Build
 
-| Feature | Description |
-|---------|-------------|
-| 💻 Zero-barrier GUI | No coding required, just click and go |
-| 📷 QR Code Decode | Upload survey QR code → auto-extract link |
-| 🎯 Smart Config | Auto-parse questions, set weights & probabilities |
-| 🌍 Random IP | Bypass IP restrictions & captcha |
-| ⏸️ Graceful Stop | Stop anytime without losing progress |
-| 📁 Save & Reuse | Export configs for repeated use |
-
----
-
-## 🚀 Quick Start
-
-> [!TIP]
-> **Just want it to work?** Download from [Release](https://github.com/hungryM0/fuck-wjx/releases/latest), double-click, done.
-
-### From Source
+Requirements: macOS 10.15+, Python 3.8+
 
 ```bash
+# Install dependencies
 pip install -r requirements.txt
+pip install pyinstaller
+
+# Run
 python fuck-wjx.py
+
+# Build as .app
+chmod +x build_macos.sh
+./build_macos.sh
 ```
-
-**Requirements:** Windows 10/11, macOS 10.15+ or Linux, Python 3.8+
-
----
-
-## 📖 Usage
-
-1. Paste survey link or upload QR code
-2. Click "Auto Configure Survey" to parse questions
-3. Adjust answer weights via the config wizard
-4. Set target count & browser instances
-5. Hit "Start Execution" and watch the magic
-
----
-
-## ⚙️ Key Settings
-
-| Setting | What it does |
-|---------|--------------|
-| Target Count | Total submissions to attempt (start with 3-5 for testing) |
-| Browser Count | Parallel instances (2-5 recommended for most PCs) |
-| Distribution | Random or custom-weighted answer selection |
-| Full Simulation | Mimics human behavior, slower but safer |
-| Random IP | Bypasses IP limits (may incur costs) |
-
----
-
-## 💬 Community
-
-QQ Group for questions & discussions:
-
-<img width="256" alt="qq" src="https://github.com/user-attachments/assets/7f25caaa-b157-4185-acae-78882f56871d" />
-
----
-
-## 🤝 Contributing
-
-PRs welcome for:
-- Parsing stability fixes
-- New question type support
-- Performance improvements
-
----
-
-## ☕ Donate
-
-<img width="250" alt="payment" src="assets/payment.png" />
-
----
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=hungryM0/fuck-wjx&type=date&legend=top-left)](https://www.star-history.com/#hungryM0/fuck-wjx&type=date&legend=top-left)
