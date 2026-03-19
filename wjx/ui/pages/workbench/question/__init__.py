@@ -16,7 +16,6 @@ from .constants import (
     TYPE_LABEL_MAP,
     _get_entry_type_label,
     _get_type_label,
-    get_entry_type_label,
 )
 from .utils import _shorten_text, _apply_label_color, _bind_slider_input
 from .wizard_dialog import QuestionWizardDialog
@@ -31,7 +30,6 @@ __all__ = [
     # 标签函数
     "_get_entry_type_label",
     "_get_type_label",
-    "get_entry_type_label",
     # 辅助函数
     "_shorten_text",
     "_apply_label_color",

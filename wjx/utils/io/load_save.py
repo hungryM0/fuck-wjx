@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from wjx.core.questions.config import QuestionEntry
 
 _CURRENT_CONFIG_SCHEMA_VERSION = 3
+_LEGACY_CONFIG_KEYS = ("random_proxy_api", "ai_enabled")
 _TEXT_RANDOM_MODES = {"none", "name", "mobile"}
 
 
@@ -406,10 +407,7 @@ def _sanitize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         config.timed_mode_interval = 3.0
 
     config.random_ip_enabled = normalize_random_ip_enabled_value(_as_bool(raw.get("random_ip_enabled"), False))
-    legacy_proxy_api = str(raw.get("random_proxy_api") or "").strip()
     custom_proxy_api = str(raw.get("custom_proxy_api") or "").strip()
-    if (not custom_proxy_api) and legacy_proxy_api:
-        custom_proxy_api = legacy_proxy_api
     proxy_source = str(raw.get("proxy_source") or "default").strip().lower()
     if proxy_source not in ("default", "benefit", "custom"):
         proxy_source = "custom" if custom_proxy_api else "default"
@@ -569,66 +567,25 @@ def _coerce_schema_version(raw_value: Any) -> int:
     try:
         version = int(raw_value)
     except Exception:
-        return 1
-    return version if version > 0 else 1
+        return 0
+    return version if version > 0 else 0
 
 
-def _migrate_v1_to_v2(payload: Dict[str, Any]) -> Dict[str, Any]:
-    migrated: Dict[str, Any] = dict(payload)
+def _ensure_supported_config_payload(payload: Dict[str, Any], *, config_path: str) -> Dict[str, Any]:
+    legacy_keys = [key for key in _LEGACY_CONFIG_KEYS if key in payload]
+    if legacy_keys:
+        legacy_text = "、".join(legacy_keys)
+        raise ValueError(
+            f"配置文件使用了已移除的旧字段（{legacy_text}），请在旧版本客户端中重新保存后再导入：{config_path}"
+        )
 
-    # 代理字段迁移：random_proxy_api -> proxy_source/custom_proxy_api
-    legacy_proxy_api = str(migrated.get("random_proxy_api") or "").strip()
-    custom_proxy_api = str(migrated.get("custom_proxy_api") or "").strip()
-    if (not custom_proxy_api) and legacy_proxy_api:
-        custom_proxy_api = legacy_proxy_api
-    proxy_source = str(migrated.get("proxy_source") or "").strip().lower()
-    if proxy_source not in ("default", "benefit", "custom"):
-        proxy_source = "custom" if custom_proxy_api else "default"
-    migrated["proxy_source"] = proxy_source
-    migrated["custom_proxy_api"] = custom_proxy_api
-    migrated.pop("random_proxy_api", None)
+    schema_version = _coerce_schema_version(payload.get("config_schema_version"))
+    if schema_version != _CURRENT_CONFIG_SCHEMA_VERSION:
+        raise ValueError(
+            f"配置文件版本不受支持（当前仅支持 schema v{_CURRENT_CONFIG_SCHEMA_VERSION}，实际为 v{schema_version}）：{config_path}"
+        )
 
-    # 多项填空细粒度配置迁移：缺失时写入空列表，后续由业务按空列表兜底
-    entries = migrated.get("question_entries")
-    if isinstance(entries, list):
-        updated_entries: List[Any] = []
-        for raw_entry in entries:
-            if not isinstance(raw_entry, dict):
-                updated_entries.append(raw_entry)
-                continue
-            entry = dict(raw_entry)
-            entry["multi_text_blank_modes"] = _normalize_multi_text_blank_modes(entry.get("multi_text_blank_modes"))
-            entry["multi_text_blank_ai_flags"] = _normalize_multi_text_blank_ai_flags(entry.get("multi_text_blank_ai_flags"))
-            updated_entries.append(entry)
-        migrated["question_entries"] = updated_entries
-
-    migrated["config_schema_version"] = 2
-    return migrated
-
-
-def _migrate_v2_to_v3(payload: Dict[str, Any]) -> Dict[str, Any]:
-    migrated: Dict[str, Any] = dict(payload)
-    ai_mode = str(migrated.get("ai_mode") or "free").strip().lower()
-    if ai_mode not in {"free", "provider"}:
-        ai_mode = "free"
-    migrated.pop("ai_enabled", None)
-    migrated["ai_mode"] = ai_mode
-    migrated["config_schema_version"] = 3
-    return migrated
-
-
-def _upgrade_config_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    current: Dict[str, Any] = dict(payload)
-    schema_version = _coerce_schema_version(current.get("config_schema_version"))
-
-    if schema_version < 2:
-        current = _migrate_v1_to_v2(current)
-        schema_version = 2
-
-    if schema_version < 3:
-        current = _migrate_v2_to_v3(current)
-        schema_version = 3
-
+    current = dict(payload)
     current["config_schema_version"] = schema_version
     return current
 
@@ -671,9 +628,9 @@ def load_config(path: Optional[str] = None, *, strict: bool = False) -> RuntimeC
         logging.warning(error_message)
         return RuntimeConfig()
     try:
-        payload = _upgrade_config_payload(payload)
+        payload = _ensure_supported_config_payload(payload, config_path=config_path)
     except Exception as exc:
-        error_message = f"迁移配置失败: {config_path} -> {exc}"
+        error_message = f"配置不兼容: {config_path} -> {exc}"
         if strict:
             raise ValueError(error_message) from exc
         logging.warning(error_message)
@@ -687,7 +644,6 @@ def save_config(config: RuntimeConfig, path: Optional[str] = None) -> str:
     payload: Dict[str, Any] = asdict(config)
     payload["question_entries"] = [serialize_question_entry(entry) for entry in config.question_entries]
     payload["config_schema_version"] = _CURRENT_CONFIG_SCHEMA_VERSION
-    payload.pop("random_proxy_api", None)
     with open(config_path, "w", encoding="utf-8") as fp:
         json.dump(payload, fp, ensure_ascii=False, indent=2)
     return config_path

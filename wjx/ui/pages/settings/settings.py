@@ -110,13 +110,7 @@ class SettingsPage(ScrollArea):
         self.download_source_combo.setMinimumWidth(180)
         for key, source in DOWNLOAD_SOURCES.items():
             self.download_source_combo.addItem(source["label"], userData=key)
-        # 读取保存的下载源设置（兼容旧键 github_mirror）
-        saved_source = str(settings.value("download_source", "")).strip()
-        if not saved_source:
-            saved_source = str(settings.value("github_mirror", DEFAULT_DOWNLOAD_SOURCE)).strip()
-            if saved_source:
-                settings.setValue("download_source", saved_source)
-                settings.remove("github_mirror")
+        saved_source = str(settings.value("download_source", DEFAULT_DOWNLOAD_SOURCE)).strip()
         idx = self.download_source_combo.findData(saved_source)
         if idx >= 0:
             self.download_source_combo.setCurrentIndex(idx)
@@ -170,8 +164,7 @@ class SettingsPage(ScrollArea):
         card.setChecked(checked)
         btn.blockSignals(False)
 
-    def _apply_sidebar_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        _ = show_tip  # 兼容旧调用，设置页切换已改为静默生效
+    def _apply_sidebar_state(self, checked: bool, persist: bool = True):
         settings = app_settings()
         if persist:
             settings.setValue("sidebar_always_expand", checked)
@@ -189,8 +182,7 @@ class SettingsPage(ScrollArea):
             except Exception as exc:
                 log_suppressed_exception("_apply_sidebar_state: if checked: nav.setCollapsible(False) nav.expand() else: nav.setCollapsible(T...", exc, level=logging.WARNING)
 
-    def _apply_topmost_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        _ = show_tip  # 兼容旧调用，设置页切换已改为静默生效
+    def _apply_topmost_state(self, checked: bool, persist: bool = True):
         settings = app_settings()
         if persist:
             settings.setValue("window_topmost", checked)
@@ -199,14 +191,12 @@ class SettingsPage(ScrollArea):
             win.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
             win.show()
 
-    def _apply_ask_save_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        _ = show_tip  # 兼容旧调用，设置页切换已改为静默生效
+    def _apply_ask_save_state(self, checked: bool, persist: bool = True):
         settings = app_settings()
         if persist:
             settings.setValue("ask_save_on_close", checked)
 
-    def _apply_auto_update_state(self, checked: bool, persist: bool = True, show_tip: bool = True):
-        _ = show_tip  # 兼容旧调用，设置页切换已改为静默生效
+    def _apply_auto_update_state(self, checked: bool, persist: bool = True):
         settings = app_settings()
         if persist:
             settings.setValue("auto_check_update", checked)
@@ -278,8 +268,8 @@ class SettingsPage(ScrollArea):
         self._set_switch_state(self.topmost_card, defaults["window_topmost"])
         self._set_switch_state(self.ask_save_card, defaults["ask_save_on_close"])
         self._set_switch_state(self.auto_update_card, defaults["auto_check_update"])
-        self._apply_sidebar_state(defaults["sidebar_always_expand"], persist=False, show_tip=False)
-        self._apply_topmost_state(defaults["window_topmost"], persist=False, show_tip=False)
+        self._apply_sidebar_state(defaults["sidebar_always_expand"], persist=False)
+        self._apply_topmost_state(defaults["window_topmost"], persist=False)
         InfoBar.success(
             "",
             "已恢复默认设置",
@@ -294,5 +284,4 @@ class SettingsPage(ScrollArea):
         source_key = str(self.download_source_combo.itemData(idx)) if idx >= 0 else DEFAULT_DOWNLOAD_SOURCE
         settings = app_settings()
         settings.setValue("download_source", source_key)
-        settings.remove("github_mirror")
 

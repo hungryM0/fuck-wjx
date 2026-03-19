@@ -310,7 +310,7 @@ class AboutPage(ScrollArea):
 
     def _show_terms_of_service(self):
         """显示服务条款对话框"""
-        from wjx.ui.dialogs import TermsOfServiceDialog
+        from wjx.ui.dialogs.terms_of_service import TermsOfServiceDialog
         dlg = TermsOfServiceDialog(self.window())
         dlg.exec()
 

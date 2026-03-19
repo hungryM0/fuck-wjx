@@ -28,19 +28,13 @@ from wjx.utils.app.config import DOWNLOAD_SOURCES, DEFAULT_DOWNLOAD_SOURCE, app_
 
 
 def _get_download_source() -> str:
-    """获取当前选择的下载源 key（兼容旧键 github_mirror）"""
+    """获取当前选择的下载源 key。"""
     if _HAS_QSETTINGS:
         try:
             settings = app_settings()
-            value = str(settings.value("download_source", "")).strip()
+            value = str(settings.value("download_source", DEFAULT_DOWNLOAD_SOURCE)).strip()
             if value:
                 return value
-            # 兼容旧设置键，读取后迁移
-            legacy_value = str(settings.value("github_mirror", DEFAULT_DOWNLOAD_SOURCE)).strip()
-            if legacy_value:
-                settings.setValue("download_source", legacy_value)
-                settings.remove("github_mirror")
-                return legacy_value
         except Exception as exc:
             log_suppressed_exception("_get_download_source", exc, level=logging.WARNING)
     return DEFAULT_DOWNLOAD_SOURCE
@@ -52,7 +46,6 @@ def _set_download_source(source_key: str) -> None:
         try:
             settings = app_settings()
             settings.setValue("download_source", source_key)
-            settings.remove("github_mirror")
             logging.info(f"已切换下载源为: {source_key}")
         except Exception as exc:
             log_suppressed_exception("_set_download_source", exc, level=logging.WARNING)

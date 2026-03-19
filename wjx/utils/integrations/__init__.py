@@ -6,7 +6,6 @@ from wjx.utils.integrations.ai_service import (
     get_ai_settings,
     get_default_system_prompt,
     save_ai_settings,
-    DEFAULT_SYSTEM_PROMPT,
     generate_answer,
     test_connection,
 )
@@ -18,7 +17,6 @@ __all__ = [
     "get_default_system_prompt",
     "get_ai_settings",
     "save_ai_settings",
-    "DEFAULT_SYSTEM_PROMPT",
     "generate_answer",
     "test_connection",
 ]

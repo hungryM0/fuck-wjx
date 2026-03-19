@@ -185,7 +185,7 @@ a = Analysis(
         "PySide6.QtMultimedia",
         "PySide6.QtMultimediaWidgets",
     ],
-    noarchive=False,
+    noarchive=True,
     optimize=2,
 )
 

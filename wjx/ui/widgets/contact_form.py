@@ -152,7 +152,6 @@ class ContactForm(StatusPollingMixin, QWidget):
         self._manage_polling = manage_polling
         self._lock_message_type = lock_message_type
         self._random_ip_user_id: int = 0
-        self._random_ip_session_incomplete: bool = False
         self._last_valid_quantity_text: str = ""
 
         wrapper = QVBoxLayout(self)
@@ -510,14 +509,9 @@ class ContactForm(StatusPollingMixin, QWidget):
             log_suppressed_exception("refresh_random_ip_user_id_hint", exc, level=logging.WARNING)
             snapshot = {}
         user_id = int(snapshot.get("user_id") or 0)
-        session_incomplete = bool(snapshot.get("session_incomplete"))
         self._random_ip_user_id = user_id
-        self._random_ip_session_incomplete = session_incomplete
         if user_id > 0:
             self.random_ip_user_id_label.setText(f"随机IP用户ID：{user_id}")
-            self.random_ip_user_id_label.show()
-        elif session_incomplete:
-            self.random_ip_user_id_label.setText("检测到旧版随机IP登录残留，服务端已停用 token 续签。请先重新领取试用；未恢复前不能申请额度")
             self.random_ip_user_id_label.show()
         else:
             self.random_ip_user_id_label.hide()
@@ -529,8 +523,6 @@ class ContactForm(StatusPollingMixin, QWidget):
             return ""
         if self._random_ip_user_id > 0:
             return ""
-        if self._random_ip_session_incomplete:
-            return "当前随机IP账号状态异常，暂时还不能勾选。请先重新领取试用，确认随机IP恢复可用后再申请。"
         return "你还没有成功使用过随机IP，暂时不能勾选。请先启用并实际跑通一次随机IP，确认能正常用，再来申请。"
 
     def _open_donate_page(self) -> None:
@@ -978,12 +970,9 @@ class ContactForm(StatusPollingMixin, QWidget):
 
         self.refresh_random_ip_user_id_hint()
         if mtype == REQUEST_MESSAGE_TYPE and self._random_ip_user_id <= 0:
-            warning_text = "暂时还不能申请额度。请先小测试一两份，确认能正常提交成功后，再来申请额度。"
-            if self._random_ip_session_incomplete:
-                warning_text = "当前随机IP账号状态异常，暂时未读取到有效用户ID，开发者没法据此补额度。请稍后重试；如果一直不恢复，请先重新领取试用。需要反馈问题的话，请改用“报错反馈”。"
             InfoBar.warning(
                 "",
-                warning_text,
+                "暂时还不能申请额度。请先小测试一两份，确认能正常提交成功后，再来申请额度。",
                 parent=self,
                 position=InfoBarPosition.TOP,
                 duration=3500,
@@ -1019,8 +1008,6 @@ class ContactForm(StatusPollingMixin, QWidget):
         full_message += f"已捐助：{'是' if self.donated_cb.isChecked() else '否'}\n"
         if self._random_ip_user_id > 0:
             full_message += f"随机IP用户ID：{self._random_ip_user_id}\n"
-        elif self._random_ip_session_incomplete:
-            full_message += "随机IP账号状态：异常（未读取到有效用户ID）\n"
         if mtype == REQUEST_MESSAGE_TYPE:
             full_message += f"支持金额：{'￥' + request_amount_text if request_amount_text else '未填写'}\n"
             full_message += f"申请额度：{request_quota_text}\n"

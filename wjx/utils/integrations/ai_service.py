@@ -97,10 +97,6 @@ DEFAULT_SYSTEM_PROMPT_PROVIDER = (
     + "\n\n多项填空补充规则：\n"
       "6. 当题目有多个空位时，按空位顺序输出一个字符串，并使用 || 分隔每个答案（示例：答案1||答案2||答案3）"
 )
-# 向后兼容：历史代码默认引用该常量时，沿用服务商模式提示词。
-DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT_PROVIDER
-
-
 def get_default_system_prompt(ai_mode: Any = AI_MODE_PROVIDER) -> str:
     """根据模式返回默认系统提示词。"""
     mode = str(ai_mode or AI_MODE_FREE).strip().lower()

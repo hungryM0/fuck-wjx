@@ -18,7 +18,6 @@ from wjx.network.proxy.auth import (
     get_fresh_quota_snapshot,
     get_session_snapshot,
     has_authenticated_session,
-    has_incomplete_session,
     has_unknown_local_quota,
     is_quota_exhausted,
 )
@@ -348,7 +347,7 @@ class RunControllerRuntimeMixin:
         self._validate_benefit_proxy_compatibility(config)
 
         if not is_custom_proxy_api_active():
-            if not has_authenticated_session() and not has_incomplete_session():
+            if not has_authenticated_session():
                 raise RuntimeError("默认随机IP需要先领取免费试用或提交额度申请，请先完成后再试，或改用自定义代理接口")
             _set_stage("初始化随机IP模块（检查本地额度缓存）")
             try:

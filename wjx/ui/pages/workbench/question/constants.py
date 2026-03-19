@@ -38,8 +38,3 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
 def _get_type_label(q_type: str) -> str:
     return TYPE_LABEL_MAP.get(q_type, q_type)
 
-
-def get_entry_type_label(entry: QuestionEntry) -> str:
-    """兼容旧导入名，避免重构后外部导入直接失败。"""
-    return _get_entry_type_label(entry)
-
