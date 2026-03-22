@@ -3,23 +3,7 @@ from typing import Any, List, Optional, Tuple, Union
 
 from wjx.core.questions.utils import normalize_droplist_probs
 
-_PRIORITY_MODE_RELIABILITY_FIRST = "reliability_first"
-_PRIORITY_MODE_RATIO_FIRST = "ratio_first"
-_VALID_PRIORITY_MODES = {_PRIORITY_MODE_RELIABILITY_FIRST, _PRIORITY_MODE_RATIO_FIRST}
-
-_CORRECTION_PROFILE_RELIABILITY_FIRST = {
-    "warmup_samples": 24,
-    "gain": 2.8,
-    "gain_psycho": 1.15,
-    "min_factor": 0.6,
-    "max_factor": 1.7,
-    "min_factor_psycho": 0.82,
-    "max_factor_psycho": 1.18,
-    "gap_limit": 0.35,
-}
-
-# 比例优先（中等加强）：加快收敛，但仍保留心理测量路径的保守约束
-_CORRECTION_PROFILE_RATIO_FIRST = {
+_CORRECTION_PROFILE_DEFAULT = {
     "warmup_samples": 12,
     "gain": 4.2,
     "gain_psycho": 2.05,
@@ -60,29 +44,12 @@ def _resolve_runtime_counts(
     return (max(0, int(total or 0)), list(counts or []))
 
 
-def _resolve_priority_mode(ctx: Optional[Any]) -> str:
-    if ctx is None:
-        return _PRIORITY_MODE_RELIABILITY_FIRST
-    try:
-        mode = str(getattr(ctx, "reliability_priority_mode", _PRIORITY_MODE_RELIABILITY_FIRST) or "")
-    except Exception:
-        mode = _PRIORITY_MODE_RELIABILITY_FIRST
-    normalized = mode.strip().lower()
-    if normalized not in _VALID_PRIORITY_MODES:
-        return _PRIORITY_MODE_RELIABILITY_FIRST
-    return normalized
-
-
 def _resolve_correction_params(
     ctx: Optional[Any],
     psycho_plan: Optional[Any],
 ) -> Tuple[int, float, float, float, float]:
-    mode = _resolve_priority_mode(ctx)
-    profile = (
-        _CORRECTION_PROFILE_RATIO_FIRST
-        if mode == _PRIORITY_MODE_RATIO_FIRST
-        else _CORRECTION_PROFILE_RELIABILITY_FIRST
-    )
+    del ctx  # 兼容旧接口：优先级开关已废弃，不再参与运行时决策
+    profile = _CORRECTION_PROFILE_DEFAULT
 
     if psycho_plan is not None:
         return (

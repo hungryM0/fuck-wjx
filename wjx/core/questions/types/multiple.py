@@ -28,6 +28,11 @@ from wjx.core.questions.utils import (
 )
 from wjx.core.persona.context import apply_persona_boost, record_answer
 from wjx.core.questions.consistency import get_multiple_rule_constraint
+from wjx.core.questions.strict_ratio import (
+    is_strict_ratio_question,
+    stochastic_round,
+    weighted_sample_without_replacement,
+)
 
 # 缓存检测到的多选限制
 _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
@@ -625,7 +630,14 @@ def _apply_rule_constraints(
     return _normalize_selected_indices(resolved, option_count)
 
 
-def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_config: List, multiple_option_fill_texts_config: List) -> None:
+def multiple(
+    driver: BrowserDriver,
+    current: int,
+    index: int,
+    multiple_prob_config: List,
+    multiple_option_fill_texts_config: List,
+    task_ctx: Optional[Any] = None,
+) -> None:
     """多选题处理主函数"""
     option_elements, option_source = _collect_multiple_option_elements(driver, current)
     if not option_elements:
@@ -753,14 +765,77 @@ def multiple(driver: BrowserDriver, current: int, index: int, multiple_prob_conf
         sanitized_probabilities.append(prob_value)
     selection_probabilities = sanitized_probabilities
 
+    strict_ratio = is_strict_ratio_question(task_ctx, current)
     # 画像约束：对匹配画像的选项概率加成
     # 多选题概率是 0-100 的百分比，加成后上限仍为 100
-    boosted = apply_persona_boost(option_texts, selection_probabilities)
-    selection_probabilities = [min(100.0, p) for p in boosted]
+    if not strict_ratio:
+        boosted = apply_persona_boost(option_texts, selection_probabilities)
+        selection_probabilities = [min(100.0, p) for p in boosted]
     for idx in blocked_indices:
         selection_probabilities[idx] = 0.0
     for idx in required_indices:
         selection_probabilities[idx] = 0.0
+
+    if strict_ratio:
+        positive_optional = [
+            idx for idx, prob in enumerate(selection_probabilities)
+            if prob > 0 and idx not in blocked_indices and idx not in required_indices
+        ]
+        if not positive_optional and not required_indices:
+            if current not in _WARNED_PROB_MISMATCH:
+                _WARNED_PROB_MISMATCH.add(current)
+                logging.warning(
+                    "第%d题（多选）：严格配比模式下所有可选项概率都 <= 0，已跳过本题；请至少保留一个 > 0%% 的选项。",
+                    current,
+                )
+            return
+
+        required_selected = _normalize_selected_indices(required_indices, len(option_elements))
+        if len(required_selected) > max_allowed:
+            logging.warning(
+                "第%d题（多选）：必选项 %d 个已超过题目最多可选 %d 项，严格配比模式下按最多可选截断。",
+                current,
+                len(required_selected),
+                max_allowed,
+            )
+            required_selected = required_selected[:max_allowed]
+
+        min_total = max(min_required, len(required_selected))
+        max_total = min(max_allowed, len(required_selected) + len(positive_optional))
+        if min_total > max_total:
+            logging.warning(
+                "第%d题（多选）：严格配比模式下正概率可选项不足，题目要求最少选 %d 项，实际最多只能选 %d 项。",
+                current,
+                min_required,
+                max_total,
+            )
+            min_total = max_total
+
+        expected_optional = sum(selection_probabilities[idx] for idx in positive_optional) / 100.0
+        total_target = len(required_selected) + stochastic_round(expected_optional)
+        total_target = max(min_total, min(max_total, total_target))
+        optional_target = max(0, total_target - len(required_selected))
+        sampled_optional = weighted_sample_without_replacement(
+            positive_optional,
+            [selection_probabilities[idx] for idx in positive_optional],
+            optional_target,
+        )
+        selected_indices = _normalize_selected_indices(required_selected + sampled_optional, len(option_elements))
+        confirmed_indices = _apply_selected_indices(selected_indices)
+        if len(confirmed_indices) < min_required:
+            logging.warning(
+                "第%d题（多选）：严格配比模式下题目最少需选 %d 项，实际点击成功 %d 项（正概率可选 %d，规则必选 %d）。",
+                current,
+                min_required,
+                len(confirmed_indices),
+                len(positive_optional),
+                len(required_selected),
+            )
+        if not confirmed_indices:
+            return
+        selected_texts = [option_texts[i] for i in confirmed_indices if i < len(option_texts)]
+        record_answer(current, "multiple", selected_indices=confirmed_indices, selected_texts=selected_texts)
+        return
 
     selection_mask: List[int] = []
     attempts = 0

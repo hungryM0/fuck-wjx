@@ -13,7 +13,6 @@
 - 从源码运行：`python fuck-wjx.py`。
 - 导入检测：`python test_wjx_imports.py`（扫描 `wjx/` 下所有 `.py` 文件的 `import` 是否报错）。
 - 死代码检测：`python test_wjx_deadcode.py`（基于 vulture，扫描 `wjx/` 下未引用的死代码）。
-- 概率命中回归：`python test_wjx_probability_guard.py`（确保存在非 0 权重时，0 权重选项绝不会被选中）。
 
 ## 仓库根目录
 
@@ -27,7 +26,6 @@
 ├── rthook_pyside6.py     # PySide6 打包钩子
 ├── test_wjx_imports.py   # 导入检测脚本
 ├── test_wjx_deadcode.py  # 死代码检测脚本
-├── test_wjx_probability_guard.py  # 概率命中回归脚本
 └── wjx/                  # 主代码目录
 ```
 
@@ -97,7 +95,7 @@ wjx/
 ## PR 流程（推荐）
 1. Fork 仓库本仓库
 2. 开发时遵守现有分层：核心逻辑放 `wjx/core`，界面相关放 `wjx/ui`，网络放 `wjx/network`，通用工具放 `wjx/utils`
-3. 自测：运行 `python test_wjx_imports.py` 检查 import 和语法错误；如果改到权重/概率命中逻辑，再运行 `python test_wjx_probability_guard.py`；至少手动跑一次核心流程（启动、加载问卷、配置、开始运行），确保无报错
+3. 自测：运行 `python test_wjx_imports.py` 检查 import 和语法错误；至少手动跑一次核心流程（启动、加载问卷、配置、开始运行），确保无报错
 4. 提交：保持清晰提交信息，必要时补充中文注释和变更说明
 5. PR 描述：写明变更目的、主要改动点、测试方式与结果，关联相关 Issue（如有）
 

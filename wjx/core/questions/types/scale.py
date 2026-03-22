@@ -7,9 +7,10 @@ from wjx.core.questions.distribution import (
     record_pending_distribution_choice,
     resolve_distribution_probabilities,
 )
+from wjx.core.questions.strict_ratio import enforce_reference_rank_order, is_strict_ratio_question
 from wjx.core.questions.tendency import get_tendency_index
 from wjx.core.questions.consistency import apply_single_like_consistency
-from wjx.core.questions.utils import normalize_droplist_probs
+from wjx.core.questions.utils import normalize_droplist_probs, weighted_index
 
 
 def scale(
@@ -31,20 +32,25 @@ def scale(
     probs = normalize_droplist_probs(probabilities, len(scale_options))
     probs = apply_single_like_consistency(probs, current)
     resolved_question_index = question_index if question_index is not None else current
+    strict_ratio = is_strict_ratio_question(task_ctx, resolved_question_index)
     probs = resolve_distribution_probabilities(
         probs,
         len(scale_options),
         task_ctx,
         resolved_question_index,
-        psycho_plan=psycho_plan,
+        psycho_plan=None if strict_ratio else psycho_plan,
     )
-    selected_index = get_tendency_index(
-        len(scale_options),
-        probs,
-        dimension=dimension,
-        psycho_plan=psycho_plan,
-        question_index=resolved_question_index,
-    )
+    if strict_ratio:
+        probs = enforce_reference_rank_order(probs, normalize_droplist_probs(probabilities, len(scale_options)))
+        selected_index = weighted_index(probs)
+    else:
+        selected_index = get_tendency_index(
+            len(scale_options),
+            probs,
+            dimension=dimension,
+            psycho_plan=psycho_plan,
+            question_index=resolved_question_index,
+        )
     scale_options[selected_index].click()
     record_pending_distribution_choice(
         task_ctx,

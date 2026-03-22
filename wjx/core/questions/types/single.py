@@ -6,9 +6,15 @@ from wjx.utils.logging.log_utils import log_suppressed_exception
 
 from wjx.network.browser import By, BrowserDriver
 from wjx.core.persona.context import apply_persona_boost, record_answer
+from wjx.core.questions.distribution import (
+    record_pending_distribution_choice,
+    resolve_distribution_probabilities,
+)
 from wjx.core.questions.consistency import (
     apply_single_like_consistency,
 )
+from wjx.core.questions.strict_ratio import is_strict_ratio_question
+from wjx.core.questions.strict_ratio import enforce_reference_rank_order
 from wjx.core.questions.utils import (
     weighted_index,
     normalize_droplist_probs,
@@ -324,6 +330,7 @@ def single(
     single_prob_config: List,
     single_option_fill_texts_config: List,
     single_attached_selects_config: Optional[List[List[dict]]] = None,
+    task_ctx: Optional[Any] = None,
 ) -> None:
     """单选题处理主函数"""
     # 兼容不同模板下的单选题 DOM 结构，按优先级收集“真实选项”节点
@@ -392,8 +399,19 @@ def single(
     option_texts = []
     for elem in option_elements:
         option_texts.append(_extract_single_option_text(elem))
-    probabilities = apply_persona_boost(option_texts, probabilities)
+    strict_ratio = is_strict_ratio_question(task_ctx, current)
+    if not strict_ratio:
+        probabilities = apply_persona_boost(option_texts, probabilities)
     probabilities = apply_single_like_consistency(probabilities, current)
+    if strict_ratio:
+        strict_reference = list(probabilities)
+        probabilities = resolve_distribution_probabilities(
+            probabilities,
+            len(option_elements),
+            task_ctx,
+            current,
+        )
+        probabilities = enforce_reference_rank_order(probabilities, strict_reference)
     target_index = weighted_index(probabilities)
     selected_option = target_index + 1
     target_elem = option_elements[target_index] if target_index < len(option_elements) else None
@@ -404,6 +422,8 @@ def single(
     if not clicked:
         logging.warning("单选题点击未生效（题号%s，索引%s），已跳过。", current, selected_option)
         return
+    if strict_ratio:
+        record_pending_distribution_choice(task_ctx, current, target_index, len(option_elements))
 
     fill_entries = single_option_fill_texts_config[index] if index < len(single_option_fill_texts_config) else None
     fill_value = get_fill_text_from_config(fill_entries, selected_option - 1)

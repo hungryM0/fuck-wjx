@@ -33,6 +33,7 @@ from wjx.core.questions.types.text import (
     text as _text_impl,
 )
 from wjx.core.questions.consistency import reset_consistency_context
+from wjx.core.questions.strict_ratio import is_strict_ratio_question
 from wjx.core.questions.tendency import reset_tendency
 from wjx.core.psychometrics import build_psychometric_plan
 from wjx.core.survey.parser import _should_treat_question_as_text_like
@@ -127,6 +128,8 @@ def _build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
 
         question_type, start_index = config_entry
         if ctx.question_dimension_map.get(question_num) is None:
+            continue
+        if is_strict_ratio_question(ctx, question_num):
             continue
 
         question_meta = ctx.questions_metadata.get(question_num) or {}
@@ -249,10 +252,11 @@ class _QuestionDispatcher:
             ctx.single_prob,
             ctx.single_option_fill_texts,
             ctx.single_attached_option_selects,
+            task_ctx=ctx,
         )
 
     def _handle_multiple(self, driver, q_num, idx, ctx: TaskContext):
-        _multiple_impl(driver, q_num, idx, ctx.multiple_prob, ctx.multiple_option_fill_texts)
+        _multiple_impl(driver, q_num, idx, ctx.multiple_prob, ctx.multiple_option_fill_texts, task_ctx=ctx)
 
     def _handle_scale(self, driver, q_num, idx, ctx: TaskContext, question_div=None, psycho_plan=None):
         dim = ctx.question_dimension_map.get(q_num)
@@ -293,7 +297,7 @@ class _QuestionDispatcher:
         )
 
     def _handle_dropdown(self, driver, q_num, idx, ctx: TaskContext):
-        _dropdown_impl(driver, q_num, idx, ctx.droplist_prob, ctx.droplist_option_fill_texts)
+        _dropdown_impl(driver, q_num, idx, ctx.droplist_prob, ctx.droplist_option_fill_texts, task_ctx=ctx)
 
     def _handle_slider(self, driver, q_num, idx, ctx: TaskContext):
         slider_score = _resolve_slider_score(idx, ctx.slider_targets)

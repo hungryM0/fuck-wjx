@@ -1,4 +1,5 @@
 """矩阵题处理"""
+import random
 from typing import Any, List, Optional, Union
 
 from wjx.network.browser import By, BrowserDriver
@@ -8,7 +9,9 @@ from wjx.core.questions.distribution import (
     record_pending_distribution_choice,
     resolve_distribution_probabilities,
 )
+from wjx.core.questions.strict_ratio import enforce_reference_rank_order, is_strict_ratio_question
 from wjx.core.questions.tendency import get_tendency_index
+from wjx.core.questions.utils import weighted_index
 
 
 def matrix(
@@ -32,10 +35,12 @@ def matrix(
         return index
     candidate_columns = list(range(2, len(column_elements) + 1))
     resolved_question_index = question_index if question_index is not None else current
+    strict_ratio = is_strict_ratio_question(task_ctx, resolved_question_index)
 
     for row_index in range(1, matrix_row_count + 1):
         raw_probabilities = matrix_prob_config[index] if index < len(matrix_prob_config) else -1
         index += 1
+        strict_reference: Optional[List[float]] = None
 
         row_probabilities: Union[List[float], int] = -1
         if isinstance(raw_probabilities, list):
@@ -45,6 +50,7 @@ def matrix(
                 probs = []
             if len(probs) != len(candidate_columns):
                 probs = [1.0] * len(candidate_columns)
+            strict_reference = list(probs)
             probs = apply_matrix_row_consistency(probs, current, row_index - 1)
             if any(p > 0 for p in probs):
                 row_probabilities = resolve_distribution_probabilities(
@@ -53,7 +59,7 @@ def matrix(
                     task_ctx,
                     resolved_question_index,
                     row_index=row_index - 1,
-                    psycho_plan=psycho_plan,
+                    psycho_plan=None if strict_ratio else psycho_plan,
                 )
         else:
             uniform_probs = apply_matrix_row_consistency([1.0] * len(candidate_columns), current, row_index - 1)
@@ -64,16 +70,27 @@ def matrix(
                     task_ctx,
                     resolved_question_index,
                     row_index=row_index - 1,
-                    psycho_plan=psycho_plan,
+                    psycho_plan=None if strict_ratio else psycho_plan,
                 )
-        selected_index = get_tendency_index(
-            len(candidate_columns),
-            row_probabilities,
-            dimension=dimension,
-            psycho_plan=psycho_plan,
-            question_index=resolved_question_index,
-            row_index=row_index - 1,
-        )
+        if strict_ratio:
+            if isinstance(row_probabilities, list):
+                row_probabilities = enforce_reference_rank_order(
+                    row_probabilities,
+                    strict_reference or row_probabilities,
+                )
+            if isinstance(row_probabilities, list) and row_probabilities:
+                selected_index = weighted_index(row_probabilities)
+            else:
+                selected_index = random.randrange(len(candidate_columns))
+        else:
+            selected_index = get_tendency_index(
+                len(candidate_columns),
+                row_probabilities,
+                dimension=dimension,
+                psycho_plan=psycho_plan,
+                question_index=resolved_question_index,
+                row_index=row_index - 1,
+            )
         selected_column = candidate_columns[selected_index]
         driver.find_element(
             By.CSS_SELECTOR, f"#drv{current}_{row_index} > td:nth-child({selected_column})"

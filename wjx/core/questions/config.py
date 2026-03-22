@@ -10,6 +10,7 @@ from wjx.core.questions.utils import (
     normalize_single_like_prob_config as _normalize_single_like_prob_config,
     resolve_prob_config as _resolve_prob_config,
 )
+from wjx.core.questions.strict_ratio import is_strict_custom_ratio_mode
 from wjx.utils.app.config import DEFAULT_FILL_TEXT, LOCATION_QUESTION_LABEL, QUESTION_TYPE_LABELS
 from wjx.utils.logging.log_utils import log_suppressed_exception
 
@@ -227,6 +228,7 @@ def configure_probabilities(
     _target.multiple_option_fill_texts = []
     _target.question_config_index_map = {}
     _target.question_dimension_map = {}
+    _target.question_strict_ratio_map = {}
     _target.question_psycho_bias_map = {}
 
     # 各题型的当前索引,用于构建 question_config_index_map
@@ -251,6 +253,12 @@ def configure_probabilities(
             getattr(entry, "custom_weights", None),
             prefer_custom=(getattr(entry, "distribution_mode", None) == "custom"),
         )
+        strict_ratio = is_strict_custom_ratio_mode(
+            getattr(entry, "distribution_mode", None),
+            probs,
+            getattr(entry, "custom_weights", None),
+        )
+        _target.question_strict_ratio_map[question_num] = strict_ratio
         if entry.question_type == "single":
             _target.question_config_index_map[question_num] = ("single", _idx_single)
             _idx_single += 1
@@ -272,7 +280,11 @@ def configure_probabilities(
         elif entry.question_type == "matrix":
             rows = max(1, entry.rows)
             _target.question_config_index_map[question_num] = ("matrix", _idx_matrix)
-            _target.question_dimension_map[question_num] = _RELIABILITY_GLOBAL_DIMENSION if reliability_mode_enabled else None
+            _target.question_dimension_map[question_num] = (
+                _RELIABILITY_GLOBAL_DIMENSION
+                if reliability_mode_enabled and not strict_ratio
+                else None
+            )
             bias_value = getattr(entry, "psycho_bias", "custom")
             if isinstance(bias_value, list):
                 _target.question_psycho_bias_map[question_num] = list(bias_value)
@@ -328,7 +340,11 @@ def configure_probabilities(
                     _target.matrix_prob.append(-1)
         elif entry.question_type in ("scale", "score"):
             _target.question_config_index_map[question_num] = (entry.question_type, _idx_scale)
-            _target.question_dimension_map[question_num] = _RELIABILITY_GLOBAL_DIMENSION if reliability_mode_enabled else None
+            _target.question_dimension_map[question_num] = (
+                _RELIABILITY_GLOBAL_DIMENSION
+                if reliability_mode_enabled and not strict_ratio
+                else None
+            )
             _target.question_psycho_bias_map[question_num] = str(getattr(entry, "psycho_bias", "custom") or "custom")
             _idx_scale += 1
             _target.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
