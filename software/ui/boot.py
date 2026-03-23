@@ -41,7 +41,11 @@ class BootSplash:
         # 添加不确定进度条
         self.progress_bar = IndeterminateProgressBar(self.splash_screen)
         self.progress_bar.start()
-        self._apply_scale(window.width(), window.height())
+        self.title_label.show()
+        self.version_label.show()
+        self.progress_bar.show()
+        self.update_layout(window.width(), window.height())
+        self.splash_screen.raise_()
 
     def _apply_scale(self, width: int, height: int):
         """按窗口尺寸动态放大启动页元素，避免大窗口里内容显得过小。"""
@@ -84,6 +88,7 @@ class BootSplash:
 
     def update_layout(self, width: int, height: int):
         """调整启动页面组件位置"""
+        self.splash_screen.resize(width, height)
         self._apply_scale(width, height)
 
         # 标题位置：图标下方居中

@@ -7,7 +7,7 @@ import sys
 
 def _get_repo_root() -> str:
     return os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     )
 
 
