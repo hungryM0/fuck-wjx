@@ -2,7 +2,7 @@
 import copy
 from typing import List, Dict, Any, Optional, Union, cast
 
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPointF, QTimer, QSize, Signal
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPointF, QTimer, QSize, QModelIndex
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QWidget,
@@ -11,18 +11,24 @@ from PySide6.QtWidgets import (
     QDialog,
     QButtonGroup,
     QFrame,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QListWidget,
+    QStyle,
 )
 from qfluentwidgets import (
     ScrollArea,
     SubtitleLabel,
     BodyLabel,
     CardWidget,
+    VerticalPipsPager,
     PushButton,
     PrimaryPushButton,
     LineEdit,
     CheckBox,
     SegmentedWidget,
 )
+from qfluentwidgets.components.widgets.tool_tip import ItemViewToolTipDelegate, ItemViewToolTipType
 
 from software.ui.widgets.no_wheel import NoWheelSlider
 from software.core.questions.config import QuestionEntry
@@ -39,111 +45,134 @@ from .psycho_config import BIAS_PRESET_CHOICES
 # ---------------------------------------------------------------------------
 
 
-class QuestionDotNavigator(QWidget):
-    """自绘题目导航点阵：整条都能点，不再依赖 PipsPager 的命中逻辑。"""
-
-    currentIndexChanged = Signal(int)
+class WizardPipsDelegate(QStyledItemDelegate):
+    """带 ItemViewToolTipDelegate 的分页点绘制。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._page_count = 0
-        self._current_index = 0
-        self._spacing = 10
-        self._visible_number = 0
-        self._dot_size = 8
-        self._selected_dot_size = 12
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hoveredRow = -1
+        self.pressedRow = -1
+        self.tooltipDelegate = ItemViewToolTipDelegate(parent, 200, ItemViewToolTipType.LIST)
+        self.tooltipDelegate.setToolTipDuration(1200)
 
-    def count(self) -> int:
-        return self._page_count
-
-    def currentIndex(self) -> int:
-        return self._current_index
-
-    def setCurrentIndex(self, index: int) -> None:
-        if self._page_count <= 0:
-            return
-        clamped = max(0, min(int(index), self._page_count - 1))
-        if clamped == self._current_index:
-            return
-        self._current_index = clamped
-        self.update()
-        self.currentIndexChanged.emit(clamped)
-
-    def setPageNumber(self, count: int) -> None:
-        self._page_count = max(0, int(count))
-        if self._page_count <= 0:
-            self._current_index = 0
-        else:
-            self._current_index = max(0, min(self._current_index, self._page_count - 1))
-        self.update()
-
-    def setVisibleNumber(self, count: int) -> None:
-        self._visible_number = max(0, int(count))
-
-    def visibleNumber(self) -> int:
-        return self._visible_number
-
-    def setSpacing(self, spacing: int) -> None:
-        self._spacing = max(0, int(spacing))
-        self.update()
-
-    def spacing(self) -> int:
-        return self._spacing
-
-    def sizeHint(self) -> QSize:
-        return QSize(18, 200)
-
-    def minimumSizeHint(self) -> QSize:
-        return QSize(18, 120)
-
-    def paintEvent(self, event) -> None:
-        if self._page_count <= 0:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        painter.save()
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
 
-        center_x = self.width() / 2
-        for idx, center_y in enumerate(self._dot_positions()):
-            selected = idx == self._current_index
-            radius = self._selected_dot_size / 2 if selected else self._dot_size / 2
-            color = QColor(92, 184, 255, 255) if selected else QColor(255, 255, 255, 165)
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(center_x, center_y), radius, radius)
+        row = index.row()
+        is_hover = row == self.hoveredRow
+        is_pressed = row == self.pressedRow
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
 
-    def mousePressEvent(self, event) -> None:
-        super().mousePressEvent(event)
-        target_index = self._index_from_y(event.position().y())
-        if target_index is not None:
-            self.setCurrentIndex(target_index)
-
-    def _dot_positions(self) -> List[float]:
-        if self._page_count <= 0:
-            return []
-        max_dot_diameter = self._selected_dot_size
-        if self._page_count <= 1:
-            step = 0
+        if is_selected:
+            color = QColor(92, 184, 255, 255)
+            radius = 5
+        elif is_pressed or is_hover:
+            color = QColor(255, 255, 255, 220)
+            radius = 4.5
         else:
-            available_span = max(max_dot_diameter, self.height() - max_dot_diameter)
-            preferred_step = max_dot_diameter + self._spacing
-            max_step = available_span / float(self._page_count - 1)
-            step = min(preferred_step, max_step)
-        top = self._selected_dot_size / 2
-        return [top + idx * step for idx in range(self._page_count)]
+            color = QColor(255, 255, 255, 165)
+            radius = 4
 
-    def _index_from_y(self, y: float) -> Optional[int]:
-        positions = self._dot_positions()
-        if not positions:
-            return None
-        nearest_index = 0
-        nearest_distance = None
-        for idx, center_y in enumerate(positions):
-            distance = abs(float(y) - center_y)
-            if nearest_distance is None or distance < nearest_distance:
-                nearest_distance = distance
-                nearest_index = idx
-        return nearest_index
+        painter.setBrush(color)
+        center = option.rect.center()
+        painter.drawEllipse(QPointF(center), radius, radius)
+        painter.restore()
+
+    def setPressedRow(self, row: int) -> None:
+        self.pressedRow = row
+        if self.parent() is not None:
+            self.parent().viewport().update()
+
+    def setHoveredRow(self, row: int) -> None:
+        self.hoveredRow = row
+        if self.parent() is not None:
+            self.parent().viewport().update()
+
+    def helpEvent(self, event, view, option, index):
+        return self.tooltipDelegate.helpEvent(event, view, option, index)
+
+
+class StableVerticalPipsPager(VerticalPipsPager):
+    """稳定版竖向分页器：保留 PipsPager 行为，放大命中范围并接 ToolTipFilter 链路。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._tooltip_texts: List[str] = []
+        self._cell_width = 18
+        self._dot_span = 12
+        self._cell_gap = 10
+        self.delegate = WizardPipsDelegate(self)
+        self.setItemDelegate(self.delegate)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setStyleSheet("background: transparent; border: none;")
+        self.setViewportMargins(0, 0, 0, 6)
+        self._apply_grid_metrics()
+
+    def _apply_grid_metrics(self) -> None:
+        self.setGridSize(QSize(self._cell_width, self._dot_span + self._cell_gap))
+        self.setFixedWidth(self._cell_width)
+        self.adjustSize()
+
+    def setSpacing(self, spacing: int) -> None:
+        self._cell_gap = max(0, int(spacing))
+        self._apply_grid_metrics()
+
+    def spacing(self) -> int:
+        return self._cell_gap
+
+    def setToolTipTexts(self, texts: List[str]) -> None:
+        self._tooltip_texts = [str(text or "").strip() for text in texts]
+        for idx in range(self.count()):
+            item = self.item(idx)
+            if item is None:
+                continue
+            tip = self._tooltip_texts[idx] if idx < len(self._tooltip_texts) else f"第{idx + 1}题"
+            item.setToolTip(tip)
+
+    def setPageNumber(self, n: int):
+        super().setPageNumber(n)
+        self._apply_grid_metrics()
+        if self._tooltip_texts:
+            self.setToolTipTexts(self._tooltip_texts)
+
+    def _setPressedItem(self, item) -> None:
+        try:
+            row = self.row(item)
+        except RuntimeError:
+            return
+        if row < 0:
+            return
+        self.delegate.setPressedRow(row)
+        self.setCurrentIndex(row)
+
+    def _setHoveredItem(self, item) -> None:
+        try:
+            row = self.row(item)
+        except RuntimeError:
+            return
+        self.delegate.setHoveredRow(row)
+
+    def leaveEvent(self, event):
+        self.delegate.setHoveredRow(-1)
+        super().leaveEvent(event)
+
+    def setCurrentIndex(self, index: int):
+        if not 0 <= index < self.count():
+            return
+        try:
+            item = self.item(index)
+        except RuntimeError:
+            return
+        if item is None:
+            return
+        self.clearSelection()
+        item.setSelected(False)
+        self.currentIndexChanged.emit(index)
+        QListWidget.setCurrentItem(self, item)
+        self._updateScrollButtonVisibility()
 
 
 class FloatingPagerShell(QWidget):
@@ -151,11 +180,39 @@ class FloatingPagerShell(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.pager = QuestionDotNavigator(self)
+        self.pager = StableVerticalPipsPager(self)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pager.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self.pager.setGeometry(0, 0, self.width(), self.height())
+        pager_width = self.pager.width()
+        pager_height = min(self.height(), self.pager.height())
+        self.pager.setGeometry((self.width() - pager_width) // 2, 0, pager_width, pager_height)
+
+    def mousePressEvent(self, event) -> None:
+        super().mousePressEvent(event)
+        local_y = event.position().toPoint().y() - self.pager.y()
+        index = self._resolve_index_from_y(local_y)
+        if index is not None:
+            self.pager.setCurrentIndex(index)
+
+    def _resolve_index_from_y(self, local_y: int) -> Optional[int]:
+        if self.pager.count() <= 0:
+            return None
+        nearest_index = 0
+        nearest_distance = None
+        for idx in range(self.pager.count()):
+            item = self.pager.item(idx)
+            if item is None:
+                continue
+            rect = self.pager.visualItemRect(item)
+            center_y = rect.center().y()
+            distance = abs(local_y - center_y)
+            if nearest_distance is None or distance < nearest_distance:
+                nearest_distance = distance
+                nearest_index = idx
+        return nearest_index
 
 
 class QuestionWizardDialog(WizardSectionsMixin, QDialog):
@@ -271,7 +328,7 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         self._content_container: Optional[QWidget] = None
         self._content_layout: Optional[QVBoxLayout] = None
         self._question_shell: Optional[FloatingPagerShell] = None
-        self._question_pager: Optional[QuestionDotNavigator] = None
+        self._question_pager: Optional[StableVerticalPipsPager] = None
         self._navigation_item_count = 0
         self._scroll_animation: Optional[QPropertyAnimation] = None
         self._is_animating_scroll = False
@@ -384,12 +441,21 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
             return
         normalized_total = max(1, int(total))
         if self._navigation_item_count == normalized_total:
+            self._question_pager.setToolTipTexts(self._build_navigation_tooltips())
             return
         self._navigation_item_count = normalized_total
         self._question_pager.blockSignals(True)
         self._question_pager.setPageNumber(normalized_total)
         self._question_pager.setVisibleNumber(normalized_total)
         self._question_pager.blockSignals(False)
+        self._question_pager.setToolTipTexts(self._build_navigation_tooltips())
+
+    def _build_navigation_tooltips(self) -> List[str]:
+        labels: List[str] = []
+        for idx in range(len(self._question_cards)):
+            qnum = str(self.info[idx].get("num") or "").strip() if idx < len(self.info) else ""
+            labels.append(f"第{qnum or idx + 1}题")
+        return labels
 
     def _update_navigation_pager_geometry(self) -> None:
         if self._question_shell is None or self._scroll_area is None:
