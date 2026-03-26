@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from software.app.config import _HTML_SPACE_RE
+import software.network.http as http_client
+from software.app.config import DEFAULT_HTTP_HEADERS, _HTML_SPACE_RE
 from software.providers.common import SURVEY_PROVIDER_QQ
 from software.network.browser import create_playwright_driver
 
@@ -33,6 +34,7 @@ QQ_PROVIDER_TYPE_TO_INTERNAL = {
 }
 _QQ_TITLE_SUFFIX_RE = re.compile(r"(?:[-|｜]\s*)?腾讯问卷.*$", re.IGNORECASE)
 _QQ_URL_RE = re.compile(r"/s\d+/(\d+)/([A-Za-z0-9_-]+)/?$", re.IGNORECASE)
+_QQ_HTTP_LOCALES = ("zhs", "zht", "zh", "en")
 
 
 def _normalize_html_text(value: Any) -> str:
@@ -55,6 +57,107 @@ def _normalize_qq_title(raw_title: Any) -> str:
         return ""
     title = _QQ_TITLE_SUFFIX_RE.sub("", title).strip(" -_|")
     return title or _normalize_html_text(str(raw_title or ""))
+
+
+def _build_qq_survey_page_url(survey_id: str, hash_value: str) -> str:
+    return f"https://wj.qq.com/s2/{survey_id}/{hash_value}/"
+
+
+def _build_qq_api_headers(page_url: str) -> Dict[str, str]:
+    return {
+        **DEFAULT_HTTP_HEADERS,
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://wj.qq.com",
+        "Referer": page_url,
+    }
+
+
+def _request_qq_api(
+    survey_id: str,
+    endpoint: str,
+    *,
+    hash_value: str,
+    headers: Dict[str, str],
+    extra_params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    url = f"https://wj.qq.com/api/v2/respondent/surveys/{survey_id}/{endpoint}"
+    params: Dict[str, Any] = {
+        "_": str(int(time.time() * 1000)),
+        "hash": hash_value,
+    }
+    if extra_params:
+        params.update(extra_params)
+    response = http_client.get(
+        url,
+        params=params,
+        headers=headers,
+        timeout=15,
+        proxies={},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"腾讯问卷接口返回了非对象响应：{endpoint}")
+    return payload
+
+
+def _ensure_qq_api_ok(payload: Dict[str, Any], endpoint: str) -> Dict[str, Any]:
+    code = str(payload.get("code") or "").upper()
+    if code not in {"OK", "0"}:
+        raise RuntimeError(f"腾讯问卷接口返回异常（{endpoint}）：{payload.get('code') or 'unknown'}")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise RuntimeError(f"腾讯问卷接口缺少 data 对象：{endpoint}")
+    return data
+
+
+def _fetch_qq_survey_via_http(survey_id: str, hash_value: str) -> Tuple[List[Dict[str, Any]], str]:
+    page_url = _build_qq_survey_page_url(survey_id, hash_value)
+    headers = _build_qq_api_headers(page_url)
+
+    session_payload = _request_qq_api(
+        survey_id,
+        "session",
+        hash_value=hash_value,
+        headers=headers,
+    )
+    _ensure_qq_api_ok(session_payload, "session")
+
+    last_error: Optional[Exception] = None
+    for locale in _QQ_HTTP_LOCALES:
+        try:
+            meta_payload = _request_qq_api(
+                survey_id,
+                "meta",
+                hash_value=hash_value,
+                headers=headers,
+                extra_params={"locale": locale},
+            )
+            meta_data = _ensure_qq_api_ok(meta_payload, f"meta?locale={locale}")
+
+            questions_payload = _request_qq_api(
+                survey_id,
+                "questions",
+                hash_value=hash_value,
+                headers=headers,
+                extra_params={"locale": locale},
+            )
+            questions_data = _ensure_qq_api_ok(questions_payload, f"questions?locale={locale}")
+            questions = questions_data.get("questions")
+            if not isinstance(questions, list) or not questions:
+                raise RuntimeError(f"腾讯问卷题目接口未返回可解析的题目数据（locale={locale}）")
+
+            title = _normalize_qq_title(meta_data.get("title") or "")
+            info = _standardize_qq_questions(questions)
+            if not info:
+                raise RuntimeError(f"腾讯问卷解析结果为空（locale={locale}）")
+            return info, title
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise RuntimeError(f"腾讯问卷 HTTP 解析失败：{last_error}") from last_error
+    raise RuntimeError("腾讯问卷 HTTP 解析失败：未获得可用 locale")
 
 
 def _build_option_texts(question: Dict[str, Any], provider_type: str) -> List[str]:
@@ -178,6 +281,12 @@ def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str,
 
 def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
     survey_id, hash_value = _extract_qq_identifiers(url)
+
+    try:
+        return _fetch_qq_survey_via_http(survey_id, hash_value)
+    except Exception:
+        logging.exception("腾讯问卷 HTTP 解析失败，准备回退 Playwright，url=%r", url)
+
     driver = None
     try:
         driver, _ = create_playwright_driver(
@@ -196,6 +305,23 @@ def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
             time.sleep(2.0)
         payload = page.evaluate(
             """async ({ surveyId, hashValue }) => {
+                const sessionUrl = `https://wj.qq.com/api/v2/respondent/surveys/${surveyId}/session?_=${Date.now()}&hash=${encodeURIComponent(hashValue)}`;
+                await fetch(sessionUrl, {
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*'
+                    }
+                });
+
+                const metaUrl = `https://wj.qq.com/api/v2/respondent/surveys/${surveyId}/meta?_=${Date.now()}&hash=${encodeURIComponent(hashValue)}&locale=zhs`;
+                const metaResponse = await fetch(metaUrl, {
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*'
+                    }
+                });
+                const metaJson = await metaResponse.json();
+
                 const requestUrl = `https://wj.qq.com/api/v2/respondent/surveys/${surveyId}/questions?_=${Date.now()}&hash=${encodeURIComponent(hashValue)}&locale=zhs`;
                 const response = await fetch(requestUrl, { credentials: 'include' });
                 const json = await response.json();
@@ -203,6 +329,8 @@ def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
                     status: response.status,
                     ok: response.ok,
                     payload: json,
+                    metaStatus: metaResponse.status,
+                    metaPayload: metaJson,
                     title: document.title || ''
                 };
             }""",
@@ -210,13 +338,14 @@ def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
         ) or {}
         if not bool(payload.get("ok")):
             raise RuntimeError(f"腾讯问卷题目接口请求失败（HTTP {payload.get('status') or 'unknown'}）")
+        meta_payload = payload.get("metaPayload") or {}
+        meta_data = _ensure_qq_api_ok(meta_payload, "meta?locale=zhs")
         outer_payload = payload.get("payload") or {}
-        if str(outer_payload.get("code") or "").upper() not in {"OK", "0"}:
-            raise RuntimeError(f"腾讯问卷接口返回异常：{outer_payload.get('code') or 'unknown'}")
-        questions_payload = (outer_payload.get("data") or {}).get("questions")
+        questions_data = _ensure_qq_api_ok(outer_payload, "questions?locale=zhs")
+        questions_payload = questions_data.get("questions")
         if not isinstance(questions_payload, list) or not questions_payload:
             raise RuntimeError("腾讯问卷题目接口未返回可解析的题目数据")
-        title = _normalize_qq_title(payload.get("title") or driver.title or "")
+        title = _normalize_qq_title(meta_data.get("title") or payload.get("title") or driver.title or "")
         info = _standardize_qq_questions(questions_payload)
         if not info:
             raise RuntimeError("腾讯问卷解析结果为空，请确认链接有效且公开可访问")

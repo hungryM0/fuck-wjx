@@ -154,11 +154,39 @@ def dismiss_resume_dialog_if_present(
         (By.CSS_SELECTOR, "a.layui-layer-btn1"),
         (By.XPATH, "//a[contains(@class,'layui-layer-btn1') and contains(normalize-space(),'取消')]"),
         (By.XPATH, "//div[contains(@class,'layui-layer-btn')]//a[contains(text(),'取消')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'重新填写')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'重新作答')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'重新开始')]"),
+        (By.XPATH, "//button[contains(normalize-space(.),'取消')]"),
     ]
+    dialog_hint_script = r"""
+        return (() => {
+            const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (!style) return false;
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
+            const bodyText = (document.body?.innerText || '').replace(/\s+/g, '');
+            const markers = ['继续上次作答', '继续上次填写', '继续填写', '重新填写', '重新作答'];
+            if (!markers.some((marker) => bodyText.includes(marker))) return false;
+            const buttons = Array.from(document.querySelectorAll('button, a')).filter(visible);
+            return buttons.some((node) => {
+                const text = (node.innerText || node.textContent || '').replace(/\s+/g, '');
+                return ['取消', '重新填写', '重新作答', '重新开始'].some((label) => text.includes(label));
+            });
+        })();
+    """
     clicked_once = False
     for attempt in range(max_checks):
         if stop_signal and stop_signal.is_set():
             return False
+        try:
+            dialog_visible = bool(driver.execute_script(dialog_hint_script))
+        except Exception:
+            dialog_visible = False
         for by, value in locator_candidates:
             try:
                 buttons = driver.find_elements(by, value)
@@ -174,10 +202,15 @@ def dismiss_resume_dialog_if_present(
                 if not displayed:
                     continue
                 text = _extract_text_from_element(button)
-                if text and "取消" not in text:
+                normalized_text = text.replace(" ", "") if text else ""
+                if normalized_text:
+                    labels = ("取消", "重新填写", "重新作答", "重新开始")
+                    if not any(label in normalized_text for label in labels):
+                        continue
+                if not normalized_text and not dialog_visible:
                     continue
                 if not clicked_once:
-                    print("检测到“继续上次作答”弹窗，自动点击取消以开始新作答...")
+                    print("检测到“断点续答”弹窗，自动关闭旧进度并开始新作答...")
                     clicked_once = True
                 try:
                     _smooth_scroll_to_element(driver, button, 'center')

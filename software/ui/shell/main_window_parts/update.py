@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QThread, QTimer, Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     IndeterminateProgressBar,
@@ -100,6 +100,64 @@ class MainWindowUpdateMixin:
             self._check_preview_version()
             self._show_unknown_badge()
 
+    def _ensure_title_bar_status_container(self) -> QWidget | None:
+        """在标题文字后面准备一个固定状态位，别再把主布局插得像坨屎。"""
+        container = getattr(self, "_title_bar_status_container", None)
+        if container is not None:
+            return container
+
+        title_bar = getattr(self, "titleBar", None)
+        layout = getattr(title_bar, "hBoxLayout", None)
+        if title_bar is None or layout is None:
+            return None
+
+        container = QWidget(title_bar)
+        container.hide()
+        host_layout = QHBoxLayout(container)
+        host_layout.setContentsMargins(8, 0, 0, 0)
+        host_layout.setSpacing(0)
+        host_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        title_label = getattr(title_bar, "titleLabel", None)
+        insert_index = layout.indexOf(title_label) + 1 if title_label is not None else -1
+        if insert_index <= 0:
+            insert_index = max(layout.count() - 1, 0)
+        layout.insertWidget(insert_index, container, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        self._title_bar_status_container = container
+        self._title_bar_status_layout = host_layout
+        return container
+
+    def _mount_title_bar_status_widget(self, widget: QWidget) -> bool:
+        """把徽章/转圈统一挂到标题后面的状态位。"""
+        container = self._ensure_title_bar_status_container()
+        host_layout = getattr(self, "_title_bar_status_layout", None)
+        if container is None or host_layout is None:
+            return False
+
+        if widget.parent() is not container:
+            widget.setParent(container)
+        if host_layout.indexOf(widget) < 0:
+            host_layout.addWidget(widget, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        container.show()
+        return True
+
+    def _clear_title_bar_status_widget(self, widget: QWidget | None) -> None:
+        """从标题状态位移除控件。"""
+        if widget is None:
+            return
+
+        host_layout = getattr(self, "_title_bar_status_layout", None)
+        if host_layout is None:
+            return
+
+        host_layout.removeWidget(widget)
+        widget.deleteLater()
+
+        container = getattr(self, "_title_bar_status_container", None)
+        if container is not None and host_layout.count() == 0:
+            container.hide()
+
     def _show_update_checking_placeholder(self):
         """更新检查期间在标题栏徽章位置显示转圈占位。"""
         if self._update_checking_spinner:
@@ -109,16 +167,17 @@ class MainWindowUpdateMixin:
             if badge is None:
                 continue
             try:
-                self.titleBar.hBoxLayout.removeWidget(badge)
-                badge.deleteLater()
+                self._clear_title_bar_status_widget(badge)
             except Exception:
                 logging.info("移除旧徽章失败", exc_info=True)
             setattr(self, attr, None)
         try:
-            spinner = IndeterminateProgressRing(parent=self.titleBar)
+            spinner = IndeterminateProgressRing(parent=self._ensure_title_bar_status_container() or self.titleBar)
             spinner.setFixedSize(16, 16)
             spinner.setStrokeWidth(2)
-            self.titleBar.hBoxLayout.insertWidget(2, spinner, 0, Qt.AlignmentFlag.AlignVCenter)
+            if not self._mount_title_bar_status_widget(spinner):
+                spinner.deleteLater()
+                return
             self._update_checking_spinner = spinner
         except Exception:
             logging.info("显示更新检查占位失败", exc_info=True)
@@ -128,8 +187,7 @@ class MainWindowUpdateMixin:
         if spinner is None:
             return
         try:
-            self.titleBar.hBoxLayout.removeWidget(spinner)
-            spinner.deleteLater()
+            self._clear_title_bar_status_widget(spinner)
         except Exception:
             logging.info("清理更新检查占位失败", exc_info=True)
         self._update_checking_spinner = None
@@ -160,10 +218,11 @@ class MainWindowUpdateMixin:
                 "最新",
                 QColor("#10b981"),  # 浅色主题背景
                 QColor("#34d399"),  # 深色主题背景（更亮的绿色）
-                parent=self.titleBar,
+                parent=self._ensure_title_bar_status_container() or self.titleBar,
             )
-            # 将徽章添加到标题栏布局
-            self.titleBar.hBoxLayout.insertWidget(2, self._latest_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+            if not self._mount_title_bar_status_widget(self._latest_badge):
+                self._latest_badge.deleteLater()
+                self._latest_badge = None
         except Exception:
             logging.info("显示最新版徽章失败", exc_info=True)
 
@@ -179,9 +238,11 @@ class MainWindowUpdateMixin:
                 "未知",
                 QColor("#6b7280"),  # 浅色主题背景（灰色）
                 QColor("#9ca3af"),  # 深色主题背景（更亮的灰色）
-                parent=self.titleBar,
+                parent=self._ensure_title_bar_status_container() or self.titleBar,
             )
-            self.titleBar.hBoxLayout.insertWidget(2, self._unknown_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+            if not self._mount_title_bar_status_widget(self._unknown_badge):
+                self._unknown_badge.deleteLater()
+                self._unknown_badge = None
         except Exception:
             logging.info("显示未知状态徽章失败", exc_info=True)
 
@@ -192,8 +253,7 @@ class MainWindowUpdateMixin:
         # 如果有预览徽章，先移除它（过时优先级更高）
         if self._preview_badge:
             try:
-                self.titleBar.hBoxLayout.removeWidget(self._preview_badge)
-                self._preview_badge.deleteLater()
+                self._clear_title_bar_status_widget(self._preview_badge)
                 self._preview_badge = None
             except Exception:
                 logging.info("清理预览版徽章失败", exc_info=True)
@@ -203,10 +263,11 @@ class MainWindowUpdateMixin:
                 "过时",
                 QColor("#ef4444"),  # 浅色主题背景（红色）
                 QColor("#fd3c3c"),  # 深色主题背景（更亮的红色）
-                parent=self.titleBar,
+                parent=self._ensure_title_bar_status_container() or self.titleBar,
             )
-            # 将徽章添加到标题栏布局
-            self.titleBar.hBoxLayout.insertWidget(2, self._outdated_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+            if not self._mount_title_bar_status_widget(self._outdated_badge):
+                self._outdated_badge.deleteLater()
+                self._outdated_badge = None
         except Exception:
             logging.info("显示可更新徽章失败", exc_info=True)
 
@@ -225,10 +286,11 @@ class MainWindowUpdateMixin:
                 "预览",
                 QColor("#f59e0b"),  # 浅色主题背景（黄色）
                 QColor("#fbbf24"),  # 深色主题背景（更亮的黄色）
-                parent=self.titleBar,
+                parent=self._ensure_title_bar_status_container() or self.titleBar,
             )
-            # 将徽章添加到标题栏布局
-            self.titleBar.hBoxLayout.insertWidget(2, self._preview_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+            if not self._mount_title_bar_status_widget(self._preview_badge):
+                self._preview_badge.deleteLater()
+                self._preview_badge = None
         except Exception:
             logging.info("显示预览版徽章失败", exc_info=True)
 
