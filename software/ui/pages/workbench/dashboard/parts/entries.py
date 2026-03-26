@@ -15,6 +15,7 @@ from software.ui.pages.workbench.question_editor.psycho_config import PSYCHO_SUP
 
 _TEXT_RANDOM_NAME_TOKEN = "__RANDOM_NAME__"
 _TEXT_RANDOM_MOBILE_TOKEN = "__RANDOM_MOBILE__"
+_TEXT_RANDOM_ID_CARD_TOKEN = "__RANDOM_ID_CARD__"
 
 
 def _pretty_text_answer(value: Any) -> str:
@@ -26,6 +27,8 @@ def _pretty_text_answer(value: Any) -> str:
         return "随机姓名"
     if text == _TEXT_RANDOM_MOBILE_TOKEN:
         return "随机手机号"
+    if text == _TEXT_RANDOM_ID_CARD_TOKEN:
+        return "随机身份证"
     return text
 
 
@@ -43,6 +46,8 @@ def question_summary(entry: QuestionEntry) -> str:
                 return "答案: 随机姓名"
             if random_mode == "mobile":
                 return "答案: 随机手机号"
+            if random_mode == "id_card":
+                return "答案: 随机身份证"
             if random_mode == "integer":
                 return f"答案: 随机整数({describe_random_int_range(getattr(entry, 'text_random_int_range', []))})"
         else:
@@ -61,6 +66,8 @@ def question_summary(entry: QuestionEntry) -> str:
                         config_parts.append(f"填空{idx + 1}: 随机姓名")
                     elif mode == "mobile":
                         config_parts.append(f"填空{idx + 1}: 随机手机号")
+                    elif mode == "id_card":
+                        config_parts.append(f"填空{idx + 1}: 随机身份证")
                     elif mode == "integer":
                         int_range = blank_int_ranges[idx] if idx < len(blank_int_ranges) else []
                         config_parts.append(f"填空{idx + 1}: 随机整数({describe_random_int_range(int_range)})")
@@ -180,6 +187,16 @@ class DashboardEntriesMixin:
         for idx, texts in text_updates.items():
             if 0 <= idx < len(entries):
                 entries[idx].texts = texts
+        option_fill_updates = dlg.get_option_fill_results()
+        for idx, option_fill_texts in option_fill_updates.items():
+            if 0 <= idx < len(entries):
+                entry = entries[idx]
+                if entry.question_type in ("single", "multiple", "dropdown"):
+                    entry.option_fill_texts = (
+                        option_fill_texts
+                        if any(text for text in option_fill_texts if text)
+                        else None
+                    )
         random_mode_updates = dlg.get_text_random_modes()
         for idx, random_mode in random_mode_updates.items():
             if 0 <= idx < len(entries):

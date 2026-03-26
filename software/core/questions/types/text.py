@@ -540,6 +540,9 @@ def _handle_multi_text(
                 elif mode == "mobile":
                     values[idx] = resolve_dynamic_text_token("__RANDOM_MOBILE__")
                     value_sources[idx] = "随机手机号"
+                elif mode == "id_card":
+                    values[idx] = resolve_dynamic_text_token("__RANDOM_ID_CARD__")
+                    value_sources[idx] = "随机身份证"
                 elif mode == "integer":
                     int_range = blank_int_ranges[idx] if blank_int_ranges and idx < len(blank_int_ranges) else []
                     parsed_range = try_parse_random_int_range(int_range)

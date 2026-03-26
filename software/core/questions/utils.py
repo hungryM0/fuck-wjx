@@ -1,7 +1,11 @@
 """题型处理共享辅助函数"""
+import json
 import math
+import os
 import random
 import time
+from datetime import date, timedelta
+from functools import lru_cache
 from typing import Any, List, Optional, Tuple, Union
 import logging
 from software.logging.log_utils import log_suppressed_exception
@@ -9,9 +13,13 @@ from software.logging.log_utils import log_suppressed_exception
 
 from software.network.browser import By, BrowserDriver
 from software.app.config import DEFAULT_FILL_TEXT
+from software.app.runtime_paths import get_resource_path
 
 _KNOWN_NON_TEXT_QUESTION_TYPES = {"3", "4", "5", "6", "7", "8", "11"}
 RANDOM_INT_TOKEN_PREFIX = "__RANDOM_INT__:"
+_RANDOM_ID_CARD_TOKEN = "__RANDOM_ID_CARD__"
+_ID_CARD_CHECKSUM_WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
+_ID_CARD_CHECKSUM_CHARS = "10X98765432"
 
 
 def _normalize_question_type_code(value: Any) -> str:
@@ -125,6 +133,89 @@ def generate_random_mobile() -> str:
     return random.choice(prefixes) + tail
 
 
+@lru_cache(maxsize=1)
+def _load_id_card_area_codes() -> Tuple[str, ...]:
+    """加载可用于随机身份证的 6 位行政区划代码。"""
+    asset_path = get_resource_path(os.path.join("software", "assets", "area_codes_2022.json"))
+    fallback_codes = ("110100", "310100", "440100", "330100", "510100")
+    try:
+        with open(asset_path, "r", encoding="utf-8") as fp:
+            area_data = json.load(fp)
+    except Exception as exc:
+        log_suppressed_exception("questions.utils._load_id_card_area_codes open", exc, level=logging.ERROR)
+        return fallback_codes
+
+    codes: List[str] = []
+    seen = set()
+    provinces = area_data.get("provinces", []) if isinstance(area_data, dict) else []
+    for province in provinces:
+        if not isinstance(province, dict):
+            continue
+        for city in province.get("cities", []) or []:
+            if not isinstance(city, dict):
+                continue
+            code = str(city.get("code") or "").strip()
+            if len(code) == 6 and code.isdigit() and code not in seen:
+                seen.add(code)
+                codes.append(code)
+    return tuple(codes or fallback_codes)
+
+
+def _resolve_current_persona() -> Any:
+    try:
+        from software.core.persona.generator import get_current_persona
+        return get_current_persona()
+    except Exception as exc:
+        log_suppressed_exception("questions.utils._resolve_current_persona import", exc, level=logging.ERROR)
+        return None
+
+
+def _choose_random_birth_date_for_id_card() -> date:
+    """根据当前画像生成更像真人填写习惯的出生日期。"""
+    today = date.today()
+    persona = _resolve_current_persona()
+    age_range_map = {
+        "18-25": (18, 25),
+        "26-35": (26, 35),
+        "36-45": (36, 45),
+        "46-60": (46, 60),
+    }
+    min_age, max_age = age_range_map.get(getattr(persona, "age_group", ""), (18, 60))
+    age = random.randint(min_age, max_age)
+    birth_year = today.year - age
+    start = date(birth_year, 1, 1)
+    end = date(birth_year, 12, 31)
+    return start + timedelta(days=random.randint(0, (end - start).days))
+
+
+def _choose_id_card_sequence_tail() -> str:
+    """生成身份证顺序码，尽量与当前画像性别保持一致。"""
+    persona = _resolve_current_persona()
+    gender = str(getattr(persona, "gender", "") or "").strip()
+    seq_prefix = random.randint(0, 99)
+    if gender == "男":
+        gender_digit = random.choice((1, 3, 5, 7, 9))
+    elif gender == "女":
+        gender_digit = random.choice((0, 2, 4, 6, 8))
+    else:
+        gender_digit = random.randint(0, 9)
+    return f"{seq_prefix:02d}{gender_digit}"
+
+
+def _calculate_id_card_checksum(first_seventeen_digits: str) -> str:
+    total = sum(int(num) * weight for num, weight in zip(first_seventeen_digits, _ID_CARD_CHECKSUM_WEIGHTS))
+    return _ID_CARD_CHECKSUM_CHARS[total % 11]
+
+
+def generate_random_id_card() -> str:
+    """生成随机身份证号，仅保证格式和校验位算法合法，不对应真实身份。"""
+    area_code = random.choice(_load_id_card_area_codes())
+    birth_date = _choose_random_birth_date_for_id_card()
+    sequence_tail = _choose_id_card_sequence_tail()
+    first_seventeen_digits = f"{area_code}{birth_date:%Y%m%d}{sequence_tail}"
+    return f"{first_seventeen_digits}{_calculate_id_card_checksum(first_seventeen_digits)}"
+
+
 def generate_random_generic_text() -> str:
     """生成随机通用文本"""
     samples = [
@@ -230,6 +321,8 @@ def resolve_dynamic_text_token(token: Any) -> str:
         return generate_random_chinese_name()
     if text == "__RANDOM_MOBILE__":
         return generate_random_mobile()
+    if text == _RANDOM_ID_CARD_TOKEN:
+        return generate_random_id_card()
     if text == "__RANDOM_TEXT__":
         return generate_random_generic_text()
     return text or DEFAULT_FILL_TEXT

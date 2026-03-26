@@ -24,9 +24,11 @@ if TYPE_CHECKING:
 
 _TEXT_RANDOM_NAME_TOKEN = "__RANDOM_NAME__"
 _TEXT_RANDOM_MOBILE_TOKEN = "__RANDOM_MOBILE__"
+_TEXT_RANDOM_ID_CARD_TOKEN = "__RANDOM_ID_CARD__"
 _TEXT_RANDOM_NONE = "none"
 _TEXT_RANDOM_NAME = "name"
 _TEXT_RANDOM_MOBILE = "mobile"
+_TEXT_RANDOM_ID_CARD = "id_card"
 _TEXT_RANDOM_INTEGER = "integer"
 
 
@@ -39,6 +41,8 @@ def _pretty_text_answer(value: Any) -> str:
         return "随机姓名"
     if text == _TEXT_RANDOM_MOBILE_TOKEN:
         return "随机手机号"
+    if text == _TEXT_RANDOM_ID_CARD_TOKEN:
+        return "随机身份证"
     return text
 
 
@@ -129,11 +133,13 @@ class QuestionEntry:
 
         if self.question_type in ("text", "multi_text"):
             text_random_mode = str(getattr(self, "text_random_mode", _TEXT_RANDOM_NONE) or _TEXT_RANDOM_NONE).strip().lower()
-            if self.question_type == "text" and text_random_mode in (_TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_INTEGER):
+            if self.question_type == "text" and text_random_mode in (_TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_ID_CARD, _TEXT_RANDOM_INTEGER):
                 if text_random_mode == _TEXT_RANDOM_NAME:
                     random_label = "随机姓名"
                 elif text_random_mode == _TEXT_RANDOM_MOBILE:
                     random_label = "随机手机号"
+                elif text_random_mode == _TEXT_RANDOM_ID_CARD:
+                    random_label = "随机身份证"
                 else:
                     random_label = f"随机整数({describe_random_int_range(getattr(self, 'text_random_int_range', []))})"
                 return f"填空题: {random_label}"
@@ -438,12 +444,14 @@ def configure_probabilities(
                 )
             else:
                 ai_enabled = False
-            if entry.question_type == "text" and text_random_mode in (_TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_INTEGER):
+            if entry.question_type == "text" and text_random_mode in (_TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_ID_CARD, _TEXT_RANDOM_INTEGER):
                 ai_enabled = False
                 if text_random_mode == _TEXT_RANDOM_NAME:
                     normalized_values = [_TEXT_RANDOM_NAME_TOKEN]
                 elif text_random_mode == _TEXT_RANDOM_MOBILE:
                     normalized_values = [_TEXT_RANDOM_MOBILE_TOKEN]
+                elif text_random_mode == _TEXT_RANDOM_ID_CARD:
+                    normalized_values = [_TEXT_RANDOM_ID_CARD_TOKEN]
                 else:
                     text_random_range = serialize_random_int_range(getattr(entry, "text_random_int_range", []))
                     if len(text_random_range) != 2:

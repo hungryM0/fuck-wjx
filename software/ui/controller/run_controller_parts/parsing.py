@@ -177,6 +177,28 @@ class RunControllerParsingMixin:
                 })
             return normalized
 
+        def _normalize_fillable_option_indices(
+            parsed_indices: Any,
+            option_count: int,
+            existing_indices: Any = None,
+        ) -> List[int]:
+            source = parsed_indices if isinstance(parsed_indices, list) else existing_indices
+            if not isinstance(source, list):
+                return []
+            total = max(0, int(option_count or 0))
+            normalized: List[int] = []
+            seen: set[int] = set()
+            for raw in source:
+                try:
+                    index = int(raw)
+                except Exception:
+                    continue
+                if index < 0 or index >= total or index in seen:
+                    continue
+                seen.add(index)
+                normalized.append(index)
+            return normalized
+
         existing_by_num: Dict[int, QuestionEntry] = {}
         existing_by_title: Dict[str, QuestionEntry] = {}
         existing_by_provider: Dict[Tuple[str, str], QuestionEntry] = {}
@@ -303,6 +325,16 @@ class RunControllerParsingMixin:
                     if q_type == "multi_text"
                     else []
                 )
+                option_fill_texts_from_existing = (
+                    copy.deepcopy(getattr(existing_config, "option_fill_texts", None))
+                    if q_type in ("single", "multiple", "dropdown")
+                    else None
+                )
+                fillable_indices_from_existing = (
+                    copy.deepcopy(getattr(existing_config, "fillable_option_indices", None))
+                    if q_type in ("single", "multiple", "dropdown")
+                    else None
+                )
                 attached_selects_from_existing = copy.deepcopy(getattr(existing_config, "attached_option_selects", []) or [])
             else:
                 ai_enabled_from_existing = False
@@ -311,6 +343,8 @@ class RunControllerParsingMixin:
                 multi_text_blank_modes_from_existing = []
                 multi_text_blank_ai_flags_from_existing = []
                 multi_text_blank_int_ranges_from_existing = []
+                option_fill_texts_from_existing = None
+                fillable_indices_from_existing = None
                 attached_selects_from_existing = []
                 if q_type in ("single", "dropdown", "scale"):
                     probabilities = -1
@@ -371,6 +405,15 @@ class RunControllerParsingMixin:
                     forced_option_text or "无文本",
                 )
 
+            fillable_option_indices = (
+                _normalize_fillable_option_indices(
+                    q.get("fillable_options"),
+                    option_count,
+                    fillable_indices_from_existing,
+                )
+                if q_type in ("single", "multiple", "dropdown")
+                else []
+            )
             entry = QuestionEntry(
                 question_type=q_type,
                 probabilities=probabilities,
@@ -390,8 +433,8 @@ class RunControllerParsingMixin:
                 multi_text_blank_int_ranges=multi_text_blank_int_ranges_from_existing if q_type == "multi_text" else [],
                 text_random_mode=text_random_mode_from_existing if q_type == "text" else "none",
                 text_random_int_range=text_random_int_range_from_existing if q_type == "text" else [],
-                option_fill_texts=None,
-                fillable_option_indices=q.get("fillable_options"),
+                option_fill_texts=option_fill_texts_from_existing if q_type in ("single", "multiple", "dropdown") else None,
+                fillable_option_indices=fillable_option_indices,
                 attached_option_selects=_normalize_attached_option_selects(
                     attached_option_selects,
                     attached_selects_from_existing if q_type == "single" else None,

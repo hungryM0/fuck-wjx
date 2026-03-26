@@ -27,6 +27,7 @@ from qfluentwidgets import (
     PrimaryPushButton,
     LineEdit,
     CheckBox,
+    SwitchButton,
     SegmentedWidget,
     MessageBox,
     isDarkTheme,
@@ -490,12 +491,13 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         self.slider_map: Dict[int, List[NoWheelSlider]] = {}
         self.matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]] = {}
         self.text_edit_map: Dict[int, QuestionWizardDialog.TextEditsValue] = {}
-        self.ai_check_map: Dict[int, CheckBox] = {}
+        self.ai_check_map: Dict[int, SwitchButton] = {}
         self.text_container_map: Dict[int, QWidget] = {}
         self.text_add_btn_map: Dict[int, PushButton] = {}
         self.text_random_mode_map: Dict[int, str] = {}
         self.text_random_name_check_map: Dict[int, CheckBox] = {}
         self.text_random_mobile_check_map: Dict[int, CheckBox] = {}
+        self.text_random_id_card_check_map: Dict[int, CheckBox] = {}
         self.text_random_integer_check_map: Dict[int, CheckBox] = {}
         self.text_random_int_min_edit_map: Dict[int, LineEdit] = {}
         self.text_random_int_max_edit_map: Dict[int, LineEdit] = {}
@@ -503,6 +505,7 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         self.multi_text_blank_integer_range_edits: Dict[int, List[Tuple[LineEdit, LineEdit]]] = {}
         self.bias_preset_map: Dict[int, Any] = {}
         self.attached_select_slider_map: Dict[int, List[Dict[str, Any]]] = {}
+        self.option_fill_edit_map: Dict[int, Dict[int, LineEdit]] = {}
         self._entry_snapshots: List[QuestionEntry] = [copy.deepcopy(entry) for entry in entries]
         self._has_content = False
         self._current_question_idx = 0
@@ -1192,6 +1195,24 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
             result[idx] = texts
         return result
 
+    def get_option_fill_results(self) -> Dict[int, List[Optional[str]]]:
+        """获取选择题中“其他请填空”等附加输入框的配置结果。"""
+        result: Dict[int, List[Optional[str]]] = {}
+        for idx, edit_map in self.option_fill_edit_map.items():
+            if not edit_map:
+                continue
+            info = self._get_entry_info(idx)
+            option_count = int(info.get("options") or 0)
+            max_index = max(edit_map.keys()) if edit_map else -1
+            normalized_count = max(option_count, max_index + 1, 0)
+            values: List[Optional[str]] = [None] * normalized_count
+            for option_index, edit in edit_map.items():
+                text = edit.text().strip()
+                if 0 <= option_index < normalized_count:
+                    values[option_index] = text or None
+            result[idx] = values
+        return result
+
     def get_text_random_modes(self) -> Dict[int, str]:
         """获取填空题随机值模式（none/name/mobile/integer）"""
         return {idx: mode for idx, mode in self.text_random_mode_map.items()}
@@ -1207,7 +1228,7 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
 
     def get_multi_text_blank_modes(self) -> Dict[int, List[str]]:
         """获取多项填空题每个填空项的随机模式"""
-        from .wizard_sections import _TEXT_RANDOM_NONE, _TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_INTEGER
+        from .wizard_sections import _TEXT_RANDOM_NONE, _TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_ID_CARD, _TEXT_RANDOM_INTEGER
         result: Dict[int, List[str]] = {}
         if not hasattr(self, "multi_text_blank_radio_groups"):
             return result
@@ -1220,6 +1241,8 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
                 elif checked_id == 2:
                     modes.append(_TEXT_RANDOM_MOBILE)
                 elif checked_id == 3:
+                    modes.append(_TEXT_RANDOM_ID_CARD)
+                elif checked_id == 4:
                     modes.append(_TEXT_RANDOM_INTEGER)
                 else:
                     modes.append(_TEXT_RANDOM_NONE)

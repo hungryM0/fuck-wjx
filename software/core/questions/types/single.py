@@ -23,6 +23,7 @@ from software.core.questions.utils import (
     extract_text_from_element,
     smooth_scroll_to_element,
 )
+from software.app.config import DEFAULT_FILL_TEXT
 
 
 def _looks_like_single_option(element: Any) -> bool:
@@ -83,6 +84,40 @@ def _extract_single_option_text(element: Any) -> str:
         if text:
             return text
     return extract_text_from_element(element).strip()
+
+
+def _single_option_has_free_text_input(target_elem: Any) -> bool:
+    """判断单选项是否带有真正的“其他请填空”输入框，而不是嵌入式下拉。"""
+    if target_elem is None:
+        return False
+    try:
+        if target_elem.find_elements(By.CSS_SELECTOR, "select"):
+            return False
+    except Exception:
+        pass
+    try:
+        candidates = target_elem.find_elements(
+            By.CSS_SELECTOR,
+            "input.OtherRadioText, input[type='text'], input[type='search'], input[type='tel'], input[type='number'], textarea",
+        )
+    except Exception as exc:
+        log_suppressed_exception("single: detect free text input", exc, level=logging.ERROR)
+        return False
+    for candidate in candidates:
+        try:
+            input_type = (candidate.get_attribute("type") or "").lower()
+        except Exception:
+            input_type = ""
+        if input_type == "hidden":
+            continue
+        try:
+            class_name = (candidate.get_attribute("class") or "").lower()
+        except Exception:
+            class_name = ""
+        if "cusomselect" in class_name or "customselect" in class_name:
+            continue
+        return True
+    return False
 
 
 def _click_single_option(driver: BrowserDriver, current: int, selected_option: int, target_elem: Any) -> bool:
@@ -425,8 +460,17 @@ def single(
     if strict_ratio:
         record_pending_distribution_choice(task_ctx, current, target_index, len(option_elements))
 
+    has_free_text_input = _single_option_has_free_text_input(target_elem)
     fill_entries = single_option_fill_texts_config[index] if index < len(single_option_fill_texts_config) else None
     fill_value = get_fill_text_from_config(fill_entries, selected_option - 1)
+    if not fill_value and has_free_text_input:
+        fill_value = DEFAULT_FILL_TEXT
+        logging.info(
+            "单选题第%s题第%s项检测到附加填空但未配置文本，已自动使用默认值“%s”。",
+            current,
+            selected_option,
+            DEFAULT_FILL_TEXT,
+        )
     attached_selects_config = (
         single_attached_selects_config[index]
         if single_attached_selects_config and index < len(single_attached_selects_config)
@@ -447,6 +491,8 @@ def single(
     selected_text = option_texts[target_index] if target_index < len(option_texts) else ""
     if attached_select_text:
         selected_text = f"{selected_text} / {attached_select_text}" if selected_text else attached_select_text
+    elif fill_value and has_free_text_input:
+        selected_text = f"{selected_text} / {fill_value}" if selected_text else fill_value
     record_answer(current, "single", selected_indices=[target_index], selected_texts=[selected_text])
 
     fill_option_additional_text(driver, current, selected_option - 1, fill_value)

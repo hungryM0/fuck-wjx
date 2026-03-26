@@ -5,7 +5,17 @@ from typing import List, Dict, Any, Tuple, Optional, cast
 from PySide6.QtCore import Qt, QPropertyAnimation, QTimer, QEasingCurve, QRegularExpression
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QButtonGroup
-from qfluentwidgets import ScrollArea, BodyLabel, CardWidget, PushButton, LineEdit, CheckBox, SegmentedWidget
+from qfluentwidgets import (
+    ScrollArea,
+    BodyLabel,
+    CardWidget,
+    PushButton,
+    LineEdit,
+    CheckBox,
+    SegmentedWidget,
+    SwitchButton,
+    IndicatorPosition,
+)
 
 from software.core.questions.utils import parse_random_int_token, try_parse_random_int_range
 from software.ui.widgets.no_wheel import NoWheelSlider
@@ -24,9 +34,11 @@ from .psycho_config import PSYCHO_SUPPORTED_TYPES, BIAS_PRESET_CHOICES, build_bi
 _TEXT_RANDOM_NONE = "none"
 _TEXT_RANDOM_NAME = "name"
 _TEXT_RANDOM_MOBILE = "mobile"
+_TEXT_RANDOM_ID_CARD = "id_card"
 _TEXT_RANDOM_INTEGER = "integer"
 _TEXT_RANDOM_NAME_TOKEN = "__RANDOM_NAME__"
 _TEXT_RANDOM_MOBILE_TOKEN = "__RANDOM_MOBILE__"
+_TEXT_RANDOM_ID_CARD_TOKEN = "__RANDOM_ID_CARD__"
 
 
 def _get_segmented_route_key(seg: Any) -> str:
@@ -62,6 +74,7 @@ class WizardSectionsMixin:
     text_random_group_map: Dict[int, Any]
     text_random_name_check_map: Dict[int, Any]
     text_random_mobile_check_map: Dict[int, Any]
+    text_random_id_card_check_map: Dict[int, Any]
     text_random_integer_check_map: Dict[int, Any]
     text_random_int_min_edit_map: Dict[int, Any]
     text_random_int_max_edit_map: Dict[int, Any]
@@ -74,6 +87,7 @@ class WizardSectionsMixin:
     entries: List[Any]
     slider_map: Dict[int, Any]
     bias_preset_map: Dict[int, Any]
+    option_fill_edit_map: Dict[int, Any]
     def _resolve_matrix_weights(self, entry: Any, rows: int, columns: int) -> List[List[float]]: ...
     def _resolve_slider_bounds(self, idx: int, entry: Any) -> Tuple[int, int]: ...
 
@@ -163,6 +177,24 @@ class WizardSectionsMixin:
                 return parsed
         return None, None
 
+    @staticmethod
+    def _normalize_fillable_option_indices(raw_indices: Any, option_count: int) -> List[int]:
+        if not isinstance(raw_indices, list):
+            return []
+        total = max(0, int(option_count or 0))
+        normalized: List[int] = []
+        seen = set()
+        for raw in raw_indices:
+            try:
+                index = int(raw)
+            except Exception:
+                continue
+            if index < 0 or index >= total or index in seen:
+                continue
+            seen.add(index)
+            normalized.append(index)
+        return normalized
+
     def _build_text_section(self, idx: int, entry: QuestionEntry, card: CardWidget, card_layout: QVBoxLayout) -> None:
         self._has_content = True
 
@@ -246,6 +278,7 @@ class WizardSectionsMixin:
 
             random_name_cb = CheckBox("随机姓名", card)
             random_mobile_cb = CheckBox("随机手机号", card)
+            random_id_card_cb = CheckBox("随机身份证", card)
             random_integer_cb = CheckBox("随机整数", card)
             random_int_min, random_int_max = self._resolve_text_random_int_range(entry)
             random_min_edit = self._create_integer_range_edit(card, random_int_min, "最小值")
@@ -255,6 +288,7 @@ class WizardSectionsMixin:
             _apply_label_color(range_separator, "#666666", "#bfbfbf")
             random_row.addWidget(random_name_cb)
             random_row.addWidget(random_mobile_cb)
+            random_row.addWidget(random_id_card_cb)
             random_row.addWidget(random_integer_cb)
             random_row.addWidget(random_min_edit)
             random_row.addWidget(range_separator)
@@ -266,10 +300,12 @@ class WizardSectionsMixin:
             random_group.setExclusive(False)
             random_group.addButton(random_name_cb, 1)
             random_group.addButton(random_mobile_cb, 2)
-            random_group.addButton(random_integer_cb, 3)
+            random_group.addButton(random_id_card_cb, 3)
+            random_group.addButton(random_integer_cb, 4)
             self.text_random_group_map[idx] = random_group
             self.text_random_name_check_map[idx] = random_name_cb
             self.text_random_mobile_check_map[idx] = random_mobile_cb
+            self.text_random_id_card_check_map[idx] = random_id_card_cb
             self.text_random_integer_check_map[idx] = random_integer_cb
             self.text_random_int_min_edit_map[idx] = random_min_edit
             self.text_random_int_max_edit_map[idx] = random_max_edit
@@ -280,16 +316,24 @@ class WizardSectionsMixin:
             random_mobile_cb.toggled.connect(
                 lambda checked, i=idx: self._on_text_random_mode_toggled(i, _TEXT_RANDOM_MOBILE, checked)
             )
+            random_id_card_cb.toggled.connect(
+                lambda checked, i=idx: self._on_text_random_mode_toggled(i, _TEXT_RANDOM_ID_CARD, checked)
+            )
             random_integer_cb.toggled.connect(
                 lambda checked, i=idx: self._on_text_random_mode_toggled(i, _TEXT_RANDOM_INTEGER, checked)
             )
 
-            ai_cb = CheckBox("启用 AI", card)
+            ai_cb = SwitchButton(card, IndicatorPosition.RIGHT)
+            ai_cb.setOnText("开")
+            ai_cb.setOffText("关")
+            ai_label = BodyLabel("启用 AI", card)
             ai_cb.setToolTip("运行时每次填空都会调用 AI")
-            install_tooltip_filters((random_name_cb, random_mobile_cb, random_integer_cb, ai_cb))
+            ai_label.setToolTip("运行时每次填空都会调用 AI")
+            install_tooltip_filters((random_name_cb, random_mobile_cb, random_id_card_cb, random_integer_cb, ai_cb, ai_label))
             ai_cb.setChecked(bool(getattr(entry, "ai_enabled", False)))
-            ai_cb.toggled.connect(lambda checked, i=idx: self._on_entry_ai_toggled(i, checked))
+            ai_cb.checkedChanged.connect(lambda checked, i=idx: self._on_entry_ai_toggled(i, checked))
             btn_row.addWidget(ai_cb)
+            btn_row.addWidget(ai_label)
             self.ai_check_map[idx] = ai_cb
 
             random_mode = self._resolve_text_random_mode(entry)
@@ -298,6 +342,8 @@ class WizardSectionsMixin:
                 random_name_cb.setChecked(True)
             elif random_mode == _TEXT_RANDOM_MOBILE:
                 random_mobile_cb.setChecked(True)
+            elif random_mode == _TEXT_RANDOM_ID_CARD:
+                random_id_card_cb.setChecked(True)
             elif random_mode == _TEXT_RANDOM_INTEGER:
                 random_integer_cb.setChecked(True)
             self._sync_text_section_state(idx)
@@ -425,7 +471,7 @@ class WizardSectionsMixin:
         # 存储每个填空项的单选按钮组和AI复选框
         blank_radio_groups: List[QButtonGroup] = []
         blank_mode_radios: List[Dict[str, QRadioButton]] = []
-        blank_ai_checkboxes: List[CheckBox] = []
+        blank_ai_checkboxes: List[SwitchButton] = []
         blank_integer_range_edits: List[Tuple[LineEdit, LineEdit]] = []
 
         # 解析现有配置
@@ -462,6 +508,7 @@ class WizardSectionsMixin:
             radio_list = QRadioButton("使用答案列表", card)
             radio_name = QRadioButton("随机姓名", card)
             radio_mobile = QRadioButton("随机手机号", card)
+            radio_id_card = QRadioButton("随机身份证", card)
             radio_integer = QRadioButton("随机整数", card)
             parsed_range = try_parse_random_int_range(saved_int_ranges[blank_idx])
             range_min, range_max = parsed_range if parsed_range is not None else (None, None)
@@ -474,13 +521,16 @@ class WizardSectionsMixin:
             radio_group.addButton(radio_list, 0)
             radio_group.addButton(radio_name, 1)
             radio_group.addButton(radio_mobile, 2)
-            radio_group.addButton(radio_integer, 3)
+            radio_group.addButton(radio_id_card, 3)
+            radio_group.addButton(radio_integer, 4)
 
             current_mode = saved_modes[blank_idx] if blank_idx < len(saved_modes) else _TEXT_RANDOM_NONE
             if current_mode == _TEXT_RANDOM_NAME:
                 radio_name.setChecked(True)
             elif current_mode == _TEXT_RANDOM_MOBILE:
                 radio_mobile.setChecked(True)
+            elif current_mode == _TEXT_RANDOM_ID_CARD:
+                radio_id_card.setChecked(True)
             elif current_mode == _TEXT_RANDOM_INTEGER:
                 radio_integer.setChecked(True)
             else:
@@ -489,17 +539,23 @@ class WizardSectionsMixin:
             blank_row.addWidget(radio_list)
             blank_row.addWidget(radio_name)
             blank_row.addWidget(radio_mobile)
+            blank_row.addWidget(radio_id_card)
             blank_row.addWidget(radio_integer)
             blank_row.addWidget(range_min_edit)
             blank_row.addWidget(range_sep_label)
             blank_row.addWidget(range_max_edit)
 
             # 每个填空项的AI复选框
-            ai_cb = CheckBox("启用AI", card)
+            ai_cb = SwitchButton(card, IndicatorPosition.RIGHT)
+            ai_cb.setOnText("开")
+            ai_cb.setOffText("关")
+            ai_label = BodyLabel("启用 AI", card)
             ai_cb.setToolTip("运行时每次填空都会调用 AI")
-            install_tooltip_filter(ai_cb)
+            ai_label.setToolTip("运行时每次填空都会调用 AI")
+            install_tooltip_filters((ai_cb, ai_label))
             ai_cb.setChecked(saved_ai_flags[blank_idx] if blank_idx < len(saved_ai_flags) else False)
             blank_row.addWidget(ai_cb)
+            blank_row.addWidget(ai_label)
             blank_ai_checkboxes.append(ai_cb)
 
             blank_row.addStretch(1)
@@ -510,6 +566,7 @@ class WizardSectionsMixin:
                 "list": radio_list,
                 "name": radio_name,
                 "mobile": radio_mobile,
+                "id_card": radio_id_card,
                 "integer": radio_integer,
             })
             blank_integer_range_edits.append((range_min_edit, range_max_edit))
@@ -520,7 +577,7 @@ class WizardSectionsMixin:
                     mode_id = radios["list"].group().checkedId()
                     ai_enabled = ai_checkbox.isChecked()
                     use_list = (mode_id == 0 and not ai_enabled)
-                    use_integer_range = (mode_id == 3 and not ai_enabled)
+                    use_integer_range = (mode_id == 4 and not ai_enabled)
 
                     # 禁用/启用该列的所有输入框
                     for row in edits_list:
@@ -535,11 +592,13 @@ class WizardSectionsMixin:
                         radios["list"].setEnabled(False)
                         radios["name"].setEnabled(False)
                         radios["mobile"].setEnabled(False)
+                        radios["id_card"].setEnabled(False)
                         radios["integer"].setEnabled(False)
                     else:
                         radios["list"].setEnabled(True)
                         radios["name"].setEnabled(True)
                         radios["mobile"].setEnabled(True)
+                        radios["id_card"].setEnabled(True)
                         radios["integer"].setEnabled(True)
 
                 return sync_column_state
@@ -552,7 +611,7 @@ class WizardSectionsMixin:
                 blank_integer_range_edits[-1],
             )
             radio_group.buttonClicked.connect(lambda checked=False, f=sync_func: f())
-            ai_cb.toggled.connect(
+            ai_cb.checkedChanged.connect(
                 lambda checked, cb=ai_cb, f=sync_func: self._on_multi_text_blank_ai_toggled(cb, checked, f)
             )
             # 初始化状态
@@ -575,7 +634,7 @@ class WizardSectionsMixin:
             add_btn.setEnabled(not all_ai)
 
         for _ai_cb in blank_ai_checkboxes:
-            _ai_cb.toggled.connect(lambda _checked, f=update_add_btn_state: f())
+            _ai_cb.checkedChanged.connect(lambda _checked, f=update_add_btn_state: f())
 
         # 初始化按钮状态
         update_add_btn_state()
@@ -831,11 +890,27 @@ class WizardSectionsMixin:
 
         jump_map: Dict[int, int] = {}
         info_entry = self._get_entry_info(idx)
+        fillable_option_indices = self._normalize_fillable_option_indices(info_entry.get("fillable_options"), options)
+        if not fillable_option_indices:
+            fillable_option_indices = self._normalize_fillable_option_indices(
+                getattr(entry, "fillable_option_indices", None),
+                options,
+            )
+        fillable_option_set = set(fillable_option_indices)
+        saved_option_fill_texts = list(getattr(entry, "option_fill_texts", []) or [])
+        option_fill_edits: Dict[int, LineEdit] = {}
         for rule in (info_entry.get("jump_rules") or []):
             oi = rule.get("option_index")
             jt = rule.get("jumpto")
             if oi is not None and jt is not None:
                 jump_map[oi] = jt
+
+        if fillable_option_indices:
+            fill_hint = BodyLabel("命中带附加输入框的选项时，会把下面对应文本一起提交。", card)
+            fill_hint.setWordWrap(True)
+            fill_hint.setStyleSheet("font-size: 12px;")
+            _apply_label_color(fill_hint, "#666666", "#bfbfbf")
+            card_layout.addWidget(fill_hint)
 
         for opt_idx in range(options):
             opt_widget = QWidget(card)
@@ -900,7 +975,36 @@ class WizardSectionsMixin:
             card_layout.addWidget(opt_widget)
             sliders.append(slider)
 
+            if opt_idx in fillable_option_set:
+                fill_widget = QWidget(card)
+                fill_layout = QHBoxLayout(fill_widget)
+                fill_layout.setContentsMargins(36, 0, 0, 4)
+                fill_layout.setSpacing(12)
+
+                fill_label = BodyLabel("选中此项时填写：", card)
+                fill_label.setFixedWidth(160)
+                fill_label.setStyleSheet("font-size: 12px;")
+                _apply_label_color(fill_label, "#666666", "#bfbfbf")
+                fill_layout.addWidget(fill_label)
+
+                fill_edit = LineEdit(card)
+                existing_fill = ""
+                if opt_idx < len(saved_option_fill_texts):
+                    existing_fill = str(saved_option_fill_texts[opt_idx] or "").strip()
+                if existing_fill:
+                    fill_edit.setText(existing_fill)
+                if entry.question_type == "single":
+                    fill_edit.setPlaceholderText("例如：无；留空时运行会自动按默认值处理")
+                else:
+                    fill_edit.setPlaceholderText("输入命中该选项时要填写的内容")
+                fill_layout.addWidget(fill_edit, 1)
+
+                card_layout.addWidget(fill_widget)
+                option_fill_edits[opt_idx] = fill_edit
+
         self.slider_map[idx] = sliders
+        if option_fill_edits:
+            self.option_fill_edit_map[idx] = option_fill_edits
 
         if entry.question_type in ("single", "dropdown", "scale", "score"):
             ratio_preview_label = BodyLabel("", card)
@@ -969,7 +1073,7 @@ class WizardSectionsMixin:
     @staticmethod
     def _resolve_text_random_mode(entry: QuestionEntry) -> str:
         mode = str(getattr(entry, "text_random_mode", _TEXT_RANDOM_NONE) or _TEXT_RANDOM_NONE).strip().lower()
-        if mode in (_TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_INTEGER):
+        if mode in (_TEXT_RANDOM_NAME, _TEXT_RANDOM_MOBILE, _TEXT_RANDOM_ID_CARD, _TEXT_RANDOM_INTEGER):
             return mode
         for raw in (entry.texts or []):
             token = str(raw or "").strip()
@@ -977,6 +1081,8 @@ class WizardSectionsMixin:
                 return _TEXT_RANDOM_NAME
             if token == _TEXT_RANDOM_MOBILE_TOKEN:
                 return _TEXT_RANDOM_MOBILE
+            if token == _TEXT_RANDOM_ID_CARD_TOKEN:
+                return _TEXT_RANDOM_ID_CARD
             if parse_random_int_token(token) is not None:
                 return _TEXT_RANDOM_INTEGER
         return _TEXT_RANDOM_NONE
@@ -986,12 +1092,13 @@ class WizardSectionsMixin:
         ai_cb = self.ai_check_map.get(idx)
         random_name_cb = self.text_random_name_check_map.get(idx)
         random_mobile_cb = self.text_random_mobile_check_map.get(idx)
+        random_id_card_cb = self.text_random_id_card_check_map.get(idx)
         random_integer_cb = self.text_random_integer_check_map.get(idx)
         random_min_edit = self.text_random_int_min_edit_map.get(idx)
         random_max_edit = self.text_random_int_max_edit_map.get(idx)
 
         def _set_random_controls_enabled(enabled: bool, tooltip: str = "") -> None:
-            for cb in (random_name_cb, random_mobile_cb, random_integer_cb):
+            for cb in (random_name_cb, random_mobile_cb, random_id_card_cb, random_integer_cb):
                 if cb is None:
                     continue
                 cb.setEnabled(enabled)
@@ -1007,7 +1114,7 @@ class WizardSectionsMixin:
             _set_random_controls_enabled(True)
             _set_integer_range_enabled(random_mode == _TEXT_RANDOM_INTEGER)
             if ai_cb:
-                ai_cb.setToolTip("随机姓名、随机手机号、随机整数与 AI 填空不能同时启用")
+                ai_cb.setToolTip("随机姓名、随机手机号、随机身份证、随机整数与 AI 填空不能同时启用")
                 ai_cb.blockSignals(True)
                 ai_cb.setChecked(False)
                 ai_cb.blockSignals(False)
@@ -1018,7 +1125,7 @@ class WizardSectionsMixin:
             ai_cb.setToolTip("运行时每次填空都会调用 AI")
             ai_cb.setEnabled(True)
             if ai_cb.isChecked():
-                _set_random_controls_enabled(False, "启用 AI 时，随机姓名、随机手机号和随机整数不可用")
+                _set_random_controls_enabled(False, "启用 AI 时，随机姓名、随机手机号、随机身份证和随机整数不可用")
                 _set_integer_range_enabled(False)
             else:
                 _set_random_controls_enabled(True)
@@ -1032,11 +1139,13 @@ class WizardSectionsMixin:
     def _on_text_random_mode_toggled(self, idx: int, mode: str, checked: bool) -> None:
         name_cb = self.text_random_name_check_map.get(idx)
         mobile_cb = self.text_random_mobile_check_map.get(idx)
+        id_card_cb = self.text_random_id_card_check_map.get(idx)
         integer_cb = self.text_random_integer_check_map.get(idx)
         if checked:
             checkbox_map = {
                 _TEXT_RANDOM_NAME: name_cb,
                 _TEXT_RANDOM_MOBILE: mobile_cb,
+                _TEXT_RANDOM_ID_CARD: id_card_cb,
                 _TEXT_RANDOM_INTEGER: integer_cb,
             }
             for other_mode, checkbox in checkbox_map.items():
@@ -1052,6 +1161,8 @@ class WizardSectionsMixin:
                 current_mode = _TEXT_RANDOM_NAME
             elif mobile_cb and mobile_cb.isChecked():
                 current_mode = _TEXT_RANDOM_MOBILE
+            elif id_card_cb and id_card_cb.isChecked():
+                current_mode = _TEXT_RANDOM_ID_CARD
             elif integer_cb and integer_cb.isChecked():
                 current_mode = _TEXT_RANDOM_INTEGER
             self.text_random_mode_map[idx] = current_mode

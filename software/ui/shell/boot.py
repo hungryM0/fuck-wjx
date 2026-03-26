@@ -67,7 +67,7 @@ class BootSplash:
 
         scale = min(width / base_width, height / base_height)
         self._scale = max(1.0, min(scale, 1.45))
-        self._icon_size = int(314 * self._scale)
+        self._icon_size = int(220 * self._scale)
         self.splash_screen.setIconSize(QSize(self._icon_size, self._icon_size))
 
         title_font_size = int(28 * self._scale)

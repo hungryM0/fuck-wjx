@@ -22,7 +22,7 @@ from software.app.config import BROWSER_PREFERENCE, USER_AGENT_PRESETS
 CURRENT_CONFIG_SCHEMA_VERSION = 3
 _CURRENT_CONFIG_SCHEMA_VERSION = CURRENT_CONFIG_SCHEMA_VERSION
 _LEGACY_CONFIG_KEYS = ("random_proxy_api", "ai_enabled")
-_TEXT_RANDOM_MODES = {"none", "name", "mobile", "integer"}
+_TEXT_RANDOM_MODES = {"none", "name", "mobile", "id_card", "integer"}
 
 __all__ = [
     "CURRENT_CONFIG_SCHEMA_VERSION",

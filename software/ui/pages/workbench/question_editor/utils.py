@@ -126,6 +126,22 @@ def _build_entry_info_fallback(entry: QuestionEntry) -> Dict[str, Any]:
         )
     elif info["question_type"] == "text":
         info["text_inputs"] = 1
+    raw_fillable_options = getattr(entry, "fillable_option_indices", None)
+    if isinstance(raw_fillable_options, list):
+        fillable_options: List[int] = []
+        seen = set()
+        option_count = int(info.get("options") or 0)
+        for raw in raw_fillable_options:
+            try:
+                index = int(raw)
+            except Exception:
+                continue
+            if index < 0 or (option_count > 0 and index >= option_count) or index in seen:
+                continue
+            seen.add(index)
+            fillable_options.append(index)
+        if fillable_options:
+            info["fillable_options"] = fillable_options
     question_num = _normalize_question_num(getattr(entry, "question_num", None))
     if question_num is not None:
         info["num"] = question_num

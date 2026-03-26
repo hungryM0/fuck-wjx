@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/icon.png" alt="SurveyController" width="120" height="120" />
   <h1>SurveyController</h1>
-  <p>一个支持图形化界面的问卷星自动填写工具，支持自定义答案分布与智能配置。</p>
+  <p>一个支持问卷星、腾讯问卷自动填写的图形化工具，支持定制数据与指定ip。</p>
 
   [![GitHub Stars](https://img.shields.io/github/stars/hungryM0/SurveyController?style=flat&logo=github&color=yellow)](https://github.com/hungryM0/SurveyController/stargazers)
   [![GitHub Forks](https://img.shields.io/github/forks/hungryM0/SurveyController?style=flat&logo=github)](https://github.com/hungryM0/SurveyController/network/members)
@@ -16,7 +16,7 @@
 > 参考了 [Zemelee/wjx](https://github.com/Zemelee/wjx)，别忘了给大佬点个star
 
 > [!WARNING]
-> **仅供学习与测试使用。** 请确保拥有目标测试问卷的授权再使用。**严禁污染他人问卷数据！**
+> **该项目仅供 Playwright 的学习与测试使用。** 请确保拥有目标测试问卷的授权再使用,**严禁污染他人问卷数据！**
 
 <img width="689" height="626" alt="gui" src="/assets/gui.png" />
 
@@ -24,10 +24,10 @@
 
 ## 主要特性
 
-1. **图形化界面** - 无需编写代码，通过可视化界面完成所有操作
-2. **二维码识别** - 上传问卷二维码图片，自动解析并提取问卷链接
+1. **图形化界面** - 无需另外编写代码，通过可视化UI界面完成所有操作
+2. **二维码识别** - 上传问卷二维码图片，自动解析为问卷链接（二维码仅支持问卷星平台）
 3. **自定义答案比例** - 解析问卷题目结构，支持自定义答案权重与概率分布
-4. **可指定地区IP** - 支持IP随机化或指定特定地区IP，且有效规避智能验证
+4. **可指定地区IP** - 支持IP随机化或指定特定地区IP
 5. **配置复用** - 支持导出与导入配置文件，便于重复使用
 6. **AI 智能填空（免费）** - 支持主观题自动生成作答内容，由 [@dAwn-Rebirth](https://github.com/dAwn-Rebirth) 贡献
 
@@ -97,6 +97,7 @@ python SurveyController.py
 
 欢迎提交 Pull Request，改进方向包括但不限于：
 - 增加对更多题型的支持
+- 增加对更多问卷平台的支持
 - 性能优化与代码重构
 
 ---
