@@ -2,8 +2,6 @@
 
 from software.io.config.load_save import (
     RuntimeConfig,
-    _CURRENT_CONFIG_SCHEMA_VERSION,
-    _LEGACY_CONFIG_KEYS,
     _ensure_supported_config_payload,
     _sanitize_filename,
     _select_user_agent_from_ratios,
@@ -19,8 +17,6 @@ from software.io.config.load_save import (
 
 __all__ = [
     "RuntimeConfig",
-    "_CURRENT_CONFIG_SCHEMA_VERSION",
-    "_LEGACY_CONFIG_KEYS",
     "_ensure_supported_config_payload",
     "_sanitize_filename",
     "_select_user_agent_from_ratios",

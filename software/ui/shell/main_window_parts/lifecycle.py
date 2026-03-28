@@ -122,8 +122,10 @@ class MainWindowLifecycleMixin:
         self.runtime_page.apply_config(cfg)
         self.dashboard.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], self.controller.questions_info)
-        self.answer_rules_page.set_questions_info(self.controller.questions_info)
-        self.answer_rules_page.set_rules(getattr(cfg, "answer_rules", []) or [])
+        self.strategy_page.set_questions_info(self.controller.questions_info)
+        self.strategy_page.set_entries(self.question_page.entries, self.question_page.entry_questions_info)
+        self.strategy_page.set_rules(getattr(cfg, "answer_rules", []) or [])
+        self.strategy_page.set_dimension_groups(getattr(cfg, "dimension_groups", []) or [])
         self.controller.refresh_random_ip_counter()
 
     def _on_random_ip_counter_update(self, count: float, limit: float, custom_api: bool) -> None:

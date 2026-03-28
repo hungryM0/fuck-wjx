@@ -17,7 +17,7 @@ from qfluentwidgets import (
     StrongBodyLabel,
 )
 from software.logging.action_logger import bind_logged_action, log_action
-from software.ui.helpers.qfluent_compat import install_tooltip_filter
+from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 
 if TYPE_CHECKING:
     from software.ui.controller import RunController

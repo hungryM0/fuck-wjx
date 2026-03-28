@@ -1,4 +1,4 @@
-"""运行时配置序列化与兼容迁移逻辑。"""
+"""运行时配置序列化与校验逻辑。"""
 from __future__ import annotations
 
 import logging
@@ -19,15 +19,13 @@ from software.providers.common import (
 from software.logging.log_utils import log_suppressed_exception
 from software.app.config import BROWSER_PREFERENCE, USER_AGENT_PRESETS
 
-CURRENT_CONFIG_SCHEMA_VERSION = 3
-_CURRENT_CONFIG_SCHEMA_VERSION = CURRENT_CONFIG_SCHEMA_VERSION
+CURRENT_CONFIG_SCHEMA_VERSION = 4
+_SUPPORTED_LEGACY_CONFIG_SCHEMA_VERSIONS = {3}
 _LEGACY_CONFIG_KEYS = ("random_proxy_api", "ai_enabled")
 _TEXT_RANDOM_MODES = {"none", "name", "mobile", "id_card", "integer"}
 
 __all__ = [
     "CURRENT_CONFIG_SCHEMA_VERSION",
-    "_CURRENT_CONFIG_SCHEMA_VERSION",
-    "_LEGACY_CONFIG_KEYS",
     "_select_user_agent_from_ratios",
     "serialize_question_entry",
     "deserialize_question_entry",
@@ -136,6 +134,37 @@ def _normalize_multi_text_blank_int_ranges(raw: Any) -> List[List[int]]:
     return [_normalize_random_int_range(item) for item in raw]
 
 
+def _normalize_dimension_value(raw: Any) -> Optional[str]:
+    try:
+        text = str(raw or "").strip()
+    except Exception:
+        text = ""
+    if not text or text == "未分组":
+        return None
+    return text
+
+
+def _normalize_dimension_groups(raw: Any) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    groups: List[str] = []
+    seen = set()
+    for item in raw:
+        normalized = _normalize_dimension_value(item)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        groups.append(normalized)
+    return groups
+
+
+def _migrate_config_payload_v3_to_v4(payload: Dict[str, Any]) -> Dict[str, Any]:
+    migrated = dict(payload)
+    migrated["dimension_groups"] = _normalize_dimension_groups(migrated.get("dimension_groups"))
+    migrated["config_schema_version"] = CURRENT_CONFIG_SCHEMA_VERSION
+    return migrated
+
+
 def serialize_question_entry(entry) -> Dict[str, Any]:
     probabilities = entry.probabilities
     if (
@@ -167,6 +196,7 @@ def serialize_question_entry(entry) -> Dict[str, Any]:
         "fillable_option_indices": entry.fillable_option_indices,
         "attached_option_selects": list(getattr(entry, "attached_option_selects", []) or []),
         "is_location": getattr(entry, "is_location", False),
+        "dimension": _normalize_dimension_value(getattr(entry, "dimension", None)),
         "psycho_bias": str(getattr(entry, "psycho_bias", "custom") or "custom"),
     }
 
@@ -207,6 +237,7 @@ def deserialize_question_entry(data: Dict[str, Any]):
         fillable_option_indices=data.get("fillable_option_indices"),
         attached_option_selects=list(data.get("attached_option_selects") or []),
         is_location=bool(data.get("is_location")),
+        dimension=_normalize_dimension_value(data.get("dimension")),
         psycho_bias=_normalize_psycho_bias(data),
     )
 
@@ -318,6 +349,7 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.psycho_target_alpha = max(0.70, min(0.95, config.psycho_target_alpha))
     config.headless_mode = _as_bool(raw.get("headless_mode", True), True)
     config.answer_rules = []
+    config.dimension_groups = _normalize_dimension_groups(raw.get("dimension_groups"))
     raw_rules = raw.get("answer_rules")
     if isinstance(raw_rules, list):
         for item in raw_rules:
@@ -390,13 +422,22 @@ def _ensure_supported_config_payload(payload: Dict[str, Any], *, config_path: st
             f"配置文件使用了已移除的旧字段（{legacy_text}），请在旧版本客户端中重新保存后再导入：{config_path}"
         )
     schema_version = _coerce_schema_version(payload.get("config_schema_version"))
-    if schema_version != _CURRENT_CONFIG_SCHEMA_VERSION:
-        raise ValueError(
-            f"配置文件版本不受支持（当前仅支持 schema v{_CURRENT_CONFIG_SCHEMA_VERSION}，实际为 v{schema_version}）：{config_path}"
+    if schema_version == CURRENT_CONFIG_SCHEMA_VERSION:
+        current = dict(payload)
+        current["config_schema_version"] = schema_version
+        return current
+    if schema_version in _SUPPORTED_LEGACY_CONFIG_SCHEMA_VERSIONS:
+        logging.info(
+            "检测到旧版配置 schema v%s，已按当前 schema v%s 兼容加载: %s",
+            schema_version,
+            CURRENT_CONFIG_SCHEMA_VERSION,
+            config_path,
         )
-    current = dict(payload)
-    current["config_schema_version"] = schema_version
-    return current
+        if schema_version == 3:
+            return _migrate_config_payload_v3_to_v4(payload)
+    raise ValueError(
+        f"配置文件版本不受支持（当前仅支持 schema v{CURRENT_CONFIG_SCHEMA_VERSION}，实际为 v{schema_version}）：{config_path}"
+    )
 
 
 def serialize_runtime_config(config: RuntimeConfig) -> Dict[str, Any]:
@@ -404,7 +445,7 @@ def serialize_runtime_config(config: RuntimeConfig) -> Dict[str, Any]:
     payload["question_entries"] = [
         serialize_question_entry(entry) for entry in list(config.question_entries or [])
     ]
-    payload["config_schema_version"] = _CURRENT_CONFIG_SCHEMA_VERSION
+    payload["config_schema_version"] = CURRENT_CONFIG_SCHEMA_VERSION
     return payload
 
 

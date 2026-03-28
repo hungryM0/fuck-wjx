@@ -12,6 +12,7 @@ from software.core.questions.utils import describe_random_int_range, parse_rando
 from software.ui.pages.workbench.question_editor.constants import _get_entry_type_label
 from software.ui.pages.workbench.question_editor.wizard_dialog import QuestionWizardDialog
 from software.ui.pages.workbench.question_editor.psycho_config import PSYCHO_SUPPORTED_TYPES
+from software.ui.pages.workbench.strategy.utils import entry_dimension_label
 
 _TEXT_RANDOM_NAME_TOKEN = "__RANDOM_NAME__"
 _TEXT_RANDOM_MOBILE_TOKEN = "__RANDOM_MOBILE__"
@@ -115,6 +116,10 @@ def question_summary(entry: QuestionEntry) -> str:
     if entry.question_type == "multiple":
         return "完全随机" if strategy == "random" else "自定义概率"
     return "完全随机" if strategy == "random" else "自定义配比"
+
+
+def question_dimension(entry: QuestionEntry) -> str:
+    return entry_dimension_label(entry)
 
 
 class DashboardEntriesMixin:
@@ -228,6 +233,10 @@ class DashboardEntriesMixin:
         for idx, flags in multi_text_blank_ai_updates.items():
             if 0 <= idx < len(entries):
                 entries[idx].multi_text_blank_ai_flags = flags
+        dimension_updates = dlg.get_dimensions()
+        for idx, dimension in dimension_updates.items():
+            if 0 <= idx < len(entries):
+                entries[idx].dimension = dimension
         # 存储倾向预设
         bias_presets = dlg.get_bias_presets()
         for idx, bias in bias_presets.items():
@@ -316,10 +325,13 @@ class DashboardEntriesMixin:
             type_item = QTableWidgetItem(type_label)
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.entry_table.setItem(idx, 1, type_item)
-            
-            # 策略列
+
+            dimension_item = QTableWidgetItem(question_dimension(entry))
+            dimension_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.entry_table.setItem(idx, 2, dimension_item)
+
             summary = question_summary(entry)
-            self.entry_table.setItem(idx, 2, QTableWidgetItem(summary))
+            self.entry_table.setItem(idx, 3, QTableWidgetItem(summary))
         self._sync_start_button_state()
 
     def _checked_rows(self) -> List[int]:

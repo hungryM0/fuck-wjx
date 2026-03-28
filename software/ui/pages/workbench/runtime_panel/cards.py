@@ -22,7 +22,7 @@ from qfluentwidgets import (
     SwitchButton,
     TransparentToolButton,
 )
-from software.ui.helpers.qfluent_compat import install_tooltip_filter
+from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.helpers.proxy_access import (
     apply_custom_proxy_api,
     apply_proxy_area_code,

@@ -64,9 +64,10 @@ software/
 │   ├── shell/             # 主窗口、启动页、页面装配
 │   ├── controller/        # Qt 协调器
 │   ├── helpers/           # UI 侧辅助门面
-│   │   └── qfluent_compat.py # QFluentWidgets 动画兼容补丁
+│   │   ├── fluent_tooltip.py # Fluent tooltip 安装器
+│   │   └── qfluent_compat.py # QFluentWidgets 动画 / InfoBar 稳定性补丁
 │   ├── pages/
-│   │   ├── workbench/     # dashboard/question_editor（含单栏配置向导）/runtime_panel/log_panel
+│   │   ├── workbench/     # dashboard/question_editor（含单栏配置向导）/runtime_panel/strategy（题目策略：条件规则+维度分组）/log_panel
 │   │   └── settings/      # 应用程序设置页；settings.py 负责页面骨架，group_widgets.py 放设置页专用右侧控件
 │   └── widgets/           # 通用组件（contact_form 已拆成包；旧 time_range_slider 已移除）
 └── update/                # 更新检查与升级

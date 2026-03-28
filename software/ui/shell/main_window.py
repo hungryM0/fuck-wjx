@@ -26,7 +26,7 @@ from qfluentwidgets import (
 from software.ui.pages.workbench.dashboard import DashboardPage
 from software.ui.pages.workbench.runtime_panel import RuntimePage
 from software.ui.pages.workbench.question_editor.page import QuestionPage
-from software.ui.pages.workbench.answer_rules import AnswerRulesPage
+from software.ui.pages.workbench.strategy import QuestionStrategyPage
 
 from software.ui.dialogs.contact import ContactDialog
 
@@ -37,7 +37,6 @@ from software.ui.shell.main_window_parts.lazy_pages import MainWindowLazyPagesMi
 from software.ui.shell.main_window_parts.update import MainWindowUpdateMixin
 from software.app.config import (
     APP_ICON_RELATIVE_PATH,
-    LEGACY_SIDEBAR_EXPAND_SETTING_KEY,
     NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
     STATUS_ENDPOINT,
     app_settings,
@@ -112,7 +111,7 @@ class MainWindow(
         # 立即初始化关键页面
         self.runtime_page = RuntimePage(self.controller, self)
         self.question_page = QuestionPage(self)
-        self.answer_rules_page = AnswerRulesPage(self)
+        self.strategy_page = QuestionStrategyPage(self)
         # QuestionPage 仅用作题目配置的数据载体，不作为主界面子页面展示；
         # 若不隐藏会以默认几何 (0,0,100,30) 叠在窗口左上角，造成标题栏错乱。
         self.question_page.hide()
@@ -120,7 +119,7 @@ class MainWindow(
             self.controller,
             self.question_page,
             self.runtime_page,
-            self.answer_rules_page,
+            self.strategy_page,
             self,
         )
 
@@ -139,7 +138,7 @@ class MainWindow(
         self.dashboard.setObjectName("dashboard")
         self.question_page.setObjectName("question")
         self.runtime_page.setObjectName("runtime")
-        self.answer_rules_page.setObjectName("answer_rules")
+        self.strategy_page.setObjectName("strategy")
 
         self._init_navigation()
         self._init_changelog_navigation()
@@ -204,18 +203,10 @@ class MainWindow(
             logging.info("启用窗口材质效果失败", exc_info=True)
 
     def _read_navigation_text_visible_setting(self) -> bool:
-        """读取导航标签可见性设置，并在启动时迁移旧版侧边栏展开配置。"""
+        """读取导航标签可见性设置。"""
         settings = app_settings()
         stored_value = settings.value(NAVIGATION_TEXT_VISIBLE_SETTING_KEY)
-        if stored_value is not None:
-            return get_bool_from_qsettings(stored_value, True)
-
-        legacy_value = settings.value(LEGACY_SIDEBAR_EXPAND_SETTING_KEY)
-        visible = get_bool_from_qsettings(legacy_value, True)
-        if legacy_value is not None:
-            settings.setValue(NAVIGATION_TEXT_VISIBLE_SETTING_KEY, visible)
-            settings.remove(LEGACY_SIDEBAR_EXPAND_SETTING_KEY)
-        return visible
+        return get_bool_from_qsettings(stored_value, True)
 
     def _configure_navigation_interface(self):
         """应用微软商店风格导航栏偏好。"""
@@ -468,7 +459,7 @@ class MainWindow(
     # ---------- controller callbacks ----------
     def _on_survey_parsed(self, info: List[Dict[str, Any]], title: str):
         parsed_title = title or "问卷"
-        self.answer_rules_page.set_questions_info(info or [])
+        self.strategy_page.set_questions_info(info or [])
         if getattr(self.dashboard, "_open_wizard_after_parse", False):
             self.dashboard._open_wizard_after_parse = False
             info_snapshot = copy.deepcopy(info or [])
@@ -481,6 +472,8 @@ class MainWindow(
             )
             return
         self.question_page.set_questions(info, self.controller.question_entries)
+        self.strategy_page.set_dimension_groups([])
+        self.strategy_page.set_entries(self.question_page.entries, self.question_page.entry_questions_info)
         self.dashboard.update_question_meta(parsed_title, len(self.controller.question_entries))
 
     def _on_survey_parse_failed(self, msg: str):
@@ -522,6 +515,8 @@ class MainWindow(
         if accepted:
             self.question_page.set_questions(info, pending_entries)
             self.controller.question_entries = pending_entries
+            self.strategy_page.set_dimension_groups([])
+            self.strategy_page.set_entries(self.question_page.entries, self.question_page.entry_questions_info)
             self.dashboard.update_question_meta(parsed_title, len(pending_entries))
             log_action(
                 "UI",

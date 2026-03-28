@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from software.core.config.codec import (
-    _CURRENT_CONFIG_SCHEMA_VERSION,
-    _LEGACY_CONFIG_KEYS,
+    CURRENT_CONFIG_SCHEMA_VERSION,
     _ensure_supported_config_payload,
     _select_user_agent_from_ratios,
     deserialize_question_entry,
@@ -32,8 +31,7 @@ __all__ = [
     "serialize_runtime_config",
     "deserialize_runtime_config",
     "normalize_runtime_config_payload",
-    "_CURRENT_CONFIG_SCHEMA_VERSION",
-    "_LEGACY_CONFIG_KEYS",
+    "CURRENT_CONFIG_SCHEMA_VERSION",
     "_ensure_supported_config_payload",
 ]
 

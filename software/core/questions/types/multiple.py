@@ -544,7 +544,7 @@ def _resolve_rule_sets(
     if overlap:
         blocked -= set(required)
         logging.warning(
-            "第%d题（多选）：作答规则[%s]同时将选项%s标记为必选和禁选，已按必选优先处理。",
+            "第%d题（多选）：条件规则[%s]同时将选项%s标记为必选和禁选，已按必选优先处理。",
             current,
             rule_id or "-",
             sorted(overlap),
@@ -566,7 +566,7 @@ def _apply_rule_constraints(
     required = _normalize_selected_indices(required_indices, option_count)
     if len(required) > max_allowed:
         logging.warning(
-            "第%d题（多选）：作答规则[%s]要求必选 %d 项，但题目最多只能选 %d 项，已截断必选集合。",
+            "第%d题（多选）：条件规则[%s]要求必选 %d 项，但题目最多只能选 %d 项，已截断必选集合。",
             current,
             rule_id or "-",
             len(required),
@@ -614,7 +614,7 @@ def _apply_rule_constraints(
         resolved.extend(fill_pool[:needed])
         if len(resolved) < min_required:
             logging.warning(
-                "第%d题（多选）：作答规则[%s]生效后可用选项不足，要求最少选 %d 项，实际最多可选 %d 项。",
+                "第%d题（多选）：条件规则[%s]生效后可用选项不足，要求最少选 %d 项，实际最多可选 %d 项。",
                 current,
                 rule_id or "-",
                 min_required,
@@ -712,7 +712,7 @@ def multiple(
         max_total = min(max_allowed, len(required_indices) + len(available_pool))
         if min_total > max_total:
             logging.warning(
-                "第%d题（多选）：作答规则[%s]与题目选择数量限制冲突，已按最多可选 %d 项处理。",
+                "第%d题（多选）：条件规则[%s]与题目选择数量限制冲突，已按最多可选 %d 项处理。",
                 current,
                 rule_id or "-",
                 max_total,

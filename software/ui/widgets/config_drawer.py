@@ -23,7 +23,7 @@ from qfluentwidgets import (
 )
 
 from software.app.runtime_paths import get_runtime_directory
-from software.ui.helpers.qfluent_compat import install_tooltip_filter
+from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 
 
 class _OverlayWidget(QWidget):

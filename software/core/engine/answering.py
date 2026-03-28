@@ -35,7 +35,7 @@ from software.core.questions.consistency import reset_consistency_context
 from software.core.questions.strict_ratio import is_strict_ratio_question
 from software.core.questions.tendency import reset_tendency
 from software.core.questions.utils import _should_treat_question_as_text_like
-from software.core.psychometrics import build_psychometric_plan
+from software.core.psychometrics import build_dimension_psychometric_plan
 from software.providers.registry import fill_survey as _fill_provider_survey
 from software.core.ai.runtime import extract_question_title_from_dom
 from software.network.browser import BrowserDriver, By, NoSuchElementException
@@ -119,7 +119,7 @@ def _resolve_bias(raw_bias: Any, probability_config: Any, option_count: int) -> 
 
 def _build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
     """根据当前任务配置构建本轮问卷的心理测量作答计划。"""
-    psycho_items: List[Tuple[int, str, int, str, Optional[int]]] = []
+    grouped_items: Dict[str, List[Tuple[int, str, int, str, Optional[int]]]] = {}
 
     for question_num in sorted(ctx.question_config_index_map.keys()):
         config_entry = ctx.question_config_index_map.get(question_num)
@@ -127,7 +127,8 @@ def _build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
             continue
 
         question_type, start_index = config_entry
-        if ctx.question_dimension_map.get(question_num) is None:
+        dimension = str(ctx.question_dimension_map.get(question_num) or "").strip()
+        if not dimension:
             continue
         if is_strict_ratio_question(ctx, question_num):
             continue
@@ -140,7 +141,7 @@ def _build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
             probability_config = ctx.scale_prob[start_index] if start_index < len(ctx.scale_prob) else -1
             option_count = _resolve_option_count(probability_config, meta_option_count, default_value=5)
             bias = _resolve_bias(saved_bias, probability_config, option_count)
-            psycho_items.append((question_num, question_type, option_count, bias, None))
+            grouped_items.setdefault(dimension, []).append((question_num, question_type, option_count, bias, None))
             continue
 
         if question_type == "matrix":
@@ -166,9 +167,9 @@ def _build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
                     else saved_bias
                 )
                 bias = _resolve_bias(row_bias, probability_config, option_count)
-                psycho_items.append((question_num, "matrix", option_count, bias, row_idx))
+                grouped_items.setdefault(dimension, []).append((question_num, "matrix", option_count, bias, row_idx))
 
-    if len(psycho_items) < 2:
+    if not grouped_items:
         return None
 
     try:
@@ -177,8 +178,8 @@ def _build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
         target_alpha = 0.9
     target_alpha = max(0.70, min(0.95, target_alpha))
 
-    return build_psychometric_plan(
-        psycho_items=psycho_items,
+    return build_dimension_psychometric_plan(
+        grouped_items=grouped_items,
         target_alpha=target_alpha,
     )
 
@@ -411,8 +412,10 @@ def brush(
         if psycho_plan is None:
             psycho_plan = _build_psychometric_plan_for_run(ctx)
         if psycho_plan is not None:
+            dimension_count = len(getattr(psycho_plan, "plans", {}) or {})
             logging.info(
-                "本轮启用心理测量计划：题目数=%d，目标α=%.2f",
+                "本轮启用心理测量计划：维度数=%d，题目数=%d，目标α=%.2f",
+                dimension_count,
                 len(getattr(psycho_plan, "items", []) or []),
                 float(getattr(ctx, "psycho_target_alpha", 0.9) or 0.9),
             )

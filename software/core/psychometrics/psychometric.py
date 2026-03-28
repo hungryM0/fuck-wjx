@@ -10,6 +10,12 @@ from software.core.psychometrics.utils import randn, z_to_category
 logger = logging.getLogger(__name__)
 
 
+def _build_choice_key(question_index: int, row_index: Optional[int] = None) -> str:
+    if row_index is not None:
+        return f"matrix:{question_index}:{row_index}"
+    return f"q:{question_index}"
+
+
 def compute_rho_from_alpha(alpha: float, k: int) -> float:
     """根据目标 Cronbach's Alpha 计算题目间的平均相关系数"""
     if not (0 < alpha < 1):
@@ -71,11 +77,28 @@ class PsychometricPlan:
     
     def get_choice(self, question_index: int, row_index: Optional[int] = None) -> Optional[int]:
         """获取指定题目的预生成答案"""
-        if row_index is not None:
-            key = f"matrix:{question_index}:{row_index}"
-        else:
-            key = f"q:{question_index}"
+        key = _build_choice_key(question_index, row_index)
         return self.choices.get(key)
+
+
+@dataclass
+class DimensionPsychometricPlan:
+    """按维度拆分的心理测量计划。"""
+
+    plans: Dict[str, PsychometricPlan]
+    item_dimension_map: Dict[str, str]
+    skipped_dimensions: Dict[str, int]
+    items: List[PsychometricItem]
+
+    def get_choice(self, question_index: int, row_index: Optional[int] = None) -> Optional[int]:
+        key = _build_choice_key(question_index, row_index)
+        dimension = self.item_dimension_map.get(key)
+        if not dimension:
+            return None
+        plan = self.plans.get(dimension)
+        if plan is None:
+            return None
+        return plan.get_choice(question_index, row_index)
 
 
 def build_psychometric_plan(
@@ -128,12 +151,7 @@ def build_psychometric_plan(
             sigma_e=sigma_e,
         )
         
-        if item.row_index is not None:
-            key = f"matrix:{item.question_index}:{item.row_index}"
-        else:
-            key = f"q:{item.question_index}"
-        
-        choices[key] = choice
+        choices[_build_choice_key(item.question_index, item.row_index)] = choice
     
     logger.info(
         "心理测量计划已启用 | 目标α=%.2f 题数=%d θ=%.2f σ_e=%.2f",
@@ -145,6 +163,51 @@ def build_psychometric_plan(
         theta=theta,
         sigma_e=sigma_e,
         choices=choices,
+    )
+
+
+def build_dimension_psychometric_plan(
+    grouped_items: Dict[str, List[Tuple[int, str, int, str, Optional[int]]]],
+    target_alpha: float = 0.9,
+) -> Optional[DimensionPsychometricPlan]:
+    """按维度分别构建心理测量计划。"""
+    if not grouped_items:
+        return None
+
+    plans: Dict[str, PsychometricPlan] = {}
+    item_dimension_map: Dict[str, str] = {}
+    skipped_dimensions: Dict[str, int] = {}
+    merged_items: List[PsychometricItem] = []
+
+    for dimension, items in grouped_items.items():
+        normalized_dimension = str(dimension or "").strip()
+        if not normalized_dimension:
+            continue
+        item_count = len(items or [])
+        if item_count < 2:
+            skipped_dimensions[normalized_dimension] = item_count
+            logger.info("维度[%s]题目数不足 2，道数=%d，已回退常规逻辑", normalized_dimension, item_count)
+            continue
+
+        plan = build_psychometric_plan(items, target_alpha=target_alpha)
+        if plan is None:
+            skipped_dimensions[normalized_dimension] = item_count
+            continue
+
+        plans[normalized_dimension] = plan
+        merged_items.extend(plan.items)
+        for item in plan.items:
+            item_dimension_map[_build_choice_key(item.question_index, item.row_index)] = normalized_dimension
+        logger.info("维度[%s]已启用心理测量计划，道数=%d", normalized_dimension, len(plan.items))
+
+    if not plans:
+        return None
+
+    return DimensionPsychometricPlan(
+        plans=plans,
+        item_dimension_map=item_dimension_map,
+        skipped_dimensions=skipped_dimensions,
+        items=merged_items,
     )
 
 

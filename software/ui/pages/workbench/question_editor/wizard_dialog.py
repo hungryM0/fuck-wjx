@@ -37,7 +37,7 @@ from qfluentwidgets.components.widgets.tool_tip import ItemViewToolTipDelegate, 
 from qfluentwidgets.components.widgets.pips_pager import PipsScrollButtonDisplayMode
 
 from software.core.questions.utils import OPTION_FILL_AI_TOKEN, build_random_int_token, serialize_random_int_range, try_parse_random_int_range
-from software.ui.helpers.qfluent_compat import install_tooltip_filters
+from software.ui.helpers.fluent_tooltip import install_tooltip_filters
 from software.ui.widgets.no_wheel import NoWheelSlider
 from software.core.questions.config import QuestionEntry
 from software.app.config import DEFAULT_FILL_TEXT
@@ -50,7 +50,6 @@ from .wizard_sections import (
     _TEXT_RANDOM_NAME_TOKEN,
     _TEXT_RANDOM_MOBILE_TOKEN,
     _TEXT_RANDOM_ID_CARD_TOKEN,
-    _get_segmented_route_key,
 )
 from .psycho_config import BIAS_PRESET_CHOICES
 
@@ -620,7 +619,7 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         def _reset_master(_=None):
             if self._master_applying:
                 return
-            if _get_segmented_route_key(_master_seg) != "custom":
+            if _master_seg.currentRouteKey() != "custom":
                 _master_seg.setCurrentItem("custom")
         for seg in self.bias_preset_map.values():
             if isinstance(seg, list):
@@ -1353,8 +1352,19 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         result: Dict[int, Any] = {}
         for idx, seg in self.bias_preset_map.items():
             if isinstance(seg, list):
-                result[idx] = [_get_segmented_route_key(s) for s in seg]
+                result[idx] = [str(s.currentRouteKey() or "custom") for s in seg]
             else:
-                result[idx] = _get_segmented_route_key(seg)
+                result[idx] = str(seg.currentRouteKey() or "custom")
+        return result
+
+    def get_dimensions(self) -> Dict[int, Optional[str]]:
+        """获取题目的当前维度配置。"""
+        result: Dict[int, Optional[str]] = {}
+        for idx, entry in enumerate(self.entries):
+            try:
+                raw = str(getattr(entry, "dimension", "") or "").strip()
+            except Exception:
+                raw = ""
+            result[idx] = raw or None
         return result
 

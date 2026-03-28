@@ -42,14 +42,14 @@ from software.ui.pages.workbench.dashboard.parts.clipboard import DashboardClipb
 from software.ui.pages.workbench.dashboard.parts.entries import DashboardEntriesMixin
 from software.ui.pages.workbench.dashboard.parts.progress import DashboardProgressMixin
 from software.ui.pages.workbench.dashboard.parts.random_ip import DashboardRandomIPMixin
-from software.ui.helpers.qfluent_compat import install_tooltip_filter
+from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.widgets.config_drawer import ConfigDrawer
 from software.ui.widgets.full_width_infobar import FullWidthInfoBar
 from software.ui.widgets.no_wheel import NoWheelSpinBox
 from software.ui.controller import RunController
-from software.ui.pages.workbench.answer_rules import AnswerRulesPage
 from software.ui.pages.workbench.question_editor.page import QuestionPage
 from software.ui.pages.workbench.runtime_panel import RuntimePage
+from software.ui.pages.workbench.strategy import QuestionStrategyPage
 from software.providers.common import (
     detect_survey_provider,
     is_supported_survey_url,
@@ -92,7 +92,7 @@ class DashboardPage(
         controller: RunController,
         question_page: QuestionPage,
         runtime_page: RuntimePage,
-        answer_rules_page: AnswerRulesPage,
+        strategy_page: QuestionStrategyPage,
         parent=None,
     ):
         super().__init__(parent)
@@ -100,7 +100,7 @@ class DashboardPage(
         self.controller = controller
         self.question_page = question_page
         self.runtime_page = runtime_page
-        self.answer_rules_page = answer_rules_page
+        self.strategy_page = strategy_page
         self._open_wizard_after_parse = False
         self._survey_title = ""
         self._last_pause_reason = ""
@@ -361,20 +361,22 @@ class DashboardPage(
         question_list_layout.addWidget(self.command_bar)
         self.entry_table = TableWidget(self.thread_view_question_card)
         self.entry_table.setRowCount(0)
-        self.entry_table.setColumnCount(3)
-        self.entry_table.setHorizontalHeaderLabels(["序号", "类型", "策略"])
+        self.entry_table.setColumnCount(4)
+        self.entry_table.setHorizontalHeaderLabels(["序号", "类型", "维度", "策略"])
         self.entry_table.verticalHeader().setVisible(False)
         self.entry_table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
         self.entry_table.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
         self.entry_table.setAlternatingRowColors(True)
         self.entry_table.setMinimumHeight(360)
-        # 设置列宽策略：第0列序号固定60px，第1列类型固定180px，第2列策略自动拉伸
+        # 设置列宽策略：第0列序号固定60px，第1列类型固定140px，第2列维度固定140px，第3列策略自动拉伸
         header = self.entry_table.horizontalHeader()
         header.setSectionResizeMode(0, header.ResizeMode.Fixed)
         header.setSectionResizeMode(1, header.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, header.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, header.ResizeMode.Fixed)
+        header.setSectionResizeMode(3, header.ResizeMode.Stretch)
         self.entry_table.setColumnWidth(0, 60)
-        self.entry_table.setColumnWidth(1, 180)
+        self.entry_table.setColumnWidth(1, 140)
+        self.entry_table.setColumnWidth(2, 140)
         question_list_layout.addWidget(self.entry_table, 1)
 
         self.thread_view_progress_card = CardWidget(self.thread_view_stack)
@@ -487,6 +489,10 @@ class DashboardPage(
             self.question_page.entriesChanged.connect(self._on_question_entries_changed)
         except Exception as exc:
             log_suppressed_exception("_bind_events: self.question_page.entriesChanged.connect(self._on_question_entries_changed)", exc, level=logging.WARNING)
+        try:
+            self.strategy_page.strategyChanged.connect(self._on_strategy_page_changed)
+        except Exception as exc:
+            log_suppressed_exception("_bind_events: self.strategy_page.strategyChanged.connect(self._on_strategy_page_changed)", exc, level=logging.WARNING)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -508,8 +514,12 @@ class DashboardPage(
         self.start_btn.setEnabled(bool(can_start))
 
     def _on_question_entries_changed(self, _count: int):
+        self.strategy_page.set_entries(self.question_page.entries, self.question_page.entry_questions_info)
         self._refresh_entry_table()
         self._sync_start_button_state()
+
+    def _on_strategy_page_changed(self):
+        self._refresh_entry_table()
 
     def _on_parse_clicked(self):
         url = self.url_edit.text().strip()
@@ -679,7 +689,8 @@ class DashboardPage(
         self.runtime_page.apply_config(cfg)
         self.apply_config(cfg)
         self.question_page.set_entries(cfg.question_entries or [], cfg.questions_info or [])
-        self.answer_rules_page.set_questions_info(cfg.questions_info or [])
+        self.strategy_page.set_questions_info(cfg.questions_info or [])
+        self.strategy_page.set_entries(self.question_page.entries, self.question_page.entry_questions_info)
         self._refresh_entry_table()
         try:
             self.update_question_meta(cfg.survey_title or "", len(cfg.question_entries or []))
@@ -821,9 +832,10 @@ class DashboardPage(
         self.random_ip_cb.blockSignals(False)
 
         try:
-            self.answer_rules_page.set_rules(getattr(cfg, "answer_rules", []) or [])
+            self.strategy_page.set_rules(getattr(cfg, "answer_rules", []) or [])
+            self.strategy_page.set_dimension_groups(getattr(cfg, "dimension_groups", []) or [])
         except Exception as exc:
-            log_suppressed_exception("apply_config: self.answer_rules_page.set_rules(...)", exc, level=logging.WARNING)
+            log_suppressed_exception("apply_config: self.strategy_page.set_rules(...)", exc, level=logging.WARNING)
 
         self._refresh_entry_table()
         self._sync_start_button_state()
@@ -855,7 +867,8 @@ class DashboardPage(
         cfg.target = max(1, self.target_spin.value())
         cfg.threads = max(1, self.thread_spin.value())
         cfg.random_ip_enabled = self.random_ip_cb.isChecked()
-        cfg.answer_rules = list(self.answer_rules_page.get_rules() or [])
+        cfg.answer_rules = list(self.strategy_page.get_rules() or [])
+        cfg.dimension_groups = list(self.strategy_page.get_dimension_groups() or [])
         return cfg
 
     def _toast(self, text: str, level: str = "info", duration: int = 2000, show_progress: bool = False):

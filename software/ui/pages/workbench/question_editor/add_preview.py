@@ -9,7 +9,7 @@ from qfluentwidgets import SubtitleLabel, BodyLabel, CardWidget, PushButton, Lin
 from software.ui.widgets.no_wheel import NoWheelSlider
 from software.app.config import DEFAULT_FILL_TEXT
 from software.ui.helpers.ai_fill import ensure_ai_ready
-from software.ui.helpers.qfluent_compat import install_tooltip_filter
+from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.logging.log_utils import log_suppressed_exception
 
 from .constants import _get_type_label

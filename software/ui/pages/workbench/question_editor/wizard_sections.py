@@ -23,7 +23,7 @@ from software.ui.widgets.no_wheel import NoWheelSlider
 from software.core.questions.config import QuestionEntry
 from software.app.config import DEFAULT_FILL_TEXT
 from software.ui.helpers.ai_fill import ensure_ai_ready
-from software.ui.helpers.qfluent_compat import install_tooltip_filter, install_tooltip_filters
+from software.ui.helpers.fluent_tooltip import install_tooltip_filter, install_tooltip_filters
 
 from .utils import (
     _shorten_text,
@@ -49,32 +49,6 @@ def _apply_ai_label_state_style(label: BodyLabel) -> None:
     label.setStyleSheet(
         f"QLabel {{ color: {active_color}; }} QLabel:disabled {{ color: {disabled_color}; }}"
     )
-
-
-def _get_segmented_route_key(seg: Any) -> str:
-    """兼容不同版本 QFluentWidgets：稳定读取分段控件 routeKey。"""
-    if seg is None:
-        return "custom"
-    try:
-        route_key_getter = getattr(seg, "currentRouteKey", None)
-        if callable(route_key_getter):
-            key = route_key_getter()
-            if isinstance(key, str) and key:
-                return key
-    except Exception:
-        pass
-    try:
-        item = seg.currentItem()
-    except Exception:
-        return "custom"
-    if isinstance(item, str) and item:
-        return item
-    route_key = getattr(item, "routeKey", None)
-    if isinstance(route_key, str) and route_key:
-        return route_key
-    return "custom"
-
-
 class WizardSectionsMixin:
     """各题型配置区 UI 构建方法。依赖 QuestionWizardDialog 的 state dict。"""
 
@@ -913,7 +887,7 @@ class WizardSectionsMixin:
                 def _on_slider(_):
                     if _flag[0]:
                         return
-                    if _get_segmented_route_key(seg) != "custom":
+                    if seg.currentRouteKey() != "custom":
                         seg.setCurrentItem("custom")
                 for sl in sliders:
                     sl.valueChanged.connect(_on_slider)
@@ -1280,7 +1254,7 @@ class WizardSectionsMixin:
                 def _cb(value):
                     if _flag[0]:
                         return
-                    if _get_segmented_route_key(_seg) != "custom":
+                    if _seg.currentRouteKey() != "custom":
                         _seg.setCurrentItem("custom")
                 return _cb
             _slider_cb = _make_slider_cb()

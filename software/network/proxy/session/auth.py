@@ -19,13 +19,10 @@ from software.app.config import (
 )
 from software.app.settings_store import app_settings
 from software.logging.log_utils import log_suppressed_exception
-from software.system.secure_store import delete_secret, read_secret, set_secret
+from software.system.secure_store import read_secret, set_secret
 
 _SESSION_PREFIX = "random_ip_auth/"
 _DEVICE_SECRET_KEY = "random_ip/device_id"
-_REFRESH_SECRET_KEY = "random_ip/refresh_token"
-_LEGACY_REFRESH_BACKUP_KEY = "refresh_token_backup"
-_LEGACY_REFRESH_EXPIRY_KEY = "refresh_expires_at"
 _LOG_BODY_PREVIEW_LIMIT = 320
 _SESSION_PERSIST_FAILED_DETAIL = "session_persist_failed"
 _SENSITIVE_PREVIEW_PATTERNS = (
@@ -223,32 +220,6 @@ def _session_log_fields(session: RandomIPSession) -> str:
         f"used={format_quota_value(used_quota)} "
         f"quota_known={bool(session.quota_known)}"
     )
-
-
-def _clear_legacy_auth_artifacts(settings: Any) -> List[str]:
-    cleared: List[str] = []
-
-    refresh_secret = read_secret(_REFRESH_SECRET_KEY)
-    if refresh_secret.value.strip():
-        cleared.append("secure_store.refresh_token")
-    if refresh_secret.status != "not_found":
-        delete_secret(_REFRESH_SECRET_KEY)
-
-    legacy_refresh_backup = str(settings.value(_settings_key(_LEGACY_REFRESH_BACKUP_KEY)) or "").strip()
-    if legacy_refresh_backup:
-        cleared.append(f"settings.{_LEGACY_REFRESH_BACKUP_KEY}")
-    settings.remove(_settings_key(_LEGACY_REFRESH_BACKUP_KEY))
-
-    legacy_refresh_expiry = str(settings.value(_settings_key(_LEGACY_REFRESH_EXPIRY_KEY)) or "").strip()
-    if legacy_refresh_expiry:
-        cleared.append(f"settings.{_LEGACY_REFRESH_EXPIRY_KEY}")
-    settings.remove(_settings_key(_LEGACY_REFRESH_EXPIRY_KEY))
-
-    if cleared:
-        settings.sync()
-    return cleared
-
-
 def _normalize_quota_state(
     *,
     remaining_quota: Any = None,
@@ -378,7 +349,6 @@ def _ensure_loaded() -> None:
         if not device_id:
             device_id = uuid.uuid4().hex
             set_secret(_DEVICE_SECRET_KEY, device_id)
-        cleared_legacy_artifacts = _clear_legacy_auth_artifacts(settings)
         loaded_user_id = _to_non_negative_int(settings.value(_settings_key("user_id")), 0)
         loaded_remaining_quota = _to_non_negative_quota(settings.value(_settings_key("remaining_quota")), 0.0)
         loaded_total_quota = _to_non_negative_quota(settings.value(_settings_key("total_quota")), loaded_remaining_quota)
@@ -410,15 +380,12 @@ def _ensure_loaded() -> None:
         log_level = logging.INFO
         if device_secret.status not in {"ok", "not_found"}:
             log_level = logging.WARNING
-        if cleared_legacy_artifacts:
-            log_level = logging.WARNING
         _log_session_event(
             log_level,
             "启动加载完成",
             loaded_session,
             device_secret=device_secret.status,
             device_from=device_from,
-            cleared_legacy_artifacts=",".join(cleared_legacy_artifacts) or "-",
             settings_user_id=loaded_user_id,
         )
 
@@ -431,11 +398,8 @@ def _persist_session_locked() -> None:
     settings.setValue(_settings_key("total_quota"), format_quota_value(_session.total_quota))
     settings.setValue(_settings_key("used_quota"), format_quota_value(_session.used_quota))
     settings.setValue(_settings_key("quota_known"), bool(_session.quota_known))
-    settings.remove(_settings_key(_LEGACY_REFRESH_EXPIRY_KEY))
-    settings.remove(_settings_key(_LEGACY_REFRESH_BACKUP_KEY))
     settings.sync()
     set_secret(_DEVICE_SECRET_KEY, _session.device_id)
-    delete_secret(_REFRESH_SECRET_KEY)
 
 
 def _verify_persisted_session(session: RandomIPSession) -> None:
@@ -472,21 +436,9 @@ def _verify_persisted_session(session: RandomIPSession) -> None:
     if persisted_quota_known is None or bool(persisted_quota_known) != expected_quota_known:
         failures.append("settings.quota_known")
 
-    persisted_refresh_expires_at = str(settings.value(_settings_key(_LEGACY_REFRESH_EXPIRY_KEY)) or "").strip()
-    if persisted_refresh_expires_at:
-        failures.append(f"settings.{_LEGACY_REFRESH_EXPIRY_KEY}")
-
-    persisted_refresh_token_backup = str(settings.value(_settings_key(_LEGACY_REFRESH_BACKUP_KEY)) or "").strip()
-    if persisted_refresh_token_backup:
-        failures.append(f"settings.{_LEGACY_REFRESH_BACKUP_KEY}")
-
     persisted_device_secret = read_secret(_DEVICE_SECRET_KEY)
     if persisted_device_secret.value.strip() != expected_device_id:
         failures.append(f"secure_store.device_id[{persisted_device_secret.status}]")
-
-    persisted_refresh_secret = read_secret(_REFRESH_SECRET_KEY)
-    if persisted_refresh_secret.status != "not_found":
-        failures.append(f"secure_store.refresh_token[{persisted_refresh_secret.status}]")
 
     if failures:
         logging.error("随机IP会话持久化校验失败：%s", ", ".join(failures))
@@ -575,15 +527,12 @@ def clear_session(*, reason: str = "unspecified") -> None:
         _ensure_loaded()
         previous_session = _session
         _session = RandomIPSession(device_id=_session.device_id)
-        delete_secret(_REFRESH_SECRET_KEY)
         settings = _get_settings()
         settings.remove(_settings_key("user_id"))
         settings.remove(_settings_key("remaining_quota"))
         settings.remove(_settings_key("total_quota"))
         settings.remove(_settings_key("used_quota"))
         settings.remove(_settings_key("quota_known"))
-        settings.remove(_settings_key(_LEGACY_REFRESH_BACKUP_KEY))
-        settings.remove(_settings_key(_LEGACY_REFRESH_EXPIRY_KEY))
         settings.sync()
         _log_session_event(logging.WARNING, "本地会话已清空", previous_session, reason=reason)
 

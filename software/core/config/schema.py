@@ -46,6 +46,7 @@ class RuntimeConfig:
     ai_model: str = ""
     ai_system_prompt: str = ""
     answer_rules: List[Dict[str, Any]] = field(default_factory=list)
+    dimension_groups: List[str] = field(default_factory=list)
     question_entries: List[QuestionEntry] = field(default_factory=list)
     questions_info: Optional[List[Dict[str, Any]]] = field(default_factory=list)
     _ai_config_present: bool = field(default=False, init=False, repr=False)

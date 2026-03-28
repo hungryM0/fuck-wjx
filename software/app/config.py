@@ -24,7 +24,6 @@ app_settings = _app_settings
 get_bool_from_qsettings = _get_bool_from_qsettings
 
 NAVIGATION_TEXT_VISIBLE_SETTING_KEY = "navigation_selected_text_visible"
-LEGACY_SIDEBAR_EXPAND_SETTING_KEY = "sidebar_always_expand"
 
 _ENV_FILE_NAME = ".env"
 def _read_windows_env_var(key: str) -> str:

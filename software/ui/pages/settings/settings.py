@@ -17,7 +17,6 @@ from qfluentwidgets import (
 from software.app.config import (
     DEFAULT_DOWNLOAD_SOURCE,
     DOWNLOAD_SOURCES,
-    LEGACY_SIDEBAR_EXPAND_SETTING_KEY,
     NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
     app_settings,
     get_bool_from_qsettings,
@@ -199,21 +198,12 @@ class SettingsPage(ScrollArea):
     def _read_navigation_text_visible_setting(self) -> bool:
         settings = app_settings()
         value = settings.value(NAVIGATION_TEXT_VISIBLE_SETTING_KEY)
-        if value is not None:
-            return get_bool_from_qsettings(value, True)
-
-        legacy_value = settings.value(LEGACY_SIDEBAR_EXPAND_SETTING_KEY)
-        visible = get_bool_from_qsettings(legacy_value, True)
-        if legacy_value is not None:
-            settings.setValue(NAVIGATION_TEXT_VISIBLE_SETTING_KEY, visible)
-            settings.remove(LEGACY_SIDEBAR_EXPAND_SETTING_KEY)
-        return visible
+        return get_bool_from_qsettings(value, True)
 
     def _apply_navigation_text_state(self, checked: bool, persist: bool = True):
         settings = app_settings()
         if persist:
             settings.setValue(NAVIGATION_TEXT_VISIBLE_SETTING_KEY, checked)
-            settings.remove(LEGACY_SIDEBAR_EXPAND_SETTING_KEY)
         log_action(
             "CONFIG",
             "toggle_navigation_text_visible",
@@ -325,7 +315,6 @@ class SettingsPage(ScrollArea):
         settings = app_settings()
         for key in (
             NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
-            LEGACY_SIDEBAR_EXPAND_SETTING_KEY,
             "window_topmost",
             "ask_save_on_close",
             "auto_check_update",

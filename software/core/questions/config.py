@@ -16,7 +16,7 @@ from software.core.questions.utils import (
     try_parse_random_int_range,
 )
 from software.core.questions.strict_ratio import is_strict_custom_ratio_mode
-from software.app.config import DEFAULT_FILL_TEXT, LOCATION_QUESTION_LABEL, QUESTION_TYPE_LABELS
+from software.app.config import DEFAULT_FILL_TEXT, DIMENSION_UNGROUPED, LOCATION_QUESTION_LABEL, QUESTION_TYPE_LABELS
 from software.logging.log_utils import log_suppressed_exception
 
 if TYPE_CHECKING:
@@ -222,9 +222,18 @@ def _get_entry_type_label(entry: QuestionEntry) -> str:
         return LOCATION_QUESTION_LABEL
     return QUESTION_TYPE_LABELS.get(entry.question_type, entry.question_type)
 
-
-# 信效度模式下所有量表/矩阵/评价题共享的全局维度标识
-_RELIABILITY_GLOBAL_DIMENSION = "__reliability__"
+def _resolve_runtime_dimension(
+    entry: QuestionEntry,
+    *,
+    reliability_mode_enabled: bool,
+    strict_ratio: bool,
+) -> Optional[str]:
+    if not reliability_mode_enabled or strict_ratio:
+        return None
+    raw_dimension = str(getattr(entry, "dimension", "") or "").strip()
+    if not raw_dimension or raw_dimension == DIMENSION_UNGROUPED:
+        return None
+    return raw_dimension
 
 
 def configure_probabilities(
@@ -306,10 +315,10 @@ def configure_probabilities(
         elif entry.question_type == "matrix":
             rows = max(1, entry.rows)
             _target.question_config_index_map[question_num] = ("matrix", _idx_matrix)
-            _target.question_dimension_map[question_num] = (
-                _RELIABILITY_GLOBAL_DIMENSION
-                if reliability_mode_enabled and not strict_ratio
-                else None
+            _target.question_dimension_map[question_num] = _resolve_runtime_dimension(
+                entry,
+                reliability_mode_enabled=reliability_mode_enabled,
+                strict_ratio=strict_ratio,
             )
             bias_value = getattr(entry, "psycho_bias", "custom")
             if isinstance(bias_value, list):
@@ -366,10 +375,10 @@ def configure_probabilities(
                     _target.matrix_prob.append(-1)
         elif entry.question_type in ("scale", "score"):
             _target.question_config_index_map[question_num] = (entry.question_type, _idx_scale)
-            _target.question_dimension_map[question_num] = (
-                _RELIABILITY_GLOBAL_DIMENSION
-                if reliability_mode_enabled and not strict_ratio
-                else None
+            _target.question_dimension_map[question_num] = _resolve_runtime_dimension(
+                entry,
+                reliability_mode_enabled=reliability_mode_enabled,
+                strict_ratio=strict_ratio,
             )
             _target.question_psycho_bias_map[question_num] = str(getattr(entry, "psycho_bias", "custom") or "custom")
             _idx_scale += 1

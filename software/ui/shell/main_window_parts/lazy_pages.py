@@ -14,9 +14,9 @@ from qfluentwidgets import (
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QStackedWidget
-    from software.ui.pages.workbench.answer_rules import AnswerRulesPage
     from software.ui.pages.workbench.dashboard import DashboardPage
     from software.ui.pages.workbench.runtime_panel import RuntimePage
+    from software.ui.pages.workbench.strategy import QuestionStrategyPage
 
 
 class MainWindowLazyPagesMixin:
@@ -26,7 +26,7 @@ class MainWindowLazyPagesMixin:
         # 以下属性由 FluentWindow / MainWindow 主类提供，仅用于 Pylance 类型检查
         dashboard: DashboardPage
         runtime_page: RuntimePage
-        answer_rules_page: AnswerRulesPage
+        strategy_page: QuestionStrategyPage
         stackedWidget: QStackedWidget
         navigationInterface: Any  # qfluentwidgets.NavigationInterface
         addSubInterface: Any
@@ -36,7 +36,7 @@ class MainWindowLazyPagesMixin:
     def _init_navigation(self):
         self.addSubInterface(self.dashboard, FluentIcon.HOME, "概览", position=NavigationItemPosition.TOP)
         self.addSubInterface(self.runtime_page, FluentIcon.DEVELOPER_TOOLS, "运行参数", position=NavigationItemPosition.TOP)
-        self.addSubInterface(self.answer_rules_page, FluentIcon.DICTIONARY_ADD, "作答规则", position=NavigationItemPosition.TOP)
+        self.addSubInterface(self.strategy_page, FluentIcon.DICTIONARY_ADD, "题目策略", position=NavigationItemPosition.TOP)
         self.addSubInterface(self._get_log_page(), FluentIcon.INFO, "日志", position=NavigationItemPosition.TOP)
         # 社区页面
         self.addSubInterface(self._get_community_page(), FluentIcon.CHAT, "社区", position=NavigationItemPosition.BOTTOM)

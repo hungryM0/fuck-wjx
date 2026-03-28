@@ -1,4 +1,4 @@
-"""作答规则引擎：按用户配置的条件规则约束后续题目作答。"""
+"""条件规则引擎：按用户配置的条件规则约束后续题目作答。"""
 from __future__ import annotations
 
 import logging
@@ -187,7 +187,7 @@ def reset_consistency_context(
     answer_rules: Optional[Sequence[Dict[str, Any]]] = None,
     questions_info: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> None:
-    """每份问卷开始时调用，注入并重置作答规则上下文。"""
+    """每份问卷开始时调用，注入并重置条件规则上下文。"""
     parsed_rules: List[AnswerRule] = []
     sanitized_rules, _ = sanitize_answer_rules(answer_rules, questions_info)
     for item in sanitized_rules:
@@ -267,7 +267,7 @@ def _apply_rule(
     valid_indices = _resolve_valid_rule_indices(rule, len(base_probabilities))
     if not valid_indices:
         logging.warning(
-            "作答规则[%s]命中但目标选项越界，已忽略该规则（题号=%s）",
+            "条件规则[%s]命中但目标选项越界，已忽略该规则（题号=%s）",
             rule.id,
             rule.target_question_num,
         )
@@ -278,13 +278,13 @@ def _apply_rule(
         adjusted = [0.0 if idx in valid_indices else weight for idx, weight in enumerate(base_probabilities)]
     if sum(adjusted) <= 0:
         logging.warning(
-            "作答规则[%s]命中后无可用选项，已回退原概率（题号=%s）",
+            "条件规则[%s]命中后无可用选项，已回退原概率（题号=%s）",
             rule.id,
             rule.target_question_num,
         )
         return list(base_probabilities)
     logging.info(
-        "作答规则[%s]已生效：条件题=%s，目标题=%s，动作=%s，目标选项=%s",
+        "条件规则[%s]已生效：条件题=%s，目标题=%s，动作=%s，目标选项=%s",
         rule.id,
         rule.condition_question_num,
         rule.target_question_num,
@@ -330,13 +330,13 @@ def get_multiple_rule_constraint(
     valid_indices = _resolve_valid_rule_indices(rule, option_count)
     if not valid_indices:
         logging.warning(
-            "作答规则[%s]命中但目标选项越界，已忽略该规则（题号=%s）",
+            "条件规则[%s]命中但目标选项越界，已忽略该规则（题号=%s）",
             rule.id,
             rule.target_question_num,
         )
         return set(), set(), rule.id
     logging.info(
-        "作答规则[%s]已生效：条件题=%s，目标题=%s，动作=%s，目标选项=%s",
+        "条件规则[%s]已生效：条件题=%s，目标题=%s，动作=%s，目标选项=%s",
         rule.id,
         rule.condition_question_num,
         rule.target_question_num,
