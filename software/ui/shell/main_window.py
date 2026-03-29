@@ -16,7 +16,6 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     MSFluentWindow,
-    MessageBox,
     Theme,
     qconfig,
     setTheme,
@@ -141,7 +140,6 @@ class MainWindow(
         self.strategy_page.setObjectName("strategy")
 
         self._init_navigation()
-        self._init_changelog_navigation()
         self._init_community_hint_badge_state()
         self.stackedWidget.currentChanged.connect(self._on_stack_widget_changed)
         # 微软商店风格导航栏需要在事件循环后应用显示偏好，避免初始化时序抖动
@@ -439,10 +437,6 @@ class MainWindow(
             def _show():
                 if kind == "confirm":
                     return self.show_confirm_dialog(title, message)
-                    box = MessageBox(title, message, self)
-                    box.yesButton.setText("确定")
-                    box.cancelButton.setText("取消")
-                    return bool(box.exec())
                 if kind == "error":
                     InfoBar.error(title, message, parent=self, position=InfoBarPosition.TOP, duration=3000)
                     return False

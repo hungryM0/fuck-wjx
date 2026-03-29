@@ -139,11 +139,6 @@ class MainWindowLazyPagesMixin:
                 self.stackedWidget.addWidget(self._donate_page)
         return self._donate_page
 
-    def _init_changelog_navigation(self):
-        """初始化更新日志导航。"""
-        # 不在启动阶段预建页面，避免主窗口刚起来就额外拉起网络线程。
-        return
-
     def _show_about_menu(self):
         """显示关于子菜单"""
         from software.app.version import __VERSION__

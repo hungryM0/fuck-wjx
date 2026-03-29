@@ -24,8 +24,8 @@
 │   └── ISSUE_TEMPLATE/        # Issue 模板（报错反馈、新功能请求）
 ├── SurveyController.py
 ├── rthook_pyside6.py     # PySide6 打包钩子
-├── test_wjx_imports.py   # 导入检测脚本
-├── test_wjx_deadcode.py  # 死代码检测脚本
+├── test_imports.py       # 导入检测脚本
+├── test_deadcode.py      # 死代码检测脚本
 ├── software/             # 软件主包（应用壳 + 共享核心 + 平台总调度）
 ├── tencent/              # 腾讯问卷主包
 └── wjx/                  # 问卷星主包
@@ -59,7 +59,7 @@ software/
 │   ├── browser/           # 浏览器驱动
 │   └── proxy/             # 代理 API / 会话 / 策略 / 地区 / 代理池
 ├── providers/             # 平台识别、注册、分发总入口
-├── system/                # Windows/系统级能力（安全存储、注册表、进程清理）
+├── system/                # Windows/系统级能力（安全存储、注册表）
 ├── ui/
 │   ├── shell/             # 主窗口、启动页、页面装配
 │   ├── controller/        # Qt 协调器

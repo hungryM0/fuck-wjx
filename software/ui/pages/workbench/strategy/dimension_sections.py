@@ -91,7 +91,7 @@ class DimensionEntryTable(TableWidget):
 
         drag = QDrag(self)
         drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.MoveAction)
+        drag.exec(supportedActions or Qt.DropAction.MoveAction)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasFormat(ENTRY_DRAG_MIME):
