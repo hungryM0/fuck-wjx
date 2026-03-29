@@ -3,14 +3,13 @@ import random
 import threading
 import time
 import traceback
-from typing import Any, Optional, Set
+from typing import Any, Optional
 import logging
 from software.logging.log_utils import log_suppressed_exception
 
 import software.core.modes.duration_control as duration_control
 import software.core.modes.timed_mode as timed_mode
 from software.core.ai.runtime import AIRuntimeError
-from software.core.engine.answering import brush
 from software.core.engine.driver_factory import (
     create_browser_manager,
     create_playwright_driver,
@@ -22,14 +21,11 @@ from software.core.engine.runtime_control import (
     _trigger_target_reached_stop,
     _wait_if_paused,
 )
-from software.core.engine.submission import (
-    EmptySurveySubmissionError,
-    _is_device_quota_limit_page,
-    _normalize_url_for_compare,
-    consume_headless_httpx_submit_success,
-)
 from software.providers.registry import (
+    consume_submission_success_signal as _provider_consume_submission_success_signal,
     handle_submission_verification_detected as _provider_handle_submission_verification_detected,
+    is_device_quota_limit_page as _provider_is_device_quota_limit_page,
+    fill_survey as _provider_fill_survey,
     submission_requires_verification as _provider_submission_requires_verification,
     submission_validation_message as _provider_submission_validation_message,
     wait_for_submission_verification as _provider_wait_for_submission_verification,
@@ -507,7 +503,10 @@ def run(
                     break
 
             # ── 3. 设备配额限制检查 ──────────────────────────────
-            if _is_device_quota_limit_page(session.driver):
+            if _provider_is_device_quota_limit_page(
+                session.driver,
+                provider=getattr(ctx, "survey_provider", None),
+            ):
                 logging.warning("检测到设备已达到最大填写次数提示页，本轮按失败处理，不计入成功份数。")
                 stopped = _handle_submission_failure(
                     ctx,
@@ -540,12 +539,6 @@ def run(
                         logging.info("设备上限失败后处理随机IP提交流程失败", exc_info=True)
                 continue
 
-            visited_urls: Set[str] = set()
-            try:
-                visited_urls.add(_normalize_url_for_compare(session.driver.current_url))
-            except Exception:
-                visited_urls.add(_normalize_url_for_compare(ctx.url))
-
             # ── 4. 答题 + 提交 ───────────────────────────────────
             while True:
                 if stop_signal.is_set():
@@ -554,12 +547,21 @@ def run(
                     ctx.reset_pending_distribution(thread_name)
                 except Exception:
                     logging.info("重置本轮比例统计缓存失败", exc_info=True)
-                finished = brush(session.driver, ctx=ctx, stop_signal=stop_signal)
+                finished = _provider_fill_survey(
+                    session.driver,
+                    ctx=ctx,
+                    stop_signal=stop_signal,
+                    thread_name=thread_name,
+                    provider=getattr(ctx, "survey_provider", None),
+                )
                 if stop_signal.is_set() or not finished:
                     break
 
                 # 无头+httpx 已经拿到业务成功码时，直接按成功提交处理，避免完成页加载超时误判失败
-                if ctx.headless_mode and consume_headless_httpx_submit_success(session.driver):
+                if ctx.headless_mode and _provider_consume_submission_success_signal(
+                    session.driver,
+                    provider=getattr(ctx, "survey_provider", None),
+                ):
                     grace_seconds = _resolve_post_submit_close_grace_seconds(ctx)
                     if grace_seconds > 0 and not stop_signal.is_set():
                         time.sleep(grace_seconds)
@@ -760,12 +762,6 @@ def run(
                     break
                 stop_signal.wait(0.8)
                 continue
-            if _handle_submission_failure(ctx, stop_signal, thread_name=thread_name):
-                break
-        except EmptySurveySubmissionError:
-            driver_had_error = True
-            if stop_signal.is_set():
-                break
             if _handle_submission_failure(ctx, stop_signal, thread_name=thread_name):
                 break
         except Exception:

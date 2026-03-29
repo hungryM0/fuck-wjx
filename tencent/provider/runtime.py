@@ -37,13 +37,10 @@ from software.core.modes.duration_control import simulate_answer_duration_delay
 from software.network.browser import BrowserDriver, NoSuchElementException
 from software.app.config import DEFAULT_FILL_TEXT, HEADLESS_PAGE_BUFFER_DELAY, HEADLESS_PAGE_CLICK_DELAY
 
-from software.core.engine.navigation import (
-    _click_next_page_button,
-    _human_scroll_after_question,
-    dismiss_resume_dialog_if_present,
-)
+from software.core.engine.navigation import _human_scroll_after_question
 from software.core.engine.runtime_control import _is_headless_mode
-from software.core.engine.submission import submit
+from tencent.provider.navigation import _click_next_page_button, dismiss_resume_dialog_if_present
+from tencent.provider.submission import submit
 
 QQ_COMPLETION_MARKERS = (
     "感谢您的参与",

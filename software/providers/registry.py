@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from software.core.engine.provider_common import provider_run_context
 from software.providers.common import (
     SURVEY_PROVIDER_QQ,
     SURVEY_PROVIDER_WJX,
@@ -48,30 +49,34 @@ def fill_survey(
 ) -> bool:
     """Provider 运行时答题分发。"""
     resolved = _resolve_provider(provider=provider, ctx=ctx)
-    if resolved == SURVEY_PROVIDER_QQ:
-        # 延迟导入，避免引入 provider runtime 与 core.engine 的循环依赖。
-        from tencent.provider.runtime import brush_qq
+    try:
+        ctx.update_thread_status(thread_name, "识别题目", running=True)
+    except Exception:
+        pass
+    with provider_run_context(ctx, psycho_plan=psycho_plan) as resolved_plan:
+        if resolved == SURVEY_PROVIDER_QQ:
+            from tencent.provider.runtime import brush_qq
 
-        return bool(
-            brush_qq(
-                driver,
-                ctx,
-                stop_signal=stop_signal,
-                thread_name=thread_name,
-                psycho_plan=psycho_plan,
+            return bool(
+                brush_qq(
+                    driver,
+                    ctx,
+                    stop_signal=stop_signal,
+                    thread_name=thread_name,
+                    psycho_plan=resolved_plan,
+                )
             )
-        )
 
-    if resolved == SURVEY_PROVIDER_WJX:
-        return bool(
-            brush_wjx(
-                driver,
-                ctx,
-                stop_signal=stop_signal,
-                thread_name=thread_name,
-                psycho_plan=psycho_plan,
+        if resolved == SURVEY_PROVIDER_WJX:
+            return bool(
+                brush_wjx(
+                    driver,
+                    ctx,
+                    stop_signal=stop_signal,
+                    thread_name=thread_name,
+                    psycho_plan=resolved_plan,
+                )
             )
-        )
 
     raise RuntimeError(f"不支持的问卷 provider: {resolved}")
 
@@ -151,13 +156,43 @@ def handle_submission_verification_detected(
         handle_wjx_submission_verification_detected(ctx, gui_instance, stop_signal)
 
 
+def consume_submission_success_signal(driver: Any, provider: Optional[str] = None) -> bool:
+    """Provider 提交成功短路标记读取。"""
+    resolved = _resolve_provider(provider=provider)
+    if resolved == SURVEY_PROVIDER_QQ:
+        from tencent.provider.submission import consume_submission_success_signal as consume_qq_submission_success_signal
+
+        return bool(consume_qq_submission_success_signal(driver))
+    if resolved == SURVEY_PROVIDER_WJX:
+        from wjx.provider.submission import consume_submission_success_signal as consume_wjx_submission_success_signal
+
+        return bool(consume_wjx_submission_success_signal(driver))
+    return False
+
+
+def is_device_quota_limit_page(driver: Any, provider: Optional[str] = None) -> bool:
+    """Provider 设备次数上限页识别。"""
+    resolved = _resolve_provider(provider=provider)
+    if resolved == SURVEY_PROVIDER_QQ:
+        from tencent.provider.submission import is_device_quota_limit_page as is_qq_device_quota_limit_page
+
+        return bool(is_qq_device_quota_limit_page(driver))
+    if resolved == SURVEY_PROVIDER_WJX:
+        from wjx.provider.submission import is_device_quota_limit_page as is_wjx_device_quota_limit_page
+
+        return bool(is_wjx_device_quota_limit_page(driver))
+    return False
+
+
 __all__ = [
     "SURVEY_PROVIDER_WJX",
     "SURVEY_PROVIDER_QQ",
+    "consume_submission_success_signal",
     "detect_survey_provider",
     "parse_survey",
     "fill_survey",
     "is_completion_page",
+    "is_device_quota_limit_page",
     "handle_submission_verification_detected",
     "submission_requires_verification",
     "submission_validation_message",

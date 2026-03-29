@@ -3,7 +3,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
-from software.core.questions.types.text import MULTI_TEXT_DELIMITER
+from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
 from software.core.questions.utils import (
     build_random_int_token,
     describe_random_int_range,

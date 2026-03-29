@@ -40,11 +40,11 @@ software/
 ├── core/                  # 共享执行核心
 │   ├── ai/                # AI 填空共享逻辑
 │   ├── config/            # 配置结构与编解码
-│   ├── engine/            # 共享执行流程（runner/cleanup/submission 等）
+│   ├── engine/            # 共享执行流程（runner/cleanup/公共预处理）；平台专属导航/提交不再放这里
 │   ├── modes/             # 作答模式与时长控制
 │   ├── persona/           # 人设与上下文生成
 │   ├── psychometrics/     # 心理测量题辅助逻辑
-│   ├── questions/         # 题目配置、分布、题型实现
+│   ├── questions/         # 题目配置、分布、共享判定与文本共享常量；平台 DOM 执行器不再放这里
 │   └── task/              # TaskContext、事件总线、线程进度模型
 ├── integrations/
 │   └── ai/                # AI API 适配器
@@ -74,19 +74,19 @@ software/
 
 tencent/
 ├── __init__.py            # 包标记文件；真正平台实现请直接看 provider/
-└── provider/              # 腾讯问卷专属实现（解析/运行时）
+└── provider/              # 腾讯问卷专属实现（解析、运行时、导航、提交）
 
 wjx/
 ├── __init__.py            # 包标记文件；仅保留版本信息，真实实现在 provider/ 子模块
-└── provider/              # 问卷星专属实现（解析、检测、运行时、提交）
+└── provider/              # 问卷星专属实现（解析、检测、导航、运行时、提交、questions/ 题型执行器）
 ```
 
 ## PR 流程（推荐）
 1. Fork 仓库本仓库
 2. 开发遵守三主包边界原则：
    - **共享代码** → `software/`（GUI、配置、执行引擎等）
-   - **问卷星专属** → `wjx/provider/`（平台特定的解析和运行逻辑）
-   - **腾讯问卷专属** → `tencent/provider/`（平台特定的解析和运行逻辑）
+   - **问卷星专属** → `wjx/provider/`（平台特定的解析、导航、提交和题型执行）
+   - **腾讯问卷专属** → `tencent/provider/`（平台特定的解析、导航、提交和运行逻辑）
    - **顶层包** → 仅保留包标记文件，不要把实现代码再塞回 `tencent/`、`wjx/` 目录
 3. 自测：运行 `python test_imports.py` 和 `python test_deadcode.py` 检查 import、语法和死代码错误；至少手动跑一次核心流程（启动APP、加载问卷、配置参数、开始执行），确保无报错
 4. 提交：保持清晰提交信息，必要时补充中文注释和变更说明

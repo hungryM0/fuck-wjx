@@ -1586,7 +1586,7 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
 
     def get_text_results(self) -> Dict[int, List[str]]:
         """获取填空题答案结果"""
-        from software.core.questions.types.text import MULTI_TEXT_DELIMITER
+        from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
         result: Dict[int, List[str]] = {}
         for idx, edits in self.text_edit_map.items():
             if edits and isinstance(edits[0], list):

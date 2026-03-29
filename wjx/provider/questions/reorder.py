@@ -7,7 +7,7 @@ from typing import Any, List, Optional
 
 from software.network.browser import By, BrowserDriver
 from software.core.questions.utils import extract_text_from_element
-from software.core.questions.types.multiple import (
+from wjx.provider.questions.multiple import (
     detect_multiple_choice_limit_range,
     detect_multiple_choice_limit,
     _log_multi_limit_once,

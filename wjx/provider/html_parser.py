@@ -807,7 +807,7 @@ def _extract_multiple_choice_limits(question_div, question_number: int) -> Tuple
 
     # 尝试从 multiple.py 中复用限制检测逻辑
     try:
-        from software.core.questions.types.multiple import (
+        from wjx.provider.questions.multiple import (
             _extract_min_max_from_attributes,
             _extract_range_from_possible_json,
             _extract_multi_limit_range_from_text,

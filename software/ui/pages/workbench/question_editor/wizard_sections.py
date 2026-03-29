@@ -439,7 +439,7 @@ class WizardSectionsMixin:
         card_layout: QVBoxLayout, blank_count: int
     ) -> None:
         """为多项填空题构建矩阵式输入界面"""
-        from software.core.questions.types.text import MULTI_TEXT_DELIMITER
+        from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
 
         # 提示标签
         hint = BodyLabel(f"答案列表（随机选择一组填入，共 {blank_count} 个填空）：", card)

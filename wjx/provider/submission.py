@@ -7,13 +7,15 @@ import threading
 import time
 from typing import Any, Optional
 
-from software.core.engine.submission import (
+from wjx.provider._submission_core import (
+    EmptySurveySubmissionError,
     _click_submit_button,
-    _is_device_quota_limit_page,
     _is_wjx_domain,
     _looks_like_wjx_survey_url,
     _normalize_url_for_compare,
     _page_looks_like_wjx_questionnaire,
+    consume_headless_httpx_submit_success,
+    _is_device_quota_limit_page,
     submit,
 )
 from software.core.task import EVENT_CAPTCHA_DETECTED, TaskContext, bus as _event_bus
@@ -283,16 +285,26 @@ def handle_submission_verification_detected(
     _trigger_aliyun_captcha_stop(ctx, gui_instance, stop_signal)
 
 
+def consume_submission_success_signal(driver: BrowserDriver) -> bool:
+    return consume_headless_httpx_submit_success(driver)
+
+
+def is_device_quota_limit_page(driver: BrowserDriver) -> bool:
+    return _is_device_quota_limit_page(driver)
+
+
 __all__ = [
     "AliyunCaptchaBypassError",
     "_ALIYUN_CAPTCHA_DOM_IDS",
     "_click_submit_button",
-    "_is_device_quota_limit_page",
     "_is_wjx_domain",
     "_looks_like_wjx_survey_url",
     "_normalize_url_for_compare",
     "_page_looks_like_wjx_questionnaire",
+    "consume_submission_success_signal",
+    "EmptySurveySubmissionError",
     "handle_submission_verification_detected",
+    "is_device_quota_limit_page",
     "submission_requires_verification",
     "submission_validation_message",
     "submit",

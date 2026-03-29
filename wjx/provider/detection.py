@@ -5,7 +5,7 @@ import time
 from typing import List, Optional, Tuple
 
 from software.network.browser import By, BrowserDriver
-from software.core.engine.navigation import dismiss_resume_dialog_if_present, try_click_start_answer_button
+from wjx.provider.navigation import dismiss_resume_dialog_if_present, try_click_start_answer_button
 
 
 def _count_questions_by_fieldset(driver: BrowserDriver) -> List[int]:

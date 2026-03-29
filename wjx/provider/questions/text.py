@@ -17,9 +17,7 @@ from software.core.questions.utils import (
 )
 from software.core.ai.runtime import AIRuntimeError, generate_ai_answer, resolve_question_title_for_ai
 from software.core.persona.context import record_answer
-
-# 多项填空题分隔符（仅用于旧配置/自定义文本的兜底解析）
-MULTI_TEXT_DELIMITER = "||"
+from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
 
 
 def _preview_text_answer(value: Optional[Any], limit: int = 80) -> str:
