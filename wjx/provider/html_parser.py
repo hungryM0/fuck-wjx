@@ -1,0 +1,1394 @@
+"""问卷星 HTML 解析模块 - 从 HTML 解析问卷结构。"""
+import re
+from typing import Any, Dict, List, Optional, Tuple
+import logging
+from software.core.questions.utils import (
+    _normalize_question_type_code,
+    _should_treat_question_as_text_like,
+)
+from software.logging.log_utils import log_suppressed_exception
+
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+
+from software.app.config import _HTML_SPACE_RE
+
+
+def _normalize_html_text(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return _HTML_SPACE_RE.sub(" ", value).strip()
+
+
+def extract_survey_title_from_html(html: str) -> Optional[str]:
+    """尝试从问卷 HTML 文本中提取标题。"""
+
+
+    if not BeautifulSoup:
+        return None
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return None
+
+    selectors = [
+        "#divTitle h1",
+        "#divTitle",
+        ".surveytitle",
+        ".survey-title",
+        ".surveyTitle",
+        ".wjdcTitle",
+        ".htitle",
+        ".topic_tit",
+        "#htitle",
+        "#lbTitle",
+    ]
+    candidates: List[str] = []
+    for selector in selectors:
+        element = soup.select_one(selector)
+        if element:
+            text = _normalize_html_text(element.get_text(" ", strip=True))
+            if text:
+                candidates.append(text)
+
+    if not candidates:
+        for tag_name in ("h1", "h2"):
+            header = soup.find(tag_name)
+            if header:
+                text = _normalize_html_text(header.get_text(" ", strip=True))
+                if text:
+                    candidates.append(text)
+                if candidates:
+                    break
+
+    title_tag = soup.find("title")
+    if title_tag:
+        text = _normalize_html_text(title_tag.get_text(" ", strip=True))
+        if text:
+            candidates.append(text)
+
+    for raw in candidates:
+        cleaned = raw
+        cleaned = re.sub(r"(?:[-|]\s*)?(?:问卷星.*)$", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.strip(" -_|")
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _extract_question_number_from_div(question_div) -> Optional[int]:
+    topic_attr = question_div.get("topic")
+    if topic_attr and topic_attr.isdigit():
+        return int(topic_attr)
+    id_attr = question_div.get("id") or ""
+    match = re.search(r"div(\d+)", id_attr)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _cleanup_question_title(raw_title: str) -> str:
+    title = _normalize_html_text(raw_title)
+    if not title:
+        return ""
+    title = re.sub(r"^\*?\s*\d+\.\s*", "", title)
+    title = title.replace("【单选题】", "").replace("【多选题】", "")
+    return title.strip()
+
+
+def _extract_display_question_number(raw_title: Any) -> Optional[int]:
+    text = _normalize_html_text(str(raw_title or ""))
+    if not text:
+        return None
+    match = re.match(r"^\*?\s*(\d+)\.\s*", text)
+    if not match:
+        return None
+    try:
+        number = int(match.group(1))
+    except Exception:
+        return None
+    return number if number > 0 else None
+
+
+def _extract_display_heading_text(question_div) -> str:
+    if question_div is None:
+        return ""
+    for class_name in ("topichtml", "field-label", "qtypetip"):
+        try:
+            title_element = question_div.find(class_=class_name)
+        except Exception:
+            title_element = None
+        if not title_element:
+            continue
+        try:
+            text = title_element.get_text(" ", strip=True)
+        except Exception:
+            text = ""
+        text = _normalize_html_text(text)
+        if text:
+            return text
+    try:
+        blockquote = question_div.find("blockquote")
+    except Exception:
+        blockquote = None
+    if blockquote is not None:
+        try:
+            text = blockquote.get_text(" ", strip=True)
+        except Exception:
+            text = ""
+        text = _normalize_html_text(text)
+        if text:
+            return text
+    try:
+        text = question_div.get_text(" ", strip=True)
+    except Exception:
+        text = ""
+    return _normalize_html_text(text)
+
+
+_FORCE_SELECT_COMMAND_RE = re.compile(r"请(?:务必|一定|必须|直接)?\s*选(?:择)?")
+_FORCE_SELECT_INDEX_RE = re.compile(r"^第?\s*(\d{1,3})\s*(?:个|项|选项|分|星)?$")
+_FORCE_SELECT_SENTENCE_SPLIT_RE = re.compile(r"[。；;！？!\n\r]")
+_FORCE_SELECT_CLEAN_RE = re.compile(r"[\s`'\"“”‘’【】\[\]\(\)（）<>《》,，、。；;:：!?！？]")
+_FORCE_SELECT_LABEL_TARGET_RE = re.compile(r"^([A-Za-z])(?:项|选项|答案)?$")
+_FORCE_SELECT_OPTION_LABEL_RE = re.compile(
+    r"^(?:第\s*)?[\(（【\[]?\s*([A-Za-z])\s*[\)）】\]]?(?=$|[\.．、:：\-\s]|[\u4e00-\u9fff])"
+)
+
+
+def _normalize_force_select_text(value: Any) -> str:
+    text = _normalize_html_text(str(value or ""))
+    if not text:
+        return ""
+    return _FORCE_SELECT_CLEAN_RE.sub("", text).lower()
+
+
+def _extract_force_select_option_label(option_text: Any) -> Optional[str]:
+    text = _normalize_html_text(str(option_text or ""))
+    if not text:
+        return None
+    match = _FORCE_SELECT_OPTION_LABEL_RE.match(text)
+    if not match:
+        return None
+    label = str(match.group(1) or "").strip().upper()
+    return label or None
+
+
+def _collect_force_select_fragments(question_div, title_text: str) -> List[str]:
+    fragments: List[str] = []
+    if title_text:
+        cleaned_title = _normalize_html_text(title_text)
+        if cleaned_title:
+            fragments.append(cleaned_title)
+    if question_div is None:
+        return fragments
+    for selector in (".qtypetip", ".topichtml", ".field-label"):
+        try:
+            element = question_div.select_one(selector)
+        except Exception:
+            element = None
+        if not element:
+            continue
+        try:
+            text = _normalize_html_text(element.get_text(" ", strip=True))
+        except Exception:
+            text = ""
+        if text:
+            fragments.append(text)
+    unique_fragments: List[str] = []
+    seen: set = set()
+    for fragment in fragments:
+        key = _normalize_html_text(fragment)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique_fragments.append(key)
+    return unique_fragments
+
+
+def _extract_force_select_option(
+    question_div,
+    title_text: str,
+    option_texts: List[str],
+) -> Tuple[Optional[int], Optional[str]]:
+    """识别“请选XX”类指令，返回强制选择的选项索引。"""
+    if not option_texts:
+        return None, None
+
+    normalized_options: List[Tuple[int, str, str]] = []
+    for idx, option_text in enumerate(option_texts):
+        normalized = _normalize_force_select_text(option_text)
+        if not normalized:
+            continue
+        normalized_options.append((idx, str(option_text or "").strip(), normalized))
+    if not normalized_options:
+        return None, None
+
+    fragments = _collect_force_select_fragments(question_div, title_text)
+    for fragment in fragments:
+        for command_match in _FORCE_SELECT_COMMAND_RE.finditer(fragment):
+            tail_text = fragment[command_match.end():]
+            if not tail_text:
+                continue
+            sentence = _FORCE_SELECT_SENTENCE_SPLIT_RE.split(tail_text, maxsplit=1)[0]
+            sentence = sentence.strip(" ：:，,、")
+            if not sentence:
+                continue
+            compact_sentence = _normalize_force_select_text(sentence)
+            if not compact_sentence:
+                continue
+
+            best_index: Optional[int] = None
+            best_text: Optional[str] = None
+            best_length = -1
+            for option_idx, raw_text, normalized_text in normalized_options:
+                # 跳过纯数字文本，避免“第1题”之类误判；数字题走索引匹配兜底。
+                if normalized_text.isdigit():
+                    continue
+                if normalized_text in compact_sentence:
+                    text_len = len(normalized_text)
+                    if text_len > best_length:
+                        best_length = text_len
+                        best_index = option_idx
+                        best_text = raw_text
+            if best_index is not None:
+                return best_index, best_text
+
+            label_match = _FORCE_SELECT_LABEL_TARGET_RE.fullmatch(compact_sentence)
+            if label_match:
+                target_label = str(label_match.group(1) or "").strip().upper()
+                if target_label:
+                    for option_idx, raw_text, _ in normalized_options:
+                        option_label = _extract_force_select_option_label(raw_text)
+                        if option_label == target_label:
+                            return option_idx, raw_text
+
+            index_match = _FORCE_SELECT_INDEX_RE.fullmatch(sentence)
+            if index_match:
+                try:
+                    target_idx = int(index_match.group(1)) - 1
+                except Exception:
+                    target_idx = -1
+                if 0 <= target_idx < len(option_texts):
+                    selected = str(option_texts[target_idx] or "").strip()
+                    return target_idx, selected or None
+    return None, None
+
+
+def _element_contains_text_input(element) -> bool:
+    if element is None:
+        return False
+    try:
+        candidates = element.find_all(['input', 'textarea'])
+    except Exception:
+        return False
+    for candidate in candidates:
+        try:
+            tag_name = (candidate.name or '').lower()
+        except Exception:
+            tag_name = ''
+        input_type = (candidate.get('type') or '').lower()
+        if tag_name == 'textarea':
+            return True
+        if input_type in ('', 'text', 'search', 'tel', 'number'):
+            return True
+    return False
+
+
+def _question_div_has_shared_text_input(question_div) -> bool:
+    if question_div is None:
+        return False
+    try:
+        shared_inputs = question_div.select('.ui-other input, .ui-other textarea')
+    except Exception:
+        shared_inputs = []
+    if shared_inputs:
+        return True
+    try:
+        keyword_inputs = question_div.select("input[id*='other'], input[name*='other'], textarea[id*='other'], textarea[name*='other']")
+        if keyword_inputs:
+            return True
+    except Exception as exc:
+        log_suppressed_exception("survey.parser._question_div_has_shared_text_input keyword", exc, level=logging.ERROR)
+    text_blob = _normalize_html_text(question_div.get_text(' ', strip=True))
+    option_fill_keywords = ["请注明", "其他", "其他内容", "填空", "填写"]
+    if any(keyword in text_blob for keyword in option_fill_keywords):
+        return True
+    return False
+
+
+def _extract_option_text_from_attrs(target) -> str:
+    if target is None:
+        return ""
+
+    def _get_attr_text(node, keys) -> str:
+        for key in keys:
+            try:
+                raw = node.get(key)
+            except Exception:
+                raw = None
+            if raw is None:
+                continue
+            text_value = _normalize_html_text(str(raw))
+            if text_value:
+                return text_value
+        return ""
+
+    primary_keys = ("title", "data-title", "data-text", "data-label", "aria-label", "alt", "htitle")
+    text_value = _get_attr_text(target, primary_keys)
+    if text_value:
+        return text_value
+
+    try:
+        candidates = target.find_all(["a", "span", "label"], limit=4)
+    except Exception:
+        candidates = []
+    for child in candidates:
+        text_value = _get_attr_text(child, primary_keys)
+        if text_value:
+            return text_value
+
+    fallback_keys = ("val", "value", "data-value", "data-val")
+    text_value = _get_attr_text(target, fallback_keys)
+    if text_value:
+        return text_value
+    for child in candidates:
+        text_value = _get_attr_text(child, fallback_keys)
+        if text_value:
+            return text_value
+    return ""
+
+
+def _text_looks_meaningful(text: str) -> bool:
+    if not text:
+        return False
+    return bool(re.search(r"[A-Za-z0-9\u4e00-\u9fff]", text))
+
+
+def _extract_rating_option_texts(question_div) -> List[str]:
+    """优先从评价题的星级锚点提取文本（避免 iconfont 文本）"""
+    if question_div is None:
+        return []
+    selectors = (
+        ".scale-rating ul li a",
+        ".scale-rating a[val]",
+        "ul[tp='d'] li a",
+        "ul[class*='modlen'] li a",
+    )
+    anchors: List[Any] = []
+    for selector in selectors:
+        try:
+            anchors = question_div.select(selector)
+        except Exception:
+            anchors = []
+        if anchors:
+            break
+    if not anchors:
+        return []
+    texts: List[str] = []
+    seen = set()
+    for idx, anchor in enumerate(anchors):
+        text = _extract_option_text_from_attrs(anchor)
+        if not _text_looks_meaningful(text):
+            try:
+                text = _normalize_html_text(anchor.get_text(" ", strip=True))
+            except Exception:
+                text = ""
+        if not _text_looks_meaningful(text):
+            try:
+                text = _normalize_html_text(anchor.get("title") or "")
+            except Exception:
+                text = ""
+        if not _text_looks_meaningful(text):
+            try:
+                text = _normalize_html_text(anchor.get("val") or "")
+            except Exception:
+                text = ""
+        if not _text_looks_meaningful(text):
+            text = str(idx + 1)
+        if text in seen:
+            continue
+        seen.add(text)
+        texts.append(text)
+    return texts
+
+
+def _collect_choice_option_texts(question_div) -> Tuple[List[str], List[int]]:
+    texts: List[str] = []
+    fillable_indices: List[int] = []
+    option_elements: List[Any] = []
+    selectors = ['.ui-controlgroup > div', 'ul > li']
+    for selector in selectors:
+        try:
+            option_elements = question_div.select(selector)
+        except Exception:
+            option_elements = []
+        if option_elements:
+            break
+    if option_elements:
+        for element in option_elements:
+            label_element = None
+            try:
+                label_element = element.select_one('.label')
+            except Exception:
+                label_element = None
+            if not label_element:
+                label_element = element
+            text = _normalize_html_text(label_element.get_text(' ', strip=True))
+            if not text:
+                text = _extract_option_text_from_attrs(element)
+            if not text:
+                continue
+            option_index = len(texts)
+            texts.append(text)
+            if _element_contains_text_input(element):
+                fillable_indices.append(option_index)
+    if not texts:
+        seen = set()
+        fallback_selectors = ['.label', 'li span', 'li']
+        for selector in fallback_selectors:
+            try:
+                elements = question_div.select(selector)
+            except Exception:
+                elements = []
+            for element in elements:
+                text = _normalize_html_text(element.get_text(' ', strip=True))
+                if not text:
+                    text = _extract_option_text_from_attrs(element)
+                if not text or text in seen:
+                    continue
+                texts.append(text)
+                seen.add(text)
+            if texts:
+                break
+    if not fillable_indices and texts and _question_div_has_shared_text_input(question_div):
+        fillable_indices.append(len(texts) - 1)
+    fillable_indices = sorted(set(fillable_indices))
+    return texts, fillable_indices
+
+
+def _extract_select_option_texts_from_element(select_element) -> List[str]:
+    if select_element is None:
+        return []
+    options: List[str] = []
+    try:
+        option_elements = select_element.find_all("option")
+    except Exception:
+        option_elements = []
+    for idx, option in enumerate(option_elements):
+        value = _normalize_html_text(option.get("value") or "")
+        text = _normalize_html_text(option.get_text(" ", strip=True))
+        if idx == 0 and ((value == "") or (value == "0") or ("请选择" in text)):
+            continue
+        if not text:
+            continue
+        options.append(text)
+    return options
+
+
+def _extract_custom_select_option_texts(element) -> List[str]:
+    if element is None:
+        return []
+    raw_values: List[str] = []
+    attr_keys = ("cusom", "custom", "data-custom", "data-cusom")
+    for key in attr_keys:
+        try:
+            raw = element.get(key)
+        except Exception:
+            raw = None
+        if raw is not None:
+            raw_values.append(str(raw))
+    options: List[str] = []
+    for raw in raw_values:
+        for part in re.split(r"[,，\n\r|/]+", raw):
+            text = _normalize_html_text(part)
+            if not text or text == "请选择":
+                continue
+            options.append(text)
+    deduped: List[str] = []
+    seen = set()
+    for option in options:
+        if option in seen:
+            continue
+        seen.add(option)
+        deduped.append(option)
+    return deduped
+
+
+def _extract_choice_attached_selects(question_div) -> List[Dict[str, Any]]:
+    if question_div is None:
+        return []
+    option_elements: List[Any] = []
+    for selector in ('.ui-controlgroup > div', 'ul > li'):
+        try:
+            option_elements = question_div.select(selector)
+        except Exception:
+            option_elements = []
+        if option_elements:
+            break
+    attached_selects: List[Dict[str, Any]] = []
+    for option_index, element in enumerate(option_elements):
+        option_text = ""
+        try:
+            label_element = element.select_one(".label")
+        except Exception:
+            label_element = None
+        if label_element is not None:
+            try:
+                option_text = _normalize_html_text(label_element.get_text(" ", strip=True))
+            except Exception:
+                option_text = ""
+        if not option_text:
+            option_text = _extract_option_text_from_attrs(element)
+        try:
+            select_element = element.find("select")
+        except Exception:
+            select_element = None
+        select_options = _extract_select_option_texts_from_element(select_element)
+        if not select_options:
+            input_candidates = []
+            try:
+                input_candidates = element.find_all("input")
+            except Exception:
+                input_candidates = []
+            for input_element in input_candidates:
+                select_options = _extract_custom_select_option_texts(input_element)
+                if select_options:
+                    break
+        if not select_options:
+            continue
+        attached_selects.append({
+            "option_index": option_index,
+            "option_text": option_text,
+            "select_options": select_options,
+            "select_option_count": len(select_options),
+        })
+    return attached_selects
+
+
+def _verify_text_indicates_location(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    text = str(value).strip()
+    if not text:
+        return False
+    return ("地图" in text) or ("map" in text.lower())
+
+
+def _soup_question_is_location(question_div) -> bool:
+    if question_div is None:
+        return False
+    try:
+        if question_div.find(class_="get_Local"):
+            return True
+    except Exception as exc:
+        log_suppressed_exception("survey.parser._soup_question_is_location get_Local", exc, level=logging.ERROR)
+    try:
+        inputs = question_div.find_all("input")
+    except Exception:
+        inputs = []
+    for input_element in inputs:
+        verify_value = input_element.get("verify")
+        if _verify_text_indicates_location(verify_value):
+            return True
+    return False
+
+
+def _collect_select_option_texts(question_div, soup, question_number: int) -> List[str]:
+    select = question_div.find("select")
+    if not select and soup:
+        select = soup.find("select", id=f"q{question_number}")
+    if not select:
+        return []
+    options: List[str] = []
+    option_elements = select.find_all("option")
+    for idx, option in enumerate(option_elements):
+        value = (option.get("value") or "").strip()
+        text = _normalize_html_text(option.get_text(" ", strip=True))
+        if idx == 0 and (value == "" or value == "0"):
+            continue
+        if not text:
+            continue
+        options.append(text)
+    return options
+
+
+def _postprocess_matrix_option_texts(option_texts: List[str]) -> List[str]:
+    """矩阵列标题后处理：保序精确去重，并过滤空文本。"""
+    if not option_texts:
+        return []
+    cleaned: List[str] = []
+    seen = set()
+    for raw_text in option_texts:
+        text = _normalize_html_text(raw_text)
+        if not text:
+            continue
+        # 只按“完全相同文本”判定重复，避免误合并相近选项。
+        if text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    return cleaned
+
+
+def _collect_matrix_option_texts(soup, question_div, question_number: int) -> Tuple[int, List[str], List[str]]:
+    option_texts: List[str] = []
+    matrix_rows = 0
+    row_texts: List[str] = []
+    def _extract_attr_text(node) -> str:
+        if node is None:
+            return ""
+        keys = (
+            "title",
+            "data-title",
+            "data-text",
+            "data-label",
+            "aria-label",
+            "alt",
+            "htitle",
+            "data-original-title",
+        )
+        for key in keys:
+            try:
+                raw = node.get(key)
+            except Exception:
+                raw = None
+            if raw is None:
+                continue
+            text_value = _normalize_html_text(str(raw))
+            if text_value:
+                return text_value
+        return ""
+
+    def _extract_row_label(row, cells) -> str:
+        label_text = ""
+        if cells:
+            label_text = _normalize_html_text(cells[0].get_text(" ", strip=True))
+            if not label_text:
+                label_text = _extract_attr_text(cells[0])
+        if not label_text:
+            label_text = _extract_attr_text(row)
+        if not label_text:
+            try:
+                for selector in (
+                    ".label",
+                    ".row-title",
+                    ".rowtitle",
+                    ".row",
+                    ".item-title",
+                    ".itemTitle",
+                    ".itemTitleSpan",
+                    ".stitle",
+                ):
+                    node = row.select_one(selector)
+                    if node:
+                        label_text = _normalize_html_text(node.get_text(" ", strip=True))
+                        if label_text:
+                            break
+            except Exception as exc:
+                log_suppressed_exception("survey.parser._extract_row_label selector", exc, level=logging.ERROR)
+        if not label_text:
+            try:
+                for child in row.find_all(["label", "span", "div", "p"], limit=10):
+                    label_text = _extract_attr_text(child)
+                    if label_text:
+                        break
+                    label_text = _normalize_html_text(child.get_text(" ", strip=True))
+                    if label_text:
+                        break
+            except Exception as exc:
+                log_suppressed_exception("survey.parser._extract_row_label child", exc, level=logging.ERROR)
+        return label_text
+    table = None
+    if question_div is not None:
+        try:
+            table = question_div.find(id=f"divRefTab{question_number}")
+        except Exception:
+            table = None
+    if table is None and soup:
+        table = soup.find(id=f"divRefTab{question_number}")
+    if table:
+        # 按HTML中的出现顺序提取行标签，而不是按rowindex排序
+        # 这样可以保持与用户看到的顺序一致
+        for row in table.find_all("tr"):
+            row_index = str(row.get("rowindex") or "").strip()
+            if row_index and str(row_index).isdigit():
+                matrix_rows += 1
+                try:
+                    cells = row.find_all(["td", "th"])
+                except Exception:
+                    cells = []
+                if cells:
+                    label_text = _extract_row_label(row, cells)
+                    # 直接按出现顺序添加到列表，而不是用rowindex作为索引
+                    row_texts.append(label_text)
+    if matrix_rows > 0:
+        # row_texts 已经按HTML顺序填充，无需再从map中提取
+        pass
+    elif table:
+        # 兼容没有 rowindex 的矩阵题：用表格行作为兜底
+        data_rows = []
+        header_id = f"drv{question_number}_1"
+        for row in table.find_all("tr"):
+            row_id = str(row.get("id") or "")
+            if row_id == header_id:
+                continue
+            try:
+                cells = row.find_all(["td", "th"])
+            except Exception:
+                cells = []
+            if len(cells) <= 1:
+                continue
+            first_text = _extract_row_label(row, cells)
+            other_texts = [_normalize_html_text(cell.get_text(" ", strip=True)) for cell in cells[1:]]
+            # 如果首列为空、后面有标题文字，多半是表头行
+            if not first_text and any(other_texts):
+                continue
+            data_rows.append((first_text, cells))
+        matrix_rows = len(data_rows)
+        row_texts = [label for label, _ in data_rows]
+        if not option_texts and data_rows:
+            max_cols = 0
+            for _, cells in data_rows:
+                try:
+                    max_cols = max(max_cols, max(0, len(cells) - 1))
+                except Exception:
+                    continue
+            if max_cols > 0:
+                option_texts = [str(i + 1) for i in range(max_cols)]
+    if matrix_rows == 0 and question_div is not None:
+        # 再兜底：从输入控件名推断行列数
+        try:
+            inputs = question_div.find_all("input")
+        except Exception:
+            inputs = []
+        row_indices: List[int] = []
+        col_indices: List[int] = []
+        name_pattern = re.compile(rf"q{question_number}[_-](\d+)(?:[_-](\d+))?")
+        for item in inputs:
+            raw_name = str(item.get("name") or item.get("id") or "")
+            if not raw_name:
+                continue
+            match = name_pattern.search(raw_name)
+            if not match:
+                continue
+            try:
+                row_idx = int(match.group(1))
+                row_indices.append(row_idx)
+            except Exception as exc:
+                log_suppressed_exception("survey.parser._collect_matrix_rows row_idx", exc, level=logging.ERROR)
+            if match.group(2):
+                try:
+                    col_idx = int(match.group(2))
+                    col_indices.append(col_idx)
+                except Exception as exc:
+                    log_suppressed_exception("survey.parser._collect_matrix_rows col_idx", exc, level=logging.ERROR)
+        if row_indices:
+            matrix_rows = max(row_indices)
+            row_texts = [""] * matrix_rows
+        if not option_texts and col_indices:
+            max_cols = max(col_indices)
+            if max_cols > 0:
+                option_texts = [str(i + 1) for i in range(max_cols)]
+    if question_div is not None and (not row_texts or any(not text for text in row_texts)):
+        try:
+            candidates = []
+            for selector in (".itemTitleSpan", ".itemTitle", ".item-title", ".row-title"):
+                nodes = question_div.select(selector)
+                if nodes:
+                    candidates = [_normalize_html_text(node.get_text(" ", strip=True)) for node in nodes]
+                    candidates = [text for text in candidates if text]
+                    if candidates:
+                        break
+            if candidates:
+                if matrix_rows <= 0:
+                    matrix_rows = len(candidates)
+                    row_texts = list(candidates)
+                else:
+                    merged: List[str] = list(row_texts)
+                    for idx in range(min(len(candidates), len(merged))):
+                        if not merged[idx]:
+                            merged[idx] = candidates[idx]
+                    row_texts = merged
+        except Exception as exc:
+            log_suppressed_exception("survey.parser._collect_matrix_rows merge", exc, level=logging.ERROR)
+    header_row = soup.find(id=f"drv{question_number}_1") if soup else None
+    if header_row:
+        cells = header_row.find_all("td")
+        if len(cells) > 1:
+            option_texts = [_normalize_html_text(td.get_text(" ", strip=True)) for td in cells[1:]]
+            option_texts = [text for text in option_texts if text]
+    if not option_texts and table:
+        header_cells = table.find_all("th")
+        if len(header_cells) > 1:
+            option_texts = [_normalize_html_text(th.get_text(" ", strip=True)) for th in header_cells[1:]]
+            option_texts = [text for text in option_texts if text]
+    raw_option_texts = list(option_texts)
+    option_texts = _postprocess_matrix_option_texts(option_texts)
+    # 兜底：若表头文本全为空或清洗后为空，按已有列数生成数字标题。
+    if not option_texts:
+        fallback_columns = len([text for text in raw_option_texts if _normalize_html_text(text)])
+        if fallback_columns > 0:
+            option_texts = [str(i + 1) for i in range(fallback_columns)]
+    return matrix_rows, option_texts, row_texts
+
+
+def _extract_question_title(question_div, fallback_number: int) -> str:
+    title_element = question_div.find(class_="topichtml")
+    if title_element:
+        title_text = _cleanup_question_title(title_element.get_text(" ", strip=True))
+        if title_text:
+            return title_text
+    label_element = question_div.find(class_="field-label")
+    if label_element:
+        title_text = _cleanup_question_title(label_element.get_text(" ", strip=True))
+        if title_text:
+            return title_text
+    return f"第{fallback_number}题"
+
+
+def _extract_multiple_choice_limits(question_div, question_number: int) -> Tuple[Optional[int], Optional[int]]:
+    """从多选题 HTML 中提取选择数量限制（最少/最多）"""
+    if question_div is None:
+        return None, None
+
+    # 尝试从 multiple.py 中复用限制检测逻辑
+    try:
+        from wjx.provider.questions.multiple import (
+            _extract_min_max_from_attributes,
+            _extract_range_from_possible_json,
+            _extract_multi_limit_range_from_text,
+        )
+
+        min_limit: Optional[int] = None
+        max_limit: Optional[int] = None
+
+        # 1. 从属性提取
+        attr_min, attr_max = _extract_min_max_from_attributes(question_div)
+        if attr_min is not None:
+            min_limit = attr_min
+        if attr_max is not None:
+            max_limit = attr_max
+
+        # 2. 从 JSON 属性提取
+        if min_limit is None or max_limit is None:
+            for attr_name in ("data", "data-setting", "data-validate"):
+                try:
+                    attr_value = question_div.get(attr_name)
+                except Exception:
+                    attr_value = None
+                cand_min, cand_max = _extract_range_from_possible_json(attr_value)
+                if min_limit is None and cand_min is not None:
+                    min_limit = cand_min
+                if max_limit is None and cand_max is not None:
+                    max_limit = cand_max
+                if min_limit is not None and max_limit is not None:
+                    break
+
+        # 3. 从文本提取
+        if min_limit is None or max_limit is None:
+            fragments: List[str] = []
+            for selector in (".qtypetip", ".topichtml", ".field-label"):
+                try:
+                    element = question_div.find(class_=selector.lstrip('.'))
+                    if element:
+                        fragments.append(element.get_text(" ", strip=True))
+                except Exception:
+                    continue
+            try:
+                fragments.append(question_div.get_text(" ", strip=True))
+            except Exception as exc:
+                log_suppressed_exception("_extract_multiple_choice_limits: fragments.append(question_div.get_text(\" \", strip=True))", exc, level=logging.ERROR)
+
+            for fragment in fragments:
+                cand_min, cand_max = _extract_multi_limit_range_from_text(fragment)
+                if min_limit is None and cand_min is not None:
+                    min_limit = cand_min
+                if max_limit is None and cand_max is not None:
+                    max_limit = cand_max
+                if min_limit is not None and max_limit is not None:
+                    break
+
+        if min_limit is not None and max_limit is not None and min_limit > max_limit:
+            min_limit, max_limit = max_limit, min_limit
+
+        return min_limit, max_limit
+    except Exception:
+        return None, None
+
+
+def _extract_question_metadata_from_html(soup, question_div, question_number: int, type_code: str):
+    option_texts: List[str] = []
+    option_count = 0
+    matrix_rows = 0
+    row_texts: List[str] = []
+    fillable_indices: List[int] = []
+    multi_min_limit: Optional[int] = None
+    multi_max_limit: Optional[int] = None
+
+    if type_code in {"3", "4", "5", "11"}:
+        option_texts, fillable_indices = _collect_choice_option_texts(question_div)
+        option_count = len(option_texts)
+        # 如果是多选题（type_code == "4"），提取选择数量限制
+        if type_code == "4":
+            multi_min_limit, multi_max_limit = _extract_multiple_choice_limits(question_div, question_number)
+    elif type_code == "7":
+        option_texts = _collect_select_option_texts(question_div, soup, question_number)
+        option_count = len(option_texts)
+        if option_count > 0 and _question_div_has_shared_text_input(question_div):
+            fillable_indices = [option_count - 1]
+    elif type_code == "6":
+        matrix_rows, option_texts, row_texts = _collect_matrix_option_texts(soup, question_div, question_number)
+        option_count = len(option_texts)
+    elif type_code == "8":
+        option_count = 1
+    return option_texts, option_count, matrix_rows, row_texts, fillable_indices, multi_min_limit, multi_max_limit
+
+
+def _extract_jump_rules_from_html(question_div, question_number: int, option_texts: List[str]) -> Tuple[bool, List[Dict[str, Any]]]:
+    """从静态 HTML 中提取跳题逻辑。"""
+    has_jump_attr = str(question_div.get("hasjump") or "").strip() == "1"
+    jump_rules: List[Dict[str, Any]] = []
+    option_idx = 0
+    inputs = question_div.find_all("input")
+    for input_el in inputs:
+        input_type = (input_el.get("type") or "").lower()
+        if input_type not in ("radio", "checkbox"):
+            continue
+        jumpto_raw = input_el.get("jumpto") or input_el.get("data-jumpto")
+        if not jumpto_raw:
+            option_idx += 1
+            continue
+        text_value = str(jumpto_raw).strip()
+        jumpto_num: Optional[int] = None
+        if text_value.isdigit():
+            jumpto_num = int(text_value)
+        else:
+            match = re.search(r"(\d+)", text_value)
+            if match:
+                try:
+                    jumpto_num = int(match.group(1))
+                except Exception:
+                    jumpto_num = None
+        if jumpto_num:
+            jump_rules.append({
+                "option_index": option_idx,
+                "jumpto": jumpto_num,
+                "option_text": option_texts[option_idx] if option_idx < len(option_texts) else None,
+            })
+        option_idx += 1
+    return has_jump_attr or bool(jump_rules), jump_rules
+
+
+def _extract_slider_range(question_div, question_number: int) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """尝试解析滑块题的最小值、最大值和步长。"""
+    try:
+        slider_input = question_div.find("input", id=f"q{question_number}")
+        if not slider_input:
+            slider_input = question_div.find("input", attrs={"type": "range"})
+    except Exception:
+        slider_input = None
+
+    def _parse(raw: Any) -> Optional[float]:
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
+    if slider_input:
+        return (
+            _parse(slider_input.get("min")),
+            _parse(slider_input.get("max")),
+            _parse(slider_input.get("step")),
+        )
+    return None, None, None
+
+
+_TEXT_INPUT_ALLOWED_TYPES = {"", "text", "search", "tel", "number"}
+_KNOWN_NON_TEXT_QUESTION_TYPES = {"3", "4", "5", "6", "7", "8", "11"}
+
+
+def _count_text_inputs_in_soup(question_div) -> int:
+    try:
+        candidates = question_div.find_all(["input", "textarea", "span", "div"])
+    except Exception:
+        return 0
+    count = 0
+    for cand in candidates:
+        try:
+            tag_name = (cand.name or "").lower()
+        except Exception:
+            tag_name = ""
+        input_type = ""
+        try:
+            input_type = (cand.get("type") or "").lower()
+        except Exception:
+            input_type = ""
+        style_text = ""
+        try:
+            style_text = (cand.get("style") or "").lower()
+        except Exception:
+            style_text = ""
+        try:
+            class_attr = cand.get("class") or []
+            if isinstance(class_attr, str):
+                class_text = class_attr.lower()
+            else:
+                class_text = " ".join(class_attr).lower()
+        except Exception:
+            class_text = ""
+        is_textcont = "textcont" in class_text or "textedit" in class_text
+
+        if input_type == "hidden" or "display:none" in style_text or "visibility:hidden" in style_text:
+            continue
+
+        if tag_name == "input":
+            try:
+                sibling = cand.find_next_sibling()
+                sibling_classes = sibling.get("class") if sibling else None
+                if sibling_classes and any("textedit" in cls.lower() for cls in sibling_classes):
+                    continue
+            except Exception as exc:
+                log_suppressed_exception("survey.parser._count_text_inputs sibling", exc, level=logging.ERROR)
+        if tag_name == "textarea" or (tag_name == "input" and input_type in _TEXT_INPUT_ALLOWED_TYPES):
+            count += 1
+            continue
+        try:
+            contenteditable = (cand.get("contenteditable") or "").lower() == "true"
+        except Exception:
+            contenteditable = False
+        if (contenteditable or is_textcont) and tag_name in {"span", "div"}:
+            count += 1
+    return count
+
+
+def _extract_text_input_labels(question_div) -> List[str]:
+    """提取多项填空题每个输入框的标签信息"""
+    labels = []
+    try:
+        candidates = question_div.find_all(["input", "textarea", "span", "div"])
+    except Exception:
+        return labels
+
+    for cand in candidates:
+        try:
+            tag_name = (cand.name or "").lower()
+            input_type = (cand.get("type") or "").lower()
+            style_text = (cand.get("style") or "").lower()
+            class_attr = cand.get("class") or []
+            class_text = " ".join(class_attr).lower() if isinstance(class_attr, list) else str(class_attr).lower()
+            is_textcont = "textcont" in class_text or "textedit" in class_text
+
+            if input_type == "hidden" or "display:none" in style_text or "visibility:hidden" in style_text:
+                continue
+
+            if tag_name == "input":
+                sibling = cand.find_next_sibling()
+                if sibling and sibling.get("class") and any("textedit" in cls.lower() for cls in sibling.get("class")):
+                    continue
+
+            is_text_input = False
+            if tag_name == "textarea" or (tag_name == "input" and input_type in _TEXT_INPUT_ALLOWED_TYPES):
+                is_text_input = True
+            elif (cand.get("contenteditable") == "true" or is_textcont) and tag_name in {"span", "div"}:
+                is_text_input = True
+
+            if is_text_input:
+                label = cand.get("placeholder") or cand.get("aria-label") or cand.get("data-label") or ""
+                if not label:
+                    prev = cand.find_previous_sibling(string=True)
+                    if prev:
+                        label = prev.strip().rstrip("：:").strip()
+                labels.append(label if label else f"填空{len(labels) + 1}")
+        except Exception:
+            continue
+
+    return labels
+
+
+def _soup_question_looks_like_description(question_div, type_code: str) -> bool:
+    """检测是否为说明页/阅读材料（有 topic 和 type 属性但无可交互控件）。
+
+    问卷星有时会给纯阅读材料/说明文字也打上 topic 和 type 属性，
+    导致解析器误将其识别为正常题目。此函数通过检测交互控件的缺失来识别这类情况。
+    """
+    if question_div is None:
+        return False
+    # 只对选择类题型做检测（type 3/4 是最常见的误识别情况）
+    if type_code not in {"3", "4"}:
+        return False
+    try:
+        # 检查是否有 radio/checkbox input（单选/多选题必备）
+        choice_inputs = question_div.find_all(
+            "input", attrs={"type": lambda v: v and v.lower() in ("radio", "checkbox")}
+        )
+        if choice_inputs:
+            return False
+        # 检查是否有标准选项容器
+        has_control_group = bool(question_div.select_one(".ui-controlgroup"))
+        if has_control_group:
+            return False
+        # 检查是否有 jqradio/jqcheck 样式的选项（另一种模板）
+        has_jq_controls = bool(question_div.select_one(".jqradio, .jqcheck"))
+        if has_jq_controls:
+            return False
+    except Exception:
+        return False
+    # 没有任何选择控件 → 说明页
+    return True
+
+
+def _soup_question_looks_like_reorder(question_div) -> bool:
+    """兜底判断：通过 DOM 特征识别排序题（静态 HTML）。"""
+    if question_div is None:
+        return False
+    try:
+        if question_div.select_one(".sortnum, .sortnum-sel, .order-number, .order-index"):
+            return True
+    except Exception as exc:
+        log_suppressed_exception("survey.parser._soup_question_looks_like_reorder quick", exc, level=logging.ERROR)
+    try:
+        has_list_items = bool(question_div.select("ul li, ol li"))
+        if not has_list_items:
+            return False
+        has_sort_signature = bool(
+            question_div.select(".ui-sortable, .ui-sortable-handle, [class*='sort']")
+        )
+        return has_sort_signature
+    except Exception:
+        return False
+
+
+def _soup_question_looks_like_numeric_scale(question_div) -> bool:
+    """检测是否更像数字量表/NPS（大量数字刻度+两端文字提示）。"""
+    if question_div is None:
+        return False
+    try:
+        anchors = question_div.select("ul[tp='d'] li a, .scale-rating ul li a, .scale-rating a[val]")
+    except Exception:
+        anchors = []
+    texts: List[str] = []
+    for anchor in anchors:
+        text = _normalize_html_text(anchor.get_text(" ", strip=True))
+        if not text:
+            try:
+                text = _normalize_html_text(anchor.get("title") or anchor.get("val") or anchor.get("value") or "")
+            except Exception:
+                text = ""
+        if text:
+            texts.append(text)
+    if not texts:
+        return False
+    numeric_count = sum(1 for t in texts if re.fullmatch(r"\d{1,2}", t))
+    has_scale_title = False
+    try:
+        has_scale_title = bool(question_div.select_one(".scaleTitle, .scaleTitle_frist, .scaleTitle_last, .scaleTitleFirst, .scaleTitleLast"))
+    except Exception:
+        has_scale_title = False
+    total = len(texts)
+    return total >= 5 and numeric_count >= max(3, int(total * 0.7)) and (total >= 9 or has_scale_title)
+
+
+def _soup_question_looks_like_rating(question_div) -> bool:
+    """识别评价题（星级评价）"""
+    if question_div is None:
+        return False
+    # NPS/数字刻度题虽然也有 rate-off/rate-on 样式，但应判为量表而非评价题
+    if _soup_question_looks_like_numeric_scale(question_div):
+        return False
+    has_rate_icon = False
+    try:
+        has_rate_icon = bool(question_div.select_one("a.rate-off, a.rate-on, .rate-off, .rate-on"))
+    except Exception:
+        has_rate_icon = False
+    has_tag_wrap = False
+    try:
+        has_tag_wrap = bool(question_div.find(class_="evaluateTagWrap"))
+    except Exception:
+        has_tag_wrap = False
+    has_iconfont = False
+    try:
+        has_iconfont = bool(question_div.select_one(".scale-rating .iconfontNew, .iconfontNew"))
+    except Exception:
+        has_iconfont = False
+
+    # 评价题需要“星级/评价”特征，避免普通量表误判
+    if has_tag_wrap:
+        return True
+    if has_rate_icon or has_iconfont:
+        return True
+    return False
+
+
+def _extract_rating_option_count(question_div) -> int:
+    """尝试解析评价题的星级数量。"""
+    if question_div is None:
+        return 0
+    try:
+        rating_list = question_div.find("ul", class_=re.compile(r"modlen(\d+)"))
+    except Exception:
+        rating_list = None
+    if rating_list:
+        try:
+            class_attr = rating_list.get("class") or []
+            for cls in class_attr:
+                match = re.search(r"modlen(\d+)", str(cls))
+                if match:
+                    return int(match.group(1))
+        except Exception as exc:
+            log_suppressed_exception("survey.parser._extract_rating_option_count modlen", exc, level=logging.ERROR)
+    try:
+        options = question_div.select(".scale-rating ul li")
+        if options:
+            return len(options)
+    except Exception as exc:
+        log_suppressed_exception("survey.parser._extract_rating_option_count scale-rating", exc, level=logging.ERROR)
+    try:
+        options = question_div.select("a.rate-off, a.rate-on")
+        if options:
+            return len(options)
+    except Exception as exc:
+        log_suppressed_exception("survey.parser._extract_rating_option_count rate-off", exc, level=logging.ERROR)
+    return 0
+
+
+def _should_mark_as_multi_text(type_code: Any, option_count: int, text_input_count: int, is_location: bool, has_gapfill: bool = False) -> bool:
+    if is_location:
+        return False
+    normalized = _normalize_question_type_code(type_code)
+    if normalized == "9" and has_gapfill:
+        return True
+    if text_input_count < 2:
+        return False
+    if normalized in ("1", "2", "9"):
+        return True
+    if normalized in _KNOWN_NON_TEXT_QUESTION_TYPES:
+        return False
+    if (option_count or 0) == 0:
+        return True
+    return (option_count or 0) <= 1 and text_input_count >= 2
+
+
+def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
+    """从 HTML 解析问卷题目列表"""
+    if not BeautifulSoup:
+        raise RuntimeError("BeautifulSoup is required for HTML parsing")
+    soup = BeautifulSoup(html, "html.parser")
+    container = soup.find("div", id="divQuestion")
+    if not container:
+        return []
+    fieldsets = container.find_all("fieldset")
+    if not fieldsets:
+        fieldsets = [container]
+    questions_info: List[Dict[str, Any]] = []
+    for page_index, fieldset in enumerate(fieldsets, 1):
+        question_divs = fieldset.find_all("div", attrs={"topic": True}, recursive=False)
+        if not question_divs:
+            question_divs = fieldset.find_all("div", attrs={"topic": True})
+        current_display_num: Optional[int] = None
+        for question_div in question_divs:
+            raw_heading_text = _extract_display_heading_text(question_div)
+            question_number = _extract_question_number_from_div(question_div)
+            if question_number is None:
+                heading_num = _extract_display_question_number(raw_heading_text)
+                if heading_num is not None:
+                    current_display_num = heading_num
+                continue
+            type_code = str(question_div.get("type") or "").strip() or "0"
+            if type_code != "11" and _soup_question_looks_like_reorder(question_div):
+                type_code = "11"
+            is_description = _soup_question_looks_like_description(question_div, type_code)
+            is_rating = False
+            rating_max = 0
+            if type_code == "5":
+                is_rating = _soup_question_looks_like_rating(question_div)
+                if is_rating:
+                    rating_max = _extract_rating_option_count(question_div)
+            is_location = type_code in {"1", "2"} and _soup_question_is_location(question_div)
+            display_num = _extract_display_question_number(raw_heading_text)
+            if display_num is None:
+                display_num = current_display_num
+            elif display_num > 0:
+                current_display_num = display_num
+            title_text = _extract_question_title(question_div, question_number)
+            (
+                option_texts,
+                option_count,
+                matrix_rows,
+                row_texts,
+                fillable_indices,
+                multi_min_limit,
+                multi_max_limit,
+            ) = _extract_question_metadata_from_html(soup, question_div, question_number, type_code)
+            if is_rating:
+                rating_texts = _extract_rating_option_texts(question_div)
+                if rating_texts:
+                    option_texts = rating_texts
+                option_count = max(option_count, rating_max, len(option_texts))
+                if option_count > 0:
+                    has_meaningful = any(_text_looks_meaningful(text) for text in option_texts)
+                    if not option_texts or not has_meaningful:
+                        option_texts = [str(i + 1) for i in range(option_count)]
+            # 量表题（type_code="5"）如果不是评价题，需要提取数字刻度选项文本
+            elif type_code == "5":
+                scale_texts = _extract_rating_option_texts(question_div)
+                if scale_texts:
+                    option_texts = scale_texts
+                    option_count = len(scale_texts)
+            attached_option_selects: List[Dict[str, Any]] = []
+            if type_code in {"3", "4"}:
+                attached_option_selects = _extract_choice_attached_selects(question_div)
+            has_jump, jump_rules = _extract_jump_rules_from_html(question_div, question_number, option_texts)
+            slider_min, slider_max, slider_step = (None, None, None)
+            if type_code == "8":
+                slider_min, slider_max, slider_step = _extract_slider_range(question_div, question_number)
+            text_input_count = _count_text_inputs_in_soup(question_div)
+            text_input_labels = _extract_text_input_labels(question_div) if text_input_count > 1 else []
+            has_gapfill = str(question_div.get("gapfill") or "").strip() == "1"
+            is_text_like_question = _should_treat_question_as_text_like(type_code, option_count, text_input_count)
+            is_multi_text = _should_mark_as_multi_text(type_code, option_count, text_input_count, is_location, has_gapfill)
+            forced_option_index: Optional[int] = None
+            forced_option_text: Optional[str] = None
+            if type_code in {"3", "5", "7"}:
+                forced_option_index, forced_option_text = _extract_force_select_option(
+                    question_div,
+                    title_text,
+                    option_texts,
+                )
+            questions_info.append({
+                "num": question_number,
+                "display_num": display_num,
+                "title": title_text,
+                "type_code": type_code,
+                "options": option_count,
+                "rows": matrix_rows,
+                "row_texts": row_texts,
+                "page": page_index,
+                "option_texts": option_texts,
+                "forced_option_index": forced_option_index,
+                "forced_option_text": forced_option_text,
+                "fillable_options": fillable_indices,
+                "attached_option_selects": attached_option_selects,
+                "has_attached_option_select": bool(attached_option_selects),
+                "is_location": is_location,
+                "is_rating": is_rating,
+                "is_description": is_description,
+                "rating_max": rating_max,
+                "text_inputs": text_input_count,
+                "text_input_labels": text_input_labels,
+                "is_multi_text": is_multi_text,
+                "is_text_like": is_text_like_question,
+                "has_jump": has_jump,
+                "jump_rules": jump_rules,
+                "slider_min": slider_min,
+                "slider_max": slider_max,
+                "slider_step": slider_step,
+                "multi_min_limit": multi_min_limit,
+                "multi_max_limit": multi_max_limit,
+            })
+    return questions_info
+
+

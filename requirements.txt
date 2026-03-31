@@ -1,0 +1,7 @@
+playwright
+opencv-python
+httpx
+packaging
+beautifulsoup4
+PySide6==6.8.3
+PySide6-Fluent-Widgets==1.11.1

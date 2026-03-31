@@ -1,0 +1,12 @@
+{
+    "QFluentWidgets": {
+        "FontFamilies": [
+            "PingFang SC",
+            "Segoe UI",
+            "Microsoft YaHei",
+            ".AppleSystemUIFont"
+        ],
+        "ThemeColor": "#ff2563eb",
+        "ThemeMode": "Auto"
+    }
+}

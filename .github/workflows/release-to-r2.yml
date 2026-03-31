@@ -1,0 +1,142 @@
+name: Upload Release to R2
+
+on:
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: read
+
+env:
+  R2_LATEST_KEY: "SurveyController_latest_setup.exe"
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Build release selectors
+        id: release_meta
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          ASSET_PATTERN="*_${TAG}_setup.exe"
+          VERSIONED_KEY="SurveyController_${TAG}.exe"
+
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "asset_pattern=${ASSET_PATTERN}" >> "${GITHUB_OUTPUT}"
+          echo "versioned_key=${VERSIONED_KEY}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ steps.release_meta.outputs.asset_pattern }}" \
+            -D dist
+
+          echo "Downloaded files:"
+          ls -lah dist
+
+      - name: Resolve upload asset
+        id: resolve_upload_asset
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/${{ steps.release_meta.outputs.asset_pattern }})
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No matched setup exe found for this tag: ${{ steps.release_meta.outputs.asset_pattern }}"
+            exit 1
+          fi
+
+          if [ "${#files[@]}" -gt 1 ]; then
+            echo "Found multiple matched setup exe assets. Refuse to pick one blindly:"
+            printf ' - %s\n' "${files[@]}"
+            echo "Please keep only one setup exe for current tag in this release."
+            exit 1
+          fi
+
+          FILE="${files[0]}"
+          echo "Selected asset: ${FILE}"
+          echo "asset_file=${FILE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Normalize R2 endpoint
+        id: r2_endpoint
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          raw="${R2_ACCOUNT_ID}"
+          raw="${raw#http://}"
+          raw="${raw#https://}"
+          raw="${raw%%/*}"
+          raw="${raw%.r2.cloudflarestorage.com}"
+
+          if [ -z "${raw}" ]; then
+            echo "R2_ACCOUNT_ID is empty or invalid"
+            exit 1
+          fi
+
+          endpoint="https://${raw}.r2.cloudflarestorage.com"
+          echo "endpoint=${endpoint}" >> "${GITHUB_OUTPUT}"
+
+      - name: Ensure AWS CLI is available
+        run: |
+          set -euo pipefail
+          if command -v aws >/dev/null 2>&1; then
+            aws --version
+            exit 0
+          fi
+
+          sudo apt-get update
+          sudo apt-get install -y awscli
+          aws --version
+
+      - name: Upload EXE to R2 with unified name
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: "3"
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          FILE="${{ steps.resolve_upload_asset.outputs.asset_file }}"
+          echo "Uploading latest alias from: ${FILE}"
+
+          aws s3 cp "${FILE}" \
+            "s3://${R2_BUCKET}/${R2_LATEST_KEY}" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "application/vnd.microsoft.portable-executable" \
+            --endpoint-url "${{ steps.r2_endpoint.outputs.endpoint }}"
+
+      - name: Upload versioned copy to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: "3"
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          FILE="${{ steps.resolve_upload_asset.outputs.asset_file }}"
+
+          aws s3 cp "${FILE}" \
+            "s3://${R2_BUCKET}/${{ steps.release_meta.outputs.versioned_key }}" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --content-type "application/vnd.microsoft.portable-executable" \
+            --endpoint-url "${{ steps.r2_endpoint.outputs.endpoint }}"
+
+      - name: Show download URLs
+        run: |
+          echo "Latest:"
+          echo "https://dl.hungrym0.top/${R2_LATEST_KEY}"
+          echo
+          echo "Versioned:"
+          echo "https://dl.hungrym0.top/${{ steps.release_meta.outputs.versioned_key }}"
