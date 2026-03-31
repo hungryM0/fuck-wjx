@@ -37,6 +37,8 @@ _QQ_TITLE_SUFFIX_RE = re.compile(r"(?:[-|｜]\s*)?腾讯问卷.*$", re.IGNORECAS
 _QQ_URL_RE = re.compile(r"/s\d+/(\d+)/([A-Za-z0-9_-]+)/?$", re.IGNORECASE)
 _QQ_HTTP_LOCALES = ("zhs", "zht", "zh", "en")
 _QQ_LOGIN_PATH_RE = re.compile(r"^/r/login\.html(?:/)?$", re.IGNORECASE)
+_QQ_FILLBLANK_TOKEN_RE = re.compile(r"\{fillblank-[^{}]+\}", re.IGNORECASE)
+_QQ_FILLBLANK_SUFFIX_RE = re.compile(r"\s*[_＿]*\s*\{fillblank-[^{}]+\}", re.IGNORECASE)
 _QQ_LOGIN_REQUIRED_MESSAGE = "作答该问卷需要登录，请自行在后台开放访问权限"
 _QQ_LOGIN_REQUIRED_TOKENS = (
     "open.weixin.qq.com/connect/confirm",
@@ -258,9 +260,47 @@ def _build_option_texts(question: Dict[str, Any], provider_type: str) -> List[st
         return []
     option_texts: List[str] = []
     for item in raw_options:
-        text = _normalize_html_text(str((item or {}).get("text") or ""))
+        text = _normalize_qq_option_text((item or {}).get("text") or "")
         option_texts.append(text)
     return option_texts
+
+
+def _normalize_qq_option_text(value: Any) -> str:
+    text = _normalize_html_text(str(value or ""))
+    if not text:
+        return ""
+    text = _QQ_FILLBLANK_SUFFIX_RE.sub("", text).strip()
+    text = _QQ_FILLBLANK_TOKEN_RE.sub("", text).strip()
+    return _normalize_html_text(text)
+
+
+def _option_payload_contains_fillblank(value: Any, *, depth: int = 0) -> bool:
+    if depth > 4 or value is None:
+        return False
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key or "").strip().lower()
+            if key_text and "fillblank" in key_text:
+                return True
+            if _option_payload_contains_fillblank(item, depth=depth + 1):
+                return True
+        return False
+    if isinstance(value, (list, tuple, set)):
+        return any(_option_payload_contains_fillblank(item, depth=depth + 1) for item in value)
+    return bool(_QQ_FILLBLANK_TOKEN_RE.search(str(value or "")))
+
+
+def _build_fillable_option_indices(question: Dict[str, Any], provider_type: str) -> List[int]:
+    if provider_type not in {"radio", "checkbox", "select"}:
+        return []
+    raw_options = question.get("options")
+    if not isinstance(raw_options, list):
+        return []
+    fillable: List[int] = []
+    for idx, item in enumerate(raw_options):
+        if _option_payload_contains_fillblank(item):
+            fillable.append(idx)
+    return fillable
 
 
 def _build_row_texts(question: Dict[str, Any]) -> List[str]:
@@ -314,6 +354,7 @@ def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str,
         page = page_map.get((page_id, str(page_raw or "").strip()), 1)
         row_texts = _build_row_texts(question)
         option_texts = _build_option_texts(question, provider_type)
+        fillable_options = _build_fillable_option_indices(question, provider_type)
         option_count = _resolve_option_count(question, provider_type, option_texts)
         type_code = QQ_PROVIDER_TYPE_TO_INTERNAL.get(provider_type, "0")
         supported = provider_type in QQ_SUPPORTED_PROVIDER_TYPES
@@ -334,7 +375,7 @@ def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str,
             "option_texts": option_texts,
             "forced_option_index": None,
             "forced_option_text": "",
-            "fillable_options": [],
+            "fillable_options": fillable_options,
             "attached_option_selects": [],
             "has_attached_option_select": False,
             "is_location": False,

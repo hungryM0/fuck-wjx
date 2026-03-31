@@ -29,6 +29,7 @@ from software.core.questions.tendency import get_tendency_index
 from software.core.questions.utils import (
     normalize_droplist_probs,
     normalize_probabilities,
+    resolve_option_fill_text_from_config,
     resolve_dynamic_text_token,
     weighted_index,
 )
@@ -245,6 +246,115 @@ def _fill_text_question(driver: BrowserDriver, provider_question_id: str, value:
                 return String(target.value || '') === nextValue;
             }""",
             {"questionId": provider_question_id, "rawValue": next_value},
+        )
+    )
+
+
+def _fill_choice_option_additional_text(
+    driver: BrowserDriver,
+    provider_question_id: str,
+    option_index: int,
+    value: Optional[str],
+    *,
+    input_type: Optional[str] = None,
+) -> bool:
+    if not provider_question_id or option_index < 0:
+        return False
+    text = str(value or "").strip()
+    if not text:
+        return False
+    page = _page(driver)
+    return bool(
+        page.evaluate(
+            """({ questionId, optionIndex, rawValue, inputType }) => {
+                const section = document.querySelector(`section.question[data-question-id="${questionId}"]`);
+                if (!section || optionIndex < 0) return false;
+                const visible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (!style) return false;
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const isTextInput = (el) => {
+                    if (!el) return false;
+                    const tag = String(el.tagName || '').toLowerCase();
+                    if (tag === 'textarea') return true;
+                    if (tag !== 'input') return false;
+                    const type = String(el.getAttribute('type') || '').toLowerCase();
+                    return !type || ['text', 'search', 'tel', 'number'].includes(type);
+                };
+                const normalize = (textValue) => String(textValue || '').trim().replace(/\\s+/g, ' ');
+                const allTextInputs = Array.from(section.querySelectorAll('textarea, input')).filter((el) => visible(el) && isTextInput(el));
+                const containers = [];
+                const pushContainer = (node) => {
+                    if (!node || containers.includes(node)) return;
+                    containers.push(node);
+                };
+                if (inputType) {
+                    const optionInputs = Array.from(section.querySelectorAll(`input[type="${inputType}"]`)).filter(visible);
+                    const targetInput = optionInputs[optionIndex];
+                    pushContainer(targetInput?.closest('.question-option'));
+                    pushContainer(targetInput?.closest('.option'));
+                    pushContainer(targetInput?.closest('.t-radio'));
+                    pushContainer(targetInput?.closest('.t-checkbox'));
+                    pushContainer(targetInput?.closest('.question-item'));
+                    pushContainer(targetInput?.closest('label'));
+                    pushContainer(targetInput?.parentElement);
+                }
+                const checkedInputs = Array.from(section.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked')).filter(visible);
+                for (const checked of checkedInputs) {
+                    pushContainer(checked.closest('.question-option'));
+                    pushContainer(checked.closest('.option'));
+                    pushContainer(checked.closest('.t-radio'));
+                    pushContainer(checked.closest('.t-checkbox'));
+                    pushContainer(checked.closest('.question-item'));
+                    pushContainer(checked.closest('label'));
+                    pushContainer(checked.parentElement);
+                }
+                let target = null;
+                for (const container of containers) {
+                    const candidate = Array.from(container.querySelectorAll('textarea, input')).find((el) => visible(el) && isTextInput(el));
+                    if (candidate) {
+                        target = candidate;
+                        break;
+                    }
+                }
+                if (!target && allTextInputs.length === 1) {
+                    target = allTextInputs[0];
+                }
+                if (!target) {
+                    const normalizedValue = normalize(rawValue);
+                    target = allTextInputs.find((el) => normalize(el.value) === normalizedValue) || null;
+                }
+                if (!target) return false;
+                const nextValue = String(rawValue || '');
+                try { target.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                try { target.focus(); } catch (e) {}
+                try {
+                    const proto = target.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement?.prototype : window.HTMLInputElement?.prototype;
+                    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+                    if (descriptor && descriptor.set) {
+                        descriptor.set.call(target, nextValue);
+                    } else {
+                        target.value = nextValue;
+                    }
+                } catch (e) {
+                    try { target.value = nextValue; } catch (err) {}
+                }
+                try { target.setAttribute('value', nextValue); } catch (e) {}
+                ['input', 'change', 'blur'].forEach((name) => {
+                    try { target.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+                });
+                return normalize(target.value) === normalize(nextValue);
+            }""",
+            {
+                "questionId": provider_question_id,
+                "optionIndex": int(option_index),
+                "rawValue": text,
+                "inputType": str(input_type or "").strip() or None,
+            },
         )
     )
 
@@ -868,6 +978,22 @@ def _answer_qq_single(
     if strict_ratio:
         record_pending_distribution_choice(ctx, current, selected_index, option_count)
     selected_text = option_texts[selected_index] if selected_index < len(option_texts) else ""
+    fill_entries = ctx.single_option_fill_texts[config_index] if config_index < len(ctx.single_option_fill_texts) else None
+    fill_value = resolve_option_fill_text_from_config(
+        fill_entries,
+        selected_index,
+        driver=driver,
+        question_number=current,
+        option_text=selected_text,
+    )
+    if fill_value and _fill_choice_option_additional_text(
+            driver,
+            str(question.get("provider_question_id") or ""),
+            selected_index,
+            fill_value,
+            input_type="radio",
+        ):
+        selected_text = f"{selected_text} / {fill_value}" if selected_text else fill_value
     record_answer(current, "single", selected_indices=[selected_index], selected_texts=[selected_text])
 
 
@@ -920,6 +1046,22 @@ def _answer_qq_dropdown(
             _describe_dropdown_state(driver, question_id),
         )
         return
+    fill_entries = ctx.droplist_option_fill_texts[config_index] if config_index < len(ctx.droplist_option_fill_texts) else None
+    fill_value = resolve_option_fill_text_from_config(
+        fill_entries,
+        selected_index,
+        driver=driver,
+        question_number=current,
+        option_text=selected_text,
+    )
+    if fill_value and _fill_choice_option_additional_text(
+            driver,
+            question_id,
+            selected_index,
+            fill_value,
+            input_type=None,
+        ):
+        selected_text = f"{selected_text} / {fill_value}" if selected_text else fill_value
     if strict_ratio:
         record_pending_distribution_choice(ctx, current, selected_index, option_count)
     record_answer(current, "dropdown", selected_indices=[selected_index], selected_texts=[selected_text])
@@ -1096,8 +1238,24 @@ def _answer_qq_multiple(
     def _apply(selected_indices: Sequence[int]) -> List[int]:
         applied = []
         question_id = str(question.get("provider_question_id") or "")
+        fill_entries = ctx.multiple_option_fill_texts[config_index] if config_index < len(ctx.multiple_option_fill_texts) else None
         for option_idx in selected_indices:
             if _click_choice_input(driver, question_id, "checkbox", option_idx):
+                fill_value = resolve_option_fill_text_from_config(
+                    fill_entries,
+                    option_idx,
+                    driver=driver,
+                    question_number=current,
+                    option_text=option_texts[option_idx] if option_idx < len(option_texts) else "",
+                )
+                if fill_value:
+                    _fill_choice_option_additional_text(
+                        driver,
+                        question_id,
+                        option_idx,
+                        fill_value,
+                        input_type="checkbox",
+                    )
                 applied.append(option_idx)
         return applied
 
