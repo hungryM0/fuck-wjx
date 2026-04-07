@@ -675,7 +675,7 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
         super().__init__(
             FluentIcon.CERTIFICATE,
             "提升问卷信效度",
-            "启用后仅优化随机/预设题的一致性；手动自定义配比始终绝对优先，不会被改写。",
+            "启用后会对维度内题目统一施加信度约束（含自定义配比题）。",
             parent,
         )
 

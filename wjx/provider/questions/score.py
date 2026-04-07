@@ -11,9 +11,8 @@ from software.core.questions.distribution import (
     resolve_distribution_probabilities,
 )
 from software.core.questions.consistency import apply_single_like_consistency
-from software.core.questions.strict_ratio import enforce_reference_rank_order, is_strict_ratio_question
 from software.core.questions.tendency import get_tendency_index
-from software.core.questions.utils import normalize_droplist_probs, weighted_index
+from software.core.questions.utils import normalize_droplist_probs
 
 
 def _is_valid_score_option(element) -> bool:
@@ -94,25 +93,20 @@ def score(
     probs = normalize_droplist_probs(probabilities, len(options))
     probs = apply_single_like_consistency(probs, current)
     resolved_question_index = question_index if question_index is not None else current
-    strict_ratio = is_strict_ratio_question(task_ctx, resolved_question_index)
     probs = resolve_distribution_probabilities(
         probs,
         len(options),
         task_ctx,
         resolved_question_index,
-        psycho_plan=None if strict_ratio else psycho_plan,
+        psycho_plan=psycho_plan,
     )
-    if strict_ratio:
-        probs = enforce_reference_rank_order(probs, normalize_droplist_probs(probabilities, len(options)))
-        selected_index = weighted_index(probs)
-    else:
-        selected_index = get_tendency_index(
-            len(options),
-            probs,
-            dimension=dimension,
-            psycho_plan=psycho_plan,
-            question_index=resolved_question_index,
-        )
+    selected_index = get_tendency_index(
+        len(options),
+        probs,
+        dimension=dimension,
+        psycho_plan=psycho_plan,
+        question_index=resolved_question_index,
+    )
     if selected_index >= len(options):
         selected_index = max(0, len(options) - 1)
     target = options[selected_index]

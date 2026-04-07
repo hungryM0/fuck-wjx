@@ -797,8 +797,60 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
                     return False
         return True
 
+    def _validate_non_zero_weights(self) -> bool:
+        for idx, sliders in self.slider_map.items():
+            weights = [max(0, slider.value()) for slider in sliders]
+            if weights and not any(weight > 0 for weight in weights):
+                self._show_validation_error(
+                    f"{self._format_question_label(idx)}的选项配比不能全为0，请至少保留一个大于0的值。",
+                    idx,
+                    sliders[0],
+                )
+                return False
+
+        for idx, row_sliders in self.matrix_row_slider_map.items():
+            info = self._get_entry_info(idx)
+            row_texts = info.get("row_texts")
+            for row_idx, row in enumerate(row_sliders):
+                weights = [max(0, slider.value()) for slider in row]
+                if not weights or any(weight > 0 for weight in weights):
+                    continue
+                row_name = f"第{row_idx + 1}行"
+                if isinstance(row_texts, list) and row_idx < len(row_texts):
+                    row_text = str(row_texts[row_idx] or "").strip()
+                    if row_text:
+                        row_name = f"{row_name}（{_shorten_text(row_text, 24)}）"
+                self._show_validation_error(
+                    f"{self._format_question_label(idx)}的{row_name}配比不能全为0，请至少保留一个大于0的值。",
+                    idx,
+                    row[0],
+                )
+                return False
+
+        for idx, config_items in self.attached_select_slider_map.items():
+            for item in config_items:
+                sliders = item.get("sliders") or []
+                if not sliders:
+                    continue
+                weights = [max(0, slider.value()) for slider in sliders]
+                if any(weight > 0 for weight in weights):
+                    continue
+                option_text = str(item.get("option_text") or "").strip()
+                if not option_text:
+                    option_text = f"第{int(item.get('option_index', 0)) + 1}项"
+                self._show_validation_error(
+                    f"{self._format_question_label(idx)}里“{_shorten_text(option_text, 28)}”对应的嵌入式下拉配比不能全为0，请至少保留一个大于0的值。",
+                    idx,
+                    sliders[0],
+                )
+                return False
+
+        return True
+
     def accept(self) -> None:
         if not self._validate_random_integer_inputs():
+            return
+        if not self._validate_non_zero_weights():
             return
         super().accept()
 
@@ -1570,16 +1622,16 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         result: Dict[int, Any] = {}
         for idx, sliders in self.slider_map.items():
             weights = [max(0, s.value()) for s in sliders]
-            if all(w <= 0 for w in weights):
-                weights = [1] * len(weights)
+            if weights and not any(weight > 0 for weight in weights):
+                raise ValueError(f"{self._format_question_label(idx)}的选项配比不能全为0。")
             result[idx] = weights
 
         for idx, row_sliders in self.matrix_row_slider_map.items():
             row_weights: List[List[int]] = []
-            for row in row_sliders:
+            for row_idx, row in enumerate(row_sliders):
                 weights = [max(0, s.value()) for s in row]
-                if all(w <= 0 for w in weights):
-                    weights = [1] * len(weights)
+                if weights and not any(weight > 0 for weight in weights):
+                    raise ValueError(f"{self._format_question_label(idx)}的第{row_idx + 1}行配比不能全为0。")
                 row_weights.append(weights)
             result[idx] = row_weights
         return result
@@ -1718,7 +1770,12 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
                 sliders = item.get("sliders") or []
                 weights = [max(0, slider.value()) for slider in sliders]
                 if weights and not any(weight > 0 for weight in weights):
-                    weights = [1] * len(weights)
+                    option_text = str(item.get("option_text") or "").strip()
+                    if not option_text:
+                        option_text = f"第{int(item.get('option_index', 0)) + 1}项"
+                    raise ValueError(
+                        f"{self._format_question_label(idx)}里“{option_text}”对应的嵌入式下拉配比不能全为0。"
+                    )
                 serialized_items.append({
                     "option_index": int(item.get("option_index", 0)),
                     "option_text": str(item.get("option_text") or "").strip(),

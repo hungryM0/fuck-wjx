@@ -1,7 +1,6 @@
 """矩阵题处理"""
 from decimal import Decimal
 import math
-import random
 import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -14,7 +13,6 @@ from software.core.questions.distribution import (
 )
 from software.core.questions.strict_ratio import enforce_reference_rank_order, is_strict_ratio_question
 from software.core.questions.tendency import get_tendency_index
-from software.core.questions.utils import weighted_index
 from software.logging.log_utils import log_suppressed_exception
 from wjx.provider.questions.slider import set_slider_value
 
@@ -103,7 +101,6 @@ def _normalize_row_probabilities(
     row_offset: int,
     task_ctx: Optional[Any],
     resolved_question_index: int,
-    strict_ratio: bool,
     psycho_plan: Optional[Any],
 ) -> Tuple[Union[List[float], int], Optional[List[float]]]:
     strict_reference: Optional[List[float]] = None
@@ -124,7 +121,7 @@ def _normalize_row_probabilities(
                 task_ctx,
                 resolved_question_index,
                 row_index=row_offset,
-                psycho_plan=None if strict_ratio else psycho_plan,
+                psycho_plan=psycho_plan,
             )
     else:
         uniform_probs = apply_matrix_row_consistency([1.0] * candidate_count, current, row_offset)
@@ -135,7 +132,7 @@ def _normalize_row_probabilities(
                 task_ctx,
                 resolved_question_index,
                 row_index=row_offset,
-                psycho_plan=None if strict_ratio else psycho_plan,
+                psycho_plan=psycho_plan,
             )
     return row_probabilities, strict_reference
 
@@ -211,7 +208,7 @@ def _fill_slider_matrix(
 
     candidate_values = _build_slider_matrix_values(driver, current, slider_inputs[0])
     resolved_question_index = question_index if question_index is not None else current
-    strict_ratio = is_strict_ratio_question(task_ctx, resolved_question_index)
+    strict_ratio_question = is_strict_ratio_question(task_ctx, resolved_question_index)
     total_constraint = _read_slider_matrix_total(driver, current, slider_inputs)
     per_row_probabilities: List[Union[List[float], int]] = []
     for row_offset, _slider_input in enumerate(slider_inputs):
@@ -223,10 +220,9 @@ def _fill_slider_matrix(
             row_offset,
             task_ctx,
             resolved_question_index,
-            strict_ratio,
             psycho_plan,
         )
-        if strict_ratio and isinstance(row_probabilities, list):
+        if strict_ratio_question and isinstance(row_probabilities, list):
             row_probabilities = enforce_reference_rank_order(
                 row_probabilities,
                 strict_reference or row_probabilities,
@@ -245,11 +241,6 @@ def _fill_slider_matrix(
         row_probabilities = per_row_probabilities[row_offset]
         if selected_indices is not None and row_offset < len(selected_indices):
             selected_index = selected_indices[row_offset]
-        elif strict_ratio:
-            if isinstance(row_probabilities, list) and row_probabilities:
-                selected_index = weighted_index(row_probabilities)
-            else:
-                selected_index = random.randrange(len(candidate_values))
         else:
             selected_index = get_tendency_index(
                 len(candidate_values),
@@ -313,7 +304,7 @@ def matrix(
         return index
     candidate_columns = list(range(2, len(column_elements) + 1))
     resolved_question_index = question_index if question_index is not None else current
-    strict_ratio = is_strict_ratio_question(task_ctx, resolved_question_index)
+    strict_ratio_question = is_strict_ratio_question(task_ctx, resolved_question_index)
 
     for row_index in range(1, matrix_row_count + 1):
         raw_probabilities = matrix_prob_config[index] if index < len(matrix_prob_config) else -1
@@ -337,7 +328,7 @@ def matrix(
                     task_ctx,
                     resolved_question_index,
                     row_index=row_index - 1,
-                    psycho_plan=None if strict_ratio else psycho_plan,
+                    psycho_plan=psycho_plan,
                 )
         else:
             uniform_probs = apply_matrix_row_consistency([1.0] * len(candidate_columns), current, row_index - 1)
@@ -348,27 +339,21 @@ def matrix(
                     task_ctx,
                     resolved_question_index,
                     row_index=row_index - 1,
-                    psycho_plan=None if strict_ratio else psycho_plan,
+                    psycho_plan=psycho_plan,
                 )
-        if strict_ratio:
-            if isinstance(row_probabilities, list):
-                row_probabilities = enforce_reference_rank_order(
-                    row_probabilities,
-                    strict_reference or row_probabilities,
-                )
-            if isinstance(row_probabilities, list) and row_probabilities:
-                selected_index = weighted_index(row_probabilities)
-            else:
-                selected_index = random.randrange(len(candidate_columns))
-        else:
-            selected_index = get_tendency_index(
-                len(candidate_columns),
+        if strict_ratio_question and isinstance(row_probabilities, list):
+            row_probabilities = enforce_reference_rank_order(
                 row_probabilities,
-                dimension=dimension,
-                psycho_plan=psycho_plan,
-                question_index=resolved_question_index,
-                row_index=row_index - 1,
+                strict_reference or row_probabilities,
             )
+        selected_index = get_tendency_index(
+            len(candidate_columns),
+            row_probabilities,
+            dimension=dimension,
+            psycho_plan=psycho_plan,
+            question_index=resolved_question_index,
+            row_index=row_index - 1,
+        )
         selected_column = candidate_columns[selected_index]
         driver.find_element(
             By.CSS_SELECTOR, f"#drv{current}_{row_index} > td:nth-child({selected_column})"

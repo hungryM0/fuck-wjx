@@ -228,7 +228,7 @@ def _resolve_runtime_dimension(
     reliability_mode_enabled: bool,
     strict_ratio: bool,
 ) -> Optional[str]:
-    if not reliability_mode_enabled or strict_ratio:
+    if not reliability_mode_enabled:
         return None
     raw_dimension = str(getattr(entry, "dimension", "") or "").strip()
     if not raw_dimension or raw_dimension == DIMENSION_UNGROUPED:
@@ -490,6 +490,18 @@ def validate_question_config(entries: List[QuestionEntry], questions_info: Optio
     if not entries:
         return "未配置任何题目"
 
+    def _count_positive_weights(raw_weights: Any) -> int:
+        if not isinstance(raw_weights, (list, tuple)):
+            return 0
+        count = 0
+        for value in raw_weights:
+            try:
+                if float(value) > 0:
+                    count += 1
+            except Exception:
+                continue
+        return count
+
     errors: List[str] = []
     question_info_map = {}
     unsupported_questions: List[dict] = []
@@ -576,6 +588,48 @@ def validate_question_config(entries: List[QuestionEntry], questions_info: Optio
                         f"  - 题目最多允许选择 {multi_max_limit} 项\n"
                         f"  - 但当前有 {positive_count} 个选项的概率大于 0%\n"
                         f"  - 请把多余选项的概率改为 0%"
+                    )
+
+        # 自定义配比题统一拦截：不允许“全 0 自动回退随机”
+        if str(getattr(entry, "distribution_mode", "") or "").strip().lower() == "custom":
+            custom_or_prob = getattr(entry, "custom_weights", None) or getattr(entry, "probabilities", None)
+
+            if question_type in ("single", "dropdown", "scale", "score") and isinstance(custom_or_prob, list):
+                if _count_positive_weights(custom_or_prob) <= 0:
+                    errors.append(
+                        f"第 {question_num} 题（{question_type}）配置无效：\n"
+                        f"  - 自定义配比不能全部为 0\n"
+                        f"  - 请至少将 1 个选项设为大于 0"
+                    )
+
+            if question_type == "matrix":
+                row_weights_source = custom_or_prob
+                if isinstance(row_weights_source, list) and any(isinstance(item, (list, tuple)) for item in row_weights_source):
+                    for row_idx, row_weights in enumerate(row_weights_source, start=1):
+                        if isinstance(row_weights, (list, tuple)) and _count_positive_weights(row_weights) <= 0:
+                            errors.append(
+                                f"第 {question_num} 题（矩阵题）配置无效：\n"
+                                f"  - 第 {row_idx} 行自定义配比全部为 0\n"
+                                f"  - 请至少将 1 个选项设为大于 0"
+                            )
+                elif isinstance(row_weights_source, list) and _count_positive_weights(row_weights_source) <= 0:
+                    errors.append(
+                        f"第 {question_num} 题（矩阵题）配置无效：\n"
+                        f"  - 自定义配比全部为 0\n"
+                        f"  - 请至少将 1 个选项设为大于 0"
+                    )
+
+            attached_select_configs = list(getattr(entry, "attached_option_selects", []) or [])
+            for cfg_idx, cfg in enumerate(attached_select_configs, start=1):
+                if not isinstance(cfg, dict):
+                    continue
+                weights = cfg.get("weights")
+                if isinstance(weights, list) and weights and _count_positive_weights(weights) <= 0:
+                    option_text = str(cfg.get("option_text") or "").strip()
+                    errors.append(
+                        f"第 {question_num} 题（嵌入式下拉）配置无效：\n"
+                        f"  - 第 {cfg_idx} 组（{option_text or '未命名选项'}）配比全部为 0\n"
+                        f"  - 请至少将 1 个选项设为大于 0"
                     )
 
     if errors:

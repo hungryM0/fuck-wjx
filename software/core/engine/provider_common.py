@@ -11,7 +11,6 @@ from software.core.persona.context import reset_context as _reset_answer_context
 from software.core.persona.generator import generate_persona, reset_persona, set_current_persona
 from software.core.psychometrics import build_dimension_psychometric_plan
 from software.core.questions.consistency import reset_consistency_context
-from software.core.questions.strict_ratio import is_strict_ratio_question
 from software.core.task import TaskContext
 from software.core.questions.tendency import reset_tendency
 
@@ -71,8 +70,6 @@ def build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
         question_type, start_index = config_entry
         dimension = str(ctx.question_dimension_map.get(question_num) or "").strip()
         if not dimension:
-            continue
-        if is_strict_ratio_question(ctx, question_num):
             continue
 
         question_meta = ctx.questions_metadata.get(question_num) or {}

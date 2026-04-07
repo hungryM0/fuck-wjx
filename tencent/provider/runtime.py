@@ -1117,25 +1117,20 @@ def _answer_qq_score_like(
     probabilities = ctx.scale_prob[config_index] if config_index < len(ctx.scale_prob) else -1
     probs = normalize_droplist_probs(probabilities, option_count)
     probs = apply_single_like_consistency(probs, current)
-    strict_ratio = is_strict_ratio_question(ctx, current)
     probs = resolve_distribution_probabilities(
         probs,
         option_count,
         ctx,
         current,
-        psycho_plan=None if strict_ratio else psycho_plan,
+        psycho_plan=psycho_plan,
     )
-    if strict_ratio:
-        probs = enforce_reference_rank_order(probs, normalize_droplist_probs(probabilities, option_count))
-        selected_index = weighted_index(probs)
-    else:
-        selected_index = get_tendency_index(
-            option_count,
-            probs,
-            dimension=ctx.question_dimension_map.get(current),
-            psycho_plan=psycho_plan,
-            question_index=current,
-        )
+    selected_index = get_tendency_index(
+        option_count,
+        probs,
+        dimension=ctx.question_dimension_map.get(current),
+        psycho_plan=psycho_plan,
+        question_index=current,
+    )
     if not _click_choice_input(driver, str(question.get("provider_question_id") or ""), "radio", selected_index):
         logging.warning("腾讯问卷第%d题（评分）点击未生效。", current)
         return
@@ -1155,7 +1150,7 @@ def _answer_qq_matrix(
     question_id = str(question.get("provider_question_id") or "")
     row_count = max(1, int(question.get("rows") or 1))
     option_count = max(2, int(question.get("options") or 0))
-    strict_ratio = is_strict_ratio_question(ctx, current)
+    strict_ratio_question = is_strict_ratio_question(ctx, current)
     next_index = config_index
     for row_index in range(row_count):
         raw_probabilities = ctx.matrix_prob[next_index] if next_index < len(ctx.matrix_prob) else -1
@@ -1178,7 +1173,7 @@ def _answer_qq_matrix(
                     ctx,
                     current,
                     row_index=row_index,
-                    psycho_plan=None if strict_ratio else psycho_plan,
+                    psycho_plan=psycho_plan,
                 )
         else:
             uniform_probs = apply_matrix_row_consistency([1.0] * option_count, current, row_index)
@@ -1189,24 +1184,18 @@ def _answer_qq_matrix(
                     ctx,
                     current,
                     row_index=row_index,
-                    psycho_plan=None if strict_ratio else psycho_plan,
+                    psycho_plan=psycho_plan,
                 )
-        if strict_ratio:
-            if isinstance(row_probabilities, list):
-                row_probabilities = enforce_reference_rank_order(row_probabilities, strict_reference or row_probabilities)
-            if isinstance(row_probabilities, list) and row_probabilities:
-                selected_index = weighted_index(row_probabilities)
-            else:
-                selected_index = random.randrange(option_count)
-        else:
-            selected_index = get_tendency_index(
-                option_count,
-                row_probabilities,
-                dimension=ctx.question_dimension_map.get(current),
-                psycho_plan=psycho_plan,
-                question_index=current,
-                row_index=row_index,
-            )
+        if strict_ratio_question and isinstance(row_probabilities, list):
+            row_probabilities = enforce_reference_rank_order(row_probabilities, strict_reference or row_probabilities)
+        selected_index = get_tendency_index(
+            option_count,
+            row_probabilities,
+            dimension=ctx.question_dimension_map.get(current),
+            psycho_plan=psycho_plan,
+            question_index=current,
+            row_index=row_index,
+        )
         if not _click_matrix_cell(driver, question_id, row_index, selected_index):
             logging.warning("腾讯问卷第%d题（矩阵）第%d行点击失败。", current, row_index + 1)
             continue

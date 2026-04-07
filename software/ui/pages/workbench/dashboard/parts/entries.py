@@ -262,7 +262,11 @@ class DashboardEntriesMixin:
             reliability_mode_enabled=reliability_mode_enabled,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._apply_wizard_results(entries, dlg)
+            try:
+                self._apply_wizard_results(entries, dlg)
+            except ValueError as exc:
+                self._toast(f"配置应用失败：{exc}", "error")
+                return False
             return True
         return False
 

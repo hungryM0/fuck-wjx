@@ -223,6 +223,50 @@ class _QuestionDispatcher:
             indices["text"] = _idx + 1
             return None  # 文本题内部已处理计数，返回 None
 
+        # 某些问卷会把多项填空题挂在 type=9 等非文本 type 上；只要配置映射为 text 且 DOM 呈现为填空特征，
+        # 就应优先走填空处理，避免被矩阵分发器误吞。
+        if question_div is not None and config_entry and config_entry[0] == "text":
+            checkbox_count, radio_count = _count_choice_inputs_driver(question_div)
+            option_count = checkbox_count + radio_count
+            text_input_count = _count_visible_text_inputs_driver(question_div)
+            has_slider_matrix = _driver_question_looks_like_slider_matrix(question_div)
+            if _should_treat_question_as_text_like(
+                question_type,
+                option_count,
+                text_input_count,
+                has_slider_matrix=has_slider_matrix,
+            ):
+                sequential_idx = int(indices.get("text", 0) or 0)
+                mapped_idx: Optional[int] = None
+                try:
+                    mapped_idx = max(0, int(config_entry[1]))
+                except Exception:
+                    mapped_idx = None
+                if mapped_idx is not None and mapped_idx < sequential_idx:
+                    logging.warning(
+                        "文本题索引回拨已拦截：题号=%s 类型=%s 映射索引=%s 当前顺序索引=%s，继续沿用顺序索引",
+                        question_num,
+                        question_type,
+                        mapped_idx,
+                        sequential_idx,
+                    )
+                _idx = sequential_idx if mapped_idx is None or mapped_idx < sequential_idx else mapped_idx
+                _text_impl(
+                    driver,
+                    question_num,
+                    _idx,
+                    ctx.texts,
+                    ctx.texts_prob,
+                    ctx.text_entry_types,
+                    ctx.text_ai_flags,
+                    ctx.text_titles,
+                    ctx.multi_text_blank_modes,
+                    ctx.multi_text_blank_ai_flags,
+                    ctx.multi_text_blank_int_ranges,
+                )
+                indices["text"] = _idx + 1
+                return None
+
         # 多行滑块题：不同问卷可能挂在 type=9 / type=12 等模板上，不能继续按题号硬编码。
         if _driver_question_looks_like_slider_matrix(question_div):
             sequential_idx = int(indices.get("matrix", 0) or 0)
