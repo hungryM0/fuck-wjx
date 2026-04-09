@@ -1045,6 +1045,137 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
     return has_jump_attr or bool(jump_rules), jump_rules
 
 
+def _extract_display_conditions_from_html(question_div, question_number: int) -> Tuple[bool, List[Dict[str, Any]]]:
+    """从静态 HTML 中提取按答案显示/隐藏题目的条件逻辑。"""
+    relation_raw = str(question_div.get("relation") or "").strip()
+    if not relation_raw:
+        return False, []
+
+    conditions: List[Dict[str, Any]] = []
+    seen: set[Tuple[int, Tuple[int, ...]]] = set()
+    for chunk in re.split(r"\s*[|]\s*", relation_raw):
+        text = str(chunk or "").strip()
+        if not text or "," not in text:
+            continue
+        source_text, option_text = text.split(",", 1)
+        source_match = re.search(r"\d+", source_text)
+        if not source_match:
+            continue
+        try:
+            source_question_num = int(source_match.group(0))
+        except Exception:
+            continue
+        option_indices: List[int] = []
+        seen_indices = set()
+        for match in re.finditer(r"\d+", option_text):
+            try:
+                option_num = int(match.group(0))
+            except Exception:
+                continue
+            if option_num <= 0:
+                continue
+            option_index = option_num - 1
+            if option_index in seen_indices:
+                continue
+            seen_indices.add(option_index)
+            option_indices.append(option_index)
+        if source_question_num <= 0 or not option_indices:
+            continue
+        dedupe_key = (source_question_num, tuple(option_indices))
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        conditions.append({
+            "condition_question_num": source_question_num,
+            "condition_mode": "selected",
+            "condition_option_indices": option_indices,
+            "raw_relation": text,
+        })
+    return bool(conditions), conditions
+
+
+def _attach_display_condition_metadata(questions_info: List[Dict[str, Any]]) -> None:
+    """为题目列表补充“受条件控制显示”和“控制后续显示”两类元数据。"""
+    by_num: Dict[int, Dict[str, Any]] = {}
+    for info in questions_info:
+        try:
+            question_num = int(info.get("num") or 0)
+        except Exception:
+            question_num = 0
+        if question_num > 0 and question_num not in by_num:
+            by_num[question_num] = info
+
+    for info in questions_info:
+        display_conditions = info.get("display_conditions") or []
+        if not isinstance(display_conditions, list) or not display_conditions:
+            continue
+        try:
+            target_question_num = int(info.get("num") or 0)
+        except Exception:
+            target_question_num = 0
+        for condition in display_conditions:
+            if not isinstance(condition, dict):
+                continue
+            try:
+                source_question_num = int(condition.get("condition_question_num") or 0)
+            except Exception:
+                source_question_num = 0
+            option_indices = condition.get("condition_option_indices") or []
+            if source_question_num <= 0 or not isinstance(option_indices, list):
+                continue
+            source_info = by_num.get(source_question_num)
+            if not source_info:
+                continue
+            targets = source_info.setdefault("controls_display_targets", [])
+            if not isinstance(targets, list):
+                targets = []
+                source_info["controls_display_targets"] = targets
+            normalized_indices: List[int] = []
+            seen_indices = set()
+            for raw_index in option_indices:
+                try:
+                    index = int(raw_index)
+                except Exception:
+                    continue
+                if index < 0 or index in seen_indices:
+                    continue
+                seen_indices.add(index)
+                normalized_indices.append(index)
+            if not normalized_indices:
+                continue
+            duplicate = False
+            for existing in targets:
+                if not isinstance(existing, dict):
+                    continue
+                try:
+                    existing_target = int(existing.get("target_question_num") or 0)
+                except Exception:
+                    existing_target = 0
+                existing_indices = existing.get("condition_option_indices") or []
+                if existing_target == target_question_num and list(existing_indices) == normalized_indices:
+                    duplicate = True
+                    break
+            if duplicate:
+                continue
+            targets.append({
+                "target_question_num": target_question_num,
+                "condition_option_indices": normalized_indices,
+                "condition_mode": str(condition.get("condition_mode") or "selected").strip() or "selected",
+            })
+
+    for info in questions_info:
+        targets = info.get("controls_display_targets")
+        if isinstance(targets, list) and targets:
+            targets.sort(key=lambda item: (
+                int(item.get("target_question_num") or 0) if isinstance(item, dict) else 0,
+                tuple(item.get("condition_option_indices") or []) if isinstance(item, dict) else (),
+            ))
+            info["has_dependent_display_logic"] = True
+        else:
+            info["controls_display_targets"] = []
+            info["has_dependent_display_logic"] = False
+
+
 def _extract_slider_range(question_div, question_number: int) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     """尝试解析滑块题的最小值、最大值和步长。"""
     try:
@@ -1515,6 +1646,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
             if type_code in {"3", "4"}:
                 attached_option_selects = _extract_choice_attached_selects(question_div)
             has_jump, jump_rules = _extract_jump_rules_from_html(question_div, question_number, option_texts)
+            has_display_condition, display_conditions = _extract_display_conditions_from_html(question_div, question_number)
             is_slider_matrix = _question_div_looks_like_slider_matrix(question_div)
             slider_min, slider_max, slider_step = (None, None, None)
             if type_code == "8":
@@ -1572,12 +1704,15 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "is_slider_matrix": is_slider_matrix,
                 "has_jump": has_jump,
                 "jump_rules": jump_rules,
+                "has_display_condition": has_display_condition,
+                "display_conditions": display_conditions,
                 "slider_min": slider_min,
                 "slider_max": slider_max,
                 "slider_step": slider_step,
                 "multi_min_limit": multi_min_limit,
                 "multi_max_limit": multi_max_limit,
             })
+    _attach_display_condition_metadata(questions_info)
     return questions_info
 
 

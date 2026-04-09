@@ -456,6 +456,126 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
         qnum = str(info.get("num") or "").strip()
         return f"第{qnum or idx + 1}题"
 
+    def _find_info_by_question_num(self, question_num: int) -> Dict[str, Any]:
+        for info in self.info:
+            if not isinstance(info, dict):
+                continue
+            try:
+                current_num = int(info.get("num") or 0)
+            except Exception:
+                current_num = 0
+            if current_num == question_num:
+                return info
+        return {}
+
+    @staticmethod
+    def _format_question_num_list(question_nums: List[int]) -> str:
+        normalized: List[int] = []
+        seen = set()
+        for raw in question_nums:
+            try:
+                value = int(raw)
+            except Exception:
+                continue
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        if not normalized:
+            return "后续题目"
+        normalized.sort()
+        labels = [f"第{num}题" for num in normalized]
+        if len(labels) <= 4:
+            return "、".join(labels)
+        return f"{'、'.join(labels[:4])} 等{len(labels)}题"
+
+    def _format_condition_option_text(self, source_info: Dict[str, Any], option_indices: List[Any]) -> str:
+        option_texts = list(source_info.get("option_texts") or [])
+        normalized_labels: List[str] = []
+        seen = set()
+        for raw in option_indices:
+            try:
+                option_index = int(raw)
+            except Exception:
+                continue
+            if option_index < 0 or option_index in seen:
+                continue
+            seen.add(option_index)
+            if option_index < len(option_texts):
+                option_text = str(option_texts[option_index] or "").strip()
+                if option_text:
+                    normalized_labels.append(f"“{_shorten_text(option_text, 18)}”")
+                    continue
+            normalized_labels.append(f"第{option_index + 1}项")
+        if not normalized_labels:
+            return "指定选项"
+        if len(normalized_labels) == 1:
+            return normalized_labels[0]
+        if len(normalized_labels) <= 3:
+            return "、".join(normalized_labels)
+        return f"以下任一项：{'、'.join(normalized_labels[:4])}"
+
+    def _build_display_condition_summary(self, info_entry: Dict[str, Any]) -> str:
+        conditions = info_entry.get("display_conditions") or []
+        if not isinstance(conditions, list) or not conditions:
+            return ""
+        segments: List[str] = []
+        for condition in conditions:
+            if not isinstance(condition, dict):
+                continue
+            try:
+                source_question_num = int(condition.get("condition_question_num") or 0)
+            except Exception:
+                source_question_num = 0
+            if source_question_num <= 0:
+                continue
+            source_info = self._find_info_by_question_num(source_question_num)
+            option_text = self._format_condition_option_text(
+                source_info,
+                list(condition.get("condition_option_indices") or []),
+            )
+            segments.append(f"第{source_question_num}题选中{option_text}")
+        if not segments:
+            return "⚠️ 这题不是每份问卷都会出现，只有满足前面题目的条件时才会显示。"
+        return f"⚠️ 这题不是每份问卷都会出现。仅在满足以下条件时显示：{'；'.join(segments)}。"
+
+    def _build_dependent_display_summary(self, info_entry: Dict[str, Any]) -> str:
+        targets = info_entry.get("controls_display_targets") or []
+        if not isinstance(targets, list) or not targets:
+            return ""
+        grouped: Dict[Tuple[int, ...], List[int]] = {}
+        for item in targets:
+            if not isinstance(item, dict):
+                continue
+            try:
+                target_question_num = int(item.get("target_question_num") or 0)
+            except Exception:
+                target_question_num = 0
+            if target_question_num <= 0:
+                continue
+            key_parts: List[int] = []
+            seen = set()
+            for raw in list(item.get("condition_option_indices") or []):
+                try:
+                    option_index = int(raw)
+                except Exception:
+                    continue
+                if option_index < 0 or option_index in seen:
+                    continue
+                seen.add(option_index)
+                key_parts.append(option_index)
+            if not key_parts:
+                continue
+            grouped.setdefault(tuple(key_parts), []).append(target_question_num)
+        if not grouped:
+            return "⚠️ 这题会控制后续题是否出现，选项配比会直接影响后续题的触达率。"
+        segments: List[str] = []
+        for option_indices, target_nums in sorted(grouped.items(), key=lambda item: item[0]):
+            option_text = self._format_condition_option_text(info_entry, list(option_indices))
+            target_text = self._format_question_num_list(target_nums)
+            segments.append(f"选中{option_text}时显示{target_text}")
+        return f"⚠️ 这题会控制后续题是否出现：{'；'.join(segments)}。"
+
     def _show_validation_error(self, message: str, idx: int, focus_widget: Optional[QWidget] = None) -> None:
         self._navigate_to_question(idx, animate=True)
         box = MessageBox("保存失败", message, self)
@@ -1398,6 +1518,18 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
             jump_badge.setStyleSheet("font-size: 12px; font-weight: 500;")
             _apply_label_color(jump_badge, "#d97706", "#e5a00d")
             header.addWidget(jump_badge)
+        has_dependent_display_logic = bool(info_entry.get("has_dependent_display_logic"))
+        if has_dependent_display_logic:
+            control_badge = BodyLabel("[控制后续显示]", card)
+            control_badge.setStyleSheet("font-size: 12px; font-weight: 500;")
+            _apply_label_color(control_badge, "#0f766e", "#34d399")
+            header.addWidget(control_badge)
+        has_display_condition = bool(info_entry.get("has_display_condition"))
+        if has_display_condition:
+            condition_badge = BodyLabel("[条件显示题]", card)
+            condition_badge.setStyleSheet("font-size: 12px; font-weight: 500;")
+            _apply_label_color(condition_badge, "#166534", "#4ade80")
+            header.addWidget(condition_badge)
 
         header.addStretch(1)
         if entry.question_type == "slider":
@@ -1459,6 +1591,20 @@ class QuestionWizardDialog(WizardSectionsMixin, QDialog):
             jump_warn.setStyleSheet("font-size: 12px; padding: 4px 0;")
             _apply_label_color(jump_warn, "#b45309", "#e5a00d")
             card_layout.addWidget(jump_warn)
+
+        if has_dependent_display_logic:
+            display_control_warn = BodyLabel(self._build_dependent_display_summary(info_entry), card)
+            display_control_warn.setWordWrap(True)
+            display_control_warn.setStyleSheet("font-size: 12px; padding: 4px 0;")
+            _apply_label_color(display_control_warn, "#0f766e", "#86efac")
+            card_layout.addWidget(display_control_warn)
+
+        if has_display_condition:
+            display_condition_warn = BodyLabel(self._build_display_condition_summary(info_entry), card)
+            display_condition_warn.setWordWrap(True)
+            display_condition_warn.setStyleSheet("font-size: 12px; padding: 4px 0;")
+            _apply_label_color(display_condition_warn, "#166534", "#86efac")
+            card_layout.addWidget(display_condition_warn)
 
         # 根据题型构建不同的配置区域
         if entry.question_type in ("text", "multi_text"):
