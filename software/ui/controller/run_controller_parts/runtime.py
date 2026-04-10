@@ -5,6 +5,7 @@ import copy
 import logging
 import math
 import threading
+import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QCoreApplication
@@ -213,6 +214,74 @@ class RunControllerRuntimeMixin:
             ).start()
             return
         self._refresh_random_ip_counter_now(adapter)
+
+    def _begin_random_ip_server_sync(self, *, min_interval_seconds: float = 0.0) -> bool:
+        if is_custom_proxy_api_active() or not has_authenticated_session():
+            return False
+        lock = getattr(self, "_random_ip_server_sync_lock", None)
+        if lock is None:
+            return True
+        now = time.monotonic()
+        with lock:
+            if bool(getattr(self, "_random_ip_server_sync_active", False)):
+                return False
+            last_sync_at = float(getattr(self, "_random_ip_last_server_sync_at", 0.0) or 0.0)
+            if min_interval_seconds > 0 and (now - last_sync_at) < float(min_interval_seconds):
+                return False
+            self._random_ip_server_sync_active = True
+        return True
+
+    def _finish_random_ip_server_sync(self, *, succeeded: bool) -> None:
+        lock = getattr(self, "_random_ip_server_sync_lock", None)
+        if lock is None:
+            return
+        with lock:
+            if succeeded:
+                self._random_ip_last_server_sync_at = time.monotonic()
+            self._random_ip_server_sync_active = False
+
+    def sync_random_ip_counter_from_server(
+        self,
+        *,
+        adapter: Optional[Any] = None,
+        async_mode: bool = True,
+        silent: bool = True,
+        min_interval_seconds: float = 0.0,
+    ) -> None:
+        adapter = adapter or getattr(self, "adapter", None)
+        if not adapter:
+            return
+        if not self._begin_random_ip_server_sync(min_interval_seconds=min_interval_seconds):
+            return
+
+        def _worker() -> None:
+            succeeded = False
+            try:
+                snapshot = sync_quota_snapshot_from_server()
+                used, total = self._resolve_counter_snapshot_values(snapshot)
+                self._apply_random_ip_counter(adapter, used=used, total=total, custom_api=False)
+                succeeded = True
+            except Exception as exc:
+                message = format_random_ip_error(exc)
+                log_level = logging.INFO if silent else logging.WARNING
+                logging.log(log_level, "同步随机IP额度失败：%s", message)
+                if not silent:
+                    self._show_random_ip_message(adapter, "随机IP同步失败", message, level="warning")
+                try:
+                    self._refresh_random_ip_counter_now(adapter)
+                except Exception:
+                    logging.info("同步失败后回退随机IP本地额度显示失败", exc_info=True)
+            finally:
+                self._finish_random_ip_server_sync(succeeded=succeeded)
+
+        if async_mode and threading.current_thread() is threading.main_thread():
+            threading.Thread(
+                target=_worker,
+                daemon=True,
+                name="RandomIPQuotaSync",
+            ).start()
+            return
+        _worker()
 
     def _try_activate_random_ip_trial(self, adapter: Optional[Any]) -> tuple[bool, bool]:
         try:
@@ -504,6 +573,23 @@ class RunControllerRuntimeMixin:
             cloned.__dict__.update(dict(getattr(config, "__dict__", {})))
             return cloned
 
+    @staticmethod
+    def _resolve_random_ip_proxy_target_count(config: RuntimeConfig) -> int:
+        threads = max(1, int(getattr(config, "threads", 1) or 1))
+        target = max(1, int(getattr(config, "target", 1) or 1))
+        return min(threads, target)
+
+    def _resolve_random_ip_init_prefetch_count(self, config: RuntimeConfig) -> int:
+        if self._should_use_initialization_gate(config):
+            return 1
+        return self._resolve_random_ip_proxy_target_count(config)
+
+    @staticmethod
+    def _resolve_proxy_api_url_for_config(config: RuntimeConfig) -> str:
+        proxy_source = str(getattr(config, "proxy_source", "default") or "default")
+        custom_proxy_api = str(getattr(config, "custom_proxy_api", "") or "").strip()
+        return custom_proxy_api if (proxy_source == "custom" and custom_proxy_api) else get_effective_proxy_api_url()
+
     def _consume_probe_failure_message(self) -> str:
         message = str(getattr(self, "_probe_failure_message", "") or "").strip()
         self._probe_failure_message = ""
@@ -543,6 +629,8 @@ class RunControllerRuntimeMixin:
         self,
         config: RuntimeConfig,
         gate_stop_event: threading.Event,
+        *,
+        expected_count: Optional[int] = None,
     ) -> List[str]:
         if not bool(getattr(config, "random_ip_enabled", False)):
             return []
@@ -584,12 +672,14 @@ class RunControllerRuntimeMixin:
         _set_stage("初始化随机IP模块（预取代理）")
         from software.network.proxy.pool import prefetch_proxy_pool
 
-        proxy_source = str(getattr(config, "proxy_source", "default") or "default")
-        custom_proxy_api = str(getattr(config, "custom_proxy_api", "") or "").strip()
-        proxy_api_url = custom_proxy_api if (proxy_source == "custom" and custom_proxy_api) else get_effective_proxy_api_url()
-        initial_proxy_count = min(
-            max(1, int(getattr(config, "threads", 1) or 1)),
-            max(1, int(getattr(config, "target", 1) or 1)),
+        proxy_api_url = self._resolve_proxy_api_url_for_config(config)
+        initial_proxy_count = max(
+            1,
+            int(
+                self._resolve_random_ip_init_prefetch_count(config)
+                if expected_count is None
+                else expected_count
+            ),
         )
         proxy_pool = prefetch_proxy_pool(
             expected_count=initial_proxy_count,
@@ -603,6 +693,47 @@ class RunControllerRuntimeMixin:
         except Exception:
             logging.info("预取代理后刷新随机IP额度失败", exc_info=True)
         return proxy_pool
+
+    def _top_up_random_ip_resources_for_run(
+        self,
+        config: RuntimeConfig,
+        proxy_pool: List[str],
+        gate_stop_event: threading.Event,
+    ) -> List[str]:
+        if not bool(getattr(config, "random_ip_enabled", False)):
+            return list(proxy_pool)
+
+        desired_count = self._resolve_random_ip_proxy_target_count(config)
+        existing_pool = list(proxy_pool)
+        missing_count = max(0, int(desired_count) - len(existing_pool))
+        if missing_count <= 0:
+            return existing_pool
+
+        if self.stop_event.is_set() or gate_stop_event.is_set():
+            return existing_pool
+
+        self._dispatch_to_ui_async(
+            lambda: (
+                self._set_initialization_stage("random_ip", "初始化随机IP模块（补齐正式运行代理）"),
+                self._emit_status(),
+            )
+        )
+
+        from software.network.proxy.pool import prefetch_proxy_pool
+
+        fetched = prefetch_proxy_pool(
+            expected_count=missing_count,
+            proxy_api_url=self._resolve_proxy_api_url_for_config(config),
+            stop_signal=self.stop_event,
+        )
+        if self.stop_event.is_set() or gate_stop_event.is_set():
+            return existing_pool
+        combined_pool = existing_pool + list(fetched or [])
+        try:
+            self._dispatch_to_ui_async(lambda: self.refresh_random_ip_counter(adapter=self.adapter))
+        except Exception:
+            logging.info("补齐正式运行代理后刷新随机IP额度失败", exc_info=True)
+        return combined_pool
 
     def _run_initialization_gate(
         self,
@@ -619,7 +750,11 @@ class RunControllerRuntimeMixin:
         effective_proxy_pool = list(proxy_pool)
         if bool(getattr(config, "random_ip_enabled", False)):
             try:
-                effective_proxy_pool = self._prepare_random_ip_resources(config, gate_stop_event)
+                effective_proxy_pool = self._prepare_random_ip_resources(
+                    config,
+                    gate_stop_event,
+                    expected_count=self._resolve_random_ip_init_prefetch_count(config),
+                )
             except Exception as exc:
                 self._dispatch_to_ui_async(lambda msg=str(exc): self._finish_initialization_failure(msg))
                 return
@@ -639,6 +774,18 @@ class RunControllerRuntimeMixin:
         if first_headless is None:
             return
         if first_headless:
+            if bool(getattr(config, "random_ip_enabled", False)):
+                try:
+                    effective_proxy_pool = self._top_up_random_ip_resources_for_run(
+                        config,
+                        effective_proxy_pool,
+                        gate_stop_event,
+                    )
+                except Exception as exc:
+                    self._dispatch_to_ui_async(lambda msg=str(exc): self._finish_initialization_failure(msg))
+                    return
+                if _cancelled():
+                    return
             self._dispatch_to_ui_async(lambda: self._start_after_init_success(config, effective_proxy_pool))
             return
 
@@ -669,6 +816,18 @@ class RunControllerRuntimeMixin:
         if third_headless is None:
             return
         if third_headless:
+            if bool(getattr(config, "random_ip_enabled", False)):
+                try:
+                    effective_proxy_pool = self._top_up_random_ip_resources_for_run(
+                        config,
+                        effective_proxy_pool,
+                        gate_stop_event,
+                    )
+                except Exception as exc:
+                    self._dispatch_to_ui_async(lambda msg=str(exc): self._finish_initialization_failure(msg))
+                    return
+                if _cancelled():
+                    return
             self._dispatch_to_ui_async(lambda: self._start_after_init_success(config, effective_proxy_pool))
             return
 
@@ -681,6 +840,18 @@ class RunControllerRuntimeMixin:
             NON_HEADLESS_FALLBACK_MAX_THREADS,
         )
         fallback_config.threads = fallback_threads
+        if bool(getattr(config, "random_ip_enabled", False)):
+            try:
+                effective_proxy_pool = self._top_up_random_ip_resources_for_run(
+                    fallback_config,
+                    effective_proxy_pool,
+                    gate_stop_event,
+                )
+            except Exception as exc:
+                self._dispatch_to_ui_async(lambda msg=str(exc): self._finish_initialization_failure(msg))
+                return
+            if _cancelled():
+                return
         self._dispatch_to_ui_async(lambda: self._start_after_init_fallback(fallback_config, effective_proxy_pool))
 
     def _run_single_probe_attempt(

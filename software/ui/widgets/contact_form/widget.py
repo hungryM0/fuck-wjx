@@ -12,6 +12,7 @@ from software.logging.log_utils import log_suppressed_exception
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent
 from PySide6.QtGui import QDoubleValidator, QIntValidator, QKeySequence, QGuiApplication, QKeyEvent
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -27,6 +28,7 @@ from qfluentwidgets import (
     CheckBox,
     PushButton,
     PrimaryPushButton,
+    RadioButton,
     IndeterminateProgressRing,
     InfoBar,
     InfoBarPosition,
@@ -46,6 +48,7 @@ from software.app.config import CONTACT_API_URL, EMAIL_VERIFY_ENDPOINT
 from software.app.version import __VERSION__
 
 REQUEST_MESSAGE_TYPE = "额度申请"
+PAYMENT_METHOD_OPTIONS = ("微信", "支付宝")
 DONATION_AMOUNT_OPTIONS = ["8.88", "11.45", "20.26", "50", "78.91", "114.51"]
 DONATION_AMOUNT_BLOCK_MESSAGE = "该金额下开发者已亏本💔"
 MAX_REQUEST_QUOTA = 19999
@@ -313,16 +316,18 @@ class ContactForm(StatusPollingMixin, QWidget):
         msg_layout.addWidget(self.random_ip_user_id_label)
 
         # 第三部分：图片附件
-        attachments_box = QVBoxLayout()
+        self.attachments_section = QWidget(self)
+        attachments_box = QVBoxLayout(self.attachments_section)
+        attachments_box.setContentsMargins(0, 0, 0, 0)
         attachments_box.setSpacing(6)
 
         attach_toolbar = QHBoxLayout()
-        attach_title = BodyLabel("图片附件 (最多3张，支持Ctrl+V粘贴，单张≤10MB):", self)
+        self.attach_title = BodyLabel("图片附件 (最多3张，支持Ctrl+V粘贴，单张≤10MB):", self.attachments_section)
 
-        self.attach_add_btn = PushButton(FluentIcon.ADD, "添加图片", self)
-        self.attach_clear_btn = PushButton(FluentIcon.DELETE, "清空附件", self)
+        self.attach_add_btn = PushButton(FluentIcon.ADD, "添加图片", self.attachments_section)
+        self.attach_clear_btn = PushButton(FluentIcon.DELETE, "清空附件", self.attachments_section)
 
-        attach_toolbar.addWidget(attach_title)
+        attach_toolbar.addWidget(self.attach_title)
         attach_toolbar.addStretch(1)
         attach_toolbar.addWidget(self.attach_add_btn)
         attach_toolbar.addWidget(self.attach_clear_btn)
@@ -333,19 +338,42 @@ class ContactForm(StatusPollingMixin, QWidget):
         self.attach_list_layout.setSpacing(12)
         self.attach_list_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
-        self.attach_list_container = QWidget(self)
+        self.attach_list_container = QWidget(self.attachments_section)
         self.attach_list_container.setLayout(self.attach_list_layout)
 
-        self.attach_placeholder = BodyLabel("暂无附件", self)
+        self.attach_placeholder = BodyLabel("暂无附件", self.attachments_section)
         self.attach_placeholder.setStyleSheet("color: #888; padding: 6px;")
 
         attachments_box.addWidget(self.attach_list_container)
         attachments_box.addWidget(self.attach_placeholder)
 
+        self.request_payment_section = QWidget(self)
+        payment_layout = QVBoxLayout(self.request_payment_section)
+        payment_layout.setContentsMargins(0, 0, 0, 0)
+        payment_layout.setSpacing(6)
+
+        payment_row = QHBoxLayout()
+        payment_row.setSpacing(12)
+        self.payment_method_label = BodyLabel("选择的支付方式：", self.request_payment_section)
+        self.payment_method_group = QButtonGroup(self.request_payment_section)
+        self.payment_method_group.setExclusive(True)
+        self.payment_method_wechat_radio = RadioButton(PAYMENT_METHOD_OPTIONS[0], self.request_payment_section)
+        self.payment_method_alipay_radio = RadioButton(PAYMENT_METHOD_OPTIONS[1], self.request_payment_section)
+        self.payment_method_group.addButton(self.payment_method_wechat_radio, 1)
+        self.payment_method_group.addButton(self.payment_method_alipay_radio, 2)
+        payment_row.addWidget(self.payment_method_label)
+        payment_row.addWidget(self.payment_method_wechat_radio)
+        payment_row.addWidget(self.payment_method_alipay_radio)
+        payment_row.addStretch(1)
+        payment_layout.addLayout(payment_row)
+
+        self.request_payment_section.hide()
+
         # 组装表单、消息、附件
         wrapper.addLayout(form_layout)
         wrapper.addLayout(msg_layout, 1) # 给消息框最大的 stretch
-        wrapper.addLayout(attachments_box)
+        wrapper.addWidget(self.attachments_section)
+        wrapper.addWidget(self.request_payment_section)
 
         # 支付确认行
         donated_row = QHBoxLayout()
@@ -411,6 +439,7 @@ class ContactForm(StatusPollingMixin, QWidget):
         self.send_verify_btn.clicked.connect(self._on_send_verify_clicked)
         self.attach_add_btn.clicked.connect(self._on_choose_files)
         self.attach_clear_btn.clicked.connect(self._on_clear_attachments)
+        self.payment_method_group.buttonToggled.connect(lambda *_: self._update_send_button_state())
         if self.cancel_btn is not None:
             self.cancel_btn.clicked.connect(self.cancelRequested.emit)
         self.refresh_random_ip_user_id_hint()
@@ -450,6 +479,22 @@ class ContactForm(StatusPollingMixin, QWidget):
             if self._handle_clipboard_image():
                 return True
         return False
+
+    def _attachments_enabled(self) -> bool:
+        return (self.type_combo.currentText() or "") != REQUEST_MESSAGE_TYPE
+
+    def _selected_payment_method(self) -> str:
+        checked_button = self.payment_method_group.checkedButton()
+        return checked_button.text() if checked_button is not None else ""
+
+    def _clear_payment_method_selection(self) -> None:
+        was_exclusive = self.payment_method_group.exclusive()
+        self.payment_method_group.setExclusive(False)
+        try:
+            for button in self.payment_method_group.buttons():
+                button.setChecked(False)
+        finally:
+            self.payment_method_group.setExclusive(was_exclusive)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -523,6 +568,8 @@ class ContactForm(StatusPollingMixin, QWidget):
         current_type = self.type_combo.currentText() or ""
         if current_type != REQUEST_MESSAGE_TYPE:
             return ""
+        if not self._selected_payment_method():
+            return "请先选择你刚刚使用的支付方式（微信或支付宝）。"
         amount_text = (self.amount_edit.currentText() or "").strip()
         if not amount_text:
             return "请先填写支付金额后，再勾选“我已完成支付，且确认随机ip可用”。"
@@ -638,6 +685,8 @@ class ContactForm(StatusPollingMixin, QWidget):
 
     def _handle_clipboard_image(self) -> bool:
         """处理 Ctrl+V 粘贴图片，返回是否消费了事件。"""
+        if not self._attachments_enabled():
+            return False
         clipboard = QGuiApplication.clipboard()
         mime = clipboard.mimeData()
         if mime is None or not mime.hasImage():
@@ -652,6 +701,8 @@ class ContactForm(StatusPollingMixin, QWidget):
         return True
 
     def _on_choose_files(self):
+        if not self._attachments_enabled():
+            return
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             "选择图片",
@@ -673,6 +724,8 @@ class ContactForm(StatusPollingMixin, QWidget):
 
         # 控制额度申请参数显示/隐藏
         if current_type == REQUEST_MESSAGE_TYPE:
+            self.attachments_section.hide()
+            self.request_payment_section.show()
             self.amount_label.show()
             self.amount_edit.show()
             self.quantity_label.show()
@@ -685,6 +738,8 @@ class ContactForm(StatusPollingMixin, QWidget):
             self.message_label.setText("补充说明（选填）：")
             self.message_edit.setPlaceholderText("请简单说明你的问卷紧急情况或使用场景...\n以及...是大学生吗（？")
         else:
+            self.attachments_section.show()
+            self.request_payment_section.hide()
             self.amount_label.hide()
             self.amount_edit.hide()
             self.quantity_label.hide()
@@ -930,15 +985,21 @@ class ContactForm(StatusPollingMixin, QWidget):
         request_amount_text = ""
         request_quota_text = ""
         request_urgency_text = ""
+        request_payment_method = ""
         if mtype == REQUEST_MESSAGE_TYPE:
             self._normalize_amount_if_needed()
             self._normalize_quantity_if_needed()
             amount_text = (self.amount_edit.currentText() or "").strip()
             quantity_text = (self.quantity_edit.text() or "").strip()
             verify_code = (self.verify_code_edit.text() or "").strip()
+            request_payment_method = self._selected_payment_method()
             request_amount_text = amount_text
             request_quota_text = self._normalize_quantity_text(quantity_text)
             request_urgency_text = (self.urgency_combo.currentText() or "").strip()
+            if not request_payment_method:
+                InfoBar.warning("", "请选择你刚刚使用的支付方式", parent=self, position=InfoBarPosition.TOP, duration=2000)
+                self._update_send_button_state()
+                return
             if not amount_text:
                 InfoBar.warning("", "请输入支付金额", parent=self, position=InfoBarPosition.TOP, duration=2000)
                 return
@@ -1031,6 +1092,7 @@ class ContactForm(StatusPollingMixin, QWidget):
         if self._random_ip_user_id > 0:
             full_message += f"随机IP用户ID：{self._random_ip_user_id}\n"
         if mtype == REQUEST_MESSAGE_TYPE:
+            full_message += f"支付方式：{request_payment_method}\n"
             full_message += f"支付金额：￥{request_amount_text}\n"
             full_message += f"申请额度：{request_quota_text}\n"
             full_message += f"紧急程度：{request_urgency_text or '中'}\n"
@@ -1043,7 +1105,7 @@ class ContactForm(StatusPollingMixin, QWidget):
             InfoBar.error("", "联系API未配置", parent=self, position=InfoBarPosition.TOP, duration=3000)
             return
         payload = {"message": full_message, "timestamp": datetime.now().isoformat()}
-        files_payload = self._attachments.files_payload()
+        files_payload = [] if mtype == REQUEST_MESSAGE_TYPE else self._attachments.files_payload()
 
         self.send_btn.setFocus()
 
@@ -1109,6 +1171,7 @@ class ContactForm(StatusPollingMixin, QWidget):
                 self.amount_edit.setText("")
                 self.quantity_edit.clear()
                 self.verify_code_edit.clear()
+                self._clear_payment_method_selection()
                 self._verify_code_requested = False
                 self._verify_code_requested_email = ""
                 urgency_default_index = self.urgency_combo.findText("中")

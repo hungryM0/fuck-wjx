@@ -26,12 +26,20 @@
 │   ├── workflows/
 │   │   └── release-to-r2.yml  # CI/CD 自动发布到 R2
 │   └── ISSUE_TEMPLATE/        # Issue 模板（报错反馈、新功能请求）
+├── README.md
+├── LICENSE
+├── requirements.txt
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
 ├── SurveyController.py
+├── SurveyController.spec      # 打包配置
+├── icon.ico                   # 打包图标
 ├── doc/                  # 项目文档目录
 │   └── wjx-web-structure.md  # 问卷星网页结构与解析指南 (推荐必读)
 ├── rthook_pyside6.py     # PySide6 打包钩子
 ├── test_imports.py       # 导入检测脚本
 ├── test_deadcode.py      # 死代码检测脚本
+├── test_reliability_modes.py  # 三模式信效度策略的最小回归检查
 ├── software/             # 软件主包（应用壳 + 共享核心 + 平台总调度）
 ├── tencent/              # 腾讯问卷主包
 └── wjx/                  # 问卷星主包

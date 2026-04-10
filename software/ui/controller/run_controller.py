@@ -244,6 +244,9 @@ class RunController(
         self._runtime_ui_state: Dict[str, Any] = {}
         self._random_ip_toggle_lock = threading.Lock()
         self._random_ip_toggle_active = False
+        self._random_ip_server_sync_lock = threading.Lock()
+        self._random_ip_server_sync_active = False
+        self._random_ip_last_server_sync_at = 0.0
         self._uiCallbackQueued.connect(self._execute_ui_callback)
 
     def is_initializing(self) -> bool:
