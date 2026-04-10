@@ -10,8 +10,11 @@ from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QVBoxLayout, QWidg
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    DropDownPushButton,
     FluentIcon,
     HorizontalSeparator,
+    PushButton,
+    RoundMenu,
     StrongBodyLabel,
     TableWidget,
     ToolButton,
@@ -201,6 +204,8 @@ class DimensionSectionWidget(QWidget):
     renameRequested = Signal(str)
     deleteRequested = Signal(str)
     entriesDropped = Signal(list, object)
+    addQuestionsRequested = Signal(str)  # 新增：请求添加题目信号
+    batchMoveRequested = Signal(list, str)  # 新增：批量移动题目信号
 
     def __init__(self, group_name: str, parent=None):
         super().__init__(parent)
@@ -268,10 +273,46 @@ class DimensionSectionWidget(QWidget):
             """
         )
 
+        # 添加题目按钮（放在表格下方）
+        self.add_questions_btn = PushButton("+ 添加题目", self)
+        self.add_questions_btn.setIcon(FluentIcon.ADD)
+        self.add_questions_btn.clicked.connect(lambda: self.addQuestionsRequested.emit(self.group_name))
+
+        # 批量移动按钮（仅在未分组区域显示）
+        self.batch_move_btn = DropDownPushButton("批量分配选中题目", self)
+        self.batch_move_btn.setIcon(FluentIcon.SEND)
+        self.batch_move_btn.setVisible(self.group_name == DIMENSION_UNGROUPED)
+
         layout.addWidget(self.header)
         layout.addWidget(self.separator)
         layout.addWidget(self.table)
+        layout.addWidget(self.add_questions_btn)
+        if self.group_name == DIMENSION_UNGROUPED:
+            layout.addWidget(self.batch_move_btn)
 
     def set_rows(self, rows: Sequence[Dict[str, object]]) -> None:
         self.table.set_rows(rows)
         self.count_label.setText(f"{len(rows)} 题")
+
+    def set_dimension_groups(self, dimension_groups: Sequence[str]) -> None:
+        """设置维度列表，用于批量移动菜单。"""
+        if self.group_name != DIMENSION_UNGROUPED:
+            return
+
+        # 创建批量移动菜单
+        from PySide6.QtGui import QAction
+
+        menu = RoundMenu(parent=self)
+        for dim_name in dimension_groups:
+            action = QAction(dim_name, self)
+            action.triggered.connect(lambda checked=False, d=dim_name: self._on_batch_move_to(d))
+            menu.addAction(action)
+
+        self.batch_move_btn.setMenu(menu)
+
+    def _on_batch_move_to(self, target_dimension: str) -> None:
+        """批量移动选中的题目到目标维度。"""
+        selected_indices = self.table.selected_entry_indices()
+        if not selected_indices:
+            return
+        self.batchMoveRequested.emit(selected_indices, target_dimension)
