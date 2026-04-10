@@ -9,6 +9,7 @@ from software.core.questions.distribution import (
     resolve_distribution_probabilities,
 )
 from software.core.questions.strict_ratio import enforce_reference_rank_order, is_strict_ratio_question
+from software.core.questions.tendency import get_tendency_index
 from software.core.questions.utils import (
     weighted_index,
     normalize_droplist_probs,
@@ -84,6 +85,9 @@ def _fill_droplist_via_click(
     current: int,
     prob_config: Union[List[float], int, None],
     fill_entries: Optional[List[Optional[str]]],
+    dimension: Optional[str] = None,
+    psycho_plan: Optional[Any] = None,
+    question_index: Optional[int] = None,
     task_ctx: Optional[Any] = None,
 ) -> None:
     """通过点击方式填充下拉框"""
@@ -138,20 +142,35 @@ def _fill_droplist_via_click(
         return
     probabilities = normalize_droplist_probs(prob_config, option_count)
     strict_ratio = is_strict_ratio_question(task_ctx, current)
+    has_reliability_dimension = isinstance(dimension, str) and bool(str(dimension).strip())
+    resolved_question_index = question_index if question_index is not None else current
     # 画像约束：对匹配画像的选项加权
     click_option_texts = [text for _, _, text in filtered_options]
     if not strict_ratio:
         probabilities = apply_persona_boost(click_option_texts, probabilities)
-    if strict_ratio:
+    if strict_ratio or has_reliability_dimension:
         strict_reference = list(probabilities)
         probabilities = resolve_distribution_probabilities(
             probabilities,
             option_count,
             task_ctx,
-            current,
+            resolved_question_index,
+            psycho_plan=psycho_plan,
+            priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
         )
-        probabilities = enforce_reference_rank_order(probabilities, strict_reference)
-    selected_idx = weighted_index(probabilities)
+        if strict_ratio:
+            probabilities = enforce_reference_rank_order(probabilities, strict_reference)
+    if has_reliability_dimension:
+        selected_idx = get_tendency_index(
+            option_count,
+            probabilities,
+            dimension=dimension,
+            psycho_plan=psycho_plan,
+            question_index=resolved_question_index,
+            priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
+        )
+    else:
+        selected_idx = weighted_index(probabilities)
     _, selected_option, selected_text = filtered_options[selected_idx]
     try:
         selected_option.click()
@@ -160,8 +179,8 @@ def _fill_droplist_via_click(
     # 记录统计数据
     # 记录作答上下文
     record_answer(current, "dropdown", selected_indices=[selected_idx], selected_texts=[selected_text])
-    if strict_ratio:
-        record_pending_distribution_choice(task_ctx, current, selected_idx, option_count)
+    if strict_ratio or has_reliability_dimension:
+        record_pending_distribution_choice(task_ctx, resolved_question_index, selected_idx, option_count)
     fill_value = resolve_option_fill_text_from_config(
         fill_entries,
         selected_idx,
@@ -178,6 +197,9 @@ def dropdown(
     index: int,
     droplist_prob_config: List,
     droplist_option_fill_texts_config: List,
+    dimension: Optional[str] = None,
+    psycho_plan: Optional[Any] = None,
+    question_index: Optional[int] = None,
     task_ctx: Optional[Any] = None,
 ) -> None:
     """下拉题处理主函数"""
@@ -185,29 +207,44 @@ def dropdown(
     fill_entries = droplist_option_fill_texts_config[index] if index < len(droplist_option_fill_texts_config) else None
     select_element, select_options = _extract_select_options(driver, current)
     strict_ratio = is_strict_ratio_question(task_ctx, current)
+    has_reliability_dimension = isinstance(dimension, str) and bool(str(dimension).strip())
+    resolved_question_index = question_index if question_index is not None else current
     if select_options:
         probabilities = normalize_droplist_probs(prob_config, len(select_options))
         # 画像约束：对匹配画像的选项加权
         option_texts = [text for _, text in select_options]
         if not strict_ratio:
             probabilities = apply_persona_boost(option_texts, probabilities)
-        if strict_ratio:
+        if strict_ratio or has_reliability_dimension:
             strict_reference = list(probabilities)
             probabilities = resolve_distribution_probabilities(
                 probabilities,
                 len(select_options),
                 task_ctx,
-                current,
+                resolved_question_index,
+                psycho_plan=psycho_plan,
+                priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
             )
-            probabilities = enforce_reference_rank_order(probabilities, strict_reference)
-        selected_idx = weighted_index(probabilities)
+            if strict_ratio:
+                probabilities = enforce_reference_rank_order(probabilities, strict_reference)
+        if has_reliability_dimension:
+            selected_idx = get_tendency_index(
+                len(select_options),
+                probabilities,
+                dimension=dimension,
+                psycho_plan=psycho_plan,
+                question_index=resolved_question_index,
+                priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
+            )
+        else:
+            selected_idx = weighted_index(probabilities)
         selected_value, selected_text = select_options[selected_idx]
         if _select_dropdown_option_via_js(driver, select_element, selected_value, selected_text):
             # 记录统计数据
             # 记录作答上下文
             record_answer(current, "dropdown", selected_indices=[selected_idx], selected_texts=[selected_text])
-            if strict_ratio:
-                record_pending_distribution_choice(task_ctx, current, selected_idx, len(select_options))
+            if strict_ratio or has_reliability_dimension:
+                record_pending_distribution_choice(task_ctx, resolved_question_index, selected_idx, len(select_options))
             fill_value = resolve_option_fill_text_from_config(
                 fill_entries,
                 selected_idx,
@@ -217,7 +254,16 @@ def dropdown(
             )
             fill_option_additional_text(driver, current, selected_idx, fill_value)
             return
-    _fill_droplist_via_click(driver, current, prob_config, fill_entries, task_ctx=task_ctx)
+    _fill_droplist_via_click(
+        driver,
+        current,
+        prob_config,
+        fill_entries,
+        dimension=dimension,
+        psycho_plan=psycho_plan,
+        question_index=resolved_question_index,
+        task_ctx=task_ctx,
+    )
 
 
 

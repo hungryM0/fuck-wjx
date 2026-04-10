@@ -440,17 +440,18 @@ def check_for_updates(gui=None) -> Optional[Dict[str, Any]]:
     """手动检查更新，返回更新信息。若提供 gui，会弹窗提示。"""
     try:
         update_info = UpdateManager.check_updates()
+        update_info_dict = update_info if isinstance(update_info, dict) else None
         if not gui:
             return update_info
-        status = update_info.get("status", "unknown") if update_info else "unknown"
+        status = update_info_dict.get("status", "unknown") if update_info_dict else "unknown"
         if status == "outdated":
-            gui.update_info = update_info
+            gui.update_info = update_info_dict
             # 使用与启动时检查更新相同的弹窗样式
             show_update_notification(gui)
         elif status == "latest":
             gui.show_message_dialog("检查更新", f"当前已是最新版本 v{__VERSION__}")
         elif status == "preview":
-            latest = update_info.get("latest_version", "?")
+            latest = update_info_dict.get("latest_version", "?") if update_info_dict else "?"
             gui.show_message_dialog("检查更新", f"当前版本 v{__VERSION__} 高于远程最新版 v{latest}，属于预览/开发版本")
         else:
             gui.show_message_dialog("检查更新失败", "无法连接到更新服务器，请检查网络连接后重试", level="error")

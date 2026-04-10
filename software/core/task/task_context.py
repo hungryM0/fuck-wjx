@@ -82,7 +82,7 @@ class TaskContext:
     # 题号 → (配置题型, 在对应类型概率列表中的起始索引)
     question_config_index_map: Dict[int, Tuple[str, int]] = field(default_factory=dict)
 
-    # 题号 → 维度名称（None 表示未分组，走纯随机）
+    # 题号 → 运行时信度维度（None 表示不参与；整卷未分组时可回退到全局维度）
     question_dimension_map: Dict[int, Optional[str]] = field(default_factory=dict)
 
     # 题号 → 是否为严格自定义比例题（手动配比绝对优先）

@@ -127,7 +127,8 @@ def load_area_codes(supported_only: bool = False) -> List[Dict[str, Any]]:
         except Exception:
             _AREA_CODES_CACHE = {}
 
-    provinces = _AREA_CODES_CACHE.get("provinces")
+    area_codes_cache: Dict[str, Any] = _AREA_CODES_CACHE if isinstance(_AREA_CODES_CACHE, dict) else {}
+    provinces = area_codes_cache.get("provinces")
     if not isinstance(provinces, list):
         return []
     if not supported_only:

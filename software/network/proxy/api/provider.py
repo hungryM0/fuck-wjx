@@ -446,7 +446,9 @@ def _fetch_new_proxy_batch(
     normalized: List[ProxyLease] = []
     for item in candidates:
         lease = _build_proxy_lease(item, source=current_source or PROXY_SOURCE_CUSTOM)
-        addr = lease.address if lease is not None else ""
+        if lease is None:
+            continue
+        addr = lease.address
         if not addr or addr in seen:
             continue
         seen.add(addr)

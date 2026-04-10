@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QWidget
 from qfluentwidgets import MessageBox, PushButton
 
 from software.network.proxy.session import get_session_snapshot
@@ -14,9 +15,22 @@ from software.app.runtime_paths import get_runtime_directory
 from software.io.config import RuntimeConfig
 from software.logging.log_utils import LOG_BUFFER_HANDLER, log_suppressed_exception
 
-
 class MainWindowLifecycleMixin:
     """收口主窗口的保存、启动恢复、标题刷新与关闭清理。"""
+
+    if TYPE_CHECKING:
+        _boot_splash: Any
+        _log_page: Any
+        _support_page: Any
+        _skip_save_on_close: bool
+        _base_window_title: str
+        dashboard: Any
+        question_page: Any
+        runtime_page: Any
+        strategy_page: Any
+        controller: Any
+
+        def _stop_update_check_worker(self) -> None: ...
 
     def _cleanup_runtime_resources_on_close(self) -> None:
         try:
@@ -61,14 +75,15 @@ class MainWindowLifecycleMixin:
     def _save_config_via_dialog(self, cfg) -> bool:
         configs_dir = os.path.join(get_runtime_directory(), "configs")
         os.makedirs(configs_dir, exist_ok=True)
+        parent_widget = cast(QWidget, self)
         path, _ = QFileDialog.getSaveFileName(
-            self,
+            parent_widget,
             "保存配置",
             configs_dir,
             "JSON 文件 (*.json);;所有文件 (*.*)",
         )
         if not path:
-            continue_box = MessageBox("确认", "未保存配置，是否继续退出？", self)
+            continue_box = MessageBox("确认", "未保存配置，是否继续退出？", parent_widget)
             continue_box.yesButton.setText("退出")
             continue_box.cancelButton.setText("取消")
             return bool(continue_box.exec())
@@ -90,10 +105,11 @@ class MainWindowLifecycleMixin:
             self._persist_last_session_log()
             return True
 
-        box = MessageBox("保存配置", "是否保存当前配置？", self)
+        parent_widget = cast(QWidget, self)
+        box = MessageBox("保存配置", "是否保存当前配置？", parent_widget)
         box.yesButton.setText("保存")
         box.cancelButton.setText("取消")
-        no_btn = PushButton("不保存", self)
+        no_btn = PushButton("不保存", parent_widget)
         box.buttonLayout.insertWidget(1, no_btn)
         no_btn.clicked.connect(lambda: box.done(2))
         reply = box.exec()
@@ -108,7 +124,7 @@ class MainWindowLifecycleMixin:
                     return False
             except Exception as exc:
                 logging.error("保存配置失败: %s", exc, exc_info=True)
-                error_box = MessageBox("错误", f"保存配置失败：{exc}\n\n是否继续退出？", self)
+                error_box = MessageBox("错误", f"保存配置失败：{exc}\n\n是否继续退出？", parent_widget)
                 error_box.yesButton.setText("退出")
                 error_box.cancelButton.setText("取消")
                 if not error_box.exec():

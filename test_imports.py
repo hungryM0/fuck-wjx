@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import py_compile
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Iterable
@@ -28,6 +30,24 @@ RUFF_SELECT = "F"
 CHILD_RESULT_PREFIX = "__WJX_CHECK__"
 IMPORT_TIMEOUT_SECONDS = 12
 WINDOW_SMOKE_TIMEOUT_SECONDS = 25
+PYRIGHT_TIMEOUT_SECONDS = 25
+UNICODE_SPACE_TRANSLATION = str.maketrans({
+    "\u00a0": " ",
+    "\u2000": " ",
+    "\u2001": " ",
+    "\u2002": " ",
+    "\u2003": " ",
+    "\u2004": " ",
+    "\u2005": " ",
+    "\u2006": " ",
+    "\u2007": " ",
+    "\u2008": " ",
+    "\u2009": " ",
+    "\u200a": " ",
+    "\u202f": " ",
+    "\u205f": " ",
+    "\u3000": " ",
+})
 
 IMPORT_SMOKE_CODE = r"""
 import importlib
@@ -143,6 +163,30 @@ def make_child_env() -> dict[str, str]:
     env["PYTHONPATH"] = root_path if not current_python_path else os.pathsep.join([root_path, current_python_path])
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     env.setdefault("WJX_IMPORT_CHECK", "1")
+
+    home_dir = (
+        env.get("HOME")
+        or env.get("USERPROFILE")
+        or (
+            f"{env.get('HOMEDRIVE', '')}{env.get('HOMEPATH', '')}"
+            if env.get("HOMEDRIVE") and env.get("HOMEPATH")
+            else ""
+        )
+    )
+    if not home_dir:
+        username = getpass.getuser().strip()
+        if username:
+            guessed_home = Path(env.get("SystemDrive", "C:")) / "Users" / username
+            if guessed_home.exists():
+                home_dir = str(guessed_home)
+    if home_dir:
+        env.setdefault("HOME", home_dir)
+        env.setdefault("USERPROFILE", home_dir)
+
+    env.setdefault(
+        "PYRIGHT_PYTHON_CACHE_DIR",
+        str(Path(tempfile.gettempdir()) / "SurveyController-pyright-cache"),
+    )
     return env
 
 
@@ -175,6 +219,14 @@ def summarize_child_output(stdout: str, stderr: str) -> str:
     if stderr_text:
         chunks.append(f"stderr: {stderr_text.splitlines()[-1]}")
     return " | ".join(chunks)
+
+
+def normalize_diagnostic_message(message: str) -> str:
+    """将诊断文本中的特殊空白归一为普通空格，避免终端乱码。"""
+    normalized = message.translate(UNICODE_SPACE_TRANSLATION)
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in normalized.split("\n")]
+    return "\n".join(lines).strip()
 
 
 def run_compile_checks(files: Iterable[Path]) -> list[dict]:
@@ -232,6 +284,79 @@ def run_ruff_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | None]
                 "message": item.get("message", ""),
             }
         )
+    return issues, None
+
+
+def run_vscode_like_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | None]:
+    """使用 pyright 生成接近 VS Code Problems 的诊断结果。"""
+    target_args = [str(path) for path in target_dirs]
+    env = make_child_env()
+    for entry_file in ENTRY_FILES:
+        if entry_file.exists():
+            target_args.append(str(entry_file))
+
+    if not target_args:
+        return [], "未找到可执行 VS Code 风格诊断的目标路径"
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "pyright",
+                "--outputjson",
+                *target_args,
+            ],
+            cwd=str(ROOT_DIR),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=PYRIGHT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return [], f"pyright 执行超时（>{PYRIGHT_TIMEOUT_SECONDS} 秒）"
+
+    stderr_text = (result.stderr or "").strip()
+    if "No module named pyright" in stderr_text:
+        return [], "未安装 pyright，无法执行 VS Code 风格诊断（可运行: python -m pip install pyright）"
+
+    raw = (result.stdout or "").strip()
+    if not raw:
+        if result.returncode == 0:
+            return [], None
+        message = stderr_text or "pyright 执行失败且无可解析输出"
+        return [], message
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return [], f"无法解析 pyright 输出: {raw}"
+
+    diagnostics = payload.get("generalDiagnostics", [])
+    issues: list[dict] = []
+    for item in diagnostics:
+        range_start = item.get("range", {}).get("start", {})
+        file_name = item.get("file", "")
+        severity = item.get("severity", "error")
+        rule = item.get("rule") or "pyright"
+        issues.append(
+            {
+                "phase": "vscode",
+                "path": format_path(file_name) if file_name else Path("<unknown>"),
+                "row": int(range_start.get("line", 0)) + 1,
+                "column": int(range_start.get("character", 0)) + 1,
+                "severity": severity,
+                "code": rule,
+                "message": normalize_diagnostic_message(item.get("message", "")),
+            }
+        )
+
+    # pyright 返回码说明：0=无问题，1=有诊断，2=执行异常
+    if result.returncode == 2 and not issues:
+        summary = payload.get("summary", {})
+        message = summary.get("errorMessage") or stderr_text or "pyright 执行异常"
+        return [], str(message)
+
     return issues, None
 
 
@@ -362,6 +487,17 @@ def print_issues(title: str, issues: Iterable[dict]) -> None:
                 print("   运行堆栈：")
                 for line in traceback_text.splitlines():
                     print(f"   {line}")
+            continue
+
+        if phase == "vscode":
+            print(
+                f"{index}. {item['path']}:{item['row']}:{item['column']}  "
+                f"[{item.get('severity', 'error')}/{item.get('code', 'pyright')}]"
+            )
+            message_lines = str(item.get("message", "")).splitlines() or [""]
+            print(f"   {message_lines[0]}")
+            for line in message_lines[1:]:
+                print(f"   {line}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -373,6 +509,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="启用全量模块导入检查。默认仅执行快检模式。",
     )
+    vscode_group = parser.add_mutually_exclusive_group()
+    vscode_group.add_argument(
+        "--vscode-errors",
+        dest="vscode_errors",
+        action="store_true",
+        help="启用 VS Code 风格诊断（默认已启用，可省略）。",
+    )
+    vscode_group.add_argument(
+        "--no-vscode-errors",
+        dest="vscode_errors",
+        action="store_false",
+        help="关闭 VS Code 风格诊断（仅保留编译、Ruff、导入和主窗口冒烟）。",
+    )
+    parser.set_defaults(vscode_errors=True)
     return parser.parse_args()
 
 
@@ -389,6 +539,7 @@ def main() -> int:
     compile_targets = iter_compile_targets()
     modules = iter_module_names(python_files)
     quick_mode = not args.full
+    vscode_mode = args.vscode_errors
 
     print(f"[INFO] 扫描目录: {', '.join(str(path.relative_to(ROOT_DIR)) for path in target_dirs)}")
     print(f"[INFO] 检查模式: {'快检' if quick_mode else '完整'}")
@@ -398,21 +549,31 @@ def main() -> int:
         print("[INFO] 模块导入检查数: 已跳过（使用 --full 可启用）")
     else:
         print(f"[INFO] 模块导入检查数: {len(modules)}")
+    if vscode_mode:
+        print("[INFO] VS Code 风格诊断: 已启用（pyright，默认开启）")
+    else:
+        print("[INFO] VS Code 风格诊断: 已关闭（使用 --no-vscode-errors）")
 
     compile_issues = run_compile_checks(compile_targets)
     ruff_issues, ruff_error = run_ruff_check(target_dirs)
+    vscode_issues, vscode_error = run_vscode_like_check(target_dirs) if vscode_mode else ([], None)
     import_issues = run_module_import_checks(modules) if args.full else []
     window_issue = run_window_smoke_check()
 
     if ruff_error:
         print(f"[ERROR] {ruff_error}")
         return 2
+    if vscode_error:
+        print(f"[ERROR] {vscode_error}")
+        return 2
 
-    total_issues = len(compile_issues) + len(ruff_issues) + len(import_issues) + (1 if window_issue else 0)
+    total_issues = len(compile_issues) + len(ruff_issues) + len(vscode_issues) + len(import_issues) + (1 if window_issue else 0)
     elapsed = time.perf_counter() - start_time
 
     print(f"[INFO] 编译问题数: {len(compile_issues)}")
     print(f"[INFO] Ruff 诊断数: {len(ruff_issues)}")
+    if vscode_mode:
+        print(f"[INFO] VS Code 风格诊断数: {len(vscode_issues)}")
     print(f"[INFO] 模块导入失败数: {len(import_issues)}")
     print(f"[INFO] 主窗口冒烟失败数: {1 if window_issue else 0}")
     print(f"[INFO] 总耗时: {elapsed:.2f} 秒")
@@ -428,6 +589,8 @@ def main() -> int:
     print(f"[FAIL] 发现 {total_issues} 处问题：")
     print_issues("【语法编译失败】", compile_issues)
     print_issues("【Ruff 静态诊断】", ruff_issues)
+    if vscode_mode:
+        print_issues("【VS Code 风格诊断（Pyright）】", vscode_issues)
     print_issues("【模块导入失败】", import_issues)
     if window_issue:
         print_issues("【主窗口冒烟失败】", [window_issue])

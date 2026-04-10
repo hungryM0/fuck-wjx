@@ -36,14 +36,14 @@ class EngineGuiAdapter:
 
     def __init__(
         self,
-        dispatcher: Callable[[Callable[[], None]], None],
+        dispatcher: Callable[[Callable[[], Any]], Any],
         stop_signal: threading.Event,
         quota_request_form_opener: Optional[Callable[[], bool]] = None,
         on_ip_counter: Optional[Callable[[float, float, bool], None]] = None,
         on_random_ip_loading: Optional[Callable[[bool, str], None]] = None,
         message_handler: Optional[Callable[[str, str, str], None]] = None,
         confirm_handler: Optional[Callable[[str, str], bool]] = None,
-        async_dispatcher: Optional[Callable[[Callable[[], None]], None]] = None,
+        async_dispatcher: Optional[Callable[[Callable[[], Any]], Any]] = None,
         cleanup_runner: Optional[CleanupRunner] = None,
     ):
         self.random_ip_enabled_var = BoolVar(False)
@@ -61,7 +61,7 @@ class EngineGuiAdapter:
         self._pause_reason = ""
         self._cleanup_runner = cleanup_runner
 
-    def dispatch_to_ui(self, callback: Callable[[], None]) -> None:
+    def dispatch_to_ui(self, callback: Callable[[], Any]) -> None:
         try:
             self._dispatcher(callback)
         except Exception:
@@ -71,7 +71,7 @@ class EngineGuiAdapter:
             except Exception:
                 logging.info("UI 派发失败且回调直接执行失败", exc_info=True)
 
-    def dispatch_to_ui_async(self, callback: Callable[[], None]) -> None:
+    def dispatch_to_ui_async(self, callback: Callable[[], Any]) -> None:
         try:
             self._async_dispatcher(callback)
         except Exception:
@@ -218,7 +218,7 @@ class RunController(
         self.worker_threads: List[threading.Thread] = []
         self._task_ctx: Optional[TaskContext] = None
         self._cleanup_runner = CleanupRunner()
-        self.on_ip_counter: Optional[Callable[[int, int, bool], None]] = None
+        self.on_ip_counter: Optional[Callable[[float, float, bool], None]] = None
         self.on_random_ip_loading: Optional[Callable[[bool, str], None]] = None
         self.quota_request_form_opener: Optional[Callable[[], bool]] = None
         self.message_dialog_handler: Optional[Callable[[str, str, str], None]] = None
@@ -244,6 +244,9 @@ class RunController(
         self._runtime_ui_state: Dict[str, Any] = {}
         self._random_ip_toggle_lock = threading.Lock()
         self._random_ip_toggle_active = False
+        self._random_ip_server_sync_lock = threading.Lock()
+        self._random_ip_server_sync_active = False
+        self._random_ip_last_server_sync_at = 0.0
         self._uiCallbackQueued.connect(self._execute_ui_callback)
 
     def is_initializing(self) -> bool:
@@ -257,7 +260,7 @@ class RunController(
         except Exception:
             logging.info("执行 UI 回调失败", exc_info=True)
 
-    def _dispatch_to_ui_async(self, callback: Callable[[], None]) -> None:
+    def _dispatch_to_ui_async(self, callback: Callable[[], Any]) -> None:
         if not callable(callback):
             return
         if QCoreApplication.instance() is None:
@@ -285,7 +288,7 @@ class RunController(
         self,
         *,
         quota_request_form_opener: Optional[Callable[[], bool]] = None,
-        on_ip_counter: Optional[Callable[[int, int, bool], None]] = None,
+        on_ip_counter: Optional[Callable[[float, float, bool], None]] = None,
         on_random_ip_loading: Optional[Callable[[bool, str], None]] = None,
         message_handler: Optional[Callable[[str, str, str], None]] = None,
         confirm_handler: Optional[Callable[[str, str], bool]] = None,

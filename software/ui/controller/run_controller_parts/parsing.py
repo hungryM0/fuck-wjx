@@ -28,6 +28,7 @@ class RunControllerParsingMixin:
         questions_info: List[Dict[str, Any]]
         question_entries: List[QuestionEntry]
         survey_title: str
+        survey_provider: str
 
     # -------------------- Parsing --------------------
     def parse_survey(self, url: str):
@@ -135,8 +136,11 @@ class RunControllerParsingMixin:
                 for item in existing_configs:
                     if not isinstance(item, dict):
                         continue
+                    raw_option_index = item.get("option_index")
+                    if raw_option_index is None:
+                        continue
                     try:
-                        option_index = int(item.get("option_index"))
+                        option_index = int(raw_option_index)
                     except Exception:
                         continue
                     existing_map[option_index] = item
@@ -144,8 +148,11 @@ class RunControllerParsingMixin:
             for item in parsed_list:
                 if not isinstance(item, dict):
                     continue
+                raw_option_index = item.get("option_index")
+                if raw_option_index is None:
+                    continue
                 try:
-                    option_index = int(item.get("option_index"))
+                    option_index = int(raw_option_index)
                 except Exception:
                     continue
                 option_text = str(item.get("option_text") or "").strip()

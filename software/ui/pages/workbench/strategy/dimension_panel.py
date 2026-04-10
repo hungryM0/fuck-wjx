@@ -175,6 +175,8 @@ class DimensionGroupingPanel(QWidget):
         self._section_widgets = {}
         while self.sections_layout.count():
             item = self.sections_layout.takeAt(0)
+            if item is None:
+                continue
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()

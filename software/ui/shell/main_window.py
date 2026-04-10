@@ -86,6 +86,10 @@ class MainWindow(
         self._community_hint_setting_key = "community_card_request_badge_pending"
         self._community_hint_pending = False
         self._community_hint_badge = None
+        self._random_ip_quota_auto_sync_interval_ms = 90000
+        self._random_ip_quota_auto_sync_timer = QTimer(self)
+        self._random_ip_quota_auto_sync_timer.setInterval(self._random_ip_quota_auto_sync_interval_ms)
+        self._random_ip_quota_auto_sync_timer.timeout.connect(self._sync_random_ip_quota_silently)
         
         self._base_window_title = f"SurveyController v{__VERSION__}"
         self.setWindowTitle(self._base_window_title)
@@ -154,6 +158,7 @@ class MainWindow(
         self._refresh_title_random_ip_user_id()
         self._register_popups()
         self._load_saved_config()
+        self._start_random_ip_quota_auto_sync()
         self._center_on_screen()
 
         finish_boot_splash(1500)
@@ -347,6 +352,24 @@ class MainWindow(
 
     def _on_quota_request_sent(self):
         self._set_community_hint_pending(True)
+
+    def _start_random_ip_quota_auto_sync(self) -> None:
+        try:
+            self._random_ip_quota_auto_sync_timer.start()
+            QTimer.singleShot(1500, self._sync_random_ip_quota_silently)
+        except Exception:
+            logging.info("启动随机IP额度自动同步失败", exc_info=True)
+
+    def _sync_random_ip_quota_silently(self) -> None:
+        try:
+            if self.controller.is_initializing() or bool(getattr(self.controller, "running", False)):
+                return
+            self.controller.sync_random_ip_counter_from_server(
+                silent=True,
+                min_interval_seconds=45.0,
+            )
+        except Exception:
+            logging.info("静默同步随机IP额度失败", exc_info=True)
 
     def _on_stack_widget_changed(self, _index: int):
         current_widget = self.stackedWidget.currentWidget()

@@ -6,6 +6,10 @@
 - **Bug/功能建议**：首选 GitHub Issues。
 - **快速反馈**：QQ群（见 README）。
 
+## 参考文档
+在着手修改或新增功能前，建议先阅读以下关键文档：
+- [wjx-web-structure.md](doc/wjx-web-structure.md) — 问卷星网页结构与解析指南。详细说明了如何识别 DOM 节点、题型以及复杂的跳转逻辑。
+
 ## 开发环境与依赖
 - 操作系统：仅考虑对 Windows 10/11 的支持
 - Python：3.8+
@@ -22,10 +26,20 @@
 │   ├── workflows/
 │   │   └── release-to-r2.yml  # CI/CD 自动发布到 R2
 │   └── ISSUE_TEMPLATE/        # Issue 模板（报错反馈、新功能请求）
+├── README.md
+├── LICENSE
+├── requirements.txt
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
 ├── SurveyController.py
+├── SurveyController.spec      # 打包配置
+├── icon.ico                   # 打包图标
+├── doc/                  # 项目文档目录
+│   └── wjx-web-structure.md  # 问卷星网页结构与解析指南 (推荐必读)
 ├── rthook_pyside6.py     # PySide6 打包钩子
 ├── test_imports.py       # 导入检测脚本
 ├── test_deadcode.py      # 死代码检测脚本
+├── test_reliability_modes.py  # 三模式信效度策略的最小回归检查
 ├── software/             # 软件主包（应用壳 + 共享核心 + 平台总调度）
 ├── tencent/              # 腾讯问卷主包
 └── wjx/                  # 问卷星主包
@@ -57,28 +71,28 @@ software/
 ├── network/
 │   ├── http/              # httpx 客户端封装
 │   ├── browser/           # 浏览器驱动
-│   └── proxy/             # 代理 API / 会话 / 策略 / 地区 / 代理池
+│   └── proxy/             # 代理 API / 会话 / 策略 / 地区 / 代理池；session/auth.py 仅保留状态与入口，HTTP/归一化/模型拆到 session/client.py、normalize.py、models.py
 ├── providers/             # 平台识别、注册、分发总入口
 ├── system/                # Windows/系统级能力（安全存储、注册表）
 ├── ui/
 │   ├── shell/             # 主窗口、启动页、页面装配
-│   ├── controller/        # Qt 协调器
+│   ├── controller/        # Qt 协调器；run_controller_parts/runtime.py 已拆成 runtime_constants.py、runtime_random_ip.py、runtime_init_gate.py、runtime_execution.py
 │   ├── helpers/           # UI 侧辅助门面
 │   │   ├── fluent_tooltip.py # Fluent tooltip 安装器
 │   │   └── qfluent_compat.py # QFluentWidgets 动画 / InfoBar 稳定性补丁
 │   ├── pages/
-│   │   ├── workbench/     # dashboard（page.py 负责首页骨架，cards.py 放首页专用卡片，parts/ 放首页交互拆分）/question_editor（含单栏配置向导）/runtime_panel/strategy（题目策略：条件规则 + 维度分组；dimension_panel.py 负责面板装配，dimension_sections.py 负责分组区块与跨表拖拽）/log_panel
+│   │   ├── workbench/     # dashboard（page.py 负责首页骨架，parts/ 下含 survey_parse.py、config_io.py、run_actions.py）/question_editor（单栏配置向导已拆成 wizard_dialog.py + wizard_search.py + wizard_navigation.py + wizard_cards.py + wizard_sections_*.py）/runtime_panel/strategy（题目策略：条件规则 + 维度分组；dimension_panel.py 负责面板装配，dimension_sections.py 负责分组区块与跨表拖拽）/log_panel
 │   │   └── settings/      # 应用程序设置页；settings.py 负责页面骨架，group_widgets.py 放设置页专用右侧控件
-│   └── widgets/           # 通用组件（contact_form 已拆成包；旧 time_range_slider 已移除）
+│   └── widgets/           # 通用组件（contact_form 已拆成包，widget.py 只做主组装，输入/附件/验证码/赞助/提交拆到 constants.py、inputs.py、attachments.py、verification.py、donation.py、submission.py；旧 time_range_slider 已移除）
 └── update/                # 更新检查与升级
 
 tencent/
 ├── __init__.py            # 包标记文件；真正平台实现请直接看 provider/
-└── provider/              # 腾讯问卷专属实现（解析、运行时、导航、提交）
+└── provider/              # 腾讯问卷专属实现（解析、运行时、导航、提交）；runtime.py 仅保留入口，交互/答题/流程拆到 runtime_interactions.py、runtime_answerers.py、runtime_flow.py
 
 wjx/
 ├── __init__.py            # 包标记文件；仅保留版本信息，真实实现在 provider/ 子模块
-└── provider/              # 问卷星专属实现（解析、检测、导航、运行时、提交、questions/ 题型执行器）
+└── provider/              # 问卷星专属实现（解析、检测、导航、运行时、提交、questions/ 题型执行器）；html_parser.py 已拆到 html_parser_common.py、html_parser_choice.py、html_parser_matrix.py、html_parser_rules.py，questions/multiple.py 已拆到 multiple_limits.py、multiple_dom.py、multiple_rules.py
 ```
 
 ## PR 流程（推荐）
@@ -102,7 +116,7 @@ wjx/
 - **举报违规** - 发现不当使用请邮件 `mail@hungrym0.top` 举报
 
 欢迎贡献 PR 改进以下方向：
-- 增加新的问卷题型支持（选择、填空、矩阵等）
+- 增加新的问卷题型支持（请参考 [问卷星网页结构解析指南](doc/wjx-web-structure.md)）
 - 增加新的问卷平台支持
 - 性能优化与用户体验改进
 - 文档完善与示例补充

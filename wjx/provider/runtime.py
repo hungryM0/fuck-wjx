@@ -129,7 +129,7 @@ class _QuestionDispatcher:
             handler=self._handle_matrix,
             needs_psycho_plan=True,
         )
-        self.register("7", index_key="dropdown", handler=self._handle_dropdown)
+        self.register("7", index_key="dropdown", handler=self._handle_dropdown, needs_psycho_plan=True)
         self.register("8", index_key="slider", handler=self._handle_slider)
 
     # -- 各题型处理器 --------------------------------------------------
@@ -186,8 +186,18 @@ class _QuestionDispatcher:
             task_ctx=ctx,
         )
 
-    def _handle_dropdown(self, driver, q_num, idx, ctx: TaskContext):
-        _dropdown_impl(driver, q_num, idx, ctx.droplist_prob, ctx.droplist_option_fill_texts, task_ctx=ctx)
+    def _handle_dropdown(self, driver, q_num, idx, ctx: TaskContext, psycho_plan=None):
+        _dropdown_impl(
+            driver,
+            q_num,
+            idx,
+            ctx.droplist_prob,
+            ctx.droplist_option_fill_texts,
+            dimension=ctx.question_dimension_map.get(q_num),
+            psycho_plan=psycho_plan,
+            question_index=q_num,
+            task_ctx=ctx,
+        )
 
     def _handle_slider(self, driver, q_num, idx, ctx: TaskContext):
         slider_score = _resolve_slider_score(idx, ctx.slider_targets)

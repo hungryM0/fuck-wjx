@@ -1,6 +1,8 @@
 """QFluentWidgets 稳定性补丁。"""
 from __future__ import annotations
 
+from typing import Any, cast
+
 from PySide6.QtCore import QAbstractAnimation, QEvent, QParallelAnimationGroup, QPropertyAnimation
 from shiboken6 import isValid
 
@@ -29,7 +31,8 @@ def install_qfluentwidgets_animation_guards() -> None:
 
         self.update()
 
-    def _safe_set_paused(self, is_paused: bool):
+    def _safe_set_paused(self, isPaused: bool):
+        is_paused = bool(isPaused)
         state = self.aniGroup.state()
         if is_paused:
             if state == QAbstractAnimation.State.Running:
@@ -45,9 +48,10 @@ def install_qfluentwidgets_animation_guards() -> None:
         else:
             self.update()
 
-    IndeterminateProgressBar.resume = _safe_resume
-    IndeterminateProgressBar.setPaused = _safe_set_paused
-    IndeterminateProgressBar._surveycontroller_resume_guard_installed = True
+    progress_cls = cast(Any, IndeterminateProgressBar)
+    progress_cls.resume = _safe_resume
+    progress_cls.setPaused = _safe_set_paused
+    setattr(progress_cls, "_surveycontroller_resume_guard_installed", True)
     _install_infobar_manager_guards(InfoBarManager)
 
 
@@ -214,7 +218,7 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
         manager_cls._updateDropAni = _safe_update_drop_ani
         manager_cls.remove = _safe_remove
         manager_cls.eventFilter = _safe_event_filter
-        manager_cls._surveycontroller_remove_guard_installed = True
+        setattr(manager_cls, "_surveycontroller_remove_guard_installed", True)
 __all__ = [
     "install_qfluentwidgets_animation_guards",
 ]

@@ -137,7 +137,12 @@ class DimensionEntryTable(TableWidget):
         from PySide6.QtWidgets import QTableWidgetItem
 
         title_item = QTableWidgetItem(str(row.get("title") or ""))
-        title_item.setData(ENTRY_INDEX_ROLE, int(row.get("entry_index", -1)))
+        entry_index_raw = row.get("entry_index", -1)
+        try:
+            entry_index = int(str(entry_index_raw))
+        except Exception:
+            entry_index = -1
+        title_item.setData(ENTRY_INDEX_ROLE, entry_index)
         self.setItem(row_index, 0, title_item)
         self.setItem(row_index, 1, QTableWidgetItem(str(row.get("question_num") or "")))
         self.setItem(row_index, 2, QTableWidgetItem(str(row.get("type_label") or "")))
@@ -152,8 +157,8 @@ class DimensionEntryTable(TableWidget):
         self.setFixedHeight(frame + header_height + content_height + 10)
         self._update_empty_hint()
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
         self._layout_empty_hint()
 
     def _layout_empty_hint(self) -> None:
@@ -174,7 +179,9 @@ class DimensionEntryTable(TableWidget):
 
     @staticmethod
     def _decode_entry_indices(mime_data: QMimeData) -> List[int]:
-        raw = bytes(mime_data.data(ENTRY_DRAG_MIME))
+        raw_qbytearray = mime_data.data(ENTRY_DRAG_MIME)
+        raw_data = raw_qbytearray.data()
+        raw = bytes(raw_data) if isinstance(raw_data, (bytes, bytearray)) else b""
         if not raw:
             return []
         try:

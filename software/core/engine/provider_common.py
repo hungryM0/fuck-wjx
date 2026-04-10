@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from software.core.persona.context import reset_context as _reset_answer_context
 from software.core.persona.generator import generate_persona, reset_persona, set_current_persona
 from software.core.psychometrics import build_dimension_psychometric_plan
+from software.core.questions.config import GLOBAL_RELIABILITY_DIMENSION
 from software.core.questions.consistency import reset_consistency_context
 from software.core.task import TaskContext
 from software.core.questions.tendency import reset_tendency
@@ -83,6 +84,17 @@ def build_psychometric_plan_for_run(ctx: TaskContext) -> Optional[Any]:
             grouped_items.setdefault(dimension, []).append((question_num, question_type, option_count, bias, None))
             continue
 
+        if question_type == "dropdown":
+            probability_config = ctx.droplist_prob[start_index] if start_index < len(ctx.droplist_prob) else -1
+            option_count = _resolve_option_count(
+                probability_config,
+                meta_option_count,
+                default_value=max(meta_option_count, 2),
+            )
+            bias = _resolve_bias(saved_bias, probability_config, option_count)
+            grouped_items.setdefault(dimension, []).append((question_num, question_type, option_count, bias, None))
+            continue
+
         if question_type == "matrix":
             row_count = int(question_meta.get("rows") or 0)
             if row_count <= 0:
@@ -129,11 +141,17 @@ def provider_run_context(ctx: TaskContext, *, psycho_plan: Optional[Any] = None)
         resolved_plan = build_psychometric_plan_for_run(ctx)
     if resolved_plan is not None:
         dimension_count = len(getattr(resolved_plan, "plans", {}) or {})
+        plan_names = list((getattr(resolved_plan, "plans", {}) or {}).keys())
+        if plan_names == [GLOBAL_RELIABILITY_DIMENSION]:
+            dimension_summary = "全局未分组问卷"
+        else:
+            dimension_summary = ",".join(plan_names[:5]) if plan_names else "无"
         logging.info(
-            "本轮启用心理测量计划：维度数=%d，题目数=%d，目标α=%.2f",
+            "本轮启用心理测量计划：维度数=%d，题目数=%d，目标α=%.2f，维度=%s",
             dimension_count,
             len(getattr(resolved_plan, "items", []) or []),
             float(getattr(ctx, "psycho_target_alpha", 0.9) or 0.9),
+            dimension_summary,
         )
 
     try:

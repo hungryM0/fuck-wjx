@@ -36,6 +36,29 @@ def _resolve_runtime_counts(
     return (max(0, int(total or 0)), list(counts or []))
 
 
+def _has_active_runtime_dimension(ctx: Optional[Any], question_index: Optional[int]) -> bool:
+    if ctx is None or question_index is None or not hasattr(ctx, "question_dimension_map"):
+        return False
+    try:
+        dimension = getattr(ctx, "question_dimension_map", {}).get(question_index)
+    except Exception:
+        return False
+    return isinstance(dimension, str) and bool(str(dimension).strip())
+
+
+def _psycho_plan_covers_question(
+    psycho_plan: Optional[Any],
+    question_index: Optional[int],
+    row_index: Optional[int],
+) -> bool:
+    if psycho_plan is None or question_index is None or not hasattr(psycho_plan, "get_choice"):
+        return False
+    try:
+        return psycho_plan.get_choice(question_index, row_index) is not None
+    except Exception:
+        return False
+
+
 def _resolve_correction_params(
     priority_mode: Any,
     *,
@@ -72,7 +95,10 @@ def resolve_distribution_probabilities(
     if total <= 0:
         return target
 
-    use_priority_profile = psycho_plan is not None or priority_mode is not None
+    use_priority_profile = (
+        _has_active_runtime_dimension(ctx, question_index)
+        or _psycho_plan_covers_question(psycho_plan, question_index, row_index)
+    )
     resolved_priority_mode = normalize_reliability_priority_mode(
         priority_mode if priority_mode is not None else getattr(ctx, "reliability_priority_mode", None)
     )

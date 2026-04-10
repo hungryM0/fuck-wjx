@@ -1,13 +1,15 @@
 """DashboardPage 剪贴板/拖拽二维码处理方法。"""
 from __future__ import annotations
 
+import io
 import logging
 import os
 from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import QEvent, QMimeData, QTimer
-from PySide6.QtGui import QClipboard, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QClipboard, QDragEnterEvent, QDropEvent, QImage
 from PySide6.QtWidgets import QFileDialog
+from PIL import Image
 
 from software.app.runtime_paths import get_runtime_directory
 from software.io.qr import decode_qrcode
@@ -57,9 +59,9 @@ class DashboardClipboardMixin:
                                     return True
 
                     # 处理直接拖入的图片数据（兼容微信 MIME）
-                    nd_image = self._extract_ndarray_from_clipboard(mime_data)
-                    if nd_image is not None:
-                        self._process_qrcode_image(nd_image)
+                    image_data = self._extract_image_from_clipboard(mime_data)
+                    if image_data is not None:
+                        self._process_qrcode_image(image_data)
                         event.acceptProposedAction()
                         return True
                 return False
@@ -75,12 +77,12 @@ class DashboardClipboardMixin:
                         clipboard = QApplication.clipboard()
                         mime_data = clipboard.mimeData(QClipboard.Mode.Clipboard)
                         # 剪贴板有图片时拦截粘贴，转为二维码解析（兼容微信剪贴板格式）
-                        pil_image = self._extract_ndarray_from_clipboard(mime_data, clipboard)
-                        if pil_image is not None:
+                        image_data = self._extract_image_from_clipboard(mime_data, clipboard)
+                        if image_data is not None:
                             try:
                                 # 递增 ticket，使 _on_clipboard_changed 的延迟任务失效，避免重复触发
                                 self._clipboard_parse_ticket += 1
-                                self._process_qrcode_image(pil_image)
+                                self._process_qrcode_image(image_data)
                             except Exception:
                                 pass
                             return True  # 拦截默认粘贴行为
@@ -130,10 +132,10 @@ class DashboardClipboardMixin:
                 self._schedule_clipboard_parse(delay_ms=50, retries=retries - 1)
             return
 
-        pil_image = self._extract_ndarray_from_clipboard(mime_data, clipboard)
-        if pil_image is not None:
+        image_data = self._extract_image_from_clipboard(mime_data, clipboard)
+        if image_data is not None:
             try:
-                self._process_qrcode_image(pil_image)
+                self._process_qrcode_image(image_data)
             except Exception:
                 pass  # 图片处理失败，静默忽略
 
@@ -150,67 +152,64 @@ class DashboardClipboardMixin:
             current = current.parentWidget()
         return False
 
-    def _qimage_to_ndarray(self, image):
-        """将 QImage 安全转换为 OpenCV 兼容的 numpy ndarray (BGR)。"""
-        import numpy as np
-        from PySide6.QtGui import QImage
-
+    def _extract_qimage(self, image) -> Optional[QImage]:
+        """把 Qt 提供的图像对象收敛为可直接解码的 QImage。"""
         if not isinstance(image, QImage) or image.isNull():
             return None
-        # 统一转换为 RGBA8888 以获得固定字节布局
-        image = image.convertToFormat(QImage.Format.Format_RGBA8888)
-        width, height = image.width(), image.height()
-        ptr = image.constBits()
-        arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4))
-        # RGBA -> BGR（OpenCV 默认格式）
-        return arr[:, :, [2, 1, 0]].copy()
+        return image
 
-    def _extract_ndarray_from_clipboard(self, mime_data: QMimeData, clipboard: Optional[QClipboard] = None):
-        """从剪贴板数据提取 OpenCV numpy ndarray，兼容微信常见图片格式。"""
-        import numpy as np
+    def _extract_image_from_clipboard(self, mime_data: QMimeData, clipboard: Optional[QClipboard] = None):
+        """从剪贴板提取 zxing-cpp 可直接解码的图像对象。"""
 
         # 普通图片剪贴板（截图工具、浏览器等）
         if mime_data.hasImage():
             image = mime_data.imageData()
-            nd = self._qimage_to_ndarray(image)
-            if nd is not None:
-                return nd
+            qimage = self._extract_qimage(image)
+            if qimage is not None:
+                return qimage
 
-        # 微信等应用在 Windows 下可能使用自定义 MIME（PNG / DIB）
-        windows_image_formats = [
+        # 微信等应用在 Windows 下可能使用自定义 MIME（PNG / JPEG / BMP）
+        encoded_image_formats = [
             'application/x-qt-windows-mime;value="PNG"',
-            'application/x-qt-windows-mime;value="DeviceIndependentBitmap"',
             "image/png",
             "image/bmp",
             "image/jpeg",
         ]
-        for fmt in windows_image_formats:
+        for fmt in encoded_image_formats:
             try:
-                import cv2
                 raw = mime_data.data(fmt)
                 if raw.isEmpty():
                     continue
-                buf = np.frombuffer(raw.data(), dtype=np.uint8)
-                img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-                if img is not None:
-                    return img
+                qimage = QImage.fromData(raw.data())
+                if not qimage.isNull():
+                    return qimage
             except Exception:
                 continue
+
+        # 微信截图常见的 DIB 数据没有 BMP 文件头，Qt 直接读会失败，Pillow 能稳一点
+        try:
+            raw = mime_data.data('application/x-qt-windows-mime;value="DeviceIndependentBitmap"')
+            if not raw.isEmpty():
+                dib_image = Image.open(io.BytesIO(raw.data()))
+                dib_image.load()
+                return dib_image
+        except Exception as exc:
+            log_suppressed_exception("_extract_image_from_clipboard: DeviceIndependentBitmap", exc, level=logging.INFO)
 
         # 兜底：有些来源能从 clipboard.image() 取到图，但 hasImage() 为 False
         if clipboard is not None:
             try:
                 image = clipboard.image()
-                nd = self._qimage_to_ndarray(image)
-                if nd is not None:
-                    return nd
+                qimage = self._extract_qimage(image)
+                if qimage is not None:
+                    return qimage
             except Exception as exc:
-                log_suppressed_exception("_extract_ndarray_from_clipboard: clipboard.image()", exc, level=logging.INFO)
+                log_suppressed_exception("_extract_image_from_clipboard: clipboard.image()", exc, level=logging.INFO)
 
         return None
 
     def _process_qrcode_image(self, image_source):
-        """处理二维码图片（文件路径或PIL Image对象）"""
+        """处理二维码图片（文件路径或支持的图像对象）。"""
         try:
             url = decode_qrcode(image_source)
             if not url:

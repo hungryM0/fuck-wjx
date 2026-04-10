@@ -268,9 +268,6 @@ def _cleanup_binaries(b_name):
         return True
     if norm.startswith('PySide6/') and basename == 'pyside6.abi3.dll':
         return True
-    # 2. 清理 CV2 无用的视频编码依赖 (扫码只需图片处理)
-    if basename.lower().startswith('opencv_videoio_ffmpeg'):
-        return True
     return False
 
 def _cleanup_datas(d_name):

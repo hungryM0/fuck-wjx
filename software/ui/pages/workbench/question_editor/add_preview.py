@@ -1,6 +1,6 @@
 """AddPreviewMixin：配置预览区 UI 构建方法，供 QuestionAddDialog 通过多继承引入。"""
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLayout
@@ -30,7 +30,7 @@ class AddPreviewMixin:
     def _current_row_count(self) -> int: ...
     def _resolve_matrix_strategy(self) -> str: ...
     def _resolve_strategy(self) -> str: ...
-    def window(self) -> Optional[QWidget]: ...
+    def window(self) -> QWidget: ...
 
     def _clear_layout(self, layout: QLayout) -> None:
         while layout.count():

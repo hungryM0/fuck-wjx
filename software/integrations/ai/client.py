@@ -118,6 +118,7 @@ _RUNTIME_AI_SETTINGS: Optional[Dict[str, Any]] = None
 _CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
 _RESPONSES_SUFFIX = "/responses"
 _LEGACY_COMPLETIONS_SUFFIX = "/completions"
+_AI_REQUEST_TIMEOUT_SECONDS = 25
 
 _FREE_AI_ERROR_MESSAGES = {
     "device_id_required": "免费 AI 调用失败：缺少设备标识（X-Device-ID）",
@@ -574,7 +575,7 @@ def _call_free_ai_api(
     question_type: str,
     blank_count: Optional[int],
     system_prompt: str = "",
-    timeout: int = 30,
+    timeout: int = _AI_REQUEST_TIMEOUT_SECONDS,
 ) -> List[str]:
     user_id, device_id = _ensure_free_ai_identity()
     _log_free_ai_request_start(
@@ -646,7 +647,7 @@ def _call_chat_completions(
     model: str,
     question: str,
     system_prompt: str,
-    timeout: int = 30,
+    timeout: int = _AI_REQUEST_TIMEOUT_SECONDS,
 ) -> str:
     """调用 Chat Completions 兼容接口。"""
     headers = {
@@ -677,7 +678,7 @@ def _call_responses_api(
     model: str,
     question: str,
     system_prompt: str,
-    timeout: int = 30,
+    timeout: int = _AI_REQUEST_TIMEOUT_SECONDS,
 ) -> str:
     """调用 Responses 兼容接口。"""
     headers = {

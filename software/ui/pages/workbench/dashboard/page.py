@@ -1,9 +1,8 @@
 """主控制面板：卡片式配置区 + 底部状态条（不包含日志）"""
-import os
 import threading
 from typing import Optional
 import logging
-from software.logging.action_logger import bind_logged_action, log_action
+from software.logging.action_logger import bind_logged_action
 from software.logging.log_utils import log_suppressed_exception
 
 
@@ -13,7 +12,6 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QFileDialog,
     QToolButton,
 )
 from qfluentwidgets import (
@@ -44,9 +42,12 @@ from qfluentwidgets import RoundMenu
 
 from software.ui.pages.workbench.dashboard.cards import RuntimeSettingsHintCard
 from software.ui.pages.workbench.dashboard.parts.clipboard import DashboardClipboardMixin
+from software.ui.pages.workbench.dashboard.parts.config_io import DashboardConfigIOMixin
 from software.ui.pages.workbench.dashboard.parts.entries import DashboardEntriesMixin
 from software.ui.pages.workbench.dashboard.parts.progress import DashboardProgressMixin
 from software.ui.pages.workbench.dashboard.parts.random_ip import DashboardRandomIPMixin
+from software.ui.pages.workbench.dashboard.parts.run_actions import DashboardRunActionsMixin
+from software.ui.pages.workbench.dashboard.parts.survey_parse import DashboardSurveyParseMixin
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.widgets.config_drawer import ConfigDrawer
 from software.ui.widgets.full_width_infobar import FullWidthInfoBar
@@ -55,22 +56,10 @@ from software.ui.controller import RunController
 from software.ui.pages.workbench.question_editor.page import QuestionPage
 from software.ui.pages.workbench.runtime_panel import RuntimePage
 from software.ui.pages.workbench.strategy import QuestionStrategyPage
-from software.providers.common import (
-    detect_survey_provider,
-    is_supported_survey_url,
-    is_wjx_survey_url,
-)
-from software.app.runtime_paths import get_runtime_directory
-from software.io.config import RuntimeConfig, build_default_config_filename
-
-
-_QQ_LOGIN_REQUIRED_MESSAGE = "作答该问卷需要登录，请自行在后台开放访问权限"
 
 
 class _PasteOnlyMenu(QObject):
     """只保留 qfluentwidgets 风格的“粘贴”菜单"""
-
-
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.ContextMenu and isinstance(watched, LineEdit):
@@ -83,9 +72,11 @@ class _PasteOnlyMenu(QObject):
                 return True
         return super().eventFilter(watched, event)
 
-
 class DashboardPage(
     DashboardClipboardMixin,
+    DashboardSurveyParseMixin,
+    DashboardConfigIOMixin,
+    DashboardRunActionsMixin,
     DashboardRandomIPMixin,
     DashboardEntriesMixin,
     DashboardProgressMixin,
@@ -175,7 +166,7 @@ class DashboardPage(
         link_layout = QVBoxLayout(self.link_card)
         link_layout.setContentsMargins(12, 12, 12, 12)
         link_layout.setSpacing(8)
-        
+
         # 顶部操作行：配置操作 + 二维码上传 + 链接输入框同一行
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
@@ -206,7 +197,7 @@ class DashboardPage(
         title_row.addWidget(self.url_edit, 1)
         title_row.addWidget(self.config_command_bar)
         link_layout.addLayout(title_row)
-        
+
         # 只保留"自动配置问卷"按钮
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
@@ -234,7 +225,7 @@ class DashboardPage(
         exec_layout = QVBoxLayout(exec_card)
         exec_layout.setContentsMargins(12, 12, 12, 12)
         exec_layout.setSpacing(10)
-        
+
         # 头部标题与跳转按钮
         title_row = QHBoxLayout()
         title_row.addWidget(SubtitleLabel("快捷设置", self))
@@ -373,7 +364,7 @@ class DashboardPage(
         # 使用 CommandBar 替代普通按钮布局
         self.command_bar = CommandBar(self.thread_view_question_card)
         self.command_bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        
+
         # 新增题目
         self.add_action = Action(FluentIcon.ADD, "新增题目")
         self.command_bar.addAction(self.add_action)
@@ -381,7 +372,7 @@ class DashboardPage(
         # 编辑选中
         self.edit_action = Action(FluentIcon.EDIT, "编辑选中")
         self.command_bar.addAction(self.edit_action)
-        
+
         # 删除选中
         self.del_action = Action(FluentIcon.DELETE, "删除选中")
         self.command_bar.addAction(self.del_action)
@@ -389,7 +380,7 @@ class DashboardPage(
         # 清空全部
         self.clear_all_action = Action(FluentIcon.BROOM, "清空所有已配置题目")
         self.command_bar.addAction(self.clear_all_action)
-        
+
         question_list_layout.addWidget(self.command_bar)
         self.entry_table = TableWidget(self.thread_view_question_card)
         self.entry_table.setRowCount(0)
@@ -553,362 +544,6 @@ class DashboardPage(
     def _on_strategy_page_changed(self):
         self._refresh_entry_table()
 
-    def _on_parse_clicked(self):
-        url = self.url_edit.text().strip()
-        if not url:
-            log_action(
-                "UI",
-                "parse_survey",
-                "parse_btn",
-                "dashboard",
-                result="blocked",
-                level=logging.WARNING,
-                payload={"reason": "empty_url"},
-            )
-            self._toast("请粘贴问卷链接", "warning")
-            return
-        # 第一层检测：是否为受支持的问卷平台
-        if not is_supported_survey_url(url):
-            log_action(
-                "UI",
-                "parse_survey",
-                "parse_btn",
-                "dashboard",
-                result="blocked",
-                level=logging.WARNING,
-                payload={"reason": "unsupported_platform"},
-            )
-            self._toast("仅支持问卷星与腾讯问卷链接", "error")
-            return
-        # 第二层检测：是否为具体的问卷链接（排除问卷星投票/考试等）
-        provider = detect_survey_provider(url)
-        if not (provider == "qq" or is_wjx_survey_url(url)):
-            log_action(
-                "UI",
-                "parse_survey",
-                "parse_btn",
-                "dashboard",
-                result="blocked",
-                level=logging.WARNING,
-                payload={"reason": "invalid_survey_url"},
-            )
-            self._toast("链接不是可解析的公开问卷", "error")
-            return
-        # 使用进度消息条显示解析状态，duration=-1 表示不自动关闭
-        self._toast("正在解析问卷...", "info", duration=-1, show_progress=True)
-        self._open_wizard_after_parse = True
-        self.controller.parse_survey(url)
-        log_action(
-            "UI",
-            "parse_survey",
-            "parse_btn",
-            "dashboard",
-            result="started",
-            payload={"provider": detect_survey_provider(url)},
-        )
-
-    def _on_survey_parsed(self, info: list, title: str):
-        """问卷解析成功的处理（仅负责关闭进度条和记录结果，向导弹出由 MainWindow 处理）"""
-        # 关闭进度消息条
-        if self._progress_infobar:
-            try:
-                self._progress_infobar.close()
-            except Exception as exc:
-                log_suppressed_exception("_on_survey_parsed: self._progress_infobar.close()", exc, level=logging.WARNING)
-            self._progress_infobar = None
-
-        count = len(info) if info else 0
-        unsupported_count = sum(1 for item in (info or []) if isinstance(item, dict) and item.get("unsupported"))
-        if unsupported_count > 0:
-            log_action(
-                "UI",
-                "parse_survey",
-                "parse_btn",
-                "dashboard",
-                result="unsupported",
-                level=logging.WARNING,
-                payload={"question_count": count, "unsupported_count": unsupported_count},
-            )
-            return
-
-        log_action(
-            "UI",
-            "parse_survey",
-            "parse_btn",
-            "dashboard",
-            result="success",
-            payload={"question_count": count},
-        )
-
-    def _on_survey_parse_failed(self, error_msg: str):
-        """问卷解析失败的处理"""
-        # 关闭进度消息条
-        if self._progress_infobar:
-            try:
-                self._progress_infobar.close()
-            except Exception as exc:
-                log_suppressed_exception("_on_survey_parse_failed: self._progress_infobar.close()", exc, level=logging.WARNING)
-            self._progress_infobar = None
-
-        text = str(error_msg or "").strip()
-        if text == _QQ_LOGIN_REQUIRED_MESSAGE:
-            self._toast(text, "warning", duration=4500)
-        elif "问卷已暂停" in text:
-            self._toast("问卷已暂停，需要前往问卷星后台重新发布", "warning", duration=4500)
-        elif "暂未开放" in text:
-            self._toast(text, "warning", duration=5000)
-        else:
-            # 显示解析失败消息
-            self._toast(f"解析失败：{text or '请确认链接有效且网络正常'}", "error", duration=3000)
-        self._open_wizard_after_parse = False
-
-    def _on_show_config_list(self):
-        try:
-            self.config_drawer.open_drawer()
-            log_action("UI", "open_config_list", "config_list_btn", "dashboard", result="opened")
-        except Exception as exc:
-            log_action(
-                "UI",
-                "open_config_list",
-                "config_list_btn",
-                "dashboard",
-                result="failed",
-                level=logging.ERROR,
-                detail=exc,
-            )
-            self._toast(f"无法打开配置列表：{exc}", "error")
-
-    def _on_load_config(self):
-        configs_dir = os.path.join(get_runtime_directory(), "configs")
-        if not os.path.exists(configs_dir):
-            os.makedirs(configs_dir, exist_ok=True)
-        path, _ = QFileDialog.getOpenFileName(self, "载入配置", configs_dir, "JSON 文件 (*.json);;所有文件 (*.*)")
-        if not path:
-            log_action("CONFIG", "load_config", "load_cfg_btn", "dashboard", result="cancelled")
-            return
-        self._load_config_from_path(path)
-
-    def _load_config_from_path(self, path: str):
-        if not path:
-            log_action("CONFIG", "load_config", "load_cfg_btn", "dashboard", result="cancelled")
-            return
-        if not os.path.exists(path):
-            log_action(
-                "CONFIG",
-                "load_config",
-                "load_cfg_btn",
-                "dashboard",
-                result="failed",
-                level=logging.WARNING,
-                payload={"reason": "missing_file", "file": os.path.basename(path)},
-            )
-            self._toast("文件不存在，可能已被删除", "warning")
-            return
-        try:
-            cfg = self.controller.load_saved_config(path, strict=True)
-        except Exception as exc:
-            logging.error("[CONFIG] load_saved_config failed: %s", exc, exc_info=True)
-            log_action(
-                "CONFIG",
-                "load_config",
-                "load_cfg_btn",
-                "dashboard",
-                result="failed",
-                level=logging.ERROR,
-                payload={"file": os.path.basename(path)},
-                detail=exc,
-            )
-            logging.error("手动载入配置失败: %s", exc, exc_info=True)
-            self._toast(f"载入失败：{exc}", "error")
-            return
-        # 应用到界面
-        self.runtime_page.apply_config(cfg)
-        self.apply_config(cfg)
-        self.question_page.set_entries(cfg.question_entries or [], cfg.questions_info or [])
-        self.strategy_page.set_questions_info(cfg.questions_info or [])
-        self.strategy_page.set_entries(self.question_page.entries, self.question_page.entry_questions_info)
-        self._refresh_entry_table()
-        try:
-            self.update_question_meta(cfg.survey_title or "", len(cfg.question_entries or []))
-        except Exception as exc:
-            log_suppressed_exception("_load_config_from_path: self.update_question_meta(...)", exc, level=logging.WARNING)
-        self._sync_start_button_state()
-        self.controller.refresh_random_ip_counter()
-        log_action(
-            "CONFIG",
-            "load_config",
-            "load_cfg_btn",
-            "dashboard",
-            result="success",
-            payload={"file": os.path.basename(path)},
-        )
-        self._toast("已载入配置", "success")
-
-    def _on_save_config(self):
-        cfg = self._build_config()
-        # 序列化过滤 UI 组件
-        from software.io.config import deserialize_question_entry, serialize_question_entry
-        cfg.question_entries = [deserialize_question_entry(serialize_question_entry(entry)) for entry in self.question_page.get_entries()]
-        cfg.questions_info = list(self.question_page.questions_info or [])
-        self.controller.config = cfg
-        configs_dir = os.path.join(get_runtime_directory(), "configs")
-        os.makedirs(configs_dir, exist_ok=True)
-        default_name = build_default_config_filename(self._survey_title)
-        default_path = os.path.join(configs_dir, default_name)
-        path, _ = QFileDialog.getSaveFileName(self, "保存配置", default_path, "JSON 文件 (*.json);;所有文件 (*.*)")
-        if not path:
-            log_action("CONFIG", "save_config", "save_cfg_btn", "dashboard", result="cancelled")
-            return
-        try:
-            self.controller.save_current_config(path)
-            log_action(
-                "CONFIG",
-                "save_config",
-                "save_cfg_btn",
-                "dashboard",
-                result="success",
-                payload={"file": os.path.basename(path)},
-            )
-            self._toast("配置已保存", "success")
-        except Exception as exc:
-            log_action(
-                "CONFIG",
-                "save_config",
-                "save_cfg_btn",
-                "dashboard",
-                result="failed",
-                level=logging.ERROR,
-                payload={"file": os.path.basename(path)},
-                detail=exc,
-            )
-            self._toast(f"保存失败：{exc}", "error")
-
-    def _on_start_clicked(self):
-        if getattr(self.controller, "running", False):
-            if self._completion_notified:
-                self._pending_restart = True
-                self.controller.stop_run()
-                log_action("RUN", "restart_run", "start_btn", "dashboard", result="queued")
-                self._toast("正在重新开始，请稍候...", "info", 1200)
-            return
-
-        cfg = self._build_config()
-        from software.io.config import deserialize_question_entry, serialize_question_entry
-        cfg.question_entries = [deserialize_question_entry(serialize_question_entry(entry)) for entry in self.question_page.get_entries()]
-        cfg.questions_info = list(self.question_page.questions_info or [])
-        if not cfg.question_entries:
-            log_action(
-                "RUN",
-                "start_run",
-                "start_btn",
-                "dashboard",
-                result="blocked",
-                level=logging.WARNING,
-                payload={"reason": "no_question_entries"},
-            )
-            self._toast("未配置任何题目，无法开始执行（请先在'题目配置'页添加/配置题目）", "warning")
-            self._sync_start_button_state(running=False)
-            return
-        # 只有在任务完成后的重新开始才重置进度，暂停后继续不重置
-        if self._completion_notified or self._last_progress >= 100:
-            self.progress_bar.setValue(0)
-            self.progress_pct.setText("0%")
-            self._last_progress = 0
-            self._completion_notified = False
-            self.status_label.setText(f"已提交 0/{cfg.target} 份 | 提交连续失败 0 次")
-        self.controller.start_run(cfg)
-        log_action(
-            "RUN",
-            "start_run",
-            "start_btn",
-            "dashboard",
-            result="started",
-            payload={"target": cfg.target, "threads": cfg.threads},
-        )
-
-    def update_question_meta(self, title: str, count: int):
-        self.count_label.setText(f"{count} 题")
-        self.title_label.setText(title or "已配置的题目")
-        self._survey_title = title or ""
-        self._refresh_entry_table()
-        self._sync_start_button_state()
-        self._refresh_ip_cost_infobar()
-
-    def _apply_runtime_ui_state(self, state: dict) -> None:
-        target = state.get("target")
-        if target is not None and int(self.target_spin.value()) != int(target):
-            self.target_spin.blockSignals(True)
-            self.target_spin.setValue(max(1, int(target)))
-            self.target_spin.blockSignals(False)
-
-        headless_enabled = bool(state.get("headless_mode", True))
-        self.thread_spin.setRange(1, 16 if headless_enabled else 8)
-
-        threads = state.get("threads")
-        if threads is not None and int(self.thread_spin.value()) != int(threads):
-            self.thread_spin.blockSignals(True)
-            self.thread_spin.setValue(max(1, int(threads)))
-            self.thread_spin.blockSignals(False)
-
-        random_ip_enabled = state.get("random_ip_enabled")
-        if random_ip_enabled is not None and bool(self.random_ip_cb.isChecked()) != bool(random_ip_enabled):
-            self.random_ip_cb.blockSignals(True)
-            self.random_ip_cb.setChecked(bool(random_ip_enabled))
-            self.random_ip_cb.blockSignals(False)
-            self._sync_random_ip_toggle_presentation(bool(random_ip_enabled))
-
-        self._refresh_ip_cost_infobar()
-
-    def apply_config(self, cfg: RuntimeConfig):
-        self.url_edit.setText(cfg.url)
-        self.target_spin.setValue(max(1, int(cfg.target or 1)))
-        self.thread_spin.setValue(max(1, int(cfg.threads or 1)))
-        # 阻塞信号避免加载配置时触发弹窗或多余同步
-        self.random_ip_cb.blockSignals(True)
-        self.random_ip_cb.setChecked(bool(cfg.random_ip_enabled))
-        self.random_ip_cb.blockSignals(False)
-        self._sync_random_ip_toggle_presentation(bool(cfg.random_ip_enabled))
-
-        try:
-            self.strategy_page.set_rules(getattr(cfg, "answer_rules", []) or [])
-            self.strategy_page.set_dimension_groups(getattr(cfg, "dimension_groups", []) or [])
-        except Exception as exc:
-            log_suppressed_exception("apply_config: self.strategy_page.set_rules(...)", exc, level=logging.WARNING)
-
-        self._refresh_entry_table()
-        self._sync_start_button_state()
-        self._refresh_ip_cost_infobar()
-        self.controller.sync_runtime_ui_state_from_config(cfg)
-
-    def _go_to_runtime_page(self):
-        main_win = self.window()
-        if hasattr(main_win, "switchTo") and hasattr(main_win, "runtime_page"):
-            main_win.switchTo(main_win.runtime_page)
-
-    def _go_to_runtime_answer_duration(self):
-        self._go_to_runtime_page()
-        try:
-            if hasattr(self.runtime_page, "focus_answer_duration_setting"):
-                self.runtime_page.focus_answer_duration_setting()
-        except Exception as exc:
-            log_suppressed_exception("_go_to_runtime_answer_duration", exc, level=logging.WARNING)
-
-    def _build_config(self) -> RuntimeConfig:
-        cfg = RuntimeConfig()
-        cfg.url = self.url_edit.text().strip()
-        cfg.survey_title = str(self._survey_title or "")
-        cfg.survey_provider = detect_survey_provider(
-            cfg.url,
-            default=str(getattr(self.controller, "survey_provider", "wjx") or "wjx"),
-        )
-        self.runtime_page.update_config(cfg)
-        cfg.target = max(1, self.target_spin.value())
-        cfg.threads = max(1, self.thread_spin.value())
-        cfg.random_ip_enabled = self.random_ip_cb.isChecked()
-        cfg.answer_rules = list(self.strategy_page.get_rules() or [])
-        cfg.dimension_groups = list(self.strategy_page.get_dimension_groups() or [])
-        return cfg
-
     def _toast(self, text: str, level: str = "info", duration: int = 2000, show_progress: bool = False):
         """显示消息提示"""
         # 如果之前有进度消息条正在显示，先关闭它
@@ -918,10 +553,10 @@ class DashboardPage(
             except Exception as exc:
                 log_suppressed_exception("_toast: self._progress_infobar.close()", exc, level=logging.WARNING)
             self._progress_infobar = None
-        
+
         parent = self.window() or self
         kind = level.lower()
-        
+
         # 如果需要显示进度条，创建带进度条的InfoBar
         if show_progress:
             # 创建InfoBar实例
@@ -933,13 +568,13 @@ class DashboardPage(
                 infobar = InfoBar.error("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
             else:
                 infobar = InfoBar.info("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
-            
+
             # 添加转圈的加载动画
             spinner = IndeterminateProgressRing()
             spinner.setFixedSize(20, 20)  # 设置spinner大小
             spinner.setStrokeWidth(3)  # 设置环的粗细
             infobar.addWidget(spinner)
-            
+
             # 保存引用以便后续关闭
             self._progress_infobar = infobar
             return infobar
@@ -954,5 +589,3 @@ class DashboardPage(
             else:
                 InfoBar.info("", text, parent=parent, position=InfoBarPosition.TOP, duration=duration)
             return None
-
-

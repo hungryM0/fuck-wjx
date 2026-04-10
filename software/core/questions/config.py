@@ -1,7 +1,7 @@
 """题目配置数据结构 - 策略、概率、选项等参数定义"""
 import copy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, List, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple, Union
 
 from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
 from software.core.questions.utils import (
@@ -30,6 +30,7 @@ _TEXT_RANDOM_NAME = "name"
 _TEXT_RANDOM_MOBILE = "mobile"
 _TEXT_RANDOM_ID_CARD = "id_card"
 _TEXT_RANDOM_INTEGER = "integer"
+GLOBAL_RELIABILITY_DIMENSION = "__global_reliability__"
 
 
 def _pretty_text_answer(value: Any) -> str:
@@ -320,6 +321,7 @@ def configure_probabilities(
     _idx_scale = 0
     _idx_slider = 0
     _idx_text = 0
+    reliability_candidates: List[Tuple[int, bool]] = []
 
     for idx, entry in enumerate(entries, start=1):
         # 确保题号不为 None，使用列表索引作为默认值
@@ -351,6 +353,13 @@ def configure_probabilities(
         elif entry.question_type == "dropdown":
             _raise_if_all_zero_single_like(probs, question_num, "dropdown")
             _target.question_config_index_map[question_num] = ("dropdown", _idx_dropdown)
+            _target.question_dimension_map[question_num] = _resolve_runtime_dimension(
+                entry,
+                reliability_mode_enabled=reliability_mode_enabled,
+                strict_ratio=strict_ratio,
+            )
+            _target.question_psycho_bias_map[question_num] = str(getattr(entry, "psycho_bias", "custom") or "custom")
+            reliability_candidates.append((question_num, strict_ratio))
             _idx_dropdown += 1
             _target.droplist_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
             _target.droplist_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
@@ -375,6 +384,7 @@ def configure_probabilities(
                 _target.question_psycho_bias_map[question_num] = list(bias_value)
             else:
                 _target.question_psycho_bias_map[question_num] = str(bias_value or "custom")
+            reliability_candidates.append((question_num, strict_ratio))
             _idx_matrix += rows
             option_count = max(1, _infer_option_count(entry))
 
@@ -432,6 +442,7 @@ def configure_probabilities(
                 strict_ratio=strict_ratio,
             )
             _target.question_psycho_bias_map[question_num] = str(getattr(entry, "psycho_bias", "custom") or "custom")
+            reliability_candidates.append((question_num, strict_ratio))
             _idx_scale += 1
             _target.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
         elif entry.question_type == "slider":
@@ -535,6 +546,18 @@ def configure_probabilities(
             _target.multi_text_blank_ai_flags.append(normalized_blank_ai_flags)
             _target.multi_text_blank_int_ranges.append(normalized_blank_int_ranges)
 
+    has_explicit_runtime_dimension = any(
+        isinstance(dimension, str) and bool(str(dimension).strip())
+        for dimension in _target.question_dimension_map.values()
+    )
+    if reliability_mode_enabled and reliability_candidates and not has_explicit_runtime_dimension:
+        for question_num, strict_ratio in reliability_candidates:
+            if strict_ratio:
+                continue
+            if _target.question_dimension_map.get(question_num):
+                continue
+            _target.question_dimension_map[question_num] = GLOBAL_RELIABILITY_DIMENSION
+
 
 def validate_question_config(entries: List[QuestionEntry], questions_info: Optional[List[dict]] = None) -> Optional[str]:
     """验证题目配置是否存在冲突，返回错误信息（如果有）。"""
@@ -565,7 +588,9 @@ def validate_question_config(entries: List[QuestionEntry], questions_info: Optio
     for item in questions_info or []:
         if not isinstance(item, dict):
             continue
-        q_num = getattr(item, "get", lambda *_args, **_kwargs: None)("num")
+        q_num = item.get("num")
+        if q_num is None:
+            continue
         try:
             q_num = int(q_num)
         except Exception:

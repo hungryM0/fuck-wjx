@@ -151,6 +151,8 @@ def _score_sum_constrained_paths(
     target_decimal = Decimal(str(total_value))
     for value in [*decimal_values, target_decimal]:
         exponent = value.as_tuple().exponent
+        if not isinstance(exponent, int):
+            continue
         if exponent < 0:
             decimals = max(decimals, -exponent)
     scale = 10 ** min(decimals, 3)

@@ -367,7 +367,7 @@ _SELECTION_KEYWORDS_EN = ("option", "options", "choice", "choices", "select", "c
 
 _CHINESE_MULTI_LIMIT_PATTERNS = (
     re.compile(r"(?:最多|至多|不超过|不超過)\s*(?:选|選|选择|選擇)?\s*(\d+)\s*[个項项]?"),
-    re.compile(r"(?:选|選|选择|選擇)\s*(\d+)\s*[个項项]"),
+    re.compile(r"(?:限选|限選)\s*(\d+)\s*[个項项条]?"),
 )
 
 _CHINESE_MULTI_RANGE_PATTERNS = (
@@ -376,19 +376,28 @@ _CHINESE_MULTI_RANGE_PATTERNS = (
     re.compile(r"(?:限选|限選)\s*(\d+)\s*(?:-|－|—|–|~|～|至|到)\s*(\d+)(?:\s*[个項项条])?"),
 )
 
+_CHINESE_MULTI_EXACT_PATTERNS = (
+    re.compile(r"(?:请)?(?:选|選|选择|選擇|勾选|勾選)\s*(\d+)\s*[个項项条]"),
+    re.compile(r"(?:必须|需|需要)\s*(?:选|選|选择|選擇|勾选|勾選)\s*(\d+)\s*[个項项条]"),
+)
+
 _CHINESE_MULTI_MIN_PATTERNS = (
     re.compile(r"(?:至少|最少|不少于)\s*(?:选|選|选择|選擇)?\s*(\d+)\s*[个項项条]"),
 )
 
 _ENGLISH_MULTI_LIMIT_PATTERNS = (
-    re.compile(r"select\s+(?:up\s+to\s+)?(\d+)", re.IGNORECASE),
-    re.compile(r"choose\s+(?:up\s+to\s+)?(\d+)", re.IGNORECASE),
-    re.compile(r"pick\s+(?:up\s+to\s+)?(\d+)", re.IGNORECASE),
+    re.compile(r"(?:select|choose|pick)\s+(?:up\s+to|at\s+most|no\s+more\s+than)\s+(\d+)", re.IGNORECASE),
+    re.compile(r"(?:up\s+to|at\s+most|no\s+more\s+than)\s+(\d+)\s+(?:options?|choices?|items?)", re.IGNORECASE),
 )
 
 _ENGLISH_MULTI_RANGE_PATTERNS = (
     re.compile(r"(?:select|choose|pick)\s*(\d+)\s*(?:-|–|—|~|～|to)\s*(\d+)", re.IGNORECASE),
     re.compile(r"(?:select|choose)\s+between\s+(\d+)\s+and\s+(\d+)", re.IGNORECASE),
+)
+
+_ENGLISH_MULTI_EXACT_PATTERNS = (
+    re.compile(r"(?:select|choose|pick)\s+(\d+)\s+(?:options?|choices?|items?)", re.IGNORECASE),
+    re.compile(r"(?:must|need\s+to|please)\s+(?:select|choose|pick)\s+(\d+)", re.IGNORECASE),
 )
 
 _ENGLISH_MULTI_MIN_PATTERNS = (

@@ -299,8 +299,11 @@ def _handle_attached_select(
     for item in attached_selects_config or []:
         if not isinstance(item, dict):
             continue
+        raw_option_index = item.get("option_index")
+        if raw_option_index is None:
+            continue
         try:
-            option_index = int(item.get("option_index"))
+            option_index = int(raw_option_index)
         except Exception:
             continue
         if option_index == selected_option_index_zero_based:
