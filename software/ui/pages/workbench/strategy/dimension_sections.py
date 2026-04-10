@@ -273,10 +273,11 @@ class DimensionSectionWidget(QWidget):
             """
         )
 
-        # 添加题目按钮（放在表格下方）
+        # 添加题目按钮（仅在非未分组区域显示）
         self.add_questions_btn = PushButton("+ 添加题目", self)
         self.add_questions_btn.setIcon(FluentIcon.ADD)
         self.add_questions_btn.clicked.connect(lambda: self.addQuestionsRequested.emit(self.group_name))
+        self.add_questions_btn.setVisible(self.group_name != DIMENSION_UNGROUPED)
 
         # 批量移动按钮（仅在未分组区域显示）
         self.batch_move_btn = DropDownPushButton("批量分配选中题目", self)
@@ -286,8 +287,9 @@ class DimensionSectionWidget(QWidget):
         layout.addWidget(self.header)
         layout.addWidget(self.separator)
         layout.addWidget(self.table)
-        layout.addWidget(self.add_questions_btn)
-        if self.group_name == DIMENSION_UNGROUPED:
+        if self.group_name != DIMENSION_UNGROUPED:
+            layout.addWidget(self.add_questions_btn)
+        else:
             layout.addWidget(self.batch_move_btn)
 
     def set_rows(self, rows: Sequence[Dict[str, object]]) -> None:
