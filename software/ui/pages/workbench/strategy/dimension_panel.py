@@ -167,11 +167,6 @@ class DimensionGroupingPanel(QWidget):
             section.renameRequested.connect(self._on_rename_dimension)
             section.deleteRequested.connect(self._on_delete_dimension)
             section.addQuestionsRequested.connect(self._on_add_questions_to_dimension)  # 新增：连接添加题目信号
-            section.batchMoveRequested.connect(self._on_batch_move_to_dimension)  # 新增：连接批量移动信号
-
-            # 为未分组区域设置维度列表（用于批量移动菜单）
-            if group_name == DIMENSION_UNGROUPED:
-                section.set_dimension_groups(self._dimension_groups)
 
             self.sections_layout.addWidget(section)
             self._section_widgets[group_name] = section
@@ -393,16 +388,3 @@ class DimensionGroupingPanel(QWidget):
         if self._apply_entries_to_dimension(selected_indices, target_dimension):
             self._toast(f"已添加 {len(selected_indices)} 道题目到「{target_group}」", "success")
 
-    def _on_batch_move_to_dimension(self, entry_indices: List[int], target_dimension_name: str) -> None:
-        """处理批量移动题目到指定维度。"""
-        if not entry_indices:
-            self._toast("未选择任何题目", "warning")
-            return
-
-        target_group = str(target_dimension_name or "").strip()
-        if not target_group:
-            return
-
-        # 应用到目标维度
-        if self._apply_entries_to_dimension(entry_indices, target_group):
-            self._toast(f"已将 {len(entry_indices)} 道题目移动到「{target_group}」", "success")
