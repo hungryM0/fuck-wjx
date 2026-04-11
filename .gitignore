@@ -20,12 +20,3 @@ __pycache__/
 *.pyc
 /configs/
 /logs/
-
-
-configs
-logs
-docx
-tests
-scripts
-plans
-.kiro
