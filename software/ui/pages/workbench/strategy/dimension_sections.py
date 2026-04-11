@@ -12,6 +12,7 @@ from qfluentwidgets import (
     CaptionLabel,
     FluentIcon,
     HorizontalSeparator,
+    PushButton,
     StrongBodyLabel,
     TableWidget,
     ToolButton,
@@ -201,6 +202,7 @@ class DimensionSectionWidget(QWidget):
     renameRequested = Signal(str)
     deleteRequested = Signal(str)
     entriesDropped = Signal(list, object)
+    addQuestionsRequested = Signal(str)  # 新增：请求添加题目信号
 
     def __init__(self, group_name: str, parent=None):
         super().__init__(parent)
@@ -268,9 +270,17 @@ class DimensionSectionWidget(QWidget):
             """
         )
 
+        # 添加题目按钮（仅在非未分组区域显示）
+        self.add_questions_btn = PushButton("添加题目", self)
+        self.add_questions_btn.setIcon(FluentIcon.ADD)
+        self.add_questions_btn.clicked.connect(lambda: self.addQuestionsRequested.emit(self.group_name))
+        self.add_questions_btn.setVisible(self.group_name != DIMENSION_UNGROUPED)
+
         layout.addWidget(self.header)
         layout.addWidget(self.separator)
         layout.addWidget(self.table)
+        if self.group_name != DIMENSION_UNGROUPED:
+            layout.addWidget(self.add_questions_btn)
 
     def set_rows(self, rows: Sequence[Dict[str, object]]) -> None:
         self.table.set_rows(rows)

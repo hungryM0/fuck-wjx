@@ -24,6 +24,7 @@ from software.app.config import DIMENSION_UNGROUPED, PRESET_DIMENSIONS
 from software.core.questions.config import QuestionEntry
 
 from .dimension_sections import DimensionSectionWidget
+from .question_selector_dialog import QuestionSelectorDialog
 from .rule_dialog import normalize_question_type_code, to_int
 from .utils import (
     entry_dimension_label,
@@ -165,6 +166,8 @@ class DimensionGroupingPanel(QWidget):
             section.entriesDropped.connect(self._on_entries_dropped)
             section.renameRequested.connect(self._on_rename_dimension)
             section.deleteRequested.connect(self._on_delete_dimension)
+            section.addQuestionsRequested.connect(self._on_add_questions_to_dimension)  # 新增：连接添加题目信号
+
             self.sections_layout.addWidget(section)
             self._section_widgets[group_name] = section
             if index < last_index:
@@ -239,12 +242,12 @@ class DimensionGroupingPanel(QWidget):
     def _validate_new_dimension_name(self, raw_value: Any, *, old_name: Optional[str] = None) -> Optional[str]:
         normalized = normalize_dimension_name(raw_value)
         if not normalized:
-            self._toast("维度名称不能为空，也不能叫“未分组”", "warning")
+            self._toast("维度名称不能为空，也不能叫'未分组'", "warning")
             return None
         if old_name and normalized == old_name:
             return normalized
         if normalized in set(self._dimension_groups):
-            self._toast(f"维度“{normalized}”已经存在了", "warning")
+            self._toast(f"维度「{normalized}」已经存在了", "warning")
             return None
         return normalized
 
@@ -263,7 +266,7 @@ class DimensionGroupingPanel(QWidget):
         self.preset_combo.setCurrentIndex(-1)
         self._refresh_sections()
         self.changed.emit()
-        self._toast(f"已新增维度“{normalized}”", "success")
+        self._toast(f"已新增维度「{normalized}」", "success")
 
     def _on_rename_dimension(self, group_name: Optional[str] = None) -> None:
         current_name = str(group_name or "").strip()
@@ -287,7 +290,7 @@ class DimensionGroupingPanel(QWidget):
         self._dimension_groups = sanitize_dimension_groups(self._dimension_groups, self._entries)
         self._refresh_sections()
         self.changed.emit()
-        self._toast(f"维度已重命名为“{new_name}”", "success")
+        self._toast(f"维度已重命名为「{new_name}」", "success")
 
     def _on_delete_dimension(self, group_name: Optional[str] = None) -> None:
         current_name = str(group_name or "").strip()
@@ -320,7 +323,7 @@ class DimensionGroupingPanel(QWidget):
         self._dimension_groups = sanitize_dimension_groups(self._dimension_groups, self._entries)
         self._refresh_sections()
         self.changed.emit()
-        self._toast(f"已删除维度“{current_name}”", "success")
+        self._toast(f"已删除维度「{current_name}」", "success")
 
     def _apply_entries_to_dimension(self, entry_indices: Sequence[int], dimension_name: Optional[str]) -> bool:
         normalized = normalize_dimension_name(dimension_name)
@@ -348,3 +351,40 @@ class DimensionGroupingPanel(QWidget):
             return
         target_dimension = None if target_group == DIMENSION_UNGROUPED else target_group
         self._apply_entries_to_dimension(entry_indices, target_dimension)
+
+    def _on_add_questions_to_dimension(self, group_name: str) -> None:
+        """处理点击"添加题目"按钮 - 弹出题目选择器。"""
+        target_group = str(group_name or "").strip()
+        if not target_group:
+            return
+
+        # 获取未分组的题目列表
+        ungrouped_questions = []
+        for row in self._build_question_rows():
+            if str(row.get("group_name") or DIMENSION_UNGROUPED) == DIMENSION_UNGROUPED:
+                ungrouped_questions.append(row)
+
+        if not ungrouped_questions:
+            self._toast("没有可添加的题目，所有题目都已分配到维度", "warning")
+            return
+
+        # 弹出题目选择器对话框
+        dialog = QuestionSelectorDialog(
+            f"添加题目到「{target_group}」",
+            ungrouped_questions,
+            self.window() or self,
+        )
+
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        selected_indices = dialog.get_selected_indices()
+        if not selected_indices:
+            self._toast("未选择任何题目", "warning")
+            return
+
+        # 应用到目标维度
+        target_dimension = None if target_group == DIMENSION_UNGROUPED else target_group
+        if self._apply_entries_to_dimension(selected_indices, target_dimension):
+            self._toast(f"已添加 {len(selected_indices)} 道题目到「{target_group}」", "success")
+
