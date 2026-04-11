@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -34,6 +35,47 @@ from .runtime_interactions import (
     _prepare_question_interaction,
     _select_dropdown_option,
 )
+
+
+def _format_matrix_weight_value(value: Any) -> str:
+    try:
+        number = float(value)
+    except Exception:
+        return str(value or "").strip() or "随机"
+    if math.isnan(number) or math.isinf(number):
+        return "随机"
+    text = f"{number:.6f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _resolve_selected_weight_text(
+    selected_index: int,
+    resolved_probabilities: Any,
+    raw_probabilities: Any,
+) -> str:
+    if isinstance(resolved_probabilities, list) and 0 <= selected_index < len(resolved_probabilities):
+        return _format_matrix_weight_value(resolved_probabilities[selected_index])
+    if isinstance(raw_probabilities, list) and 0 <= selected_index < len(raw_probabilities):
+        return _format_matrix_weight_value(raw_probabilities[selected_index])
+    return "随机"
+
+
+def _log_qq_matrix_row_choice(
+    current: int,
+    row_number: int,
+    selected_index: int,
+    option_texts: List[str],
+    resolved_probabilities: Any,
+    raw_probabilities: Any,
+) -> None:
+    logging.info(
+        "矩阵题作答：题号=%s 行号=%s 目标权重=%s 最终选中列=%s 页面列文本=%s",
+        current,
+        row_number,
+        _resolve_selected_weight_text(selected_index, resolved_probabilities, raw_probabilities),
+        selected_index + 1,
+        option_texts[selected_index] if 0 <= selected_index < len(option_texts) else "",
+    )
 
 
 def _answer_qq_single(
@@ -254,6 +296,7 @@ def _answer_qq_matrix(
     question_id = str(question.get("provider_question_id") or "")
     row_count = max(1, int(question.get("rows") or 1))
     option_count = max(2, int(question.get("options") or 0))
+    option_texts = list(question.get("option_texts") or [])
     strict_ratio_question = is_strict_ratio_question(ctx, current)
     next_index = config_index
     for row_index in range(row_count):
@@ -307,6 +350,14 @@ def _answer_qq_matrix(
             logging.warning("腾讯问卷第%d题（矩阵）第%d行点击失败。", current, row_index + 1)
             continue
         record_pending_distribution_choice(ctx, current, selected_index, option_count, row_index=row_index)
+        _log_qq_matrix_row_choice(
+            current,
+            row_index + 1,
+            selected_index,
+            option_texts,
+            row_probabilities,
+            raw_probabilities,
+        )
         record_answer(current, "matrix", selected_indices=[selected_index], row_index=row_index)
     return next_index
 
