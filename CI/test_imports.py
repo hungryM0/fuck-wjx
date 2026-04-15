@@ -49,6 +49,15 @@ UNICODE_SPACE_TRANSLATION = str.maketrans({
     "\u3000": " ",
 })
 
+
+def configure_console_encoding() -> None:
+    """在 Windows CI 的非 UTF-8 控制台中强制使用 UTF-8 输出，避免中文日志炸掉。"""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
 IMPORT_SMOKE_CODE = r"""
 import importlib
 import json
@@ -222,7 +231,7 @@ def summarize_child_output(stdout: str, stderr: str) -> str:
 
 
 def normalize_diagnostic_message(message: str) -> str:
-    """将诊断文本中的特殊空白归一为普通空格，避免终端乱码。"""
+    """Normalize uncommon whitespace in diagnostics for stable console output."""
     normalized = message.translate(UNICODE_SPACE_TRANSLATION)
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.rstrip() for line in normalized.split("\n")]
@@ -248,7 +257,7 @@ def run_compile_checks(files: Iterable[Path]) -> list[dict]:
 def run_ruff_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | None]:
     target_args = [str(path) for path in target_dirs]
     if not target_args:
-        return [], "未找到可执行 Ruff 检查的目标目录"
+        return [], "No target directories found for Ruff checks."
 
     result = subprocess.run(
         [
@@ -263,14 +272,14 @@ def run_ruff_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | None]
     )
 
     if result.returncode == 2:
-        message = result.stderr.strip() or result.stdout.strip() or "ruff 执行失败"
+        message = result.stderr.strip() or result.stdout.strip() or "Ruff execution failed."
         return [], message
 
     raw = result.stdout.strip()
     try:
         diagnostics: list[dict] = json.loads(raw) if raw else []
     except json.JSONDecodeError:
-        return [], f"无法解析 ruff 输出: {raw}"
+        return [], f"Failed to parse Ruff output: {raw}"
 
     issues: list[dict] = []
     for item in diagnostics:
@@ -287,8 +296,8 @@ def run_ruff_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | None]
     return issues, None
 
 
-def run_vscode_like_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | None]:
-    """使用 pyright 生成接近 VS Code Problems 的诊断结果。"""
+def run_pyright_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | None]:
+    """Run Pyright diagnostics."""
     target_args = [str(path) for path in target_dirs]
     env = make_child_env()
     for entry_file in ENTRY_FILES:
@@ -296,7 +305,7 @@ def run_vscode_like_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str 
             target_args.append(str(entry_file))
 
     if not target_args:
-        return [], "未找到可执行 VS Code 风格诊断的目标路径"
+        return [], "No target paths found for Pyright diagnostics."
 
     try:
         result = subprocess.run(
@@ -314,23 +323,23 @@ def run_vscode_like_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str 
             timeout=PYRIGHT_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
-        return [], f"pyright 执行超时（>{PYRIGHT_TIMEOUT_SECONDS} 秒）"
+        return [], f"Pyright timed out (>{PYRIGHT_TIMEOUT_SECONDS}s)."
 
     stderr_text = (result.stderr or "").strip()
     if "No module named pyright" in stderr_text:
-        return [], "未安装 pyright，无法执行 VS Code 风格诊断（可运行: python -m pip install pyright）"
+        return [], "Pyright is not installed, so Pyright diagnostics cannot run."
 
     raw = (result.stdout or "").strip()
     if not raw:
         if result.returncode == 0:
             return [], None
-        message = stderr_text or "pyright 执行失败且无可解析输出"
+        message = stderr_text or "Pyright failed without producing parseable output."
         return [], message
 
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        return [], f"无法解析 pyright 输出: {raw}"
+        return [], f"Failed to parse Pyright output: {raw}"
 
     diagnostics = payload.get("generalDiagnostics", [])
     issues: list[dict] = []
@@ -341,7 +350,7 @@ def run_vscode_like_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str 
         rule = item.get("rule") or "pyright"
         issues.append(
             {
-                "phase": "vscode",
+                "phase": "pyright",
                 "path": format_path(file_name) if file_name else Path("<unknown>"),
                 "row": int(range_start.get("line", 0)) + 1,
                 "column": int(range_start.get("character", 0)) + 1,
@@ -351,10 +360,10 @@ def run_vscode_like_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str 
             }
         )
 
-    # pyright 返回码说明：0=无问题，1=有诊断，2=执行异常
+    # Pyright exit codes: 0=no issues, 1=diagnostics found, 2=execution error
     if result.returncode == 2 and not issues:
         summary = payload.get("summary", {})
-        message = summary.get("errorMessage") or stderr_text or "pyright 执行异常"
+        message = summary.get("errorMessage") or stderr_text or "Pyright execution error."
         return [], str(message)
 
     return issues, None
@@ -375,7 +384,7 @@ def run_module_import_checks(modules: Iterable[str]) -> list[dict]:
                 timeout=IMPORT_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            signature = ("TimeoutError", f"导入超时（>{IMPORT_TIMEOUT_SECONDS} 秒）", "")
+            signature = ("TimeoutError", f"Import timed out (>{IMPORT_TIMEOUT_SECONDS}s).", "")
             issue = issues_by_signature.setdefault(
                 signature,
                 {
@@ -395,7 +404,7 @@ def run_module_import_checks(modules: Iterable[str]) -> list[dict]:
 
         error_type = payload.get("error_type", "ImportError")
         fallback_message = summarize_child_output(result.stdout, result.stderr)
-        message = payload.get("message") or fallback_message or "模块导入失败"
+        message = payload.get("message") or fallback_message or "Module import failed."
         traceback_text = payload.get("traceback", "").strip()
         signature = (error_type, message, traceback_text)
         issue = issues_by_signature.setdefault(
@@ -427,19 +436,19 @@ def run_window_smoke_check() -> dict | None:
     except subprocess.TimeoutExpired:
         return {
             "phase": "window",
-            "message": f"主窗口创建超时（>{WINDOW_SMOKE_TIMEOUT_SECONDS} 秒）",
+            "message": f"Main window creation timed out (>{WINDOW_SMOKE_TIMEOUT_SECONDS}s).",
         }
 
     payload = extract_child_payload(result.stdout, result.stderr) or {}
-    # 在 Windows + Qt 场景下，子进程偶发非 0 退出码，但已明确输出成功 payload。
-    # 这里优先信任结构化结果，避免主窗口冒烟误报。
+    # In Windows + Qt scenarios, the child process may occasionally exit non-zero
+    # even after emitting a successful payload. Prefer the structured result here.
     if payload.get("kind") == "window_smoke" and payload.get("ok") is True:
         return None
 
     fallback_message = summarize_child_output(result.stdout, result.stderr)
     return {
         "phase": "window",
-        "message": payload.get("message") or fallback_message or "主窗口创建失败",
+        "message": payload.get("message") or fallback_message or "Main window creation failed.",
         "error_type": payload.get("error_type", "RuntimeError"),
         "traceback": payload.get("traceback", "").strip(),
     }
@@ -473,23 +482,23 @@ def print_issues(title: str, issues: Iterable[dict]) -> None:
             print(f"   {item['message']}")
             traceback_text = item.get("traceback")
             if traceback_text:
-                print("   导入堆栈：")
+                print("   Import traceback:")
                 for line in traceback_text.splitlines():
                     print(f"   {line}")
             continue
 
         if phase == "window":
             error_type = item.get("error_type", "RuntimeError")
-            print(f"{index}. 主窗口创建  [{error_type}]")
+            print(f"{index}. Main window creation  [{error_type}]")
             print(f"   {item['message']}")
             traceback_text = item.get("traceback")
             if traceback_text:
-                print("   运行堆栈：")
+                print("   Runtime traceback:")
                 for line in traceback_text.splitlines():
                     print(f"   {line}")
             continue
 
-        if phase == "vscode":
+        if phase == "pyright":
             print(
                 f"{index}. {item['path']}:{item['row']}:{item['column']}  "
                 f"[{item.get('severity', 'error')}/{item.get('code', 'pyright')}]"
@@ -502,36 +511,37 @@ def print_issues(title: str, issues: Iterable[dict]) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="检查 wjx、software、tencent 目录下 Python 文件的语法、静态导入和启动链问题。"
+        description="Check syntax, static imports, and startup-chain issues in wjx, software, and tencent."
     )
     parser.add_argument(
         "--full",
         action="store_true",
-        help="启用全量模块导入检查。默认仅执行快检模式。",
+        help="Enable full module import checks. The default is quick mode.",
     )
-    vscode_group = parser.add_mutually_exclusive_group()
-    vscode_group.add_argument(
-        "--vscode-errors",
-        dest="vscode_errors",
+    pyright_group = parser.add_mutually_exclusive_group()
+    pyright_group.add_argument(
+        "--pyright",
+        dest="pyright_enabled",
         action="store_true",
-        help="启用 VS Code 风格诊断（默认已启用，可省略）。",
+        help="Enable Pyright diagnostics (enabled by default).",
     )
-    vscode_group.add_argument(
-        "--no-vscode-errors",
-        dest="vscode_errors",
+    pyright_group.add_argument(
+        "--no-pyright",
+        dest="pyright_enabled",
         action="store_false",
-        help="关闭 VS Code 风格诊断（仅保留编译、Ruff、导入和主窗口冒烟）。",
+        help="Disable Pyright diagnostics and keep compile, Ruff, import, and window smoke checks only.",
     )
-    parser.set_defaults(vscode_errors=True)
+    parser.set_defaults(pyright_enabled=True)
     return parser.parse_args()
 
 
 def main() -> int:
+    configure_console_encoding()
     args = parse_args()
 
     target_dirs = iter_target_dirs()
     if not target_dirs:
-        print("[ERROR] 未找到可扫描目录（期望存在 wjx/、software/、tencent/ 至少一个）")
+        print("[ERROR] No scan targets found. Expected at least one of wjx/, software/, or tencent/.")
         return 2
 
     start_time = time.perf_counter()
@@ -539,61 +549,61 @@ def main() -> int:
     compile_targets = iter_compile_targets()
     modules = iter_module_names(python_files)
     quick_mode = not args.full
-    vscode_mode = args.vscode_errors
+    pyright_mode = args.pyright_enabled
 
-    print(f"[INFO] 扫描目录: {', '.join(str(path.relative_to(ROOT_DIR)) for path in target_dirs)}")
-    print(f"[INFO] 检查模式: {'快检' if quick_mode else '完整'}")
-    print(f"[INFO] Python 文件数: {len(python_files)}")
-    print(f"[INFO] 编译目标数: {len(compile_targets)}")
+    print(f"[INFO] Scan targets: {', '.join(str(path.relative_to(ROOT_DIR)) for path in target_dirs)}")
+    print(f"[INFO] Check mode: {'quick' if quick_mode else 'full'}")
+    print(f"[INFO] Python files: {len(python_files)}")
+    print(f"[INFO] Compile targets: {len(compile_targets)}")
     if quick_mode:
-        print("[INFO] 模块导入检查数: 已跳过（使用 --full 可启用）")
+        print("[INFO] Module import checks: skipped (use --full to enable)")
     else:
-        print(f"[INFO] 模块导入检查数: {len(modules)}")
-    if vscode_mode:
-        print("[INFO] VS Code 风格诊断: 已启用（pyright，默认开启）")
+        print(f"[INFO] Module import checks: {len(modules)}")
+    if pyright_mode:
+        print("[INFO] Pyright diagnostics: enabled")
     else:
-        print("[INFO] VS Code 风格诊断: 已关闭（使用 --no-vscode-errors）")
+        print("[INFO] Pyright diagnostics: disabled (--no-pyright)")
 
     compile_issues = run_compile_checks(compile_targets)
     ruff_issues, ruff_error = run_ruff_check(target_dirs)
-    vscode_issues, vscode_error = run_vscode_like_check(target_dirs) if vscode_mode else ([], None)
+    pyright_issues, pyright_error = run_pyright_check(target_dirs) if pyright_mode else ([], None)
     import_issues = run_module_import_checks(modules) if args.full else []
     window_issue = run_window_smoke_check()
 
     if ruff_error:
         print(f"[ERROR] {ruff_error}")
         return 2
-    if vscode_error:
-        print(f"[ERROR] {vscode_error}")
+    if pyright_error:
+        print(f"[ERROR] {pyright_error}")
         return 2
 
-    total_issues = len(compile_issues) + len(ruff_issues) + len(vscode_issues) + len(import_issues) + (1 if window_issue else 0)
+    total_issues = len(compile_issues) + len(ruff_issues) + len(pyright_issues) + len(import_issues) + (1 if window_issue else 0)
     elapsed = time.perf_counter() - start_time
 
-    print(f"[INFO] 编译问题数: {len(compile_issues)}")
-    print(f"[INFO] Ruff 诊断数: {len(ruff_issues)}")
-    if vscode_mode:
-        print(f"[INFO] VS Code 风格诊断数: {len(vscode_issues)}")
-    print(f"[INFO] 模块导入失败数: {len(import_issues)}")
-    print(f"[INFO] 主窗口冒烟失败数: {1 if window_issue else 0}")
-    print(f"[INFO] 总耗时: {elapsed:.2f} 秒")
+    print(f"[INFO] Compile issues: {len(compile_issues)}")
+    print(f"[INFO] Ruff diagnostics: {len(ruff_issues)}")
+    if pyright_mode:
+        print(f"[INFO] Pyright diagnostics: {len(pyright_issues)}")
+    print(f"[INFO] Module import failures: {len(import_issues)}")
+    print(f"[INFO] Main window smoke failures: {1 if window_issue else 0}")
+    print(f"[INFO] Elapsed time: {elapsed:.2f}s")
 
     if total_issues == 0:
         if quick_mode:
-            print("[PASS] 快检通过：语法编译、Ruff 静态检查和主窗口冒烟全部通过。")
-            print("[INFO] 如需额外检查包级循环导入等问题，请运行: python CI/test_imports.py --full")
+            print("[PASS] Quick checks passed: compile, Ruff, and main window smoke checks all succeeded.")
+            print("[INFO] For package-level import checks such as circular imports, run: python CI/test_imports.py --full")
         else:
-            print("[PASS] 完整检查通过：语法编译、Ruff 静态检查、模块导入和主窗口冒烟全部通过。")
+            print("[PASS] Full checks passed: compile, Ruff, module import, and main window smoke checks all succeeded.")
         return 0
 
-    print(f"[FAIL] 发现 {total_issues} 处问题：")
-    print_issues("【语法编译失败】", compile_issues)
-    print_issues("【Ruff 静态诊断】", ruff_issues)
-    if vscode_mode:
-        print_issues("【VS Code 风格诊断（Pyright）】", vscode_issues)
-    print_issues("【模块导入失败】", import_issues)
+    print(f"[FAIL] Found {total_issues} issue(s):")
+    print_issues("[Compile failures]", compile_issues)
+    print_issues("[Ruff diagnostics]", ruff_issues)
+    if pyright_mode:
+        print_issues("[Pyright diagnostics]", pyright_issues)
+    print_issues("[Module import failures]", import_issues)
     if window_issue:
-        print_issues("【主窗口冒烟失败】", [window_issue])
+        print_issues("[Main window smoke failures]", [window_issue])
 
     return 1
 
