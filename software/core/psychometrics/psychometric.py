@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def _build_choice_key(question_index: int, row_index: Optional[int] = None) -> str:
     if row_index is not None:
-        return f"matrix:{question_index}:{row_index}"
+        return f"q:{question_index}:row:{row_index}"
     return f"q:{question_index}"
 
 
@@ -80,6 +80,9 @@ class PsychometricPlan:
         key = _build_choice_key(question_index, row_index)
         return self.choices.get(key)
 
+    def is_distribution_locked(self, question_index: int, row_index: Optional[int] = None) -> bool:
+        return False
+
 
 @dataclass
 class DimensionPsychometricPlan:
@@ -99,6 +102,9 @@ class DimensionPsychometricPlan:
         if plan is None:
             return None
         return plan.get_choice(question_index, row_index)
+
+    def is_distribution_locked(self, question_index: int, row_index: Optional[int] = None) -> bool:
+        return False
 
 
 def build_psychometric_plan(

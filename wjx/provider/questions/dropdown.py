@@ -156,7 +156,6 @@ def _fill_droplist_via_click(
             task_ctx,
             resolved_question_index,
             psycho_plan=psycho_plan,
-            priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
         )
         if strict_ratio:
             probabilities = enforce_reference_rank_order(probabilities, strict_reference)
@@ -167,7 +166,6 @@ def _fill_droplist_via_click(
             dimension=dimension,
             psycho_plan=psycho_plan,
             question_index=resolved_question_index,
-            priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
         )
     else:
         selected_idx = weighted_index(probabilities)
@@ -223,7 +221,6 @@ def dropdown(
                 task_ctx,
                 resolved_question_index,
                 psycho_plan=psycho_plan,
-                priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
             )
             if strict_ratio:
                 probabilities = enforce_reference_rank_order(probabilities, strict_reference)
@@ -234,7 +231,6 @@ def dropdown(
                 dimension=dimension,
                 psycho_plan=psycho_plan,
                 question_index=resolved_question_index,
-                priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
             )
         else:
             selected_idx = weighted_index(probabilities)

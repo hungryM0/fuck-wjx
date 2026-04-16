@@ -110,7 +110,9 @@ class WizardSectionsCommonMixin:
     ) -> None:
         percentages = self._compute_ratio_percentages([slider.value() for slider in sliders])
         label.setText(self._build_ratio_preview_text(option_names, percentages, prefix))
-        label.setToolTip("这里显示的是目标占比，实际作答会受信效度和一致性约束影响而小幅波动。")
+        label.setToolTip(
+            "这里显示的是目标占比。开启信效度优化后，量表/评分/下拉/矩阵题会优先按整批目标占比执行；其他题型仍可能受一致性和随机策略影响。"
+        )
         install_tooltip_filter(label)
     @staticmethod
     def _create_integer_range_edit(parent: QWidget, initial_value: Optional[int], placeholder: str) -> LineEdit:

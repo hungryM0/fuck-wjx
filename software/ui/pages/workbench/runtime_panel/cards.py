@@ -4,7 +4,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, Qt, QStringListModel, Signal
 from PySide6.QtGui import QDoubleValidator, QIntValidator
-from PySide6.QtWidgets import QButtonGroup, QCompleter, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCompleter, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     ComboBox,
@@ -18,7 +18,6 @@ from qfluentwidgets import (
     InfoBarPosition,
     LineEdit,
     PushButton,
-    RadioButton,
     SettingCard,
     SwitchButton,
     TransparentToolButton,
@@ -32,13 +31,6 @@ from software.ui.helpers.proxy_access import (
     load_benefit_supported_areas,
     load_supported_area_codes,
     test_custom_proxy_api,
-)
-from software.core.questions.reliability_mode import (
-    DEFAULT_RELIABILITY_PRIORITY_MODE,
-    RELIABILITY_PRIORITY_BALANCED,
-    RELIABILITY_PRIORITY_RATIO_FIRST,
-    RELIABILITY_PRIORITY_RELIABILITY_FIRST,
-    normalize_reliability_priority_mode,
 )
 
 
@@ -683,7 +675,7 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
         super().__init__(
             FluentIcon.CERTIFICATE,
             "提升问卷信效度",
-            "启用后会对维度内题目统一施加信度约束，自定义配比题仍保持硬约束。",
+            "启用后会对量表/评分/下拉/矩阵等信效度题型优先锁定整批配比，再尽量提高维度一致性。",
             parent,
         )
 
@@ -721,29 +713,12 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
         alpha_row.addWidget(self.alphaEdit)
 
         layout.addLayout(alpha_row)
-
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(0, 0, 0, 0)
-        mode_row.setSpacing(12)
-
-        mode_label = BodyLabel("优化偏向", self._groupContainer)
-        mode_row.addWidget(mode_label)
-        mode_row.addStretch(1)
-        self.modeButtonGroup = QButtonGroup(self._groupContainer)
-        self.modeRadioMap = {
-            RELIABILITY_PRIORITY_RELIABILITY_FIRST: RadioButton("信度优先", self._groupContainer),
-            RELIABILITY_PRIORITY_BALANCED: RadioButton("平衡（默认）", self._groupContainer),
-            RELIABILITY_PRIORITY_RATIO_FIRST: RadioButton("比例优先", self._groupContainer),
-        }
-        for mode, button in self.modeRadioMap.items():
-            self.modeButtonGroup.addButton(button)
-            button.setProperty("priorityMode", mode)
-            button.setToolTip("平衡模式会兼顾信度和比例，自定义配比题继续按硬约束执行。")
-            install_tooltip_filter(button)
-            mode_row.addWidget(button)
-        self.set_priority_mode(DEFAULT_RELIABILITY_PRIORITY_MODE)
-
-        layout.addLayout(mode_row)
+        hint_label = BodyLabel(
+            "系统会固定按“先保配比、再尽量拉高信度”的统一策略执行；若目标 α 做不到，会保留配比并下调实际信度。",
+            self._groupContainer,
+        )
+        hint_label.setStyleSheet("color: #606060; font-size: 12px;")
+        layout.addWidget(hint_label)
 
 
         self.addGroupWidget(self._groupContainer)
@@ -763,18 +738,6 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
 
     def setChecked(self, checked: bool) -> None:
         self.switchButton.setChecked(bool(checked))
-
-    def get_priority_mode(self) -> str:
-        for mode, button in self.modeRadioMap.items():
-            if button.isChecked():
-                return normalize_reliability_priority_mode(mode)
-        return DEFAULT_RELIABILITY_PRIORITY_MODE
-
-    def set_priority_mode(self, value: str) -> None:
-        normalized = normalize_reliability_priority_mode(value)
-        button = self.modeRadioMap.get(normalized) or self.modeRadioMap.get(DEFAULT_RELIABILITY_PRIORITY_MODE)
-        if button is not None and not button.isChecked():
-            button.setChecked(True)
 
     def get_alpha(self) -> float:
         """读取并裁剪目标 Alpha 值，落在 0.70-0.95 之间。

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 import logging
 from software.logging.log_utils import log_suppressed_exception
 
-from software.core.questions.reliability_mode import get_reliability_priority_profile
+from software.core.questions.reliability_mode import get_reliability_profile
 from software.core.questions.utils import weighted_index
 from software.app.config import DIMENSION_UNGROUPED
 
@@ -137,16 +137,15 @@ def _blend_psychometric_choice(
     anchor_index: int,
     option_count: int,
     probabilities: Union[List[float], int, None],
-    priority_mode: Optional[str] = None,
 ) -> int:
     anchor = max(0, min(option_count - 1, int(anchor_index)))
     if option_count <= 0 or not isinstance(probabilities, list) or len(probabilities) != option_count:
         return anchor
 
-    fluctuation_window = _resolve_fluctuation_window(option_count, priority_mode=priority_mode)
+    fluctuation_window = _resolve_fluctuation_window(option_count)
     if fluctuation_window <= 0:
         return anchor
-    profile = get_reliability_priority_profile(priority_mode)
+    profile = get_reliability_profile()
 
     low = max(0, anchor - fluctuation_window)
     high = min(option_count - 1, anchor + fluctuation_window)
@@ -161,7 +160,7 @@ def _blend_psychometric_choice(
             continue
         if low <= idx <= high:
             distance = abs(idx - anchor)
-            adjusted_probs.append(weight * _window_decay(distance, fluctuation_window, priority_mode=priority_mode))
+            adjusted_probs.append(weight * _window_decay(distance, fluctuation_window))
         else:
             adjusted_probs.append(weight * (profile.consistency_outside_decay * 0.5))
 
@@ -180,7 +179,6 @@ def get_tendency_index(
     psycho_plan: Optional[Any] = None,
     question_index: Optional[int] = None,
     row_index: Optional[int] = None,
-    priority_mode: Optional[str] = None,
 ) -> int:
     """获取带有一致性倾向的选项索引。"""
     if option_count <= 0:
@@ -198,11 +196,12 @@ def get_tendency_index(
     if psycho_plan is not None and question_index is not None:
         choice = _get_psychometric_answer(psycho_plan, question_index, row_index, option_count)
         if choice is not None:
+            if _is_distribution_locked_plan(psycho_plan, question_index, row_index):
+                return _finalize_choice(choice, anchor=choice)
             blended_choice = _blend_psychometric_choice(
                 choice,
                 option_count,
                 probabilities,
-                priority_mode=priority_mode,
             )
             return _finalize_choice(blended_choice, anchor=choice)
         # 计划未命中时，回退到常规倾向逻辑
@@ -234,7 +233,7 @@ def get_tendency_index(
     base = int(round(base_ratio * (option_count - 1)))
     base = max(0, min(option_count - 1, base))
 
-    selected = _apply_consistency(base, option_count, probabilities, priority_mode=priority_mode)
+    selected = _apply_consistency(base, option_count, probabilities)
     return _finalize_choice(selected, anchor=base)
 
 
@@ -242,12 +241,11 @@ def _apply_consistency(
     base: int,
     option_count: int,
     probabilities: Union[List[float], int, None],
-    priority_mode: Optional[str] = None,
 ) -> int:
     """在基准附近的自适应窗口内应用一致性约束选择选项。"""
     # 当前题目选项数可能与生成 base 时不同，需要夹到合法范围
     effective_base = min(base, option_count - 1)
-    fluctuation_window = _resolve_fluctuation_window(option_count, priority_mode=priority_mode)
+    fluctuation_window = _resolve_fluctuation_window(option_count)
     if fluctuation_window <= 0:
         return effective_base
 
@@ -261,11 +259,11 @@ def _apply_consistency(
         for i in range(option_count):
             if low <= i <= high:
                 distance = abs(i - effective_base)
-                decay = _window_decay(distance, fluctuation_window, priority_mode=priority_mode)
+                decay = _window_decay(distance, fluctuation_window)
                 adjusted_probs.append(probabilities[i] * decay)
             else:
                 adjusted_probs.append(
-                    probabilities[i] * get_reliability_priority_profile(priority_mode).consistency_outside_decay
+                    probabilities[i] * get_reliability_profile().consistency_outside_decay
                 )
 
         total = sum(adjusted_probs)
@@ -278,7 +276,7 @@ def _apply_consistency(
     weights = []
     for c in candidates:
         distance = abs(c - effective_base)
-        weights.append(_window_decay(distance, fluctuation_window, priority_mode=priority_mode))
+        weights.append(_window_decay(distance, fluctuation_window))
 
     total = sum(weights)
     pivot = random.random() * total
@@ -290,13 +288,13 @@ def _apply_consistency(
     return candidates[-1]
 
 
-def _resolve_fluctuation_window(option_count: int, *, priority_mode: Optional[str] = None) -> int:
+def _resolve_fluctuation_window(option_count: int) -> int:
     """根据量程动态计算波动窗口。"""
     if option_count <= _SMALL_SCALE_STATIC_MAX_OPTIONS:
         # 3级及以下量表不做波动，避免语义直接翻转
         return 0
 
-    profile = get_reliability_priority_profile(priority_mode)
+    profile = get_reliability_profile()
     span = max(option_count, 1)
     window = int(round(span * profile.consistency_window_ratio))
     if window < 1:
@@ -304,9 +302,9 @@ def _resolve_fluctuation_window(option_count: int, *, priority_mode: Optional[st
     return min(window, profile.consistency_window_max)
 
 
-def _window_decay(distance: int, window: int, *, priority_mode: Optional[str] = None) -> float:
+def _window_decay(distance: int, window: int) -> float:
     """窗口内距离衰减：中心最高，边缘次之。"""
-    profile = get_reliability_priority_profile(priority_mode)
+    profile = get_reliability_profile()
     if distance <= 0:
         return profile.consistency_center_weight
     if window <= 0:
@@ -341,6 +339,24 @@ def _get_psychometric_answer(
             level=logging.WARNING
         )
         return None
+
+
+def _is_distribution_locked_plan(
+    plan: Any,
+    question_index: int,
+    row_index: Optional[int],
+) -> bool:
+    if plan is None or not hasattr(plan, "is_distribution_locked"):
+        return False
+    try:
+        return bool(plan.is_distribution_locked(question_index, row_index))
+    except Exception as exc:
+        log_suppressed_exception(
+            f"_is_distribution_locked_plan: question_index={question_index}, row_index={row_index}",
+            exc,
+            level=logging.WARNING,
+        )
+        return False
 
 
 

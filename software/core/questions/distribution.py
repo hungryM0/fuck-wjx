@@ -1,7 +1,7 @@
 import math
 from typing import Any, List, Optional, Tuple, Union
 
-from software.core.questions.reliability_mode import get_reliability_priority_profile, normalize_reliability_priority_mode
+from software.core.questions.reliability_mode import get_reliability_profile
 from software.core.questions.utils import normalize_droplist_probs
 
 _STANDARD_CORRECTION_PARAMS = (12, 4.2, 0.45, 2.2, 0.42)
@@ -60,13 +60,12 @@ def _psycho_plan_covers_question(
 
 
 def _resolve_correction_params(
-    priority_mode: Any,
     *,
     use_priority_profile: bool,
 ) -> Tuple[int, float, float, float, float]:
     if not use_priority_profile:
         return _STANDARD_CORRECTION_PARAMS
-    profile = get_reliability_priority_profile(priority_mode)
+    profile = get_reliability_profile()
     return (
         int(profile.distribution_warmup_samples),
         float(profile.distribution_gain),
@@ -84,7 +83,6 @@ def resolve_distribution_probabilities(
     *,
     row_index: Optional[int] = None,
     psycho_plan: Optional[Any] = None,
-    priority_mode: Optional[str] = None,
 ) -> List[float]:
     target = _normalize_distribution_target(probabilities, option_count)
     if option_count <= 0 or not target or question_index is None or ctx is None:
@@ -99,11 +97,7 @@ def resolve_distribution_probabilities(
         _has_active_runtime_dimension(ctx, question_index)
         or _psycho_plan_covers_question(psycho_plan, question_index, row_index)
     )
-    resolved_priority_mode = normalize_reliability_priority_mode(
-        priority_mode if priority_mode is not None else getattr(ctx, "reliability_priority_mode", None)
-    )
     warmup_samples, gain, min_factor, max_factor, gap_limit = _resolve_correction_params(
-        resolved_priority_mode,
         use_priority_profile=use_priority_profile,
     )
     sample_factor = min(1.0, float(total) / float(max(1, warmup_samples)))

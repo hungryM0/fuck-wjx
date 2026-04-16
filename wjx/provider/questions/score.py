@@ -99,7 +99,6 @@ def score(
         task_ctx,
         resolved_question_index,
         psycho_plan=psycho_plan,
-        priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
     )
     selected_index = get_tendency_index(
         len(options),
@@ -107,7 +106,6 @@ def score(
         dimension=dimension,
         psycho_plan=psycho_plan,
         question_index=resolved_question_index,
-        priority_mode=getattr(task_ctx, "reliability_priority_mode", None),
     )
     if selected_index >= len(options):
         selected_index = max(0, len(options) - 1)

@@ -149,7 +149,6 @@ def _answer_qq_dropdown(
             ctx,
             current,
             psycho_plan=psycho_plan,
-            priority_mode=getattr(ctx, "reliability_priority_mode", None),
         )
         if strict_ratio:
             probabilities = enforce_reference_rank_order(probabilities, strict_reference)
@@ -160,7 +159,6 @@ def _answer_qq_dropdown(
             dimension=dimension,
             psycho_plan=psycho_plan,
             question_index=current,
-            priority_mode=getattr(ctx, "reliability_priority_mode", None),
         )
     else:
         selected_index = weighted_index(probabilities)
@@ -269,7 +267,6 @@ def _answer_qq_score_like(
         ctx,
         current,
         psycho_plan=psycho_plan,
-        priority_mode=getattr(ctx, "reliability_priority_mode", None),
     )
     selected_index = get_tendency_index(
         option_count,
@@ -277,7 +274,6 @@ def _answer_qq_score_like(
         dimension=ctx.question_dimension_map.get(current),
         psycho_plan=psycho_plan,
         question_index=current,
-        priority_mode=getattr(ctx, "reliability_priority_mode", None),
     )
     if not _click_choice_input(driver, str(question.get("provider_question_id") or ""), "radio", selected_index):
         logging.warning("腾讯问卷第%d题（评分）点击未生效。", current)
@@ -322,7 +318,6 @@ def _answer_qq_matrix(
                     current,
                     row_index=row_index,
                     psycho_plan=psycho_plan,
-                    priority_mode=getattr(ctx, "reliability_priority_mode", None),
                 )
         else:
             uniform_probs = apply_matrix_row_consistency([1.0] * option_count, current, row_index)
@@ -334,7 +329,6 @@ def _answer_qq_matrix(
                     current,
                     row_index=row_index,
                     psycho_plan=psycho_plan,
-                    priority_mode=getattr(ctx, "reliability_priority_mode", None),
                 )
         if strict_ratio_question and isinstance(row_probabilities, list):
             row_probabilities = enforce_reference_rank_order(row_probabilities, strict_reference or row_probabilities)
@@ -345,7 +339,6 @@ def _answer_qq_matrix(
             psycho_plan=psycho_plan,
             question_index=current,
             row_index=row_index,
-            priority_mode=getattr(ctx, "reliability_priority_mode", None),
         )
         if not _click_matrix_cell(driver, question_id, row_index, selected_index):
             logging.warning("腾讯问卷第%d题（矩阵）第%d行点击失败。", current, row_index + 1)
@@ -562,7 +555,6 @@ def _answer_qq_matrix_star(
                     current,
                     row_index=row_index,
                     psycho_plan=psycho_plan,
-                    priority_mode=getattr(ctx, "reliability_priority_mode", None),
                 )
         else:
             uniform_probs = apply_matrix_row_consistency([1.0] * option_count, current, row_index)
@@ -574,7 +566,6 @@ def _answer_qq_matrix_star(
                     current,
                     row_index=row_index,
                     psycho_plan=psycho_plan,
-                    priority_mode=getattr(ctx, "reliability_priority_mode", None),
                 )
         if strict_ratio_question and isinstance(row_probabilities, list):
             row_probabilities = enforce_reference_rank_order(row_probabilities, strict_reference or row_probabilities)
@@ -585,7 +576,6 @@ def _answer_qq_matrix_star(
             psycho_plan=psycho_plan,
             question_index=current,
             row_index=row_index,
-            priority_mode=getattr(ctx, "reliability_priority_mode", None),
         )
         if not _click_star_cell(driver, question_id, row_index, selected_index):
             logging.warning("腾讯问卷第%d题（矩阵星级）第%d行点击失败。", current, row_index + 1)

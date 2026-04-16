@@ -105,7 +105,6 @@ class RuntimePage(ScrollArea):
         self.reliability_card = ReliabilitySettingCard(parent=run_group)
         self.reliability_card.setChecked(True)
         self.reliability_card.set_alpha(0.9)
-        self.reliability_card.set_priority_mode("balanced")
 
         self.headless_card = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
@@ -502,7 +501,6 @@ class RuntimePage(ScrollArea):
         cfg.fail_stop_enabled = True
         cfg.pause_on_aliyun_captcha = True
         cfg.reliability_mode_enabled = self.reliability_card.switchButton.isChecked()
-        cfg.reliability_priority_mode = self.reliability_card.get_priority_mode()
         try:
             cfg.psycho_target_alpha = self.reliability_card.get_alpha()
         except Exception as exc:
@@ -552,7 +550,6 @@ class RuntimePage(ScrollArea):
         self._sync_random_ua(self.random_ua_card.switchButton.isChecked())
         self.reliability_card.switchButton.setChecked(getattr(cfg, "reliability_mode_enabled", True))
         try:
-            self.reliability_card.set_priority_mode(getattr(cfg, "reliability_priority_mode", "balanced"))
             self.reliability_card.set_alpha(getattr(cfg, "psycho_target_alpha", 0.9))
             self.reliability_card._sync_enabled(self.reliability_card.switchButton.isChecked())
         except Exception as exc:

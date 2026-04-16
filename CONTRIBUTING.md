@@ -40,8 +40,8 @@
 ├── rthook_pyside6.py     # PySide6 打包钩子
 ├── CI/                   # CI 与自动化辅助目录
 │   ├── test_imports.py   # 导入检测脚本
+│   ├── test_joint_psychometric_plan.py # 联合信效度配额计划最小回归脚本
 │   └── worker/           # Cloudflare Worker 相关配置，用于发送联系开发者消息
-├── test_reliability_modes.py  # 三模式信效度策略的最小回归检查
 ├── software/             # 软件主包（应用壳 + 共享核心 + 平台总调度）
 ├── tencent/              # 腾讯问卷主包
 └── wjx/                  # 问卷星主包
@@ -59,7 +59,7 @@ software/
 │   ├── engine/            # 共享执行流程；runner.py 仅保留薄入口，浏览器生命周期/停止策略/提交判定/线程主循环已拆到 browser_session_service.py、run_stop_policy.py、submission_service.py、execution_loop.py
 │   ├── modes/             # 作答模式与时长控制
 │   ├── persona/           # 人设与上下文生成
-│   ├── psychometrics/     # 心理测量题辅助逻辑
+│   ├── psychometrics/     # 心理测量题辅助逻辑；joint_optimizer.py 负责“保比例优先”的整批联合优化与样本槽位答案计划
 │   ├── questions/         # 题目配置、分布、共享判定与文本共享常量；config.py 仅保留门面导出，schema.py/default_builder.py/normalization.py/validation.py 才是当前权威拆分
 │   └── task/              # 事件总线与执行模型；当前权威模型为 ExecutionConfig + ExecutionState，task_context.py 内只保留过渡别名供旧类型引用
 ├── integrations/

@@ -6,6 +6,7 @@ import copy
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 from software.app.config import DEFAULT_FILL_TEXT, DIMENSION_UNGROUPED
+from software.core.psychometrics import JOINT_PSYCHOMETRIC_SUPPORTED_TYPES
 from software.core.questions.schema import (
     GLOBAL_RELIABILITY_DIMENSION,
     QuestionEntry,
@@ -42,7 +43,8 @@ def _resolve_runtime_dimension(
     reliability_mode_enabled: bool,
     strict_ratio: bool,
 ) -> Optional[str]:
-    if not reliability_mode_enabled or strict_ratio:
+    allows_joint_ratio = str(getattr(entry, "question_type", "") or "").strip() in JOINT_PSYCHOMETRIC_SUPPORTED_TYPES
+    if not reliability_mode_enabled or (strict_ratio and not allows_joint_ratio):
         return None
     raw_dimension = str(getattr(entry, "dimension", "") or "").strip()
     if not raw_dimension or raw_dimension == DIMENSION_UNGROUPED:
@@ -124,7 +126,7 @@ def configure_probabilities(
     target.question_psycho_bias_map = {}
 
     idx_single = idx_dropdown = idx_multiple = idx_matrix = idx_scale = idx_slider = idx_text = 0
-    reliability_candidates: List[Tuple[int, bool]] = []
+    reliability_candidates: List[Tuple[int, bool, str]] = []
 
     for idx, entry in enumerate(entries, start=1):
         question_num = entry.question_num if entry.question_num is not None else idx
@@ -160,7 +162,7 @@ def configure_probabilities(
                 strict_ratio=strict_ratio,
             )
             target.question_psycho_bias_map[question_num] = str(getattr(entry, "psycho_bias", "custom") or "custom")
-            reliability_candidates.append((question_num, strict_ratio))
+            reliability_candidates.append((question_num, strict_ratio, entry.question_type))
             idx_dropdown += 1
             target.droplist_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
             target.droplist_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))
@@ -182,7 +184,7 @@ def configure_probabilities(
             )
             bias_value = getattr(entry, "psycho_bias", "custom")
             target.question_psycho_bias_map[question_num] = list(bias_value) if isinstance(bias_value, list) else str(bias_value or "custom")
-            reliability_candidates.append((question_num, strict_ratio))
+            reliability_candidates.append((question_num, strict_ratio, entry.question_type))
             idx_matrix += rows
             option_count = max(1, _infer_option_count(entry))
 
@@ -239,7 +241,7 @@ def configure_probabilities(
                 strict_ratio=strict_ratio,
             )
             target.question_psycho_bias_map[question_num] = str(getattr(entry, "psycho_bias", "custom") or "custom")
-            reliability_candidates.append((question_num, strict_ratio))
+            reliability_candidates.append((question_num, strict_ratio, entry.question_type))
             idx_scale += 1
             target.scale_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
         elif entry.question_type == "slider":
@@ -332,7 +334,8 @@ def configure_probabilities(
         for dimension in target.question_dimension_map.values()
     )
     if reliability_mode_enabled and reliability_candidates and not has_explicit_runtime_dimension:
-        for question_num, strict_ratio in reliability_candidates:
-            if strict_ratio or target.question_dimension_map.get(question_num):
+        for question_num, strict_ratio, question_type in reliability_candidates:
+            supports_joint_ratio = str(question_type or "").strip() in JOINT_PSYCHOMETRIC_SUPPORTED_TYPES
+            if (strict_ratio and not supports_joint_ratio) or target.question_dimension_map.get(question_num):
                 continue
             target.question_dimension_map[question_num] = GLOBAL_RELIABILITY_DIMENSION

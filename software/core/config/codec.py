@@ -8,10 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from software.core.config.schema import RuntimeConfig
 from software.core.questions.consistency import normalize_rule_dict, sanitize_answer_rules
-from software.core.questions.reliability_mode import (
-    DEFAULT_RELIABILITY_PRIORITY_MODE,
-    normalize_reliability_priority_mode,
-)
 from software.core.questions.utils import serialize_random_int_range
 from software.network.proxy import normalize_random_ip_enabled_value
 from software.providers.common import (
@@ -346,9 +342,6 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.fail_stop_enabled = bool(raw.get("fail_stop_enabled", True))
     config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
     config.reliability_mode_enabled = bool(raw.get("reliability_mode_enabled", True))
-    config.reliability_priority_mode = normalize_reliability_priority_mode(
-        raw.get("reliability_priority_mode") or DEFAULT_RELIABILITY_PRIORITY_MODE
-    )
     config.psycho_target_alpha = _as_float(raw.get("psycho_target_alpha") or 0.9, 0.9)
     config.psycho_target_alpha = max(0.70, min(0.95, config.psycho_target_alpha))
     config.headless_mode = _as_bool(raw.get("headless_mode", True), True)

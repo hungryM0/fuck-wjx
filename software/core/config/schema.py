@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from software.providers.common import SURVEY_PROVIDER_WJX
 from software.app.config import DEFAULT_RANDOM_UA_KEYS
-from software.core.questions.reliability_mode import DEFAULT_RELIABILITY_PRIORITY_MODE
 
 if TYPE_CHECKING:
     from software.core.questions.config import QuestionEntry
@@ -36,7 +35,6 @@ class RuntimeConfig:
     fail_stop_enabled: bool = True
     pause_on_aliyun_captcha: bool = True
     reliability_mode_enabled: bool = True
-    reliability_priority_mode: str = DEFAULT_RELIABILITY_PRIORITY_MODE
     psycho_target_alpha: float = 0.9
     headless_mode: bool = True
     ai_mode: str = "free"

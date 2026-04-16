@@ -9,108 +9,43 @@ from urllib.parse import urlparse
 
 from software.core.persona.context import reset_context as _reset_answer_context
 from software.core.persona.generator import generate_persona, reset_persona, set_current_persona
-from software.core.psychometrics import build_dimension_psychometric_plan
+from software.core.psychometrics import (
+    CombinedPsychometricPlan,
+    build_dimension_psychometric_plan,
+    build_joint_psychometric_answer_plan,
+    build_psychometric_blueprint,
+)
 from software.core.questions.config import GLOBAL_RELIABILITY_DIMENSION
 from software.core.questions.consistency import reset_consistency_context
-from software.core.task import ExecutionConfig
+from software.core.task import ExecutionConfig, ExecutionState
 from software.core.questions.tendency import reset_tendency
 
-_PSYCHO_BIAS_CHOICES = {"left", "center", "right"}
 
-
-def _resolve_option_count(probability_config: Any, metadata_fallback: int, default_value: int = 5) -> int:
-    if isinstance(probability_config, list) and probability_config:
-        return max(2, len(probability_config))
-    if metadata_fallback > 0:
-        return max(2, int(metadata_fallback))
-    return max(2, int(default_value))
-
-
-def _infer_bias_from_probabilities(probability_config: Any, option_count: int) -> str:
-    if not isinstance(probability_config, list) or not probability_config:
-        return "center"
-
-    weights: List[float] = []
-    for raw in probability_config:
-        try:
-            weights.append(max(0.0, float(raw)))
-        except Exception:
-            weights.append(0.0)
-
-    total = sum(weights)
-    if total <= 0:
-        return "center"
-
-    denom = max(1, option_count - 1)
-    weighted_mean = sum(idx * weight for idx, weight in enumerate(weights)) / total
-    ratio = weighted_mean / denom
-    if ratio <= 0.4:
-        return "left"
-    if ratio >= 0.6:
-        return "right"
-    return "center"
-
-
-def _resolve_bias(raw_bias: Any, probability_config: Any, option_count: int) -> str:
-    if isinstance(raw_bias, str):
-        normalized = raw_bias.strip().lower()
-        if normalized in _PSYCHO_BIAS_CHOICES:
-            return normalized
-    return _infer_bias_from_probabilities(probability_config, option_count)
+def _build_grouped_runtime_items(
+    config: ExecutionConfig,
+) -> Dict[str, List[Tuple[int, str, int, str, Optional[int]]]]:
+    grouped_items: Dict[str, List[Tuple[int, str, int, str, Optional[int]]]] = {}
+    for dimension, items in build_psychometric_blueprint(config).items():
+        normalized_dimension = str(dimension or "").strip()
+        if not normalized_dimension:
+            continue
+        bucket = grouped_items.setdefault(normalized_dimension, [])
+        for item in items:
+            bucket.append(
+                (
+                    item.question_index,
+                    item.question_type,
+                    item.option_count,
+                    item.bias,
+                    item.row_index,
+                )
+            )
+    return grouped_items
 
 
 def build_psychometric_plan_for_run(config: ExecutionConfig) -> Optional[Any]:
     """根据当前任务配置构建本轮问卷的心理测量作答计划。"""
-    grouped_items: Dict[str, List[Tuple[int, str, int, str, Optional[int]]]] = {}
-
-    for question_num in sorted(config.question_config_index_map.keys()):
-        config_entry = config.question_config_index_map.get(question_num)
-        if not config_entry:
-            continue
-
-        question_type, start_index = config_entry
-        dimension = str(config.question_dimension_map.get(question_num) or "").strip()
-        if not dimension:
-            continue
-
-        question_meta = config.questions_metadata.get(question_num) or {}
-        meta_option_count = int(question_meta.get("options") or 0)
-        saved_bias = config.question_psycho_bias_map.get(question_num, "custom")
-
-        if question_type in ("scale", "score"):
-            probability_config = config.scale_prob[start_index] if start_index < len(config.scale_prob) else -1
-            option_count = _resolve_option_count(probability_config, meta_option_count, default_value=5)
-            bias = _resolve_bias(saved_bias, probability_config, option_count)
-            grouped_items.setdefault(dimension, []).append((question_num, question_type, option_count, bias, None))
-            continue
-
-        if question_type == "dropdown":
-            probability_config = config.droplist_prob[start_index] if start_index < len(config.droplist_prob) else -1
-            option_count = _resolve_option_count(
-                probability_config,
-                meta_option_count,
-                default_value=max(meta_option_count, 2),
-            )
-            bias = _resolve_bias(saved_bias, probability_config, option_count)
-            grouped_items.setdefault(dimension, []).append((question_num, question_type, option_count, bias, None))
-            continue
-
-        if question_type == "matrix":
-            row_count = int(question_meta.get("rows") or 0)
-            if row_count <= 0:
-                row_count = 1
-
-            for row_idx in range(row_count):
-                matrix_prob_idx = start_index + row_idx
-                probability_config = config.matrix_prob[matrix_prob_idx] if matrix_prob_idx < len(config.matrix_prob) else -1
-                option_count = _resolve_option_count(
-                    probability_config,
-                    meta_option_count,
-                    default_value=max(meta_option_count, 5),
-                )
-                row_bias = saved_bias[row_idx] if isinstance(saved_bias, list) and row_idx < len(saved_bias) else saved_bias
-                bias = _resolve_bias(row_bias, probability_config, option_count)
-                grouped_items.setdefault(dimension, []).append((question_num, "matrix", option_count, bias, row_idx))
+    grouped_items = _build_grouped_runtime_items(config)
 
     if not grouped_items:
         return None
@@ -127,8 +62,23 @@ def build_psychometric_plan_for_run(config: ExecutionConfig) -> Optional[Any]:
     )
 
 
+def ensure_joint_psychometric_answer_plan(config: ExecutionConfig) -> Optional[Any]:
+    cached = getattr(config, "joint_psychometric_answer_plan", None)
+    if cached is not None:
+        return cached
+    plan = build_joint_psychometric_answer_plan(config)
+    config.joint_psychometric_answer_plan = plan
+    return plan
+
+
 @contextmanager
-def provider_run_context(config: ExecutionConfig, *, psycho_plan: Optional[Any] = None) -> Iterator[Optional[Any]]:
+def provider_run_context(
+    config: ExecutionConfig,
+    *,
+    state: Optional[ExecutionState] = None,
+    thread_name: str = "",
+    psycho_plan: Optional[Any] = None,
+) -> Iterator[Optional[Any]]:
     """在 provider 运行前统一初始化画像、上下文与心理测量计划。"""
     persona = generate_persona()
     set_current_persona(persona)
@@ -137,9 +87,52 @@ def provider_run_context(config: ExecutionConfig, *, psycho_plan: Optional[Any] 
     reset_consistency_context(config.answer_rules, list((config.questions_metadata or {}).values()))
 
     resolved_plan = psycho_plan
+    fallback_plan: Optional[Any] = None
+    joint_sample_plan: Optional[Any] = None
+    reserved_sample_index: Optional[int] = None
     if resolved_plan is None:
-        resolved_plan = build_psychometric_plan_for_run(config)
-    if resolved_plan is not None:
+        fallback_plan = build_psychometric_plan_for_run(config)
+        joint_answer_plan = ensure_joint_psychometric_answer_plan(config)
+        if joint_answer_plan is not None and state is not None:
+            reserved_sample_index = state.peek_reserved_joint_sample(thread_name)
+            if reserved_sample_index is not None:
+                joint_sample_plan = joint_answer_plan.build_sample_plan(reserved_sample_index)
+            else:
+                logging.warning("线程[%s]存在联合信效度计划但未预留样本槽位，已回退常规逻辑", thread_name or "Worker-?")
+        if joint_sample_plan is not None and fallback_plan is not None:
+            resolved_plan = CombinedPsychometricPlan(primary=joint_sample_plan, fallback=fallback_plan)
+        elif joint_sample_plan is not None:
+            resolved_plan = joint_sample_plan
+        else:
+            resolved_plan = fallback_plan
+
+    if joint_sample_plan is not None:
+        diagnostics = dict(getattr(joint_sample_plan, "diagnostics_by_dimension", {}) or {})
+        active_dimensions = [
+            name
+            for name, diagnostic in diagnostics.items()
+            if not bool(getattr(diagnostic, "skipped", False))
+        ]
+        logging.info(
+            "本轮启用联合信效度计划：样本槽位=%d，维度数=%d，锁定题目数=%d，目标α=%.2f，维度=%s",
+            int(reserved_sample_index or 0) + 1,
+            len(active_dimensions),
+            len(getattr(joint_sample_plan, "choices", {}) or {}),
+            float(getattr(config, "psycho_target_alpha", 0.9) or 0.9),
+            ",".join(active_dimensions[:5]) if active_dimensions else "无",
+        )
+        for diagnostic in diagnostics.values():
+            if bool(getattr(diagnostic, "skipped", False)):
+                continue
+            if not bool(getattr(diagnostic, "degraded_for_ratio", False)):
+                continue
+            logging.warning(
+                "维度[%s]已保比例优先，实际α=%.3f 低于目标α=%.3f",
+                getattr(diagnostic, "dimension", ""),
+                float(getattr(diagnostic, "actual_alpha", 0.0) or 0.0),
+                float(getattr(diagnostic, "target_alpha", 0.0) or 0.0),
+            )
+    elif resolved_plan is not None:
         dimension_count = len(getattr(resolved_plan, "plans", {}) or {})
         plan_names = list((getattr(resolved_plan, "plans", {}) or {}).keys())
         if plan_names == [GLOBAL_RELIABILITY_DIMENSION]:
@@ -181,6 +174,7 @@ def normalize_url_for_compare(value: str) -> str:
 
 __all__ = [
     "build_psychometric_plan_for_run",
+    "ensure_joint_psychometric_answer_plan",
     "normalize_url_for_compare",
     "provider_run_context",
 ]

@@ -197,7 +197,12 @@ def fill_survey(
         state.update_thread_status(thread_name, "识别题目", running=True)
     except Exception:
         pass
-    with provider_run_context(config, psycho_plan=psycho_plan) as resolved_plan:
+    with provider_run_context(
+        config,
+        state=state,
+        thread_name=thread_name,
+        psycho_plan=psycho_plan,
+    ) as resolved_plan:
         return bool(
             adapter.fill_survey(
                 driver,

@@ -13,6 +13,7 @@ from software.app.config import BROWSER_PREFERENCE
 from software.core.ai.runtime import AIRuntimeError
 from software.core.engine.browser_session_service import BrowserSessionService
 from software.core.engine.failure_reason import FailureReason
+from software.core.engine.provider_common import ensure_joint_psychometric_answer_plan
 from software.core.engine.run_stop_policy import RunStopPolicy
 from software.core.engine.submission_service import SubmissionService
 from software.core.task import ExecutionConfig, ExecutionState
@@ -197,6 +198,22 @@ class ExecutionLoop:
                 except Exception:
                     logging.info("重置本轮比例统计缓存失败", exc_info=True)
 
+                joint_answer_plan = ensure_joint_psychometric_answer_plan(self.config)
+                if joint_answer_plan is not None:
+                    reserved_sample_index = self.state.reserve_joint_sample(
+                        int(getattr(joint_answer_plan, "sample_count", self.config.target_num) or self.config.target_num),
+                        thread_name=thread_name,
+                    )
+                    if reserved_sample_index is None:
+                        logging.info("线程[%s]等待联合信效度样本槽位释放", thread_name)
+                        try:
+                            self.state.update_thread_status(thread_name, "等待信效度配额槽位", running=True)
+                        except Exception:
+                            logging.info("更新线程状态失败：等待信效度配额槽位", exc_info=True)
+                        if stop_signal.wait(0.2):
+                            break
+                        continue
+
                 finished = _provider_fill_survey(
                     session.driver,
                     self.config,
@@ -206,6 +223,10 @@ class ExecutionLoop:
                     provider=self.config.survey_provider,
                 )
                 if stop_signal.is_set() or not finished:
+                    try:
+                        self.state.release_joint_sample(thread_name)
+                    except Exception:
+                        logging.info("释放联合信效度样本槽位失败", exc_info=True)
                     continue
 
                 outcome = self.submission_service.finalize_after_submit(
@@ -219,6 +240,10 @@ class ExecutionLoop:
                     if outcome.should_stop:
                         break
                 elif outcome.status == "aborted":
+                    try:
+                        self.state.release_joint_sample(thread_name)
+                    except Exception:
+                        logging.info("释放联合信效度样本槽位失败", exc_info=True)
                     break
                 else:
                     driver_had_error = True
@@ -279,6 +304,10 @@ class ExecutionLoop:
                 if stop_signal.wait(wait_seconds):
                     break
 
+        try:
+            self.state.release_joint_sample(thread_name)
+        except Exception:
+            logging.info("线程结束时释放联合信效度样本槽位失败", exc_info=True)
         try:
             self.state.mark_thread_finished(thread_name, status_text="已停止")
         except Exception:

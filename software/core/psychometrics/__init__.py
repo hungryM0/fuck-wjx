@@ -7,6 +7,17 @@ from software.core.psychometrics.psychometric import (
     PsychometricPlan,
     PsychometricItem,
 )
+from software.core.psychometrics.joint_optimizer import (
+    CombinedPsychometricPlan,
+    JOINT_PSYCHOMETRIC_SUPPORTED_TYPES,
+    JointPsychometricAnswerPlan,
+    JointPsychometricDimensionDiagnostic,
+    JointPsychometricSamplePlan,
+    PsychometricBlueprintItem,
+    build_joint_psychometric_answer_plan,
+    build_psychometric_blueprint,
+    build_psychometric_choice_key,
+)
 from software.core.psychometrics.utils import (
     randn,
     normal_inv,
@@ -22,6 +33,15 @@ __all__ = [
     "DimensionPsychometricPlan",
     "PsychometricPlan",
     "PsychometricItem",
+    "CombinedPsychometricPlan",
+    "JOINT_PSYCHOMETRIC_SUPPORTED_TYPES",
+    "JointPsychometricAnswerPlan",
+    "JointPsychometricDimensionDiagnostic",
+    "JointPsychometricSamplePlan",
+    "PsychometricBlueprintItem",
+    "build_joint_psychometric_answer_plan",
+    "build_psychometric_blueprint",
+    "build_psychometric_choice_key",
     "randn",
     "normal_inv",
     "z_to_category",

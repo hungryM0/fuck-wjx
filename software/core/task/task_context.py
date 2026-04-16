@@ -7,9 +7,6 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Tuple, Union
 
-from software.core.questions.reliability_mode import DEFAULT_RELIABILITY_PRIORITY_MODE
-
-
 @dataclass
 class ThreadProgressState:
     """单个工作线程的运行状态快照。"""
@@ -69,9 +66,9 @@ class ExecutionConfig:
     question_strict_ratio_map: Dict[int, bool] = field(default_factory=dict)
     question_psycho_bias_map: Dict[int, Any] = field(default_factory=dict)
     questions_metadata: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    joint_psychometric_answer_plan: Optional[Any] = None
 
     psycho_target_alpha: float = 0.9
-    reliability_priority_mode: str = DEFAULT_RELIABILITY_PRIORITY_MODE
 
     headless_mode: bool = False
     browser_preference: List[str] = field(default_factory=list)
@@ -107,6 +104,8 @@ class ExecutionState:
     thread_progress: Dict[str, ThreadProgressState] = field(default_factory=dict)
     distribution_runtime_stats: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     distribution_pending_by_thread: Dict[str, List[Tuple[str, int, int]]] = field(default_factory=dict)
+    joint_reserved_sample_by_thread: Dict[str, int] = field(default_factory=dict)
+    joint_committed_sample_indexes: set[int] = field(default_factory=set)
 
     proxy_waiting_threads: int = 0
     proxy_in_use_by_thread: Dict[str, ProxyLease] = field(default_factory=dict)
@@ -382,6 +381,44 @@ class ExecutionState:
                 committed += 1
         return committed
 
+    def peek_reserved_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]:
+        key = str(thread_name or threading.current_thread().name or "Worker-?").strip() or "Worker-?"
+        with self.lock:
+            reserved = self.joint_reserved_sample_by_thread.get(key)
+            return int(reserved) if reserved is not None else None
+
+    def reserve_joint_sample(self, sample_count: int, thread_name: Optional[str] = None) -> Optional[int]:
+        key = str(thread_name or threading.current_thread().name or "Worker-?").strip() or "Worker-?"
+        total = max(0, int(sample_count or 0))
+        if total <= 0:
+            return None
+        with self.lock:
+            existing = self.joint_reserved_sample_by_thread.get(key)
+            if existing is not None:
+                return int(existing)
+            reserved_values = set(self.joint_reserved_sample_by_thread.values())
+            for sample_index in range(total):
+                if sample_index in reserved_values or sample_index in self.joint_committed_sample_indexes:
+                    continue
+                self.joint_reserved_sample_by_thread[key] = sample_index
+                return sample_index
+        return None
+
+    def release_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]:
+        key = str(thread_name or threading.current_thread().name or "Worker-?").strip() or "Worker-?"
+        with self.lock:
+            reserved = self.joint_reserved_sample_by_thread.pop(key, None)
+            return int(reserved) if reserved is not None else None
+
+    def commit_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]:
+        key = str(thread_name or threading.current_thread().name or "Worker-?").strip() or "Worker-?"
+        with self.lock:
+            reserved = self.joint_reserved_sample_by_thread.pop(key, None)
+            if reserved is None:
+                return None
+            self.joint_committed_sample_indexes.add(int(reserved))
+            return int(reserved)
+
     def snapshot_thread_progress(self) -> List[Dict[str, Any]]:
         with self.lock:
             rows = []
@@ -458,8 +495,8 @@ if TYPE_CHECKING:
         question_strict_ratio_map: Dict[int, bool]
         question_psycho_bias_map: Dict[int, Any]
         questions_metadata: Dict[int, Dict[str, Any]]
+        joint_psychometric_answer_plan: Optional[Any]
         psycho_target_alpha: float
-        reliability_priority_mode: str
         headless_mode: bool
         browser_preference: List[str]
         num_threads: int
@@ -482,6 +519,8 @@ if TYPE_CHECKING:
         thread_progress: Dict[str, ThreadProgressState]
         distribution_runtime_stats: Dict[str, Dict[str, Any]]
         distribution_pending_by_thread: Dict[str, List[Tuple[str, int, int]]]
+        joint_reserved_sample_by_thread: Dict[str, int]
+        joint_committed_sample_indexes: set[int]
         proxy_waiting_threads: int
         proxy_in_use_by_thread: Dict[str, ProxyLease]
         stop_event: threading.Event
@@ -524,6 +563,10 @@ if TYPE_CHECKING:
             thread_name: Optional[str] = None,
         ) -> None: ...
         def commit_pending_distribution(self, thread_name: Optional[str] = None) -> int: ...
+        def peek_reserved_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]: ...
+        def reserve_joint_sample(self, sample_count: int, thread_name: Optional[str] = None) -> Optional[int]: ...
+        def release_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]: ...
+        def commit_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]: ...
         def snapshot_thread_progress(self) -> List[Dict[str, Any]]: ...
 else:
     # 运行时继续导出 ExecutionState，保证旧 import 不崩；静态检查期则使用上面的协议补足过渡字段。

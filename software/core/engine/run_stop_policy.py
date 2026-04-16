@@ -52,6 +52,10 @@ class RunStopPolicy:
                 logging.warning("已连续失败%s次（失败止损已关闭）", self.state.cur_fail)
         if thread_name:
             try:
+                self.state.release_joint_sample(thread_name)
+            except Exception:
+                logging.info("失败后释放联合信效度样本槽位失败", exc_info=True)
+            try:
                 self.state.increment_thread_fail(thread_name, status_text=status_text)
             except Exception:
                 logging.info("更新线程失败计数失败", exc_info=True)
@@ -90,6 +94,10 @@ class RunStopPolicy:
                 should_break = True
 
         if record_thread_success and thread_name:
+            try:
+                self.state.commit_joint_sample(thread_name)
+            except Exception:
+                logging.info("提交成功后核销联合信效度样本槽位失败", exc_info=True)
             try:
                 self.state.commit_pending_distribution(thread_name)
             except Exception:
