@@ -104,18 +104,20 @@ python SurveyController.py
 
 感谢以下贡献者对本项目的支持：
 
-<a href="https://github.com/shiahonb777">
-  <img src="https://wsrv.nl/?url=https%3A%2F%2Fgithub.com%2Fshiahonb777.png&mask=circle&w=50&h=50&fit=cover" width="50" height="50" alt="shiahonb777" />
-</a>
-<a href="https://github.com/BingBuLiang">
-  <img src="https://wsrv.nl/?url=https%3A%2F%2Fgithub.com%2FBingBuLiang.png&mask=circle&w=50&h=50&fit=cover" width="50" height="50" alt="BingBuLiang" />
-</a>
-<a href="https://github.com/dAwn-Rebirth">
-  <img src="https://wsrv.nl/?url=https%3A%2F%2Fgithub.com%2FdAwn-Rebirth.png&mask=circle&w=50&h=50&fit=cover" width="50" height="50" alt="dAwn-Rebirth" />
-</a>
-<a href="https://github.com/Moyuin-aka">
-  <img src="https://wsrv.nl/?url=https%3A%2F%2Fgithub.com%2FMoyuin-aka.png&mask=circle&w=50&h=50&fit=cover" width="50" height="50" alt="Moyuin-aka" />
-</a>
+<div style="display: flex; gap: 10px;">
+  <a href="https://github.com/shiahonb777">
+    <img src="https://github.com/shiahonb777.png" width="50" height="50" alt="shiahonb777" style="border-radius: 50%;" />
+  </a>
+  <a href="https://github.com/BingBuLiang">
+    <img src="https://github.com/BingBuLiang.png" width="50" height="50" alt="BingBuLiang" style="border-radius: 50%;" />
+  </a>
+  <a href="https://github.com/dAwn-Rebirth">
+    <img src="https://github.com/dAwn-Rebirth.png" width="50" height="50" alt="dAwn-Rebirth" style="border-radius: 50%;" />
+  </a>
+  <a href="https://github.com/Moyuin-aka">
+    <img src="https://github.com/Moyuin-aka.png" width="50" height="50" alt="Moyuin-aka" style="border-radius: 50%;" />
+  </a>
+</div>
 
 ---
 
