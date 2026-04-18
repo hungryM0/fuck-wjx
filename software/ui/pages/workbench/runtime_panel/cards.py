@@ -824,9 +824,9 @@ class TimeRangeSettingCard(SettingCard):
     def _normalize_text(self):
         self.setValue(self.getValue())
 
-    def setEnabled(self, enabled):
-        super().setEnabled(enabled)
-        self.inputEdit.setEnabled(enabled)
+    def setEnabled(self, arg__1):
+        super().setEnabled(arg__1)
+        self.inputEdit.setEnabled(arg__1)
 
     def getValue(self) -> int:
         """获取当前秒数"""

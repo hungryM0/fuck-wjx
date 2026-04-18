@@ -1,6 +1,6 @@
 """联系开发者表单组件，可嵌入页面或对话框。"""
 import logging
-from typing import Callable, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 from software.logging.log_utils import log_suppressed_exception
 
@@ -68,6 +68,7 @@ class ContactForm(
         lock_message_type: bool = False,
         status_endpoint: str = "",
         status_formatter: Optional[Callable] = None,
+        config_snapshot_provider: Optional[Callable[[], Any]] = None,
         show_cancel_button: bool = False,
         auto_clear_on_success: bool = True,
         manage_polling: bool = True,
@@ -88,8 +89,12 @@ class ContactForm(
         self._auto_clear_on_success = auto_clear_on_success
         self._manage_polling = manage_polling
         self._lock_message_type = lock_message_type
+        self._config_snapshot_provider = config_snapshot_provider
         self._random_ip_user_id: int = 0
         self._last_valid_quantity_text: str = ""
+        self._pending_temp_attachment_paths: list[str] = []
+        self._auto_attach_config_default = True
+        self._auto_attach_log_default = True
 
         wrapper = QVBoxLayout(self)
         wrapper.setContentsMargins(0, 0, 0, 0)
@@ -281,6 +286,20 @@ class ContactForm(
         attachments_box.addWidget(self.attach_list_container)
         attachments_box.addWidget(self.attach_placeholder)
 
+        self.auto_attach_section = QWidget(self)
+        auto_attach_layout = QVBoxLayout(self.auto_attach_section)
+        auto_attach_layout.setContentsMargins(0, 0, 0, 0)
+        auto_attach_layout.setSpacing(6)
+        self.auto_attach_title = BodyLabel("附加排障文件：", self.auto_attach_section)
+        self.auto_attach_config_checkbox = CheckBox("上传当前运行配置", self.auto_attach_section)
+        self.auto_attach_log_checkbox = CheckBox("上传当前日志", self.auto_attach_section)
+        self.auto_attach_config_checkbox.setChecked(self._auto_attach_config_default)
+        self.auto_attach_log_checkbox.setChecked(self._auto_attach_log_default)
+        auto_attach_layout.addWidget(self.auto_attach_title)
+        auto_attach_layout.addWidget(self.auto_attach_config_checkbox)
+        auto_attach_layout.addWidget(self.auto_attach_log_checkbox)
+        self.auto_attach_section.hide()
+
         self.request_payment_section = QWidget(self)
         payment_layout = QVBoxLayout(self.request_payment_section)
         payment_layout.setContentsMargins(0, 0, 0, 0)
@@ -307,6 +326,7 @@ class ContactForm(
         wrapper.addLayout(form_layout)
         wrapper.addLayout(msg_layout, 1) # 给消息框最大的 stretch
         wrapper.addWidget(self.attachments_section)
+        wrapper.addWidget(self.auto_attach_section)
         wrapper.addWidget(self.request_payment_section)
 
         self.request_payment_confirm_section = QWidget(self)
@@ -508,10 +528,12 @@ class ContactForm(
     def _on_type_changed(self):
         current_type = self.type_combo.currentText()
         self._sync_message_type_lock_state()
+        is_bug_report = self._is_bug_report_type(current_type)
 
         # 控制额度申请参数显示/隐藏
         if current_type == REQUEST_MESSAGE_TYPE:
             self.attachments_section.hide()
+            self.auto_attach_section.hide()
             self.request_payment_section.show()
             self.request_payment_confirm_section.show()
             self.amount_label.show()
@@ -527,6 +549,7 @@ class ContactForm(
             self.message_edit.setPlaceholderText("请简单说明你的问卷紧急情况或使用场景...\n以及...是大学生吗（？")
         else:
             self.attachments_section.show()
+            self.auto_attach_section.setVisible(is_bug_report)
             self.request_payment_section.hide()
             self.request_payment_confirm_section.hide()
             self.amount_label.hide()
@@ -558,6 +581,13 @@ class ContactForm(
         self.type_combo.setVisible(not self._lock_message_type)
         self.type_combo.setEnabled(not self._lock_message_type)
         self.type_locked_label.setVisible(self._lock_message_type)
+
+    def _is_bug_report_type(self, message_type: Optional[str]) -> bool:
+        return (message_type or "").strip() == "报错反馈"
+
+    def _reset_bug_report_auto_attach_defaults(self) -> None:
+        self.auto_attach_config_checkbox.setChecked(self._auto_attach_config_default)
+        self.auto_attach_log_checkbox.setChecked(self._auto_attach_log_default)
 
     def _update_send_button_state(self) -> None:
         if not hasattr(self, "send_btn"):

@@ -167,8 +167,8 @@ class RatioSlider(QWidget):
         self._set_values_silently(values)
         self.valueChanged.emit(values)
 
-    def setEnabled(self, enabled: bool):
+    def setEnabled(self, arg__1: bool):
         """启用/禁用所有滑块"""
-        super().setEnabled(enabled)
+        super().setEnabled(arg__1)
         for slider in self.sliders.values():
-            slider.setEnabled(enabled)
+            slider.setEnabled(arg__1)

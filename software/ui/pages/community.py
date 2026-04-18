@@ -327,8 +327,8 @@ class CommunityPage(ScrollArea):
 
     # ── 响应式布局 ──
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, arg__1):
+        super().resizeEvent(arg__1)
         self._update_layout()
 
     def _update_layout(self):

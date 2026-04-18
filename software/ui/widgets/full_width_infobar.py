@@ -60,7 +60,7 @@ class FullWidthInfoBar(InfoBar):
         self._install_parent_filter()
         self._schedule_deferred_sync()
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
         if not self._syncing:
             self._adjustText()

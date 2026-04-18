@@ -699,8 +699,8 @@ class IpUsagePage(ScrollArea):
         self._loading_overlay.setGeometry(rect)
         self._loading_overlay.raise_()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+    def resizeEvent(self, arg__1):
+        super().resizeEvent(arg__1)
         self._update_chart_height()
         self._update_overlay_geometry()
 

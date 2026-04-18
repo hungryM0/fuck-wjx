@@ -35,6 +35,7 @@ class SupportPage(ScrollArea):
             self,
             status_endpoint=STATUS_ENDPOINT,
             status_formatter=format_status_payload,
+            config_snapshot_provider=getattr(self.parentWidget(), "_collect_current_config_snapshot", None),
             show_cancel_button=False,
             auto_clear_on_success=True,
         )

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
+import tempfile
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Optional, cast
@@ -13,8 +15,10 @@ from PySide6.QtWidgets import QWidget
 from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox
 
 from software.app.config import CONTACT_API_URL
+from software.app.runtime_paths import get_runtime_directory
 from software.app.version import __VERSION__
-from software.logging.log_utils import log_suppressed_exception
+from software.io.config import RuntimeConfig, save_config
+from software.logging.log_utils import LOG_BUFFER_HANDLER, log_suppressed_exception, save_log_records_to_file
 from software.ui.helpers.contact_api import format_quota_value, post as http_post
 
 from .constants import DONATION_AMOUNT_BLOCK_MESSAGE, MAX_REQUEST_QUOTA, REQUEST_MESSAGE_TYPE
@@ -29,10 +33,14 @@ class ContactFormSubmissionMixin:
         verify_code_edit: Any
         urgency_combo: Any
         donated_cb: Any
+        auto_attach_config_checkbox: Any
+        auto_attach_log_checkbox: Any
         message_edit: Any
         send_btn: Any
         send_spinner: Any
         _attachments: Any
+        _config_snapshot_provider: Any
+        _pending_temp_attachment_paths: list[str]
         _random_ip_user_id: int
         _current_has_email: bool
         _current_message_type: str
@@ -55,7 +63,94 @@ class ContactFormSubmissionMixin:
         def _render_attachments_ui(self) -> None: ...
         def _clear_payment_method_selection(self) -> None: ...
         def refresh_random_ip_user_id_hint(self) -> None: ...
+        def _is_bug_report_type(self, message_type: Optional[str]) -> bool: ...
+        def _reset_bug_report_auto_attach_defaults(self) -> None: ...
         def window(self) -> QWidget: ...
+
+    def _cleanup_pending_temp_files(self) -> None:
+        for path in list(getattr(self, "_pending_temp_attachment_paths", [])):
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except Exception as exc:
+                log_suppressed_exception(f"_cleanup_pending_temp_files: {path}", exc, level=logging.WARNING)
+        self._pending_temp_attachment_paths = []
+
+    @staticmethod
+    def _read_file_bytes(path: str) -> bytes:
+        with open(path, "rb") as file:
+            return file.read()
+
+    def _export_bug_report_config_snapshot(self) -> tuple[str, tuple[str, bytes, str]]:
+        provider = getattr(self, "_config_snapshot_provider", None)
+        if not callable(provider):
+            host = self._find_controller_host()
+            provider = getattr(host, "_collect_current_config_snapshot", None) if host is not None else None
+        if not callable(provider):
+            raise ValueError("当前窗口没有可导出的运行时配置")
+        config_snapshot = cast(RuntimeConfig, provider())
+        if config_snapshot is None:
+            raise ValueError("当前运行时配置为空，无法导出")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"bug_report_config_{timestamp}.json"
+        path = os.path.join(tempfile.gettempdir(), file_name)
+        save_config(config_snapshot, path)
+        self._pending_temp_attachment_paths.append(path)
+        return "配置快照", (file_name, self._read_file_bytes(path), "application/json")
+
+    def _export_bug_report_log_snapshot(self) -> tuple[str, tuple[str, bytes, str]]:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"bug_report_log_{timestamp}.txt"
+        path = os.path.join(tempfile.gettempdir(), file_name)
+        save_log_records_to_file(LOG_BUFFER_HANDLER.get_records(), get_runtime_directory(), path)
+        self._pending_temp_attachment_paths.append(path)
+        return "日志快照", (file_name, self._read_file_bytes(path), "text/plain")
+
+    @staticmethod
+    def _fatal_crash_log_payload() -> Optional[tuple[str, tuple[str, bytes, str]]]:
+        path = os.path.join(get_runtime_directory(), "logs", "fatal_crash.log")
+        if not os.path.exists(path):
+            return None
+        if os.path.getsize(path) <= 0:
+            return None
+        with open(path, "rb") as file:
+            data = file.read()
+        return "fatal_crash.log", ("fatal_crash.log", data, "text/plain")
+
+    @staticmethod
+    def _renumber_files_payload(
+        items: list[tuple[str, tuple[str, bytes, str]]],
+    ) -> list[tuple[str, tuple[str, bytes, str]]]:
+        payload: list[tuple[str, tuple[str, bytes, str]]] = []
+        for index, (_, file_tuple) in enumerate(items, start=1):
+            payload.append((f"file{index}", file_tuple))
+        return payload
+
+    def _build_bug_report_auto_files_payload(
+        self,
+    ) -> tuple[list[tuple[str, tuple[str, bytes, str]]], list[str]]:
+        auto_files: list[tuple[str, tuple[str, bytes, str]]] = []
+        summary_lines = [
+            f"当前运行配置快照：{'已附带' if self.auto_attach_config_checkbox.isChecked() else '未附带'}",
+            f"当前日志快照：{'已附带' if self.auto_attach_log_checkbox.isChecked() else '未附带'}",
+        ]
+
+        if self.auto_attach_config_checkbox.isChecked():
+            auto_files.append(self._export_bug_report_config_snapshot())
+
+        if self.auto_attach_log_checkbox.isChecked():
+            auto_files.append(self._export_bug_report_log_snapshot())
+            fatal_payload = self._fatal_crash_log_payload()
+            if fatal_payload is not None:
+                auto_files.append(fatal_payload)
+                summary_lines.append("fatal_crash.log：已附带")
+            else:
+                summary_lines.append("fatal_crash.log：未发现")
+        else:
+            summary_lines.append("fatal_crash.log：未附带")
+
+        return auto_files, summary_lines
 
     def _validate_email(self, email: str) -> bool:
         if not email:
@@ -63,6 +158,7 @@ class ContactFormSubmissionMixin:
         pattern = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
         return re.match(pattern, email) is not None
     def _on_send_clicked(self):
+        self._cleanup_pending_temp_files()
         email = (self.email_edit.text() or "").strip()
         self._current_has_email = bool(email)
 
@@ -193,8 +289,20 @@ class ContactFormSubmissionMixin:
         if not api_url:
             InfoBar.error("", "联系API未配置", parent=self, position=InfoBarPosition.TOP, duration=3000)
             return
+        attachment_summary_lines: list[str] = []
+        manual_files_payload = [] if mtype == REQUEST_MESSAGE_TYPE else self._attachments.files_payload()
+        auto_files_payload: list[tuple[str, tuple[str, bytes, str]]] = []
+        if self._is_bug_report_type(mtype):
+            try:
+                auto_files_payload, attachment_summary_lines = self._build_bug_report_auto_files_payload()
+            except Exception as exc:
+                self._cleanup_pending_temp_files()
+                InfoBar.error("", f"自动导出附件失败：{exc}", parent=self, position=InfoBarPosition.TOP, duration=3500)
+                return
+            attachment_summary_lines.append(f"手动截图：{len(manual_files_payload)} 张")
+            full_message += "\n\n附件情况：\n" + "\n".join(attachment_summary_lines)
         payload = {"message": full_message, "timestamp": datetime.now().isoformat()}
-        files_payload = [] if mtype == REQUEST_MESSAGE_TYPE else self._attachments.files_payload()
+        files_payload = self._renumber_files_payload(manual_files_payload + auto_files_payload)
 
         self.send_btn.setFocus()
 
@@ -221,6 +329,8 @@ class ContactFormSubmissionMixin:
                     self._sendFinished.emit(False, f"发送失败：{resp.status_code}")
             except Exception as exc:
                 self._sendFinished.emit(False, f"发送失败：{exc}")
+            finally:
+                self._cleanup_pending_temp_files()
 
         threading.Thread(target=_send, daemon=True).start()
     def _clear_email_selection(self):
@@ -240,6 +350,7 @@ class ContactFormSubmissionMixin:
         self.send_spinner.hide()
         self.send_btn.setText("发送")
         self._update_send_button_state()
+        self._cleanup_pending_temp_files()
 
         if success:
             current_type = getattr(self, "_current_message_type", "")
@@ -266,6 +377,7 @@ class ContactFormSubmissionMixin:
                 self.message_edit.clear()
                 self._attachments.clear()
                 self._render_attachments_ui()
+                self._reset_bug_report_auto_attach_defaults()
             self.sendSucceeded.emit()
         else:
             InfoBar.error("", error_msg, parent=self, position=InfoBarPosition.TOP, duration=3000)

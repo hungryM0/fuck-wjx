@@ -31,6 +31,7 @@ class ContactDialog(QDialog):
             lock_message_type=lock_message_type,
             status_endpoint=status_endpoint,
             status_formatter=status_formatter,
+            config_snapshot_provider=getattr(parent, "_collect_current_config_snapshot", None),
             show_cancel_button=True,
             auto_clear_on_success=False,
             manage_polling=False,
@@ -46,9 +47,9 @@ class ContactDialog(QDialog):
         """发送成功后延迟关闭，让InfoBar有时间显示"""
         QTimer.singleShot(2800, self.accept)
 
-    def closeEvent(self, event):
+    def closeEvent(self, arg__1):
         self.form.stop_status_polling()
-        super().closeEvent(event)
+        super().closeEvent(arg__1)
 
     def reject(self):
         self.form.stop_status_polling()

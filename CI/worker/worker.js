@@ -53,7 +53,7 @@ async function parseIncomingRequest(request) {
 }
 
 function validatePayload(message, files) {
-  const maxFiles = 3;
+  const maxFiles = 6;
   const maxFileSize = 10 * 1024 * 1024;
 
   if (files.length > maxFiles) {
@@ -115,6 +115,20 @@ async function sendSingleFile(apiBase, chatId, file, caption) {
   });
 }
 
+function splitFilesByType(fileList) {
+  const images = [];
+  const documents = [];
+  for (const file of fileList) {
+    const isImage = file.type && file.type.startsWith("image/");
+    if (isImage) {
+      images.push(file);
+    } else {
+      documents.push(file);
+    }
+  }
+  return { images, documents };
+}
+
 async function sendMediaGroup(apiBase, chatId, fileList, caption) {
   const form = new FormData();
   form.append("chat_id", chatId);
@@ -143,6 +157,17 @@ async function sendMediaGroup(apiBase, chatId, fileList, caption) {
   });
 }
 
+async function sendHomogeneousFiles(apiBase, chatId, fileList, caption) {
+  if (!fileList.length) {
+    return;
+  }
+  if (fileList.length === 1) {
+    await sendSingleFile(apiBase, chatId, fileList[0], caption);
+    return;
+  }
+  await sendMediaGroup(apiBase, chatId, fileList, caption);
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -167,18 +192,23 @@ export default {
       }
 
       const apiBase = `https://api.telegram.org/bot${botToken}`;
+      const { images, documents } = splitFilesByType(files);
 
       if (files.length === 0) {
         await sendMessage(apiBase, chatId, message);
         return jsonResponse({ status: "ok" });
       }
 
-      if (files.length === 1) {
-        await sendSingleFile(apiBase, chatId, files[0], message || undefined);
+      if (images.length > 0 && documents.length > 0) {
+        if (message) {
+          await sendMessage(apiBase, chatId, message);
+        }
+        await sendHomogeneousFiles(apiBase, chatId, images);
+        await sendHomogeneousFiles(apiBase, chatId, documents);
         return jsonResponse({ status: "ok" });
       }
 
-      await sendMediaGroup(apiBase, chatId, files, message || undefined);
+      await sendHomogeneousFiles(apiBase, chatId, files, message || undefined);
       return jsonResponse({ status: "ok" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "internal_error";

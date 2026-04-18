@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, cast
 
 from PySide6.QtCore import QEvent, QMimeData, QSize, Qt, Signal
-from PySide6.QtGui import QDrag
+from PySide6.QtGui import QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
@@ -120,7 +120,8 @@ class DimensionEntryTable(TableWidget):
     def viewportEvent(self, event) -> bool:
         event_type = event.type()
         if event_type in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
-            mime_data = event.mimeData() if hasattr(event, "mimeData") else None
+            drag_event = cast(QDragEnterEvent | QDragMoveEvent | QDropEvent, event)
+            mime_data = drag_event.mimeData()
             if mime_data is None or not mime_data.hasFormat(ENTRY_DRAG_MIME):
                 event.ignore()
                 return True
@@ -130,7 +131,7 @@ class DimensionEntryTable(TableWidget):
                     event.ignore()
                     return True
                 self.entriesDropped.emit(entry_indices, self.group_name)
-            event.acceptProposedAction()
+            drag_event.acceptProposedAction()
             return True
         return super().viewportEvent(event)
 

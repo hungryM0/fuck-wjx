@@ -65,6 +65,6 @@ class SwitchSettingCard(SettingCard):
     def setChecked(self, checked):
         self.switchButton.setChecked(checked)
 
-    def blockSignals(self, block):
-        return self.switchButton.blockSignals(block)
+    def blockSignals(self, b):
+        return self.switchButton.blockSignals(b)
 

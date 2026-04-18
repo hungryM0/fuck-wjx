@@ -134,8 +134,8 @@ class _ChangelogListPage(ScrollArea):
 
         self._layout.addStretch(1)
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
+    def resizeEvent(self, arg__1):
+        super().resizeEvent(arg__1)
         h_margin = max(24, min(int(self.width() * 0.04), 80))
         self._layout.setContentsMargins(h_margin, 36, h_margin, 36)
 
@@ -209,8 +209,8 @@ class _ChangelogDetailPage(ScrollArea):
         self.content_browser.setStyleSheet("border: none; background: transparent;")
         self._layout.addWidget(self.content_browser)
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
+    def resizeEvent(self, arg__1):
+        super().resizeEvent(arg__1)
         h_margin = max(24, min(int(self.width() * 0.04), 80))
         self._layout.setContentsMargins(h_margin, 36, h_margin, 36)
 

@@ -110,7 +110,8 @@ class WizardPipsDelegate(QStyledItemDelegate):
         self._view_parent.viewport().update()
 
     def helpEvent(self, event, view, option, index):
-        return self.tooltipDelegate.helpEvent(event, view, option, index)
+        model_index = QModelIndex(index) if isinstance(index, QPersistentModelIndex) else index
+        return self.tooltipDelegate.helpEvent(event, view, option, model_index)
 
 class StableVerticalPipsPager(VerticalPipsPager):
     """稳定版竖向分页器：保留 PipsPager 行为，放大命中范围并接 ToolTipFilter 链路。"""
@@ -142,8 +143,8 @@ class StableVerticalPipsPager(VerticalPipsPager):
                 item.setSizeHint(grid_size)
         self.adjustSize()
 
-    def setSpacing(self, spacing: int) -> None:
-        self._cell_gap = max(0, int(spacing))
+    def setSpacing(self, space: int) -> None:
+        self._cell_gap = max(0, int(space))
         self._apply_grid_metrics()
 
     def spacing(self) -> int:
@@ -475,7 +476,8 @@ class WizardNavigationMixin:
                 widget.installEventFilter(self)
             except Exception:
                 continue
-    def eventFilter(self, watched, event):
+    def eventFilter(self, arg__1, arg__2):
+        watched, event = arg__1, arg__2
         if watched is self._search_edit and event is not None and event.type() == QEvent.Type.KeyPress:
             if self._search_popup is not None and self._search_popup.isVisible():
                 key = event.key()
@@ -574,8 +576,8 @@ class WizardNavigationMixin:
             return
         current_idx = self._resolve_current_question_idx_from_scroll()
         self._set_current_question_idx(current_idx)
-    def resizeEvent(self, event) -> None:
-        cast(Any, super()).resizeEvent(event)
+    def resizeEvent(self, arg__1) -> None:
+        cast(Any, super()).resizeEvent(arg__1)
         self._hide_search_popup()
         self._update_navigation_pager_geometry()
     def reject(self) -> None:
