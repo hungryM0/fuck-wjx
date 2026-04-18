@@ -1,34 +1,32 @@
 <div align="center">
   <img src="assets/icon.png" alt="fuck-wjx" width="120" height="120" />
-  <h1>fuck-wjx-mac</h1>
-  <p>A macOS version of the WenJuanXing auto-fill tool.</p>
-
-  English | [简体中文](./README_CN.md)
+  <h1>问卷星速填 macOS</h1>
+  <p>自动填写问卷星的 macOS 版本工具。</p>
 </div>
 
-> Inspired by [Zemelee/wjx](https://github.com/Zemelee/wjx) - give that repo a star⭐
+> 参考了 [Zemelee/wjx](https://github.com/Zemelee/wjx)，别忘了给大佬点个star⭐
 
 > [!WARNING]
-> **For learning and testing only.** Ensure you have authorization. **DO NOT pollute others' survey data!**
+> **仅供学习与测试使用。** 请确保有授权再使用。**严禁污染他人问卷数据！**
 
-## Disclaimer
+## 声明
 
-**This macOS branch is community-driven. The original author does not provide long-term support or troubleshooting for macOS.** 
-PRs for bug fixes or compatibility improvements are welcome.
+**本项目 macOS 分支由社区驱动维护，原作者不提供针对 macOS 版本的长期支持或问题解答。**
+欢迎提交 PR 修复 BUG 或提升兼容性。
 
-## Run & Build
+## 运行与打包
 
-Requirements: macOS 10.15+, Python 3.8+
+环境要求：macOS 10.15+, Python 3.8+
 
 ```bash
-# Install dependencies
+# 安装依赖
 pip install -r requirements.txt
 pip install pyinstaller
 
-# Run
+# 运行
 python fuck-wjx.py
 
-# Build as .app
+# 打包为 .app
 chmod +x build_macos.sh
 ./build_macos.sh
 ```
