@@ -110,7 +110,7 @@ class WizardPipsDelegate(QStyledItemDelegate):
         self._view_parent.viewport().update()
 
     def helpEvent(self, event, view, option, index):
-        model_index = QModelIndex(index) if isinstance(index, QPersistentModelIndex) else index
+        model_index = cast(QModelIndex, index)
         return self.tooltipDelegate.helpEvent(event, view, option, model_index)
 
 class StableVerticalPipsPager(VerticalPipsPager):

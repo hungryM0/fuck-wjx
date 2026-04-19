@@ -16,6 +16,14 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+function extractUserIdFromMessage(message) {
+  if (typeof message !== "string") {
+    return "";
+  }
+  const match = message.match(/随机IP用户ID：\s*(\d+)/);
+  return match ? match[1] : "";
+}
+
 async function parseIncomingRequest(request) {
   const contentType = request.headers.get("Content-Type") || "";
   let message = "";
@@ -31,6 +39,9 @@ async function parseIncomingRequest(request) {
     const maybeUserId = form.get("userId") ?? form.get("user_id");
     if (typeof maybeUserId === "string") {
       userId = maybeUserId.trim();
+    }
+    if (!userId) {
+      userId = extractUserIdFromMessage(message);
     }
 
     for (const [, value] of form.entries()) {
@@ -52,6 +63,9 @@ async function parseIncomingRequest(request) {
     } else if (typeof body?.user_id === "string") {
       userId = body.user_id.trim();
     }
+    if (!userId) {
+      userId = extractUserIdFromMessage(message);
+    }
     return { message, files, userId };
   }
 
@@ -59,6 +73,7 @@ async function parseIncomingRequest(request) {
   if (text) {
     message = text;
   }
+  userId = extractUserIdFromMessage(message);
   return { message, files, userId };
 }
 
