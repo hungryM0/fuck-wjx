@@ -259,3 +259,41 @@ class SampleDispatcher:
                 "success_rate": round(success_rate, 2),
                 "failed_samples": failed_row_nos,
             }
+
+    def export_incomplete_samples(self, original_excel_path: str) -> Optional[str]:
+        """导出未完成的样本到 Excel 文件。
+        
+        Args:
+            original_excel_path: 原始 Excel 文件路径
+            
+        Returns:
+            导出文件路径，如果没有未完成样本则返回 None
+        """
+        with self.lock:
+            # 获取未完成的样本（pending 和 failed）
+            incomplete_samples = [
+                s for s in self.samples
+                if s.status in ("pending", "failed")
+            ]
+            
+            if not incomplete_samples:
+                return None
+            
+            # 导出到 Excel
+            from software.io.excel.writer import ExcelWriter
+            writer = ExcelWriter()
+            output_path = writer.export_failed_samples(incomplete_samples, original_excel_path)
+            
+            return output_path
+    
+    def get_incomplete_samples(self) -> list[SampleRow]:
+        """获取所有未完成的样本（线程安全）。
+        
+        Returns:
+            未完成样本列表（pending + failed）
+        """
+        with self.lock:
+            return [
+                s for s in self.samples
+                if s.status in ("pending", "failed")
+            ]

@@ -257,6 +257,10 @@ class RunControllerExecutionMixin:
         if threading.current_thread() is not threading.main_thread():
             self._dispatch_to_ui_async(lambda: self._on_run_finished(adapter_snapshot))
             return
+        
+        # 导出未完成的样本（如果是反填模式）
+        self._export_incomplete_samples_if_needed()
+        
         self._schedule_cleanup(adapter_snapshot)
         already_stopped = getattr(self, "_stopped_by_stop_run", False)
         self._stopped_by_stop_run = False
@@ -288,6 +292,51 @@ class RunControllerExecutionMixin:
         if self._cleanup_scheduled:
             return
         self._cleanup_scheduled = True
+    
+    def _export_incomplete_samples_if_needed(self) -> None:
+        """如果是反填模式且有未完成样本，导出到 Excel 文件。"""
+        try:
+            # 检查是否是反填模式
+            execution_state = self._execution_state
+            if not execution_state:
+                return
+            
+            sample_dispatcher = getattr(execution_state, "sample_dispatcher", None)
+            if not sample_dispatcher:
+                return
+            
+            # 获取配置中的 Excel 路径
+            config = self.config
+            backfill_excel_path = getattr(config, "backfill_excel_path", "")
+            if not backfill_excel_path:
+                return
+            
+            # 导出未完成的样本
+            output_path = sample_dispatcher.export_incomplete_samples(backfill_excel_path)
+            
+            if output_path:
+                logging.info(f"已导出未完成样本到: {output_path}")
+                # 可以在这里添加 UI 提示
+                try:
+                    from PySide6.QtWidgets import QMessageBox
+                    from PySide6.QtCore import Qt
+                    
+                    def _show_message():
+                        msg = QMessageBox()
+                        msg.setIcon(QMessageBox.Icon.Information)
+                        msg.setWindowTitle("未完成样本已导出")
+                        msg.setText(f"有未完成的样本已导出到：\n\n{output_path}")
+                        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                        msg.exec()
+                    
+                    self._dispatch_to_ui_async(_show_message)
+                except Exception:
+                    logging.info("显示导出提示失败", exc_info=True)
+            else:
+                logging.info("所有样本都已完成，无需导出")
+                
+        except Exception as exc:
+            logging.error(f"导出未完成样本失败: {exc}", exc_info=True)
         self._submit_cleanup_task(
             adapter_snapshot,
             delay_seconds=STOP_FORCE_WAIT_SECONDS,
