@@ -49,4 +49,8 @@ class RuntimeConfig:
     question_entries: List[QuestionEntry] = field(default_factory=list)
     questions_info: Optional[List[Dict[str, Any]]] = field(default_factory=list)
     _ai_config_present: bool = field(default=False, init=False, repr=False)
+    
+    # 反填模式配置
+    backfill_enabled: bool = False
+    backfill_excel_path: str = ""
 

@@ -400,6 +400,12 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     else:
         config.questions_info = []
     config.answer_rules, _ = sanitize_answer_rules(config.answer_rules, config.questions_info or [])
+    
+    # 反填模式配置
+    config.backfill_enabled = _as_bool(raw.get("backfill_enabled"), False)
+    backfill_path = str(raw.get("backfill_excel_path") or "").strip()
+    config.backfill_excel_path = backfill_path if backfill_path else ""
+    
     return config
 
 
