@@ -90,20 +90,45 @@ class AnswerNormalizer:
             return None
 
         raw_text = str(raw_value).strip()
+        
+        # 处理 "其他〖空〗" 或 "其他〖无〗" 这样的格式，提取 "其他"
+        # 这种格式表示选择了某个选项（如"其他"），但附带的填空内容为空或无
+        import re
+        match = re.match(r"^(.+?)〖[^〗]*〗$", raw_text)
+        if match:
+            raw_text = match.group(1).strip()
 
         # 文本题直接返回
         if question.qtype == "text":
             return raw_text
 
-        # 多选题处理（支持逗号、分号、顿号分隔）
-        if question.qtype == "multi_choice":
+        # 排序题处理（使用 → 分隔）
+        if question.qtype == "order":
             import re
-            parts = re.split(r"[,，;；、]", raw_text)
+            parts = re.split(r"[→>]", raw_text)
             normalized_parts = []
             for part in parts:
                 part = part.strip()
                 if part:
-                    normalized_part = self._normalize_single_option(question, part)
+                    normalized_part = self._normalize_single_option(question, part, allow_substring=False)
+                    normalized_parts.append(normalized_part)
+            return normalized_parts if normalized_parts else None
+
+        # 多选题处理（支持逗号、分号、顿号、┋分隔）
+        # 注意：不要分割 "、"，因为它可能是选项文本的一部分
+        if question.qtype == "multi_choice":
+            import re
+            # 优先使用 ┋ 分隔，其次是逗号和分号
+            parts = re.split(r"[┋;；]", raw_text)
+            # 如果没有找到这些分隔符，尝试用逗号分隔
+            if len(parts) == 1:
+                parts = re.split(r"[,，]", raw_text)
+            
+            normalized_parts = []
+            for part in parts:
+                part = part.strip()
+                if part:
+                    normalized_part = self._normalize_single_option(question, part, allow_substring=True)
                     normalized_parts.append(normalized_part)
             return normalized_parts if normalized_parts else None
 
@@ -113,7 +138,8 @@ class AnswerNormalizer:
     def _normalize_single_option(
         self, 
         question: QuestionSchema, 
-        raw_text: str
+        raw_text: str,
+        allow_substring: bool = True
     ) -> str:
         """标准化单个选项。
         
@@ -182,7 +208,33 @@ class AnswerNormalizer:
             except (ValueError, TypeError):
                 pass
 
-        # 5) 模糊匹配
+        # 5) 子串匹配（去除分隔符后）- 仅在允许时使用
+        if allow_substring:
+            # 将选项文本按 "-"、"、" 等分隔符拆分，检查 Excel 文本是否匹配其中任一部分
+            import re
+            raw_normalized = raw_text.strip()
+            
+            for opt in question.options:
+                # 将选项按分隔符拆分
+                opt_parts = re.split(r'[-—、，,]', opt.text)
+                opt_parts = [p.strip() for p in opt_parts if p.strip()]
+                
+                # 检查 Excel 文本是否匹配任一部分
+                for part in opt_parts:
+                    if raw_normalized == part:
+                        return opt.text
+                    # 也检查小写匹配
+                    if raw_normalized.lower() == part.lower():
+                        return opt.text
+
+        # 6) 前缀匹配（用于处理被截断的选项）
+        # 如果 Excel 中的文本是选项的前缀，则匹配
+        for opt in question.options:
+            if opt.text.startswith(raw_text) and len(raw_text) >= 5:
+                # 至少 5 个字符才认为是有效前缀
+                return opt.text
+
+        # 7) 模糊匹配
         best_opt = None
         best_score = -1.0
         norm_raw = normalize_text(raw_text)
@@ -196,7 +248,7 @@ class AnswerNormalizer:
         if best_opt is not None and best_score >= self.fuzzy_threshold:
             return best_opt.text
 
-        # 6) 无法识别，报错
+        # 8) 无法识别，报错
         available_options = ", ".join([opt.text for opt in question.options[:5]])
         if len(question.options) > 5:
             available_options += "..."

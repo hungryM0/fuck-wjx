@@ -48,6 +48,7 @@ from software.ui.pages.workbench.dashboard.parts.progress import DashboardProgre
 from software.ui.pages.workbench.dashboard.parts.random_ip import DashboardRandomIPMixin
 from software.ui.pages.workbench.dashboard.parts.run_actions import DashboardRunActionsMixin
 from software.ui.pages.workbench.dashboard.parts.survey_parse import DashboardSurveyParseMixin
+from software.ui.pages.workbench.dashboard.parts.backfill import DashboardBackfillMixin
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.widgets.config_drawer import ConfigDrawer
 from software.ui.widgets.full_width_infobar import FullWidthInfoBar
@@ -73,6 +74,7 @@ class _PasteOnlyMenu(QObject):
         return super().eventFilter(watched, event)
 
 class DashboardPage(
+    DashboardBackfillMixin,
     DashboardClipboardMixin,
     DashboardSurveyParseMixin,
     DashboardConfigIOMixin,
@@ -332,6 +334,23 @@ class DashboardPage(
         self._ip_benefit_infobar.hide()
         exec_layout.addWidget(self._ip_benefit_infobar)
         layout.addWidget(exec_card)
+
+        # 反填模式卡片
+        backfill_card = CardWidget(self)
+        backfill_card_layout = QVBoxLayout(backfill_card)
+        backfill_card_layout.setContentsMargins(12, 12, 12, 12)
+        backfill_card_layout.setSpacing(10)
+        
+        backfill_title_row = QHBoxLayout()
+        backfill_title_row.addWidget(SubtitleLabel("数据反填模式", self))
+        backfill_title_row.addStretch(1)
+        backfill_card_layout.addLayout(backfill_title_row)
+        
+        # 添加反填模式 UI
+        backfill_ui_layout = self._init_backfill_ui()
+        backfill_card_layout.addLayout(backfill_ui_layout)
+        
+        layout.addWidget(backfill_card)
 
         switch_row = QHBoxLayout()
         switch_row.setContentsMargins(0, 0, 0, 0)

@@ -13,7 +13,7 @@ from software.io.excel.schema import MappingItem, MappingPlan as _MappingPlan
 
 
 def normalize_text(s: str) -> str:
-    """标准化文本：去括号、去题号、去标点、转小写。
+    """标准化文本：去括号、去题号前缀、去标点、转小写。
     
     Args:
         s: 原始文本
@@ -24,13 +24,15 @@ def normalize_text(s: str) -> str:
     s = str(s or "").strip().lower()
     # 去括号及括号内容
     s = re.sub(r"[（(].*?[）)]", "", s)
-    # 去题号（Q1、1、、1.、1．等）
-    s = re.sub(r"^[qQ]?\d+[、.．\s_-]*", "", s)
+    # 去题号前缀（支持多种格式：1、 1. Q1 等）
+    s = re.sub(r"^[qQ]?\d+[、.．\s_-]+", "", s)
     # 去空格
     s = re.sub(r"\s+", "", s)
     # 去标点
     s = re.sub(r"[，。、""''：:；;！？!?—]", "", s)
     s = s.replace("-", "")
+    # 去"—"符号（矩阵题常用）
+    s = s.replace("—", "")
     return s
 
 
@@ -91,19 +93,21 @@ class QuestionMatcher:
     def build_mapping(
         self, 
         excel_columns: list[str], 
-        survey: SurveySchema
+        survey: SurveySchema,
+        skip_unmatchable: bool = True,
     ) -> MappingPlan:
         """构建映射计划。
         
         Args:
             excel_columns: Excel 列名列表
             survey: 问卷结构
+            skip_unmatchable: 是否跳过无法匹配的列（默认 True）
             
         Returns:
             映射计划
             
         Raises:
-            ValueError: 无法自动匹配某列
+            ValueError: 当 skip_unmatchable=False 且无法自动匹配某列时
         """
         items = []
         
@@ -111,8 +115,23 @@ class QuestionMatcher:
         q_by_index = {q.index: q for q in survey.questions}
         q_by_norm_title = {normalize_text(q.title): q for q in survey.questions}
         used_qids = set()
+        
+        # 常见的非题目列名（需要跳过）
+        skip_keywords = [
+            '序号', '编号', 'id', 'no', 'number',
+            '时间', 'time', '日期', 'date',
+            '来源', 'source', '渠道', 'channel',
+            'ip', '地址', 'address',
+            '总分', '得分', 'score', 'total',
+            '状态', 'status',
+        ]
 
         for col in excel_columns:
+            # 检查是否是需要跳过的列
+            col_lower = col.lower()
+            if any(keyword in col_lower for keyword in skip_keywords):
+                continue
+            
             matched = None
             mode = None
             confidence = 0.0
@@ -154,12 +173,17 @@ class QuestionMatcher:
                     mode = "by_title_fuzzy"
                     confidence = best_score / 100.0
 
-            # 4) 无法匹配，报错
+            # 4) 无法匹配的处理
             if matched is None:
-                raise ValueError(
-                    f"Excel 列无法自动匹配到问卷题目: '{col}'\n"
-                    f"请检查列名是否包含题号（如 Q1、1、）或与题目标题相似"
-                )
+                if skip_unmatchable:
+                    # 跳过无法匹配的列
+                    continue
+                else:
+                    # 报错
+                    raise ValueError(
+                        f"Excel 列无法自动匹配到问卷题目: '{col}'\n"
+                        f"请检查列名是否包含题号（如 Q1、1、）或与题目标题相似"
+                    )
 
             used_qids.add(matched.qid)
             items.append(

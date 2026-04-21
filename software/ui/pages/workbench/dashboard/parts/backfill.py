@@ -41,6 +41,11 @@ class DashboardBackfillMixin:
         self._backfill_enabled = False
         self._backfill_excel_path = ""
         
+        # 添加说明标签
+        hint_label = QLabel("💡 提示：启用反填模式前，请先在上方输入问卷链接并完成“自动配置问卷”")
+        hint_label.setStyleSheet("color: #606060; font-size: 12px; padding: 4px;")
+        hint_label.setWordWrap(True)
+        
         # 1. 反填模式开关
         self.backfill_switch = SwitchButton()
         self.backfill_switch.setOnText("反填模式")
@@ -63,6 +68,9 @@ class DashboardBackfillMixin:
         
         # 布局
         backfill_layout = QVBoxLayout()
+        
+        # 提示信息
+        backfill_layout.addWidget(hint_label)
         
         # 第一行：开关
         row1 = QHBoxLayout()
@@ -87,6 +95,21 @@ class DashboardBackfillMixin:
     
     def _on_backfill_mode_changed(self, checked: bool):
         """反填模式开关变化。"""
+        # 检查是否已解析问卷
+        if checked and (not hasattr(self.controller, 'surveyParsed') or not self.controller.surveyParsed):
+            # 未解析问卷，不允许启用
+            self.backfill_switch.setChecked(False)
+            InfoBar.warning(
+                title="请先解析问卷",
+                content="启用反填模式前，请先输入问卷链接或上传二维码，并点击“自动配置问卷”",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=4000,
+                parent=self,
+            )
+            return
+        
         self._backfill_enabled = checked
         self.backfill_excel_btn.setEnabled(checked)
         
