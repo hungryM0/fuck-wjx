@@ -64,6 +64,24 @@ class DashboardRunActionsMixin:
             self._toast("未配置任何题目，无法开始执行（请先在'题目配置'页添加/配置题目）", "warning")
             self._sync_start_button_state(running=False)
             return
+        
+        # 验证反填模式配置
+        if cfg.backfill_enabled:
+            is_valid, error_msg = self.validate_backfill_config()
+            if not is_valid:
+                log_action(
+                    "RUN",
+                    "start_run",
+                    "start_btn",
+                    "dashboard",
+                    result="blocked",
+                    level=logging.WARNING,
+                    payload={"reason": "invalid_backfill_config", "error": error_msg},
+                )
+                self._toast(f"反填模式配置错误: {error_msg}", "warning", duration=3000)
+                self._sync_start_button_state(running=False)
+                return
+        
         # 只有在任务完成后的重新开始才重置进度，暂停后继续不重置
         if self._completion_notified or self._last_progress >= 100:
             self.progress_bar.setValue(0)
@@ -78,7 +96,7 @@ class DashboardRunActionsMixin:
             "start_btn",
             "dashboard",
             result="started",
-            payload={"target": cfg.target, "threads": cfg.threads},
+            payload={"target": cfg.target, "threads": cfg.threads, "backfill_enabled": cfg.backfill_enabled},
         )
     def update_question_meta(self, title: str, count: int):
         self.count_label.setText(f"{count} 题")
@@ -127,6 +145,30 @@ class DashboardRunActionsMixin:
         except Exception as exc:
             log_suppressed_exception("apply_config: self.strategy_page.set_rules(...)", exc, level=logging.WARNING)
 
+        # 恢复反填模式配置
+        backfill_enabled = bool(getattr(cfg, "backfill_enabled", False))
+        backfill_excel_path = str(getattr(cfg, "backfill_excel_path", "") or "")
+        
+        self.backfill_switch.blockSignals(True)
+        self.backfill_switch.setChecked(backfill_enabled)
+        self.backfill_switch.blockSignals(False)
+        
+        self._backfill_enabled = backfill_enabled
+        self._backfill_excel_path = backfill_excel_path
+        
+        if backfill_enabled and backfill_excel_path:
+            import os
+            file_name = os.path.basename(backfill_excel_path)
+            self.backfill_path_label.setText(file_name)
+            self.backfill_path_label.setStyleSheet("color: black;")
+            self.backfill_excel_btn.setEnabled(True)
+            self.backfill_preview_btn.setEnabled(True)
+        else:
+            self.backfill_path_label.setText("未选择文件")
+            self.backfill_path_label.setStyleSheet("color: gray;")
+            self.backfill_excel_btn.setEnabled(backfill_enabled)
+            self.backfill_preview_btn.setEnabled(False)
+
         self._refresh_entry_table()
         self._sync_start_button_state()
         self._refresh_ip_cost_infobar()
@@ -156,4 +198,9 @@ class DashboardRunActionsMixin:
         cfg.random_ip_enabled = self.random_ip_cb.isChecked()
         cfg.answer_rules = list(self.strategy_page.get_rules() or [])
         cfg.dimension_groups = list(self.strategy_page.get_dimension_groups() or [])
+        
+        # 反填模式配置
+        cfg.backfill_enabled = self._backfill_enabled
+        cfg.backfill_excel_path = self._backfill_excel_path
+        
         return cfg
