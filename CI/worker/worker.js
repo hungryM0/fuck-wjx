@@ -170,7 +170,11 @@ async function buildGitHubIssueBody({ message, files }) {
   if (version) {
     lines.push(`版本号：SurveyController v${version}`);
   }
-  lines.push("消息内容：", issueMessage || "未提供正文");
+  if (issueMessage) {
+    lines.push(issueMessage);
+  } else {
+    lines.push("未提供正文");
+  }
   if (logSections.length > 0) {
     lines.push("", ...logSections);
   }
