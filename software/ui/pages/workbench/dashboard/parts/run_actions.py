@@ -51,19 +51,44 @@ class DashboardRunActionsMixin:
         from software.io.config import deserialize_question_entry, serialize_question_entry
         cfg.question_entries = [deserialize_question_entry(serialize_question_entry(entry)) for entry in self.question_page.get_entries()]
         cfg.questions_info = list(self.question_page.questions_info or [])
+        
+        # 题目配置检查
+        # 反填模式：如果配置文件中已有 question_entries，则跳过检查（允许离线使用）
+        # 随机模式：必须有 question_entries
         if not cfg.question_entries:
-            log_action(
-                "RUN",
-                "start_run",
-                "start_btn",
-                "dashboard",
-                result="blocked",
-                level=logging.WARNING,
-                payload={"reason": "no_question_entries"},
-            )
-            self._toast("未配置任何题目，无法开始执行（请先在'题目配置'页添加/配置题目）", "warning")
-            self._sync_start_button_state(running=False)
-            return
+            # 如果是反填模式，提示用户需要先解析问卷
+            if cfg.backfill_enabled:
+                log_action(
+                    "RUN",
+                    "start_run",
+                    "start_btn",
+                    "dashboard",
+                    result="blocked",
+                    level=logging.WARNING,
+                    payload={"reason": "no_question_entries_backfill"},
+                )
+                self._toast(
+                    "反填模式需要问卷结构信息。\n"
+                    "请先点击'自动配置问卷'解析问卷，或加载包含完整配置的 JSON 文件。",
+                    "warning",
+                    duration=4000
+                )
+                self._sync_start_button_state(running=False)
+                return
+            else:
+                # 随机模式：显示原有提示
+                log_action(
+                    "RUN",
+                    "start_run",
+                    "start_btn",
+                    "dashboard",
+                    result="blocked",
+                    level=logging.WARNING,
+                    payload={"reason": "no_question_entries"},
+                )
+                self._toast("未配置任何题目，无法开始执行（请先在'题目配置'页添加/配置题目）", "warning")
+                self._sync_start_button_state(running=False)
+                return
         
         # 验证反填模式配置
         if cfg.backfill_enabled:

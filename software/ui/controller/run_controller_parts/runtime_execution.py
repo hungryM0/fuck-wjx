@@ -337,10 +337,7 @@ class RunControllerExecutionMixin:
                 
         except Exception as exc:
             logging.error(f"导出未完成样本失败: {exc}", exc_info=True)
-        self._submit_cleanup_task(
-            adapter_snapshot,
-            delay_seconds=STOP_FORCE_WAIT_SECONDS,
-        )
+    
     def stop_run(self):
         if self._starting and not self.running:
             self.stop_event.set()
