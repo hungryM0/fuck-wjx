@@ -568,6 +568,8 @@ class PlaywrightDriver:
         self.session_id = f"pw-{int(time.time() * 1000)}-{random.randint(1000, 9999)}"
         self.browser_pid = self._extract_browser_pid(browser)
         self.browser_pids: Set[int] = {self.browser_pid} if self.browser_pid else set()
+        self._owner_thread_id = threading.get_ident()
+        self._owner_thread_name = threading.current_thread().name or "UnnamedThread"
         self._cleanup_done = False
         self._cleanup_lock = threading.Lock()
 
@@ -674,8 +676,57 @@ class PlaywrightDriver:
             self._cleanup_done = True
             return True
 
+    def _is_owner_thread(self) -> bool:
+        return threading.get_ident() == self._owner_thread_id
+
+    def _force_terminate_browser_process_tree(self) -> bool:
+        pids: Set[int] = set(int(pid) for pid in self.browser_pids if pid)
+        current_pid = self._extract_browser_pid(self._browser)
+        if current_pid:
+            pids.add(current_pid)
+        if not pids:
+            return False
+
+        _no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        terminated = False
+        for pid in sorted(pids):
+            try:
+                result = subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    creationflags=_no_window,
+                )
+            except Exception as exc:
+                log_suppressed_exception(
+                    "browser_driver.PlaywrightDriver._force_terminate_browser_process_tree taskkill",
+                    exc,
+                    level=logging.WARNING,
+                )
+                continue
+
+            output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+            if result.returncode == 0:
+                terminated = True
+                continue
+            if "not found" in output or "没有运行的任务" in output or "找不到进程" in output:
+                terminated = True
+                continue
+            logging.warning("跨线程强制关闭浏览器进程失败(pid=%s): %s", pid, output.strip() or f"returncode={result.returncode}")
+        return terminated
+
     def quit(self) -> None:
         """默认仅关闭 page/context；若驱动独占底座则附带关闭底座。"""
+        if not self._is_owner_thread():
+            current_thread = threading.current_thread().name or "UnnamedThread"
+            logging.warning(
+                "检测到跨线程清理 PlaywrightDriver，跳过 sync_api 关闭以避免 greenlet 线程炸裂: owner=%s current=%s",
+                self._owner_thread_name,
+                current_thread,
+            )
+            self._force_terminate_browser_process_tree()
+            return
         try:
             self._page.close()
         except Exception as exc:

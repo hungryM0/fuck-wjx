@@ -8,7 +8,7 @@
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from software.core.persona.generator import get_current_persona
 
@@ -112,15 +112,6 @@ def apply_persona_boost(
                 )
                 break  # 一个选项只加成一次
     return boosted
-
-def get_persona_name_gender() -> Tuple[Optional[str], Optional[str]]:
-    """获取当前画像的性别信息，用于填空题生成姓名时保持一致。"""
-    persona = get_current_persona()
-    if persona is None:
-        return None, None
-    return persona.gender, None
-
-
 # ── AI 上下文构建 ───────────────────────────────────────────
 
 def build_ai_context_prompt() -> str:

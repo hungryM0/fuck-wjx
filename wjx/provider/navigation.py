@@ -12,13 +12,93 @@ from software.core.questions.utils import (
 from software.network.browser import By, BrowserDriver
 from software.logging.log_utils import log_suppressed_exception
 
-_START_TEXTS = ("开始作答", "开始答题", "开始填写")
+_START_TEXTS = (
+    "开始作答",
+    "开始答题",
+    "开始填写",
+    "Start answering",
+    "Start survey",
+    "Start questionnaire",
+    "Begin answering",
+    "Begin survey",
+    "Begin questionnaire",
+)
+_START_TEXT_SET = {"".join(str(text or "").split()).casefold() for text in _START_TEXTS}
+_RESUME_DIALOG_MARKERS = (
+    "继续上次作答",
+    "继续上次填写",
+    "继续填写",
+    "重新填写",
+    "重新作答",
+    "Continue previous answer",
+    "Continue previous answers",
+    "Continue answering",
+    "Continue survey",
+    "Resume answering",
+    "Resume survey",
+    "Start over",
+    "Start again",
+    "Restart survey",
+)
+_RESUME_DIALOG_MARKER_SET = {"".join(str(text or "").split()).casefold() for text in _RESUME_DIALOG_MARKERS}
+_RESUME_ACTION_TEXTS = (
+    "取消",
+    "重新填写",
+    "重新作答",
+    "重新开始",
+    "Cancel",
+    "Start over",
+    "Start again",
+    "Restart",
+    "Restart survey",
+)
+_RESUME_ACTION_TEXT_SET = {"".join(str(text or "").split()).casefold() for text in _RESUME_ACTION_TEXTS}
+
+
+def _normalize_gate_label(text: object) -> str:
+    return "".join(str(text or "").split()).casefold()
+
+
+def _wait_after_gate_click(stop_signal: Optional[threading.Event], delay: float = 0.3) -> bool:
+    if stop_signal:
+        return not stop_signal.wait(delay)
+    time.sleep(delay)
+    return True
+
+
+def _try_playwright_locator_click(driver: BrowserDriver, selectors: tuple[str, ...], timeout_ms: int = 1500) -> bool:
+    page = getattr(driver, "page", None)
+    if page is None:
+        return False
+
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first
+            if locator.count() <= 0:
+                continue
+        except Exception:
+            continue
+
+        try:
+            locator.scroll_into_view_if_needed(timeout=timeout_ms)
+        except Exception:
+            pass
+
+        for kwargs in ({}, {"force": True}):
+            try:
+                locator.click(timeout=timeout_ms, **kwargs)
+                return True
+            except Exception:
+                continue
+    return False
 
 
 def _should_attempt_start_click(driver: BrowserDriver) -> bool:
     """仅当页面仍处于开屏阶段时才尝试点击“开始作答”按钮。"""
+    start_labels_js = repr(sorted(_START_TEXT_SET))
     script = r"""
         return (() => {
+            const normalize = (text) => (text || '').replace(/\s+/g, '').toLowerCase();
             const visible = (el) => {
                 if (!el) return false;
                 const style = window.getComputedStyle(el);
@@ -38,10 +118,10 @@ def _should_attempt_start_click(driver: BrowserDriver) -> bool:
                 return false;
             };
 
-            const startLabels = new Set(['开始作答', '开始答题', '开始填写']);
-            const startNodes = Array.from(document.querySelectorAll('a, button, div, span')).filter((el) => {
+            const startLabels = new Set(__START_LABELS__);
+            const startNodes = Array.from(document.querySelectorAll('a, button, div, span, input[type="button"], input[type="submit"], [role="button"]')).filter((el) => {
                 if (!visible(el)) return false;
-                const text = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+                const text = normalize(el.innerText || el.textContent || el.value || '');
                 return startLabels.has(text);
             });
             const hasStartGate = startNodes.length > 0;
@@ -65,7 +145,7 @@ def _should_attempt_start_click(driver: BrowserDriver) -> bool:
 
             return !!(hasStartGate && !hasQuestionArea && !hasActionButtons);
         })();
-    """
+    """.replace("__START_LABELS__", start_labels_js)
     try:
         return bool(driver.execute_script(script))
     except Exception:
@@ -84,17 +164,37 @@ def try_click_start_answer_button(
     if not _should_attempt_start_click(driver):
         return False
 
+    locator_click_selectors = (
+        "#slideChunk",
+        "#CoverStartGroup #slideChunk",
+        "#CoverStartGroup .slideChunkWord",
+        ".slideChunkWord",
+    )
     locator_candidates = [
+        (By.CSS_SELECTOR, "#slideChunk"),
+        (By.CSS_SELECTOR, "#CoverStartGroup #slideChunk"),
+        (By.CSS_SELECTOR, "#CoverStartGroup .slideChunkWord"),
+        (By.CSS_SELECTOR, ".slideChunkWord"),
         (By.XPATH, "//div[contains(@class,'slideChunkWord') and normalize-space()='开始作答']"),
+        (By.XPATH, "//div[contains(@class,'slideChunkWord') and normalize-space()='Start answering']"),
         (By.XPATH, "//a[normalize-space()='开始作答' or normalize-space()='开始答题' or normalize-space()='开始填写']"),
+        (By.XPATH, "//a[normalize-space()='Start answering' or normalize-space()='Start survey' or normalize-space()='Start questionnaire' or normalize-space()='Begin answering' or normalize-space()='Begin survey' or normalize-space()='Begin questionnaire']"),
         (By.XPATH, "//button[normalize-space()='开始作答' or normalize-space()='开始答题' or normalize-space()='开始填写']"),
+        (By.XPATH, "//button[normalize-space()='Start answering' or normalize-space()='Start survey' or normalize-space()='Start questionnaire' or normalize-space()='Begin answering' or normalize-space()='Begin survey' or normalize-space()='Begin questionnaire']"),
         (By.XPATH, "//div[normalize-space()='开始作答' or normalize-space()='开始答题' or normalize-space()='开始填写']"),
+        (By.XPATH, "//div[normalize-space()='Start answering' or normalize-space()='Start survey' or normalize-space()='Start questionnaire' or normalize-space()='Begin answering' or normalize-space()='Begin survey' or normalize-space()='Begin questionnaire']"),
         (By.XPATH, "//span[normalize-space()='开始作答' or normalize-space()='开始答题' or normalize-space()='开始填写']"),
+        (By.XPATH, "//span[normalize-space()='Start answering' or normalize-space()='Start survey' or normalize-space()='Start questionnaire' or normalize-space()='Begin answering' or normalize-space()='Begin survey' or normalize-space()='Begin questionnaire']"),
     ]
     already_reported = False
     for attempt in range(max_checks):
         if stop_signal and stop_signal.is_set():
             return False
+        if _try_playwright_locator_click(driver, locator_click_selectors):
+            if not already_reported:
+                print("检测到开屏开始按钮，尝试自动点击...")
+                already_reported = True
+            return _wait_after_gate_click(stop_signal)
         for by, value in locator_candidates:
             try:
                 elements = driver.find_elements(by, value)
@@ -110,10 +210,10 @@ def try_click_start_answer_button(
                 if not displayed:
                     continue
                 text = _extract_text_from_element(element)
-                if text.replace(" ", "") not in _START_TEXTS:
+                if _normalize_gate_label(text) not in _START_TEXT_SET:
                     continue
                 if not already_reported:
-                    print("检测到“开始作答”按钮，尝试自动点击...")
+                    print("检测到开屏开始按钮，尝试自动点击...")
                     already_reported = True
                 try:
                     _smooth_scroll_to_element(driver, element, 'center')
@@ -125,14 +225,62 @@ def try_click_start_answer_button(
                 ):
                     try:
                         click_method()
-                        if stop_signal:
-                            if stop_signal.wait(0.3):
-                                return False
-                        else:
-                            time.sleep(0.3)
-                        return True
+                        return _wait_after_gate_click(stop_signal)
                     except Exception:
                         continue
+        try:
+            clicked_via_script = bool(
+                driver.execute_script(
+                    r"""
+                    return (() => {
+                        const normalize = (text) => (text || '').replace(/\s+/g, '').toLowerCase();
+                        const visible = (el) => {
+                            if (!el) return false;
+                            const style = window.getComputedStyle(el);
+                            if (!style) return false;
+                            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                            const rect = el.getBoundingClientRect();
+                            return rect.width > 0 && rect.height > 0;
+                        };
+
+                        const clickVisible = (el) => {
+                            if (!visible(el)) return false;
+                            try {
+                                el.scrollIntoView({ block: 'center', inline: 'center' });
+                            } catch (e) {}
+                            try {
+                                el.click();
+                                return true;
+                            } catch (e) {}
+                            return false;
+                        };
+
+                        const startLabels = new Set(__START_LABELS__);
+                        const directStart = document.querySelector('#slideChunk');
+                        if (clickVisible(directStart)) return true;
+                        const candidates = Array.from(document.querySelectorAll('a, button, div, span, input[type="button"], input[type="submit"], [role="button"]'));
+                        for (const el of candidates) {
+                            const text = normalize(el.innerText || el.textContent || el.value || '');
+                            if (!startLabels.has(text)) continue;
+                            if (clickVisible(el)) return true;
+                        }
+                        if (typeof initContentShow === 'function') {
+                            initContentShow();
+                            return true;
+                        }
+                        return false;
+                    })();
+                    """
+                    .replace("__START_LABELS__", repr(sorted(_START_TEXT_SET)))
+                )
+            )
+        except Exception:
+            clicked_via_script = False
+        if clicked_via_script:
+            if not already_reported:
+                print("检测到开屏开始按钮，尝试自动点击...")
+                already_reported = True
+            return _wait_after_gate_click(stop_signal)
         if attempt < max_checks - 1:
             if stop_signal and stop_signal.wait(poll_interval):
                 return False
@@ -158,9 +306,12 @@ def dismiss_resume_dialog_if_present(
         (By.XPATH, "//button[contains(normalize-space(.),'重新作答')]"),
         (By.XPATH, "//button[contains(normalize-space(.),'重新开始')]"),
         (By.XPATH, "//button[contains(normalize-space(.),'取消')]"),
+        (By.CSS_SELECTOR, "button"),
+        (By.CSS_SELECTOR, "a"),
     ]
     dialog_hint_script = r"""
         return (() => {
+            const normalize = (text) => (text || '').replace(/\s+/g, '').toLowerCase();
             const visible = (el) => {
                 if (!el) return false;
                 const style = window.getComputedStyle(el);
@@ -169,16 +320,19 @@ def dismiss_resume_dialog_if_present(
                 const rect = el.getBoundingClientRect();
                 return rect.width > 0 && rect.height > 0;
             };
-            const bodyText = (document.body?.innerText || '').replace(/\s+/g, '');
-            const markers = ['继续上次作答', '继续上次填写', '继续填写', '重新填写', '重新作答'];
+            const bodyText = normalize(document.body?.innerText || '');
+            const markers = __RESUME_MARKERS__;
             if (!markers.some((marker) => bodyText.includes(marker))) return false;
             const buttons = Array.from(document.querySelectorAll('button, a')).filter(visible);
             return buttons.some((node) => {
-                const text = (node.innerText || node.textContent || '').replace(/\s+/g, '');
-                return ['取消', '重新填写', '重新作答', '重新开始'].some((label) => text.includes(label));
+                const text = normalize(node.innerText || node.textContent || node.value || '');
+                return __RESUME_ACTIONS__.some((label) => text.includes(label));
             });
         })();
-    """
+    """.replace("__RESUME_MARKERS__", repr(sorted(_RESUME_DIALOG_MARKER_SET))).replace(
+        "__RESUME_ACTIONS__",
+        repr(sorted(_RESUME_ACTION_TEXT_SET)),
+    )
     clicked_once = False
     for attempt in range(max_checks):
         if stop_signal and stop_signal.is_set():
@@ -202,10 +356,9 @@ def dismiss_resume_dialog_if_present(
                 if not displayed:
                     continue
                 text = _extract_text_from_element(button)
-                normalized_text = text.replace(" ", "") if text else ""
+                normalized_text = _normalize_gate_label(text) if text else ""
                 if normalized_text:
-                    labels = ("取消", "重新填写", "重新作答", "重新开始")
-                    if not any(label in normalized_text for label in labels):
+                    if not any(label in normalized_text for label in _RESUME_ACTION_TEXT_SET):
                         continue
                 if not normalized_text and not dialog_visible:
                     continue

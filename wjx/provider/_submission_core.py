@@ -36,12 +36,6 @@ _HEADLESS_SUBMIT_RETRYABLE_ERRORS = (
     httpx.ConnectTimeout,
     httpx.ReadTimeout,
 )
-
-
-class EmptySurveySubmissionError(RuntimeError):
-    """检测到问卷未添加题目导致无法提交时抛出，用于关闭当前实例并继续下一份。"""
-
-
 def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
     """点击“提交”按钮（简单版）。"""
 
@@ -739,15 +733,21 @@ def _page_looks_like_wjx_questionnaire(driver: BrowserDriver) -> bool:
     """用 DOM 特征判断当前页是否为可作答的问卷页。"""
     script = r"""
         return (() => {
-            const bodyText = (document.body?.innerText || '').replace(/\s+/g, '');
+            const normalize = (text) => (text || '').replace(/\s+/g, '').toLowerCase();
+            const bodyText = normalize(document.body?.innerText || '');
             const completeMarkers = ['答卷已经提交', '感谢您的参与', '感谢参与'];
             if (completeMarkers.some(m => bodyText.includes(m))) return false;
 
             // 开屏“开始作答”页（还未展示题目）
-            if (bodyText.includes('开始作答') || bodyText.includes('开始答题') || bodyText.includes('开始填写')) {
-                const startLike = Array.from(document.querySelectorAll('div, a, button, span')).some(el => {
-                    const t = (el.innerText || el.textContent || '').replace(/\s+/g, '');
-                    return t === '开始作答' || t === '开始答题' || t === '开始填写';
+            const startLabels = [
+                '开始作答', '开始答题', '开始填写',
+                'startanswering', 'startsurvey', 'startquestionnaire',
+                'beginanswering', 'beginsurvey', 'beginquestionnaire'
+            ];
+            if (startLabels.some(label => bodyText.includes(label))) {
+                const startLike = Array.from(document.querySelectorAll('div, a, button, span, input[type="button"], input[type="submit"], [role="button"]')).some(el => {
+                    const t = normalize(el.innerText || el.textContent || el.value || '');
+                    return startLabels.includes(t);
                 });
                 if (startLike) return true;
             }
@@ -774,7 +774,7 @@ def _is_device_quota_limit_page(driver: BrowserDriver) -> bool:
     """检测"设备已达到最大填写次数"提示页。"""
     script = r"""
         return (() => {
-            const text = (document.body?.innerText || '').replace(/\s+/g, '');
+            const text = (document.body?.innerText || '').replace(/\s+/g, '').toLowerCase();
             if (!text) return false;
 
             const limitMarkers = [
@@ -796,7 +796,12 @@ def _is_device_quota_limit_page(driver: BrowserDriver) -> bool:
             );
             if (questionLike) return false;
 
-            const startHints = ['开始作答', '开始答题', '开始填写', '继续作答', '继续填写'];
+            const startHints = [
+                '开始作答', '开始答题', '开始填写', '继续作答', '继续填写',
+                'startanswering', 'startsurvey', 'startquestionnaire',
+                'beginanswering', 'beginsurvey', 'beginquestionnaire',
+                'continueanswering', 'continuesurvey', 'resumeanswering', 'resumesurvey'
+            ];
             if (startHints.some(hint => text.includes(hint))) return false;
 
             const submitSelectors = [

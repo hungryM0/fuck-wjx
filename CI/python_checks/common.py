@@ -1,20 +1,18 @@
 #!/usr/bin/env python
-"""多层检查核心目录 Python 文件的语法、静态导入和运行时导入问题。"""
+"""Python CI 检查的共享能力。"""
 
 from __future__ import annotations
 
-import argparse
 import getpass
 import json
 import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 from typing import Iterable
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 TARGET_DIRS = [
     ROOT_DIR / "wjx",
     ROOT_DIR / "software",
@@ -47,15 +45,6 @@ UNICODE_SPACE_TRANSLATION = str.maketrans({
     "\u205f": " ",
     "\u3000": " ",
 })
-
-
-def configure_console_encoding() -> None:
-    """在 Windows CI 的非 UTF-8 控制台中强制使用 UTF-8 输出，避免中文日志炸掉。"""
-    for stream_name in ("stdout", "stderr"):
-        stream = getattr(sys, stream_name, None)
-        reconfigure = getattr(stream, "reconfigure", None)
-        if callable(reconfigure):
-            reconfigure(encoding="utf-8", errors="replace")
 
 IMPORT_SMOKE_CODE = r"""
 import importlib
@@ -129,6 +118,15 @@ os._exit(0)
 """
 
 
+def configure_console_encoding() -> None:
+    """在 Windows CI 的非 UTF-8 控制台中强制使用 UTF-8 输出，避免中文日志炸掉。"""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def iter_target_dirs() -> list[Path]:
     return [path for path in TARGET_DIRS if path.exists()]
 
@@ -162,6 +160,14 @@ def iter_module_names(files: Iterable[Path]) -> list[str]:
         if module_name:
             modules.append(module_name)
     return sorted(set(modules), key=lambda name: (name.count("."), name))
+
+
+def ensure_target_dirs() -> list[Path]:
+    target_dirs = iter_target_dirs()
+    if not target_dirs:
+        print("[ERROR] No scan targets found. Expected at least one of wjx/, software/, or tencent/.")
+        raise SystemExit(2)
+    return target_dirs
 
 
 def make_child_env() -> dict[str, str]:
@@ -440,8 +446,6 @@ def run_window_smoke_check() -> dict | None:
         }
 
     payload = extract_child_payload(result.stdout, result.stderr) or {}
-    # In Windows + Qt scenarios, the child process may occasionally exit non-zero
-    # even after emitting a successful payload. Prefer the structured result here.
     if payload.get("kind") == "window_smoke" and payload.get("ok") is True:
         return None
 
@@ -509,104 +513,5 @@ def print_issues(title: str, issues: Iterable[dict]) -> None:
                 print(f"   {line}")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Check syntax, static imports, and startup-chain issues in wjx, software, and tencent."
-    )
-    parser.add_argument(
-        "--full",
-        action="store_true",
-        help="Enable full module import checks. The default is quick mode.",
-    )
-    pyright_group = parser.add_mutually_exclusive_group()
-    pyright_group.add_argument(
-        "--pyright",
-        dest="pyright_enabled",
-        action="store_true",
-        help="Enable Pyright diagnostics (enabled by default).",
-    )
-    pyright_group.add_argument(
-        "--no-pyright",
-        dest="pyright_enabled",
-        action="store_false",
-        help="Disable Pyright diagnostics and keep compile, Ruff, import, and window smoke checks only.",
-    )
-    parser.set_defaults(pyright_enabled=True)
-    return parser.parse_args()
-
-
-def main() -> int:
-    configure_console_encoding()
-    args = parse_args()
-
-    target_dirs = iter_target_dirs()
-    if not target_dirs:
-        print("[ERROR] No scan targets found. Expected at least one of wjx/, software/, or tencent/.")
-        return 2
-
-    start_time = time.perf_counter()
-    python_files = iter_python_files()
-    compile_targets = iter_compile_targets()
-    modules = iter_module_names(python_files)
-    quick_mode = not args.full
-    pyright_mode = args.pyright_enabled
-
+def print_scan_targets(target_dirs: Iterable[Path]) -> None:
     print(f"[INFO] Scan targets: {', '.join(str(path.relative_to(ROOT_DIR)) for path in target_dirs)}")
-    print(f"[INFO] Check mode: {'quick' if quick_mode else 'full'}")
-    print(f"[INFO] Python files: {len(python_files)}")
-    print(f"[INFO] Compile targets: {len(compile_targets)}")
-    if quick_mode:
-        print("[INFO] Module import checks: skipped (use --full to enable)")
-    else:
-        print(f"[INFO] Module import checks: {len(modules)}")
-    if pyright_mode:
-        print("[INFO] Pyright diagnostics: enabled")
-    else:
-        print("[INFO] Pyright diagnostics: disabled (--no-pyright)")
-
-    compile_issues = run_compile_checks(compile_targets)
-    ruff_issues, ruff_error = run_ruff_check(target_dirs)
-    pyright_issues, pyright_error = run_pyright_check(target_dirs) if pyright_mode else ([], None)
-    import_issues = run_module_import_checks(modules) if args.full else []
-    window_issue = run_window_smoke_check()
-
-    if ruff_error:
-        print(f"[ERROR] {ruff_error}")
-        return 2
-    if pyright_error:
-        print(f"[ERROR] {pyright_error}")
-        return 2
-
-    total_issues = len(compile_issues) + len(ruff_issues) + len(pyright_issues) + len(import_issues) + (1 if window_issue else 0)
-    elapsed = time.perf_counter() - start_time
-
-    print(f"[INFO] Compile issues: {len(compile_issues)}")
-    print(f"[INFO] Ruff diagnostics: {len(ruff_issues)}")
-    if pyright_mode:
-        print(f"[INFO] Pyright diagnostics: {len(pyright_issues)}")
-    print(f"[INFO] Module import failures: {len(import_issues)}")
-    print(f"[INFO] Main window smoke failures: {1 if window_issue else 0}")
-    print(f"[INFO] Elapsed time: {elapsed:.2f}s")
-
-    if total_issues == 0:
-        if quick_mode:
-            print("[PASS] Quick checks passed: compile, Ruff, and main window smoke checks all succeeded.")
-            print("[INFO] For package-level import checks such as circular imports, run: python CI/test_imports.py --full")
-        else:
-            print("[PASS] Full checks passed: compile, Ruff, module import, and main window smoke checks all succeeded.")
-        return 0
-
-    print(f"[FAIL] Found {total_issues} issue(s):")
-    print_issues("[Compile failures]", compile_issues)
-    print_issues("[Ruff diagnostics]", ruff_issues)
-    if pyright_mode:
-        print_issues("[Pyright diagnostics]", pyright_issues)
-    print_issues("[Module import failures]", import_issues)
-    if window_issue:
-        print_issues("[Main window smoke failures]", [window_issue])
-
-    return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

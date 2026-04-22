@@ -96,12 +96,10 @@ def _extract_multiple_choice_limits(question_div, question_number: int) -> Tuple
     if question_div is None:
         return None, None
 
-    # 尝试从 multiple.py 中复用限制检测逻辑
+    # 直接复用多选限制解析权威实现
     try:
-        from wjx.provider.questions.multiple import (
-            _extract_multi_limit_range_from_text,
-        )
         from wjx.provider.questions.multiple_limits import (
+            _extract_multi_limit_range_from_text,
             _extract_min_max_from_attributes,
             _extract_range_from_possible_json,
         )

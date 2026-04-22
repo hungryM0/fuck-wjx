@@ -7,12 +7,12 @@ from typing import Any, List, Optional
 
 from software.network.browser import By, BrowserDriver
 from software.core.questions.utils import extract_text_from_element
-from wjx.provider.questions.multiple import (
-    detect_multiple_choice_limit_range,
-    detect_multiple_choice_limit,
+from wjx.provider.questions.multiple_limits import (
+    _extract_multi_limit_range_from_text,
     _log_multi_limit_once,
     _safe_positive_int,
-    _extract_multi_limit_range_from_text,
+    detect_multiple_choice_limit,
+    detect_multiple_choice_limit_range,
 )
 from software.logging.log_utils import log_suppressed_exception
 

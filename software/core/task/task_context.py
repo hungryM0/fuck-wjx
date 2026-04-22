@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import threading
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 @dataclass
 class ThreadProgressState:
@@ -226,10 +226,6 @@ class ExecutionState:
         with self.lock:
             self.proxy_waiting_threads = max(0, int(self.proxy_waiting_threads or 0) - 1)
 
-    def get_proxy_waiter_count(self) -> int:
-        with self.lock:
-            return max(0, int(self.proxy_waiting_threads or 0))
-
     def mark_proxy_in_use(self, thread_name: str, lease: ProxyLease) -> None:
         key = str(thread_name or "").strip()
         if not key or not isinstance(lease, ProxyLease):
@@ -243,10 +239,6 @@ class ExecutionState:
             return None
         with self.lock:
             return self.proxy_in_use_by_thread.pop(key, None)
-
-    def get_proxy_in_use_count(self) -> int:
-        with self.lock:
-            return len(self.proxy_in_use_by_thread)
 
     def update_thread_status(
         self,
@@ -492,127 +484,3 @@ class ExecutionState:
 
 _EXECUTION_CONFIG_FIELD_NAMES = frozenset(ExecutionConfig.__dataclass_fields__.keys())
 _EXECUTION_STATE_FIELD_NAMES = frozenset(ExecutionState.__dataclass_fields__.keys())
-
-
-if TYPE_CHECKING:
-    class TaskContext(Protocol):
-        """旧类型名的静态过渡协议，兼容仍按旧心智混用配置态与运行态的调用方。"""
-
-        config: ExecutionConfig
-
-        url: str
-        survey_title: str
-        survey_provider: str
-        single_prob: List[Union[List[float], int, float, None]]
-        droplist_prob: List[Union[List[float], int, float, None]]
-        multiple_prob: List[List[float]]
-        matrix_prob: List[Union[List[float], int, float, None]]
-        scale_prob: List[Union[List[float], int, float, None]]
-        slider_targets: List[float]
-        texts: List[List[str]]
-        texts_prob: List[List[float]]
-        text_entry_types: List[str]
-        text_ai_flags: List[bool]
-        text_titles: List[str]
-        multi_text_blank_modes: List[List[str]]
-        multi_text_blank_ai_flags: List[List[bool]]
-        multi_text_blank_int_ranges: List[List[List[int]]]
-        single_option_fill_texts: List[Optional[List[Optional[str]]]]
-        single_attached_option_selects: List[List[Dict[str, Any]]]
-        droplist_option_fill_texts: List[Optional[List[Optional[str]]]]
-        multiple_option_fill_texts: List[Optional[List[Optional[str]]]]
-        answer_rules: List[Dict[str, Any]]
-        question_config_index_map: Dict[int, Tuple[str, int]]
-        question_dimension_map: Dict[int, Optional[str]]
-        question_strict_ratio_map: Dict[int, bool]
-        question_psycho_bias_map: Dict[int, Any]
-        questions_metadata: Dict[int, Dict[str, Any]]
-        joint_psychometric_answer_plan: Optional[Any]
-        psycho_target_alpha: float
-        headless_mode: bool
-        browser_preference: List[str]
-        num_threads: int
-        target_num: int
-        fail_threshold: int
-        stop_on_fail_enabled: bool
-        submit_interval_range_seconds: Tuple[int, int]
-        answer_duration_range_seconds: Tuple[int, int]
-        timed_mode_enabled: bool
-        timed_mode_refresh_interval: float
-        random_proxy_ip_enabled: bool
-        proxy_ip_pool: List[ProxyLease]
-        random_user_agent_enabled: bool
-        user_agent_ratios: Dict[str, int]
-        pause_on_aliyun_captcha: bool
-
-        cur_num: int
-        cur_fail: int
-        device_quota_fail_count: int
-        terminal_stop_category: str
-        terminal_failure_reason: str
-        terminal_stop_message: str
-        thread_progress: Dict[str, ThreadProgressState]
-        distribution_runtime_stats: Dict[str, Dict[str, Any]]
-        distribution_pending_by_thread: Dict[str, List[Tuple[str, int, int]]]
-        joint_reserved_sample_by_thread: Dict[str, int]
-        joint_committed_sample_indexes: set[int]
-        proxy_waiting_threads: int
-        proxy_in_use_by_thread: Dict[str, ProxyLease]
-        stop_event: threading.Event
-        lock: threading.Lock
-        _aliyun_captcha_stop_triggered: bool
-        _aliyun_captcha_stop_lock: threading.Lock
-        _aliyun_captcha_popup_shown: bool
-        _target_reached_stop_triggered: bool
-        _target_reached_stop_lock: threading.Lock
-        _terminal_stop_lock: threading.Lock
-        _proxy_fetch_lock: threading.Lock
-
-        def get_browser_semaphore(self, max_instances: int) -> threading.Semaphore: ...
-        def ensure_worker_threads(self, expected_count: int) -> None: ...
-        def register_proxy_waiter(self) -> None: ...
-        def unregister_proxy_waiter(self) -> None: ...
-        def get_proxy_waiter_count(self) -> int: ...
-        def mark_proxy_in_use(self, thread_name: str, lease: ProxyLease) -> None: ...
-        def release_proxy_in_use(self, thread_name: str) -> Optional[ProxyLease]: ...
-        def get_proxy_in_use_count(self) -> int: ...
-        def update_thread_status(self, thread_name: str, status_text: str, *, running: Optional[bool] = None) -> None: ...
-        def update_thread_step(
-            self,
-            thread_name: str,
-            step_current: int,
-            step_total: int,
-            *,
-            status_text: Optional[str] = None,
-            running: Optional[bool] = None,
-        ) -> None: ...
-        def increment_thread_success(self, thread_name: str, *, status_text: str = "提交成功") -> None: ...
-        def increment_thread_fail(self, thread_name: str, *, status_text: str = "失败重试") -> None: ...
-        def mark_thread_finished(self, thread_name: str, *, status_text: str = "已停止") -> None: ...
-        def mark_terminal_stop(
-            self,
-            category: str,
-            *,
-            failure_reason: str = "",
-            message: str = "",
-            overwrite: bool = False,
-        ) -> None: ...
-        def get_terminal_stop_snapshot(self) -> Tuple[str, str, str]: ...
-        def snapshot_distribution_stats(self, stat_key: str, option_count: int) -> Tuple[int, List[int]]: ...
-        def reset_pending_distribution(self, thread_name: Optional[str] = None) -> None: ...
-        def append_pending_distribution_choice(
-            self,
-            stat_key: str,
-            option_index: int,
-            option_count: int,
-            thread_name: Optional[str] = None,
-        ) -> None: ...
-        def commit_pending_distribution(self, thread_name: Optional[str] = None) -> int: ...
-        def peek_reserved_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]: ...
-        def reserve_joint_sample(self, sample_count: int, thread_name: Optional[str] = None) -> Optional[int]: ...
-        def release_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]: ...
-        def commit_joint_sample(self, thread_name: Optional[str] = None) -> Optional[int]: ...
-        def snapshot_thread_progress(self) -> List[Dict[str, Any]]: ...
-else:
-    # 运行时继续导出 ExecutionState，保证旧 import 不崩；静态检查期则使用上面的协议补足过渡字段。
-    TaskContext = ExecutionState

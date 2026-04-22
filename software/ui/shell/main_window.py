@@ -93,6 +93,8 @@ class MainWindow(
         self._startup_update_check_timer = None
         self._startup_update_check_completed = False
         self._startup_update_check_suspended = False
+        self._startup_update_notification_timer = None
+        self._startup_update_pending_info = None
         self._random_ip_quota_auto_sync_interval_ms = 90000
         self._random_ip_quota_auto_sync_timer = QTimer(self)
         self._random_ip_quota_auto_sync_timer.setInterval(self._random_ip_quota_auto_sync_interval_ms)

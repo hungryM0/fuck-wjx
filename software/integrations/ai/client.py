@@ -330,13 +330,6 @@ def get_ai_readiness_error(config: Optional[Dict[str, Any]] = None) -> str:
     if missing_fields:
         return f"缺少 {'、'.join(missing_fields)}"
     return ""
-
-
-def is_ai_ready(config: Optional[Dict[str, Any]] = None) -> bool:
-    """判断 AI 配置是否已满足调用条件。"""
-    return not get_ai_readiness_error(config)
-
-
 def _normalize_ai_mode(value: Any) -> str:
     mode = str(value or AI_MODE_FREE).strip().lower()
     if mode == AI_MODE_FREE:

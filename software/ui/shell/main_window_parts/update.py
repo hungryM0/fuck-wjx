@@ -37,12 +37,17 @@ class MainWindowUpdateMixin:
         show_confirm_dialog: Any
         show_message_dialog: Any
         close: Any
+        isVisible: Any
+        isMinimized: Any
+        isActiveWindow: Any
         _settings_page: Any
         _update_check_thread: Any
         _update_check_worker: Any
         _startup_update_check_timer: Any
         _startup_update_check_completed: bool
         _startup_update_check_suspended: bool
+        _startup_update_notification_timer: Any
+        _startup_update_pending_info: Any
 
     @staticmethod
     def _is_preview_version() -> bool:
@@ -59,7 +64,7 @@ class MainWindowUpdateMixin:
         if not get_bool_from_qsettings(settings.value("auto_check_update"), True):
             self._startup_update_check_completed = True
             return
-        self._schedule_startup_update_check(15000)
+        self._schedule_startup_update_check(800)
 
     def _ensure_startup_update_check_timer(self) -> QTimer:
         timer = getattr(self, "_startup_update_check_timer", None)
@@ -70,34 +75,101 @@ class MainWindowUpdateMixin:
             self._startup_update_check_timer = timer
         return timer
 
+    def _ensure_startup_update_notification_timer(self) -> QTimer:
+        timer = getattr(self, "_startup_update_notification_timer", None)
+        if timer is None:
+            timer = QTimer(cast(QObject, self))
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._on_startup_update_notification_timeout)
+            self._startup_update_notification_timer = timer
+        return timer
+
     def _schedule_startup_update_check(self, delay_ms: int) -> None:
         if getattr(self, "_startup_update_check_completed", False):
             return
         self._ensure_startup_update_check_timer().start(max(int(delay_ms), 0))
 
+    def _schedule_startup_update_notification(self, delay_ms: int) -> None:
+        if not getattr(self, "_startup_update_pending_info", None):
+            return
+        self._ensure_startup_update_notification_timer().start(max(int(delay_ms), 0))
+
     def _cancel_startup_update_check(self) -> None:
         timer = getattr(self, "_startup_update_check_timer", None)
         if timer is not None:
             timer.stop()
+        notification_timer = getattr(self, "_startup_update_notification_timer", None)
+        if notification_timer is not None:
+            notification_timer.stop()
 
     def _set_startup_update_check_suspended(self, suspended: bool) -> None:
         self._startup_update_check_suspended = bool(suspended)
-        if not suspended and not getattr(self, "_startup_update_check_completed", False):
+        if suspended:
+            return
+        if getattr(self, "_startup_update_pending_info", None):
+            timer = getattr(self, "_startup_update_notification_timer", None)
+            if timer is None or not timer.isActive():
+                self._schedule_startup_update_notification(600)
+            return
+        if not getattr(self, "_startup_update_check_completed", False):
             timer = getattr(self, "_startup_update_check_timer", None)
             if timer is None or not timer.isActive():
-                self._schedule_startup_update_check(2500)
+                self._schedule_startup_update_check(1200)
 
     def _on_startup_update_check_timeout(self) -> None:
         if getattr(self, "_startup_update_check_completed", False):
             return
         if getattr(self, "_startup_update_check_suspended", False):
-            self._schedule_startup_update_check(5000)
+            self._schedule_startup_update_check(3000)
             return
         self._start_update_check_worker()
+
+    def _is_boot_splash_visible(self) -> bool:
+        splash = getattr(self, "_boot_splash", None)
+        if splash is None:
+            return False
+        splash_screen = getattr(splash, "splash_screen", None)
+        if splash_screen is None:
+            return False
+        try:
+            return bool(splash_screen.isVisible())
+        except Exception:
+            return False
+
+    def _can_show_startup_update_notification(self) -> bool:
+        if getattr(self, "_startup_update_check_suspended", False):
+            return False
+        if not getattr(self, "_startup_update_pending_info", None):
+            return False
+        try:
+            if not self.isVisible() or self.isMinimized():
+                return False
+        except Exception:
+            return False
+        if self._is_boot_splash_visible():
+            return False
+        try:
+            if not self.isActiveWindow():
+                return False
+        except Exception:
+            return False
+        return True
+
+    def _on_startup_update_notification_timeout(self) -> None:
+        if not getattr(self, "_startup_update_pending_info", None):
+            return
+        if not self._can_show_startup_update_notification():
+            self._schedule_startup_update_notification(1500)
+            return
+        self.update_info = self._startup_update_pending_info
+        self._startup_update_pending_info = None
+        self._show_update_notification()
 
     def _start_update_check_worker(self) -> None:
         from software.ui.workers.update_worker import UpdateCheckWorker
 
+        if getattr(self, "_update_check_thread", None) is not None:
+            return
         self._show_update_checking_placeholder()
         self._stop_update_check_worker()
         worker = UpdateCheckWorker()
@@ -137,8 +209,9 @@ class MainWindowUpdateMixin:
         self._clear_update_checking_placeholder()
         status = update_info.get("status", "unknown") if update_info else "unknown"
         if has_update:
-            self.update_info = update_info
-            self._show_update_notification()
+            self._startup_update_pending_info = dict(update_info or {})
+            self._show_outdated_badge()
+            self._schedule_startup_update_notification(1000)
         else:
             self._apply_version_status_badge(status)
 

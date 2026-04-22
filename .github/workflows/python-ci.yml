@@ -1,17 +1,15 @@
-name: Python Import CI
+name: Python CI
 
 on:
   pull_request:
   push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  import-check:
+  python-check:
     runs-on: windows-latest
 
     steps:
@@ -28,14 +26,19 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Run quick import check on push
-        if: github.event_name == 'push'
-        run: python CI/test_imports.py
+      - name: Run compile check
+        run: python -m CI.python_checks.compile_check
 
-      - name: Run full import check on pull request
-        if: github.event_name == 'pull_request'
-        run: python CI/test_imports.py --full
+      - name: Run Ruff check
+        run: python -m CI.python_checks.ruff_check
 
-      - name: Run quick import check on manual dispatch
-        if: github.event_name == 'workflow_dispatch'
-        run: python CI/test_imports.py
+      - name: Run Pyright check
+        run: python -m CI.python_checks.pyright_check
+
+      - name: Run module import check
+        if: ${{ github.event_name != 'push' }}
+        run: python -m CI.python_checks.import_check
+
+      - name: Run main window smoke check
+        if: ${{ github.event_name != 'push' }}
+        run: python -m CI.python_checks.window_smoke_check

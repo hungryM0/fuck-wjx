@@ -17,7 +17,6 @@ from software.core.task.task_context import (
     ExecutionConfig,
     ExecutionState,
     ProxyLease,
-    TaskContext,
     ThreadProgressState,
 )
 
@@ -36,7 +35,6 @@ __all__ = [
     "ExecutionConfig",
     "ExecutionState",
     "ProxyLease",
-    "TaskContext",
     "ThreadProgressState",
 ]
 

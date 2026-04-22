@@ -74,7 +74,12 @@ function buildGitHubIssueTitle({ issueTitle, message }) {
     return extractedTitle;
   }
 
-  return "未命名报错反馈";
+  const messageTitle = sanitizeIssueTitle(extractIssueMessageContent(message));
+  if (messageTitle) {
+    return messageTitle;
+  }
+
+  return "报错反馈";
 }
 
 async function buildGitHubIssueBody({ message, files }) {

@@ -338,28 +338,6 @@ class _QuestionDispatcher:
 
 
 _dispatcher = _QuestionDispatcher()
-
-
-def register_question_handler(
-    question_type: str,
-    *,
-    index_key: str,
-    handler: QuestionHandler,
-    config_aliases: Tuple[str, ...] = (),
-    needs_question_div: bool = False,
-    needs_psycho_plan: bool = False,
-) -> None:
-    """为题型执行注册扩展处理器。"""
-    _dispatcher.register(
-        question_type,
-        index_key=index_key,
-        handler=handler,
-        config_aliases=config_aliases,
-        needs_question_div=needs_question_div,
-        needs_psycho_plan=needs_psycho_plan,
-    )
-
-
 def brush(
     driver: BrowserDriver,
     ctx: ExecutionState,
@@ -614,23 +592,6 @@ def brush_wjx(
     psycho_plan: Optional[Any],
 ) -> bool:
     del config
-    return brush(
-        driver,
-        ctx,
-        stop_signal=stop_signal,
-        thread_name=thread_name,
-        psycho_plan=psycho_plan,
-    )
-
-
-def fill_survey(
-    driver: BrowserDriver,
-    ctx: ExecutionState,
-    *,
-    stop_signal: Optional[threading.Event],
-    thread_name: str,
-    psycho_plan: Optional[Any],
-) -> bool:
     return brush(
         driver,
         ctx,

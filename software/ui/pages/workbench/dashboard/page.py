@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QToolButton,
+    QSizePolicy,
 )
 from qfluentwidgets import (
     ScrollArea,
@@ -354,11 +355,13 @@ class DashboardPage(
         question_title_row = QHBoxLayout()
         question_title_row.setSpacing(8)
         self.title_label = SubtitleLabel("题目清单与操作", self.thread_view_question_card)
+        self.title_label.setWordWrap(True)
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.count_label = BodyLabel("0 题", self.thread_view_question_card)
         self.count_label.setStyleSheet("color: #6b6b6b;")
-        question_title_row.addWidget(self.title_label)
-        question_title_row.addStretch(1)
-        question_title_row.addWidget(self.count_label)
+        self.count_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        question_title_row.addWidget(self.title_label, 1)
+        question_title_row.addWidget(self.count_label, 0, Qt.AlignmentFlag.AlignTop)
         question_list_layout.addLayout(question_title_row)
 
         # 使用 CommandBar 替代普通按钮布局

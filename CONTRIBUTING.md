@@ -12,10 +12,11 @@
 
 ## 开发环境与依赖
 - 操作系统：仅考虑对 Windows 10/11 的支持
-- Python：3.8+
+- Python：3.11+
 - 安装依赖：`pip install -r requirements.txt`。
 - 从源码运行：`python SurveyController.py`。
-- 导入检测：`python CI/test_imports.py`（扫描 `wjx/`、`software/`、`tencent/` 下所有 `.py` 文件的 `import` 是否报错）。
+- Python CI 快检：`python CI/python_ci.py`（编译 + Ruff + Pyright）。
+- Python CI 全检：`python CI/python_ci.py --full`（在快检基础上再跑模块导入与主窗口冒烟）。
 
 ## 仓库根目录
 
@@ -23,7 +24,7 @@
 仓库根目录
 ├── .github/
 │   ├── workflows/
-│   │   ├── python-ci.yml     # Windows 平台 Python 导入/语法/主窗口快检
+│   │   ├── python-ci.yml     # Windows 平台 Python CI；push 跑编译/Ruff/Pyright 快检，PR 与手动触发再补导入/主窗口全检
 │   │   ├── release-to-r2.yml   # CI/CD 自动发布安装包到 R2
 │   │   └── deploy-worker.yml   # CI/CD 自动部署 Cloudflare Worker
 │   └── ISSUE_TEMPLATE/        # Issue 模板（报错反馈、新功能请求）
@@ -39,7 +40,9 @@
 │   └── wjx-web-structure.md  # 问卷星网页结构与解析指南 (推荐必读)
 ├── rthook_pyside6.py     # PySide6 打包钩子
 ├── CI/                   # CI 与自动化辅助目录
-│   ├── test_imports.py   # 导入检测脚本
+│   ├── python_ci.py      # Python CI 聚合入口；默认快检编译/Ruff/Pyright，`--full` 再补模块导入与主窗口冒烟
+│   ├── __init__.py       # CI Python 包标记
+│   ├── python_checks/    # Python CI 拆分脚本目录；common.py 为共享能力，compile/ruff/pyright/import/window 脚本按职责独立执行
 │   └── worker/           # Cloudflare Worker 相关配置；wrangler.toml 指向 src/index.js 单入口，消息解析/Telegram/GitHub 拆到 src/request.js、src/telegram.js、src/github.js；不保留旧 worker.js 转发层
 ├── software/             # 软件主包（应用壳 + 共享核心 + 平台总调度）
 ├── tencent/              # 腾讯问卷主包
@@ -59,12 +62,12 @@ software/
 │   ├── modes/             # 作答模式与时长控制
 │   ├── persona/           # 人设与上下文生成
 │   ├── psychometrics/     # 心理测量题辅助逻辑；orientation.py 负责按最终配比推断题目方向/维度锚点/反向题，joint_optimizer.py 负责“保比例优先”的整批联合优化与样本槽位答案计划
-│   ├── questions/         # 题目配置、分布、共享判定与文本共享常量；config.py 仅保留门面导出，schema.py/default_builder.py/normalization.py/validation.py 才是当前权威拆分
-│   └── task/              # 事件总线与执行模型；当前权威模型为 ExecutionConfig + ExecutionState，task_context.py 内只保留过渡别名供旧类型引用
+│   ├── questions/         # 题目配置、分布、共享判定与文本共享常量；config.py 仅保留门面导出，schema.py/default_builder.py/normalization.py/validation.py 才是当前权威拆分；questions/multiple.py 仅保留多选执行入口，限制解析权威在 multiple_limits.py
+│   └── task/              # 事件总线与执行模型；当前权威模型为 ExecutionConfig + ExecutionState，task_context.py 仅保留执行配置/状态数据结构，不再保留 TaskContext 过渡别名
 ├── integrations/
 │   └── ai/                # AI API 适配器
 ├── io/
-│   ├── config/            # 配置读写、导入导出
+│   ├── config/            # 配置读写、导入导出；__init__.py 直接导出 codec/store 权威接口，不保留 load_save.py 中转层
 │   ├── qr/                # 二维码工具
 │   ├── markdown/          # Markdown 工具
 │   └── reports/           # 使用记录等输出
@@ -89,11 +92,11 @@ software/
 
 tencent/
 ├── __init__.py            # 包标记文件；真正平台实现请直接看 provider/
-└── provider/              # 腾讯问卷专属实现（解析、运行时、导航、提交）；runtime.py 仅保留入口，交互/答题/流程拆到 runtime_interactions.py、runtime_answerers.py、runtime_flow.py
+└── provider/              # 腾讯问卷专属实现（解析、运行时、导航、提交）；runtime.py 仅保留答题入口，完成页/提交流程判断权威在 runtime_flow.py，交互/答题拆到 runtime_interactions.py、runtime_answerers.py
 
 wjx/
 ├── __init__.py            # 包标记文件；仅保留版本信息，真实实现在 provider/ 子模块
-└── provider/              # 问卷星专属实现（解析、检测、导航、运行时、提交、questions/ 题型执行器）；html_parser.py 已拆到 html_parser_common.py、html_parser_choice.py、html_parser_matrix.py、html_parser_rules.py，questions/multiple.py 已拆到 multiple_limits.py、multiple_dom.py、multiple_rules.py
+└── provider/              # 问卷星专属实现（解析、检测、导航、运行时、提交、questions/ 题型执行器）；html_parser.py 已拆到 html_parser_common.py、html_parser_choice.py、html_parser_matrix.py、html_parser_rules.py，questions/multiple.py 仅保留多选执行入口，限制/DOM/规则拆到 multiple_limits.py、multiple_dom.py、multiple_rules.py，不额外保留 helper 转发层
 ```
 
 ## PR 流程（推荐）
@@ -103,7 +106,7 @@ wjx/
    - **问卷星专属** → `wjx/provider/`（平台特定的解析、导航、提交和题型执行）
    - **腾讯问卷专属** → `tencent/provider/`（平台特定的解析、导航、提交和运行逻辑）
    - **顶层包** → 仅保留包标记文件，不要把实现代码再塞回 `tencent/`、`wjx/` 目录
-3. 自测：运行 `python CI/test_imports.py` 检查 import 和语法错误；至少手动跑一次核心流程（启动APP、加载问卷、配置参数、开始执行），确保无报错
+3. 自测：先运行 `python CI/python_ci.py` 做编译/Ruff/Pyright 快检；涉及导入链或窗口启动时再运行 `python CI/python_ci.py --full`；至少手动跑一次核心流程（启动APP、加载问卷、配置参数、开始执行），确保无报错
 4. 提交：保持清晰提交信息，必要时补充中文注释和变更说明
 5. PR 描述：写明变更目的、主要改动点、测试方式与结果，关联相关 Issue（如有）
 

@@ -128,17 +128,17 @@ class _QqProviderAdapter:
         )
 
     def is_completion_page(self, driver: Any) -> bool:
-        from tencent.provider.runtime import qq_is_completion_page
+        from tencent.provider.runtime_flow import qq_is_completion_page
 
         return bool(qq_is_completion_page(driver))
 
     def submission_requires_verification(self, driver: Any) -> bool:
-        from tencent.provider.runtime import qq_submission_requires_verification
+        from tencent.provider.runtime_flow import qq_submission_requires_verification
 
         return bool(qq_submission_requires_verification(driver))
 
     def submission_validation_message(self, driver: Any) -> str:
-        from tencent.provider.runtime import qq_submission_validation_message
+        from tencent.provider.runtime_flow import qq_submission_validation_message
 
         return str(qq_submission_validation_message(driver) or "").strip()
 

@@ -83,7 +83,12 @@ def _count_questions_by_script(driver: BrowserDriver) -> Tuple[List[int], int, i
 
 def detect(driver: BrowserDriver, stop_signal: Optional[threading.Event] = None) -> List[int]:
     dismiss_resume_dialog_if_present(driver, stop_signal=stop_signal)
-    try_click_start_answer_button(driver, stop_signal=stop_signal)
+    start_clicked = try_click_start_answer_button(driver, stop_signal=stop_signal)
+    if start_clicked:
+        if stop_signal:
+            stop_signal.wait(0.5)
+        else:
+            time.sleep(0.5)
     question_counts_per_page = _count_questions_by_fieldset(driver)
     if sum(question_counts_per_page) > 0:
         return question_counts_per_page

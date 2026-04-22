@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
-from urllib.parse import urlparse
 
 from software.core.persona.context import reset_context as _reset_answer_context
 from software.core.persona.generator import generate_persona, reset_persona, set_current_persona
@@ -146,30 +145,8 @@ def provider_run_context(
         yield resolved_plan
     finally:
         reset_persona()
-
-
-def normalize_url_for_compare(value: str) -> str:
-    """用于比较的 URL 归一化：去掉 fragment，去掉首尾空白。"""
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    try:
-        parsed = urlparse(text)
-    except Exception:
-        return text
-    try:
-        if parsed.fragment:
-            parsed = parsed._replace(fragment="")
-        return parsed.geturl()
-    except Exception:
-        return text
-
-
 __all__ = [
     "build_psychometric_plan_for_run",
     "ensure_joint_psychometric_answer_plan",
-    "normalize_url_for_compare",
     "provider_run_context",
 ]

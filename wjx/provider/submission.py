@@ -8,7 +8,6 @@ import time
 from typing import Any, Optional
 
 from wjx.provider._submission_core import (
-    EmptySurveySubmissionError,
     _click_submit_button,
     _is_wjx_domain,
     _looks_like_wjx_survey_url,
@@ -302,7 +301,6 @@ __all__ = [
     "_normalize_url_for_compare",
     "_page_looks_like_wjx_questionnaire",
     "consume_submission_success_signal",
-    "EmptySurveySubmissionError",
     "handle_submission_verification_detected",
     "is_device_quota_limit_page",
     "submission_requires_verification",

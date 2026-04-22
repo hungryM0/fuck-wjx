@@ -23,14 +23,7 @@ from .multiple_dom import (
     _collect_multiple_option_elements,
     _warn_option_locator_once,
 )
-from .multiple_limits import (
-    _extract_multi_limit_range_from_text,
-    _log_multi_limit_once,
-    _safe_positive_int,
-    clear_multiple_choice_cache,
-    detect_multiple_choice_limit,
-    detect_multiple_choice_limit_range,
-)
+from .multiple_limits import _log_multi_limit_once, detect_multiple_choice_limit_range
 from .multiple_rules import (
     _WARNED_PROB_MISMATCH,
     _apply_rule_constraints,
@@ -38,15 +31,7 @@ from .multiple_rules import (
     _resolve_rule_sets,
 )
 
-__all__ = [
-    'clear_multiple_choice_cache',
-    'detect_multiple_choice_limit_range',
-    'detect_multiple_choice_limit',
-    '_log_multi_limit_once',
-    '_safe_positive_int',
-    '_extract_multi_limit_range_from_text',
-    'multiple',
-]
+__all__ = ["multiple"]
 
 
 def multiple(
