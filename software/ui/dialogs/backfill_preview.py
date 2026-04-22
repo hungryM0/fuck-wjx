@@ -139,8 +139,8 @@ class BackfillPreviewDialog(MessageBoxBase):
                 "by_index": "题号匹配",
                 "by_title_exact": "标题精确匹配",
                 "by_title_fuzzy": "模糊匹配",
-            }.get(item.mode, item.mode)
-            table.setItem(i, 2, QTableWidgetItem(mode_text))
+            }.get(item.mode, item.mode or "未知")
+            table.setItem(i, 2, QTableWidgetItem(str(mode_text)))
             
             # 置信度
             confidence_text = f"{item.confidence * 100:.0f}%"

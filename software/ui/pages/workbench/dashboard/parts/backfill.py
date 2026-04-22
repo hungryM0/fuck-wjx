@@ -2,12 +2,13 @@
 
 提供反填模式的 UI 控件和逻辑。
 """
+# pyright: reportAttributeAccessIssue=false
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtCore import Qt  # type: ignore[attr-defined]
+from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QWidget
 from qfluentwidgets import (
     SwitchButton,
     PushButton,
@@ -29,8 +30,12 @@ class DashboardBackfillMixin:
     - 映射预览对话框
     """
     
+    # 类型注解：这些属性来自主类 DashboardPage
     if TYPE_CHECKING:
         controller: RunController
+        
+        def window(self) -> QWidget: ...
+        def _toast(self, text: str, level: str = "info", duration: int = 2000, show_progress: bool = False) -> Any: ...
         
     def _init_backfill_ui(self):
         """初始化反填模式 UI。
@@ -133,7 +138,7 @@ class DashboardBackfillMixin:
     def _on_select_excel(self):
         """选择 Excel 文件。"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
+            self,  # type: ignore[arg-type]
             "选择 Excel 文件",
             "",
             "Excel 文件 (*.xlsx *.xls)"
@@ -159,10 +164,11 @@ class DashboardBackfillMixin:
                 sample_count = len(samples)
                 
                 # 更新目标份数（同时同步到 controller 状态）
-                if hasattr(self, 'target_spin'):
-                    self.target_spin.blockSignals(True)
-                    self.target_spin.setValue(sample_count)
-                    self.target_spin.blockSignals(False)
+                target_spin = getattr(self, 'target_spin', None)
+                if target_spin is not None:
+                    target_spin.blockSignals(True)
+                    target_spin.setValue(sample_count)
+                    target_spin.blockSignals(False)
                     # 同步到 controller 的运行时状态
                     self.controller.set_runtime_ui_state(target=sample_count, emit=False)
                 

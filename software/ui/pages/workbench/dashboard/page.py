@@ -36,7 +36,7 @@ from qfluentwidgets import (
     HyperlinkButton,
     SegmentedWidget,
     DrillInTransitionStackedWidget,
-    TogglePushButton,
+    TogglePushButton as ToggleButton,  # Alias for type compatibility
 )
 from qfluentwidgets import RoundMenu
 
@@ -258,7 +258,7 @@ class DashboardPage(
         spin_row.addStretch(1)
         left_column.addLayout(spin_row)
 
-        self.random_ip_cb = TogglePushButton(self)
+        self.random_ip_cb: ToggleButton = ToggleButton(self)  # type: ignore[assignment]
         self.random_ip_cb.setMinimumHeight(36)
         self._sync_random_ip_toggle_presentation(False)
         random_ip_row = QHBoxLayout()

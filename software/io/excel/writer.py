@@ -6,15 +6,18 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, List
+
+if TYPE_CHECKING:
+    from openpyxl import Workbook as WorkbookType
+    from openpyxl.styles import Font as FontType, PatternFill as PatternFillType
 
 try:
     import openpyxl
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
 except ImportError:
-    openpyxl = None
-    Workbook = None
+    openpyxl = None  # type: ignore
+    Workbook = None  # type: ignore
 
 from software.io.excel.schema import SampleRow
 
@@ -38,7 +41,7 @@ class ExcelWriter:
             include_status: 是否包含状态列
             include_error: 是否包含错误信息列
         """
-        if not openpyxl:
+        if openpyxl is None or Workbook is None:
             raise ImportError("需要安装 openpyxl 库：pip install openpyxl")
         
         if not samples:
@@ -46,7 +49,7 @@ class ExcelWriter:
             return
         
         # 创建工作簿
-        wb = Workbook()
+        wb: WorkbookType = Workbook()  # type: ignore
         ws = wb.active
         if ws is None:
             raise RuntimeError("无法创建工作表")
@@ -99,21 +102,20 @@ class ExcelWriter:
                 ws.cell(row=row_idx, column=error_col, value=error_text)
         
         # 自动调整列宽
-        for column in ws.columns:
+        from openpyxl.utils import get_column_letter
+        
+        for col_idx in range(1, len(col_names) + 1):
             max_length = 0
-            # 获取列字母（跳过合并单元格）
-            first_cell = column[0]
-            if hasattr(first_cell, 'column_letter'):
-                column_letter = first_cell.column_letter
-            else:
-                continue
+            column_letter = get_column_letter(col_idx)
             
-            for cell in column:
+            for row_idx in range(1, len(samples) + 2):
                 try:
+                    cell = ws.cell(row=row_idx, column=col_idx)
                     if cell.value:
                         max_length = max(max_length, len(str(cell.value)))
                 except:
                     pass
+            
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column_letter].width = adjusted_width
         

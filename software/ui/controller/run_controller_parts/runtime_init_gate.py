@@ -117,7 +117,7 @@ class RunControllerInitializationMixin:
                 
                 # 2. 获取问卷结构
                 from software.core.backfill.survey_converter import convert_to_survey_schema
-                survey_schema = convert_to_survey_schema(self)
+                survey_schema = convert_to_survey_schema(self)  # type: ignore[arg-type]
                 logging.info(f"问卷结构转换完成，共 {len(survey_schema.questions)} 个题目")
                 
                 # 3. 映射 Excel 列到题目
