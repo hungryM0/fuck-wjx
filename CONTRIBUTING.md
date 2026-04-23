@@ -1,131 +1,179 @@
 # 贡献指南
 
-感谢愿意改进本项目！在开始之前，请先阅读 [行为准则](https://github.com/hungryM0/SurveyController/blob/main/CODE_OF_CONDUCT.md)，确保所作的改进能够遵守行为准则。
+感谢愿意改进本项目！在开始之前，请先阅读 [行为准则](CODE_OF_CONDUCT.md)。
 
-## 交流渠道
-- **Bug/功能建议**：首选 GitHub Issues。
-- **快速反馈**：QQ群（见 README）。
+## 快速开始
+- **交流**：首选 GitHub Issues，或加入 QQ 群（见 README）。
+- **参考**：建议阅读 [项目文档](doc/wjx-web-structure.md) 以了解各个平台的解析逻辑。
+- **环境**：Python 3.11+，Windows 10/11。执行 `pip install -r requirements.txt` 安装依赖。
 
-## 参考文档
-在着手修改或新增功能前，建议先阅读以下关键文档：
-- [wjx-web-structure.md](doc/wjx-web-structure.md) — 问卷星网页结构与解析指南。详细说明了如何识别 DOM 节点、题型以及复杂的跳转逻辑。
-
-## 开发环境与依赖
-- 操作系统：仅考虑对 Windows 10/11 的支持
-- Python：3.11+
-- 安装依赖：`pip install -r requirements.txt`。
-- 从源码运行：`python SurveyController.py`。
-- Python CI 快检：`python CI/python_ci.py`（编译 + Ruff + Pyright）。
-- Python CI 全检：`python CI/python_ci.py --full`（在快检基础上再跑模块导入与主窗口冒烟）。
-- 真实问卷解析回归：`python -m unittest CI.test_live_survey_parsers -v`（读取 `configs/debug.json` 与 `configs/腾讯问卷.json` 的 URL，校验问卷星/腾讯解析结果）。
-
-## 仓库根目录
+<details>
+<summary><b>📂 项目目录结构</b></summary>
 
 ```markdown
 仓库根目录
 ├── .github/
 │   ├── workflows/
-│   │   ├── python-ci.yml     # Windows 平台 Python CI；push 跑编译/Ruff/Pyright 快检，PR 与手动触发再补导入/主窗口全检
-│   │   ├── release-to-r2.yml   # CI/CD 自动发布安装包到 R2
-│   │   └── deploy-worker.yml   # CI/CD 自动部署 Cloudflare Worker
-│   └── ISSUE_TEMPLATE/        # Issue 模板（报错反馈、新功能请求）
+│   │   ├── python-ci.yml
+│   │   ├── release-to-r2.yml
+│   │   └── deploy-worker.yml
+│   └── ISSUE_TEMPLATE/
 ├── README.md
 ├── LICENSE
 ├── requirements.txt
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── SurveyController.py
-├── SurveyController.spec      # 打包配置
-├── icon.ico                   # 打包图标
-├── doc/                  # 项目文档目录
-│   └── wjx-web-structure.md  # 问卷星网页结构与解析指南 (推荐必读)
-├── rthook_pyside6.py     # PySide6 打包钩子
-├── CI/                   # CI 与自动化辅助目录
-│   ├── python_ci.py      # Python CI 聚合入口；默认快检编译/Ruff/Pyright，`--full` 再补模块导入与主窗口冒烟
-│   ├── test_live_survey_parsers.py # 真实问卷链接解析回归测试；读取 configs/debug.json 与 configs/腾讯问卷.json 的 URL 校验问卷星/腾讯解析结果
-│   ├── __init__.py       # CI Python 包标记
-│   ├── python_checks/    # Python CI 拆分脚本目录；common.py 为共享能力，compile/ruff/pyright/import/window 脚本按职责独立执行
-│   └── worker/           # Cloudflare Worker 相关配置；wrangler.toml 指向 src/index.js 单入口，消息解析/Telegram/GitHub 拆到 src/request.js、src/telegram.js、src/github.js；不保留旧 worker.js 转发层
-├── software/             # 软件主包（应用壳 + 共享核心 + 平台总调度）
-├── tencent/              # 腾讯问卷主包
-└── wjx/                  # 问卷星主包
+├── SurveyController.spec
+├── rthook_pyside6.py
+├── icon.ico
+├── CI/
+│   ├── __init__.py
+│   ├── python_ci.py
+│   ├── live_tests/
+│   │   ├── __init__.py
+│   │   └── test_survey_parsers.py
+│   ├── python_checks/
+│   │   ├── __init__.py
+│   │   ├── common.py
+│   │   ├── compile_check.py
+│   │   ├── import_check.py
+│   │   ├── pyright_check.py
+│   │   ├── ruff_check.py
+│   │   ├── unit_test_check.py
+│   │   └── window_smoke_check.py
+│   ├── unit_tests/
+│   │   ├── __init__.py
+│   │   ├── engine/
+│   │   └── psychometrics/
+│   └── worker/
+│       ├── wrangler.toml
+│       └── src/
+├── doc/
+│   └── wjx-web-structure.md
+├── logs/
+├── Setup/
+│   ├── InnoSetup.iss
+│   └── LICENSE/
+│       ├── after_install.txt
+│       └── before_install.txt
+├── assets/
+├── software/
+│   ├── __init__.py
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── main.py
+│   │   ├── runtime_paths.py
+│   │   ├── settings_store.py
+│   │   └── version.py
+│   ├── assets/
+│   │   ├── __init__.py
+│   │   ├── area_codes_2022.json
+│   │   ├── area.txt
+│   │   └── legal/
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── ai/
+│   │   ├── config/
+│   │   ├── engine/
+│   │   ├── modes/
+│   │   ├── persona/
+│   │   ├── psychometrics/
+│   │   ├── questions/
+│   │   └── task/
+│   ├── integrations/
+│   │   ├── __init__.py
+│   │   └── ai/
+│   ├── io/
+│   │   ├── __init__.py
+│   │   ├── config/
+│   │   ├── markdown/
+│   │   ├── qr/
+│   │   └── reports/
+│   ├── logging/
+│   │   ├── __init__.py
+│   │   ├── action_logger.py
+│   │   └── log_utils.py
+│   ├── network/
+│   │   ├── __init__.py
+│   │   ├── session_policy.py
+│   │   ├── browser/
+│   │   ├── http/
+│   │   └── proxy/
+│   ├── providers/
+│   │   ├── __init__.py
+│   │   ├── common.py
+│   │   ├── contracts.py
+│   │   └── registry.py
+│   ├── system/
+│   │   ├── __init__.py
+│   │   ├── power_management.py
+│   │   ├── registry_manager.py
+│   │   └── secure_store.py
+│   ├── ui/
+│   │   ├── theme.json
+│   │   ├── controller/
+│   │   ├── dialogs/
+│   │   ├── helpers/
+│   │   ├── pages/
+│   │   ├── shell/
+│   │   ├── widgets/
+│   │   └── workers/
+│   └── update/
+│       ├── __init__.py
+│       └── updater.py
+├── tencent/
+│   ├── __init__.py
+│   └── provider/
+│       ├── __init__.py
+│       ├── navigation.py
+│       ├── parser.py
+│       ├── runtime.py
+│       ├── runtime_answerers.py
+│       ├── runtime_flow.py
+│       ├── runtime_interactions.py
+│       └── submission.py
+└── wjx/
+   ├── __init__.py
+   ├── assets/
+   ├── cli/
+   ├── core/
+   ├── modes/
+   ├── network/
+   ├── provider/
+   │   ├── __init__.py
+   │   ├── _submission_core.py
+   │   ├── detection.py
+   │   ├── html_parser.py
+   │   ├── html_parser_choice.py
+   │   ├── html_parser_common.py
+   │   ├── html_parser_matrix.py
+   │   ├── html_parser_rules.py
+   │   ├── navigation.py
+   │   ├── parser.py
+   │   ├── questions/
+   │   ├── runtime.py
+   │   └── submission.py
+   ├── ui/
+   └── utils/
 ```
 
-## 目录结构（`wjx/`、`software/`、`tencent/`）
+</details>
 
-```markdown
-software/
-├── app/                   # 启动入口、版本、运行路径、QSettings 门面
-├── assets/                # 程序内置资源（地区数据、协议文本等）
-├── core/                  # 共享执行核心
-│   ├── ai/                # AI 填空共享逻辑
-│   ├── config/            # 配置结构与编解码
-│   ├── engine/            # 共享执行流程；runner.py 仅保留薄入口，浏览器生命周期/停止策略/提交判定/线程主循环已拆到 browser_session_service.py、run_stop_policy.py、submission_service.py、execution_loop.py
-│   ├── modes/             # 作答模式与时长控制
-│   ├── persona/           # 人设与上下文生成
-│   ├── psychometrics/     # 心理测量题辅助逻辑；orientation.py 负责按最终配比推断题目方向/维度锚点/反向题，joint_optimizer.py 负责“保比例优先”的整批联合优化与样本槽位答案计划
-│   ├── questions/         # 题目配置、分布、共享判定与文本共享常量；config.py 仅保留门面导出，schema.py/default_builder.py/normalization.py/validation.py 才是当前权威拆分；questions/multiple.py 仅保留多选执行入口，限制解析权威在 multiple_limits.py
-│   └── task/              # 事件总线与执行模型；当前权威模型为 ExecutionConfig + ExecutionState，task_context.py 仅保留执行配置/状态数据结构，不再保留 TaskContext 过渡别名
-├── integrations/
-│   └── ai/                # AI API 适配器
-├── io/
-│   ├── config/            # 配置读写、导入导出；__init__.py 直接导出 codec/store 权威接口，不保留 load_save.py 中转层
-│   ├── qr/                # 二维码工具
-│   ├── markdown/          # Markdown 工具
-│   └── reports/           # 使用记录等输出
-├── logging/               # 日志工具
-├── network/
-│   ├── http/              # httpx 客户端封装
-│   ├── browser/           # 浏览器驱动
-│   └── proxy/             # 代理 API / 会话 / 策略 / 地区 / 代理池；session/auth.py 仅保留状态与入口，HTTP/归一化/模型拆到 session/client.py、normalize.py、models.py
-├── providers/             # 平台识别、注册、分发总入口；contracts.py 统一 SurveyDefinition 契约，registry.py 负责 provider 对象分发
-├── system/                # Windows/系统级能力（安全存储、注册表、电源管理）
-├── ui/
-│   ├── shell/             # 主窗口、启动页、页面装配
-│   ├── controller/        # Qt 协调器；run_controller_parts/runtime.py 已拆成 runtime_constants.py、runtime_random_ip.py、runtime_init_gate.py、runtime_execution.py
-│   ├── helpers/           # UI 侧辅助门面
-│   │   ├── fluent_tooltip.py # Fluent tooltip 安装器
-│   │   └── qfluent_compat.py # QFluentWidgets 动画 / InfoBar 稳定性补丁
-│   ├── pages/
-│   │   ├── workbench/     # dashboard（page.py 负责首页骨架，parts/ 下含 survey_parse.py、config_io.py、run_actions.py）/question_editor（单栏配置向导已拆成 wizard_dialog.py + wizard_search.py + wizard_navigation.py + wizard_cards.py + wizard_sections_*.py）/runtime_panel/strategy（题目策略：条件规则 + 维度分组；dimension_panel.py 负责面板装配，dimension_sections.py 负责分组区块与跨表拖拽）/log_panel
-│   │   └── settings/      # 应用程序设置页；settings.py 负责页面骨架，统一复用 ui/widgets/setting_cards.py 中的卡片组件，不再保留 settings/group_widgets.py
-│   └── widgets/           # 通用组件（contact_form 已拆成包，widget.py 只做主组装，输入/附件/验证码/赞助/提交拆到 constants.py、inputs.py、attachments.py、verification.py、donation.py、submission.py；旧 time_range_slider 已移除）
-└── update/                # 更新检查与升级
+## PR 流程
+1. **Fork** 仓库并创建特性分支。
+2. **开发**：
+   - 共享代码进入 `software/`。
+   - 平台专属逻辑进入对应的 `provider/` 子目录。
+   - 保持顶层包（`wjx/`、`tencent/`）简洁，仅保留包标记。
+3. **自测**：建议至少手动跑一次核心流程。
+4. **提交**：PR 描述请写明改动目的、测试结果，如果有的话关联相关 Issue。
 
-tencent/
-├── __init__.py            # 包标记文件；真正平台实现请直接看 provider/
-└── provider/              # 腾讯问卷专属实现（解析、运行时、导航、提交）；runtime.py 仅保留答题入口，完成页/提交流程判断权威在 runtime_flow.py，交互/答题拆到 runtime_interactions.py、runtime_answerers.py
+## 开发规范
+- **模块化**：按职责拆分文件，避免“巨型文件”；新功能应放入对应的子目录。
+- **UI 组件**：使用 `QfluentWidgets` 原生组件，保持界面风格统一。
+- **友好说明**：输出信息应简洁易懂，面向小白用户，避免过度使用专业术语。
+- **文档规范**：尽可能少地使用 emoji 表情符号。使用 HTML 标签折叠过长的文本内容，保持文档清晰。
 
-wjx/
-├── __init__.py            # 包标记文件；仅保留版本信息，真实实现在 provider/ 子模块
-└── provider/              # 问卷星专属实现（解析、检测、导航、运行时、提交、questions/ 题型执行器）；html_parser.py 已拆到 html_parser_common.py、html_parser_choice.py、html_parser_matrix.py、html_parser_rules.py，questions/multiple.py 仅保留多选执行入口，限制/DOM/规则拆到 multiple_limits.py、multiple_dom.py、multiple_rules.py，不额外保留 helper 转发层
-```
-
-## PR 流程（推荐）
-1. Fork 仓库本仓库
-2. 开发遵守三主包边界原则：
-   - **共享代码** → `software/`（GUI、配置、执行引擎等）
-   - **问卷星专属** → `wjx/provider/`（平台特定的解析、导航、提交和题型执行）
-   - **腾讯问卷专属** → `tencent/provider/`（平台特定的解析、导航、提交和运行逻辑）
-   - **顶层包** → 仅保留包标记文件，不要把实现代码再塞回 `tencent/`、`wjx/` 目录
-3. 自测：先运行 `python CI/python_ci.py` 做编译/Ruff/Pyright 快检；涉及导入链或窗口启动时再运行 `python CI/python_ci.py --full`；涉及真实问卷解析变更时再运行 `python -m unittest CI.test_live_survey_parsers -v`；至少手动跑一次核心流程（启动APP、加载问卷、配置参数、开始执行），确保无报错
-4. 提交：保持清晰提交信息，必要时补充中文注释和变更说明
-5. PR 描述：写明变更目的、主要改动点、测试方式与结果，关联相关 Issue（如有）
-
-## 代码与文档风格
-- **目录结构** - 维持现有模块划分，新功能按职责放到对应目录，不要把无关功能堆进一个文件
-- **UI 组件** - 优先使用 `QfluentWidgets` 原生组件保持统一风格
-- **文档/提示信息** - 使用简洁易懂的中文，避免专业术语堆砌，让小白用户也能理解
-
-## 行为要求
-- **明确用途** - 仅用于授权测试或学习。严禁伪造学术数据、非法刷问卷、污染他人数据
-- **举报违规** - 发现不当使用请邮件 `mail@hungrym0.top` 举报
-
-欢迎贡献 PR 改进以下方向：
-- 增加新的问卷题型支持（请参考 [问卷星网页结构解析指南](doc/wjx-web-structure.md)）
-- 增加新的问卷平台支持
-- 性能优化与用户体验改进
-- 文档完善与示例补充
-
-感谢你的贡献！
-
+欢迎贡献新的题型支持、平台适配或性能优化，感谢你的支持！

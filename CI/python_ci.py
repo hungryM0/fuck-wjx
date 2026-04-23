@@ -24,6 +24,7 @@ from CI.python_checks.common import (
     run_module_import_checks,
     run_pyright_check,
     run_ruff_check,
+    run_unit_tests,
     run_window_smoke_check,
 )
 
@@ -74,6 +75,7 @@ def main() -> int:
         print("[INFO] Pyright diagnostics: enabled")
     else:
         print("[INFO] Pyright diagnostics: disabled (--no-pyright)")
+    print("[INFO] Unit tests: enabled")
     if quick_mode:
         print("[INFO] Module import checks: skipped (use --full to enable)")
         print("[INFO] Main window smoke check: skipped (use --full to enable)")
@@ -84,6 +86,7 @@ def main() -> int:
     compile_issues = run_compile_checks(compile_targets)
     ruff_issues, ruff_error = run_ruff_check(target_dirs)
     pyright_issues, pyright_error = run_pyright_check(target_dirs) if pyright_mode else ([], None)
+    unit_test_issue = run_unit_tests()
     import_issues = run_module_import_checks(modules) if args.full else []
     window_issue = run_window_smoke_check() if args.full else None
 
@@ -94,23 +97,31 @@ def main() -> int:
         print(f"[ERROR] {pyright_error}")
         return 2
 
-    total_issues = len(compile_issues) + len(ruff_issues) + len(pyright_issues) + len(import_issues) + (1 if window_issue else 0)
+    total_issues = (
+        len(compile_issues)
+        + len(ruff_issues)
+        + len(pyright_issues)
+        + (1 if unit_test_issue else 0)
+        + len(import_issues)
+        + (1 if window_issue else 0)
+    )
     elapsed = time.perf_counter() - start_time
 
     print(f"[INFO] Compile issues: {len(compile_issues)}")
     print(f"[INFO] Ruff diagnostics: {len(ruff_issues)}")
     if pyright_mode:
         print(f"[INFO] Pyright diagnostics: {len(pyright_issues)}")
+    print(f"[INFO] Unit test failures: {1 if unit_test_issue else 0}")
     print(f"[INFO] Module import failures: {len(import_issues)}")
     print(f"[INFO] Main window smoke failures: {1 if window_issue else 0}")
     print(f"[INFO] Elapsed time: {elapsed:.2f}s")
 
     if total_issues == 0:
         if quick_mode:
-            print("[PASS] Quick checks passed: compile, Ruff, and Pyright checks all succeeded.")
+            print("[PASS] Quick checks passed: compile, Ruff, Pyright, and unit tests all succeeded.")
             print("[INFO] For import and main window smoke checks, run: python CI/python_ci.py --full")
         else:
-            print("[PASS] Full checks passed: compile, Ruff, Pyright, module import, and main window smoke checks all succeeded.")
+            print("[PASS] Full checks passed: compile, Ruff, Pyright, unit tests, module import, and main window smoke checks all succeeded.")
         return 0
 
     print(f"[FAIL] Found {total_issues} issue(s):")
@@ -118,6 +129,8 @@ def main() -> int:
     print_issues("[Ruff diagnostics]", ruff_issues)
     if pyright_mode:
         print_issues("[Pyright diagnostics]", pyright_issues)
+    if unit_test_issue:
+        print_issues("[Unit test failures]", [unit_test_issue])
     print_issues("[Module import failures]", import_issues)
     if window_issue:
         print_issues("[Main window smoke failures]", [window_issue])

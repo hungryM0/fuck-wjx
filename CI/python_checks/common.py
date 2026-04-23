@@ -27,6 +27,7 @@ RUFF_SELECT = "F"
 CHILD_RESULT_PREFIX = "__WJX_CHECK__"
 IMPORT_TIMEOUT_SECONDS = 12
 WINDOW_SMOKE_TIMEOUT_SECONDS = 25
+UNIT_TEST_TIMEOUT_SECONDS = int(os.environ.get("SURVEY_CONTROLLER_UNIT_TEST_TIMEOUT_SECONDS", "120"))
 PYRIGHT_TIMEOUT_SECONDS = int(os.environ.get("SURVEY_CONTROLLER_PYRIGHT_TIMEOUT_SECONDS", "90"))
 UNICODE_SPACE_TRANSLATION = str.maketrans({
     "\u00a0": " ",
@@ -458,6 +459,47 @@ def run_window_smoke_check() -> dict | None:
     }
 
 
+def run_unit_tests() -> dict | None:
+    env = make_child_env()
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "CI/unit_tests",
+                "-t",
+                ".",
+                "-v",
+            ],
+            cwd=str(ROOT_DIR),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=UNIT_TEST_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "phase": "unit",
+            "message": f"Unit tests timed out (>{UNIT_TEST_TIMEOUT_SECONDS}s).",
+        }
+
+    if result.returncode == 0:
+        return None
+
+    summary = summarize_child_output(result.stdout, result.stderr) or "Unit tests failed."
+    return {
+        "phase": "unit",
+        "message": summary,
+        "stdout": (result.stdout or "").strip(),
+        "stderr": (result.stderr or "").strip(),
+    }
+
+
 def print_issues(title: str, issues: Iterable[dict]) -> None:
     issue_list = list(issues)
     if not issue_list:
@@ -499,6 +541,21 @@ def print_issues(title: str, issues: Iterable[dict]) -> None:
             if traceback_text:
                 print("   Runtime traceback:")
                 for line in traceback_text.splitlines():
+                    print(f"   {line}")
+            continue
+
+        if phase == "unit":
+            print(f"{index}. Unit tests")
+            print(f"   {item['message']}")
+            stdout_text = item.get("stdout")
+            stderr_text = item.get("stderr")
+            if stdout_text:
+                print("   unittest stdout:")
+                for line in stdout_text.splitlines()[-12:]:
+                    print(f"   {line}")
+            if stderr_text:
+                print("   unittest stderr:")
+                for line in stderr_text.splitlines()[-12:]:
                     print(f"   {line}")
             continue
 

@@ -35,6 +35,9 @@ jobs:
       - name: Run Pyright check
         run: python -m CI.python_checks.pyright_check
 
+      - name: Run unit tests
+        run: python -m CI.python_checks.unit_test_check
+
       - name: Run module import check
         if: ${{ github.event_name != 'push' }}
         run: python -m CI.python_checks.import_check
@@ -45,4 +48,4 @@ jobs:
 
       - name: Run live survey parser regression tests
         if: ${{ github.event_name != 'push' }}
-        run: python -m unittest CI.test_live_survey_parsers -v
+        run: python -m unittest CI.live_tests.test_survey_parsers -v

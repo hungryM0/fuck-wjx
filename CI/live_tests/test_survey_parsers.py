@@ -3,21 +3,14 @@
 
 from __future__ import annotations
 
-import json
 import unittest
-from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from tencent.provider.parser import parse_qq_survey
 from wjx.provider.parser import parse_wjx_survey
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-WJX_CONFIG_PATH = ROOT_DIR / "configs" / "debug.json"
-QQ_CONFIG_PATH = ROOT_DIR / "configs" / "腾讯问卷.json"
-
-
-def _load_config(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+WJX_SURVEY_URL = "https://v.wjx.cn/vm/tgRSrWd.aspx"
+QQ_SURVEY_URL = "https://wj.qq.com/s2/26070328/fa89/"
 
 
 def _question_by_num(questions: list[dict], question_num: int) -> dict:
@@ -42,8 +35,7 @@ class LiveSurveyParserRegressionTests(unittest.TestCase):
         raise AssertionError("解析器未返回结果")
 
     def test_wjx_live_parser_regression(self) -> None:
-        cfg = _load_config(WJX_CONFIG_PATH)
-        questions, title = self._run_with_retry(parse_wjx_survey, str(cfg.get("url") or ""))
+        questions, title = self._run_with_retry(parse_wjx_survey, WJX_SURVEY_URL)
 
         self.assertEqual(title, "example")
         self.assertEqual(len(questions), 11)
@@ -94,8 +86,7 @@ class LiveSurveyParserRegressionTests(unittest.TestCase):
         self.assertEqual(q11["text_input_labels"], ["填空1", "填空2", "填空3"])
 
     def test_qq_live_parser_regression(self) -> None:
-        cfg = _load_config(QQ_CONFIG_PATH)
-        questions, title = self._run_with_retry(parse_qq_survey, str(cfg.get("url") or ""))
+        questions, title = self._run_with_retry(parse_qq_survey, QQ_SURVEY_URL)
 
         self.assertEqual(title, "大学生就业意向调研问卷")
         self.assertEqual(len(questions), 17)
