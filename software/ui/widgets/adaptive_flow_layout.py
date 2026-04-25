@@ -14,6 +14,7 @@ No extra UI behaviors, just layout.
 from __future__ import annotations
 
 from math import ceil
+from typing import cast
 
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtWidgets import QLayout, QLayoutItem, QWidget
@@ -47,13 +48,13 @@ class AdaptiveFlowLayout(QLayout):
             return self._items[index]
         return None
 
-    def takeAt(self, index: int) -> QLayoutItem | None:
+    def takeAt(self, index: int) -> QLayoutItem:
         if 0 <= index < len(self._items):
             return self._items.pop(index)
-        return None
+        return cast(QLayoutItem, None)
 
-    def expandingDirections(self) -> Qt.Orientations:
-        return Qt.Orientations()
+    def expandingDirections(self) -> Qt.Orientation:
+        return Qt.Orientation(0)
 
     def hasHeightForWidth(self) -> bool:
         return True
@@ -69,7 +70,11 @@ class AdaptiveFlowLayout(QLayout):
         return self.minimumSize()
 
     def minimumSize(self) -> QSize:
-        left, top, right, bottom = self.getContentsMargins()
+        margins = self.contentsMargins()
+        left = margins.left()
+        top = margins.top()
+        right = margins.right()
+        bottom = margins.bottom()
         width = left + right
         height = top + bottom
 
@@ -92,7 +97,11 @@ class AdaptiveFlowLayout(QLayout):
     # ---- Internal ----
 
     def _effective_rect(self, rect: QRect) -> QRect:
-        left, top, right, bottom = self.getContentsMargins()
+        margins = self.contentsMargins()
+        left = margins.left()
+        top = margins.top()
+        right = margins.right()
+        bottom = margins.bottom()
         return QRect(
             rect.x() + left,
             rect.y() + top,
@@ -151,6 +160,10 @@ class AdaptiveFlowLayout(QLayout):
                 y += self._v_spacing
 
         # Return used height including margins.
-        left, top, right, bottom = self.getContentsMargins()
+        margins = self.contentsMargins()
+        left = margins.left()
+        top = margins.top()
+        right = margins.right()
+        bottom = margins.bottom()
         used_h = (y - r.y()) + top + bottom
         return used_h
