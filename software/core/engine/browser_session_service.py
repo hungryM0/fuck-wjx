@@ -21,6 +21,15 @@ from software.network.session_policy import (
     _select_user_agent_for_session,
 )
 
+_HEADED_RUNTIME_WINDOW_SIZE = (550, 650)
+
+
+def _resolve_runtime_window_size(config: ExecutionConfig) -> Optional[tuple[int, int]]:
+    """无头模式保留较大视口，避免部分站点在小视口下退化为空白页。"""
+    if bool(getattr(config, "headless_mode", False)):
+        return None
+    return _HEADED_RUNTIME_WINDOW_SIZE
+
 
 class BrowserSessionService:
     """封装单次浏览器会话的创建、注册、销毁逻辑。"""
@@ -157,7 +166,10 @@ class BrowserSessionService:
 
         self._register_driver(self.driver)
         setattr(self.driver, "_submit_proxy_address", submit_proxy_address)
-        self.driver.set_window_size(550, 650)
+        runtime_window_size = _resolve_runtime_window_size(self.config)
+        if runtime_window_size is not None:
+            width, height = runtime_window_size
+            self.driver.set_window_size(width, height)
         return active_browser
 
 

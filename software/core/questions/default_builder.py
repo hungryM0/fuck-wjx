@@ -201,9 +201,10 @@ def build_default_question_entries(
         rating_max = int(q.get("rating_max") or 0)
         title_text = str(q.get("title") or "").strip()
         forced_option_text = str(q.get("forced_option_text") or "").strip()
+        forced_texts_raw = q.get("forced_texts")
         forced_texts = [
             str(item or "").strip()
-            for item in (q.get("forced_texts") if isinstance(q.get("forced_texts"), list) else [])
+            for item in (forced_texts_raw if isinstance(forced_texts_raw, list) else [])
             if str(item or "").strip()
         ]
         attached_option_selects = q.get("attached_option_selects") if isinstance(q.get("attached_option_selects"), list) else []
