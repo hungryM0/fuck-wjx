@@ -218,38 +218,6 @@ def _read_session() -> RandomIPSession:
     with _session_lock:
         return replace(_session)
 
-def _update_quota(
-    remaining_quota: float,
-    total_hint: Optional[float] = None,
-    *,
-    used_hint: Optional[float] = None,
-    quota_known: Optional[bool] = None,
-) -> RandomIPSession:
-    global _session
-    with _session_lock:
-        _ensure_loaded()
-        remaining, total_quota, used_quota = _normalize_quota_state(
-            remaining_quota=remaining_quota,
-            total_quota=total_hint if total_hint is not None else _session.total_quota,
-            used_quota=used_hint,
-            default_total_quota=float(_session.total_quota or 0.0),
-        )
-        session = replace(
-            _session,
-            remaining_quota=remaining,
-            total_quota=total_quota,
-            used_quota=used_quota,
-            quota_known=_normalize_quota_known(
-                user_id=_session.user_id,
-                total_quota=total_quota,
-                used_quota=used_quota,
-                quota_known=_session.quota_known if quota_known is None else quota_known,
-            ),
-        )
-        _session = session
-        _persist_session_locked()
-        return replace(session)
-
 def get_device_id() -> str:
     return _read_session().device_id
 
@@ -464,20 +432,6 @@ def _require_authenticated_session() -> RandomIPSession:
         return session
     raise RandomIPAuthError("not_authenticated")
 
-def update_remaining_quota(
-    remaining_quota: float,
-    *,
-    total_hint: Optional[float] = None,
-    used_hint: Optional[float] = None,
-    quota_known: Optional[bool] = None,
-) -> RandomIPSession:
-    return _update_quota(
-        max(0.0, float(remaining_quota or 0.0)),
-        total_hint=total_hint,
-        used_hint=used_hint,
-        quota_known=quota_known,
-    )
-
 def extract_proxy(*, minute: int, pool: str, area: Optional[str], num: int = 1, upstream: str = "default") -> Dict[str, Any]:
     session = _require_authenticated_session()
     body: Dict[str, Any] = {
@@ -533,26 +487,29 @@ def get_quota_snapshot() -> Dict[str, Any]:
 def get_fresh_quota_snapshot() -> Dict[str, Any]:
     return _build_quota_snapshot(_require_authenticated_session())
 
-def sync_quota_snapshot_from_server() -> Dict[str, Any]:
+def sync_quota_snapshot_from_server(*, emit_logs: bool = True) -> Dict[str, Any]:
     session = _require_authenticated_session()
-    logging.info(
-        "随机IP额度服务端同步开始：endpoint=%s user_id=%s",
-        _endpoint_name(AUTH_TRIAL_ENDPOINT),
-        int(session.user_id or 0),
-    )
+    if emit_logs:
+        logging.info(
+            "随机IP额度服务端同步开始：endpoint=%s user_id=%s",
+            _endpoint_name(AUTH_TRIAL_ENDPOINT),
+            int(session.user_id or 0),
+        )
     response = _post_json(AUTH_TRIAL_ENDPOINT, json_body={})
     if int(getattr(response, "status_code", 0) or 0) != 200:
         error = _extract_error_payload(response)
-        logging.warning(
-            "随机IP额度服务端同步失败：endpoint=%s status=%s detail=%s",
-            _endpoint_name(AUTH_TRIAL_ENDPOINT),
-            int(getattr(response, "status_code", 0) or 0),
-            error.detail,
-        )
+        if emit_logs:
+            logging.warning(
+                "随机IP额度服务端同步失败：endpoint=%s status=%s detail=%s",
+                _endpoint_name(AUTH_TRIAL_ENDPOINT),
+                int(getattr(response, "status_code", 0) or 0),
+                error.detail,
+            )
         raise error
     refreshed = _parse_session_response(response, fallback_session=session)
     persisted = _set_session(refreshed, verify_auth_persistence=True)
-    _log_session_event(logging.INFO, "随机IP额度已与服务端同步", persisted)
+    if emit_logs:
+        _log_session_event(logging.INFO, "随机IP额度已与服务端同步", persisted)
     return _build_quota_snapshot(persisted)
 
 def _apply_quota_payload(data: Dict[str, Any], *, log_context: str = "随机IP额度响应") -> RandomIPSession:

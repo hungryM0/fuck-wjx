@@ -4,7 +4,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from software.core.engine.execution_loop import ExecutionLoop
+from software.core.engine.execution_loop import ExecutionLoop, _load_survey_page
 from software.core.task import ExecutionConfig, ExecutionState
 
 
@@ -29,7 +29,41 @@ class _FakeBrowserSession:
         self.shutdown_called += 1
 
 
+class _FakeDriver:
+    def __init__(self, failures: int = 0):
+        self.failures = failures
+        self.calls: list[tuple[str, int, str]] = []
+
+    def get(self, url: str, timeout: int = 20000, wait_until: str = "domcontentloaded") -> None:
+        self.calls.append((url, timeout, wait_until))
+        if self.failures > 0:
+            self.failures -= 1
+            raise TimeoutError("goto timeout")
+
+
 class ExecutionLoopTests(unittest.TestCase):
+    def test_load_survey_page_keeps_default_timeout_for_non_credamo(self) -> None:
+        config = ExecutionConfig(url="https://example.com", survey_provider="wjx")
+        driver = _FakeDriver()
+
+        _load_survey_page(driver, config)
+
+        self.assertEqual(driver.calls, [("https://example.com", 20000, "domcontentloaded")])
+
+    def test_load_survey_page_retries_credamo_with_commit_after_timeout(self) -> None:
+        config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
+        driver = _FakeDriver(failures=1)
+
+        _load_survey_page(driver, config)
+
+        self.assertEqual(
+            driver.calls,
+            [
+                ("https://www.credamo.com/answer.html#/s/demo", 45000, "domcontentloaded"),
+                ("https://www.credamo.com/answer.html#/s/demo", 45000, "commit"),
+            ],
+        )
+
     def test_run_thread_finishes_cleanly_when_url_is_empty(self) -> None:
         config = ExecutionConfig(url="")
         state = ExecutionState(config=config)

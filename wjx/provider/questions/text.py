@@ -327,17 +327,6 @@ def should_mark_as_multi_text(type_code: Any, option_count: int, text_input_coun
     return (option_count or 0) <= 1 and text_input_count >= 2
 
 
-def should_treat_as_text_like(type_code: Any, option_count: int, text_input_count: int) -> bool:
-    """判断是否应视为填空类题型"""
-    _KNOWN_NON_TEXT_QUESTION_TYPES = {"3", "4", "5", "6", "7", "8", "11"}
-    normalized = str(type_code).strip() if type_code is not None else ""
-    if normalized in ("1", "2"):
-        return text_input_count > 0
-    if normalized in _KNOWN_NON_TEXT_QUESTION_TYPES:
-        return False
-    return (option_count or 0) <= 1 and text_input_count > 0
-
-
 def text(
     driver: BrowserDriver,
     current: int,

@@ -132,11 +132,6 @@ def _coerce_proxy_lease(item: Any, *, source: str = "") -> Optional[ProxyLease]:
     return None
 
 
-def _proxy_lease_address(item: Any) -> str:
-    lease = _coerce_proxy_lease(item)
-    return lease.address if lease is not None else ""
-
-
 # ==================== TTL 检查 ====================
 
 def get_proxy_required_ttl_seconds(answer_duration_range_seconds: Optional[Tuple[int, int]]) -> int:
@@ -219,18 +214,6 @@ def _proxy_is_responsive(proxy_address: str, skip_for_default: bool = True) -> b
         return False
     logging.info(f"代理 {masked_proxy} 验证通过，耗时 {elapsed:.2f}s")
     return True
-
-
-def _proxy_is_responsive_fast(proxy_address: str) -> bool:
-    proxy_address = _normalize_proxy_address(proxy_address) or ""
-    if not proxy_address:
-        return False
-    proxies = {"http": proxy_address, "https": proxy_address}
-    try:
-        response = http_client.get(PROXY_HEALTH_CHECK_URL, proxies=proxies, timeout=3)
-        return response.status_code < 400
-    except Exception:
-        return False
 
 
 def normalize_proxy_address(proxy_address: Optional[str]) -> Optional[str]:

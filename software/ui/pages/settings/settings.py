@@ -26,6 +26,7 @@ from software.app.config import (
 )
 from software.logging.action_logger import bind_logged_action, log_action
 from software.logging.log_utils import log_suppressed_exception
+from software.providers.survey_cache import clear_survey_parse_cache
 from software.ui.widgets.setting_cards import (
     ComboSettingCard,
     SwitchSettingCard,
@@ -129,8 +130,16 @@ class SettingsPage(ScrollArea):
             "恢复所有设置项的默认值",
             self.tools_group,
         )
+        self.clear_survey_cache_card = PushSettingCard(
+            "删除缓存",
+            FluentIcon.DELETE,
+            "删除问卷解析缓存",
+            "清空本地问卷解析缓存，下次解析时会重新抓取问卷结构",
+            self.tools_group,
+        )
         self.tools_group.addSettingCard(self.restart_card)
         self.tools_group.addSettingCard(self.reset_ui_card)
+        self.tools_group.addSettingCard(self.clear_survey_cache_card)
         layout.addWidget(self.tools_group)
 
         layout.addStretch(1)
@@ -186,6 +195,15 @@ class SettingsPage(ScrollArea):
             scope="CONFIG",
             event="reset_ui_settings",
             target="reset_ui_card",
+            page="settings",
+            forward_signal_args=False,
+        )
+        bind_logged_action(
+            self.clear_survey_cache_card.clicked,
+            self._on_clear_survey_parse_cache,
+            scope="CONFIG",
+            event="clear_survey_parse_cache",
+            target="clear_survey_cache_card",
             page="settings",
             forward_signal_args=False,
         )
@@ -384,6 +402,46 @@ class SettingsPage(ScrollArea):
         InfoBar.success("", "已恢复默认设置", parent=self.window(), position=InfoBarPosition.TOP, duration=2000)
 
         log_action("CONFIG", "reset_ui_settings", "reset_ui_card", "settings", result="success")
+
+    def _on_clear_survey_parse_cache(self):
+        box = MessageBox(
+            "删除问卷解析缓存",
+            "确定要删除本地问卷解析缓存吗？\n删除后下次解析会重新请求问卷数据。",
+            self.window() or self,
+        )
+        box.yesButton.setText("删除")
+        box.cancelButton.setText("取消")
+        if not box.exec():
+            log_action("CONFIG", "clear_survey_parse_cache", "clear_survey_cache_card", "settings", result="cancelled")
+            return
+
+        log_action("CONFIG", "clear_survey_parse_cache", "clear_survey_cache_card", "settings", result="confirmed")
+        try:
+            removed_count = clear_survey_parse_cache()
+        except Exception as exc:
+            log_action(
+                "CONFIG",
+                "clear_survey_parse_cache",
+                "clear_survey_cache_card",
+                "settings",
+                result="failed",
+                level=logging.ERROR,
+                detail=exc,
+            )
+            log_suppressed_exception("_on_clear_survey_parse_cache: clear_survey_parse_cache()", exc, level=logging.ERROR)
+            InfoBar.error("", f"删除问卷解析缓存失败：{exc}", parent=self.window(), position=InfoBarPosition.TOP, duration=3000)
+            return
+
+        detail = "没有可删除的问卷解析缓存" if removed_count <= 0 else f"已删除 {removed_count} 项问卷解析缓存"
+        InfoBar.success("", detail, parent=self.window(), position=InfoBarPosition.TOP, duration=2500)
+        log_action(
+            "CONFIG",
+            "clear_survey_parse_cache",
+            "clear_survey_cache_card",
+            "settings",
+            result="success",
+            payload={"removed_count": removed_count},
+        )
 
     def _on_download_source_changed(self):
         idx = self.download_source_combo.currentIndex()

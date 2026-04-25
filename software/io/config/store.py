@@ -31,13 +31,6 @@ def _sanitize_filename(value: Optional[str], max_length: int = 80) -> str:
     return sanitized[:max_length]
 
 
-def _ensure_configs_dir() -> str:
-    base = get_runtime_directory()
-    target = os.path.join(base, "configs")
-    os.makedirs(target, exist_ok=True)
-    return target
-
-
 def _default_config_path() -> str:
     return os.path.join(get_runtime_directory(), "config.json")
 

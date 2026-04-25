@@ -14,7 +14,6 @@ from software.core.questions.schema import (
     _TEXT_RANDOM_NAME_TOKEN,
     _TEXT_RANDOM_NONE,
     _infer_option_count,
-    get_entry_type_label,
 )
 from software.core.questions.validation import validate_question_config
 
@@ -32,6 +31,5 @@ __all__ = [
     "_infer_option_count",
     "build_default_question_entries",
     "configure_probabilities",
-    "get_entry_type_label",
     "validate_question_config",
 ]

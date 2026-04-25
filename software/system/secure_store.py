@@ -127,10 +127,6 @@ def read_secret(key: str) -> SecretReadResult:
     return SecretReadResult(value=value, exists=True, status="ok")
 
 
-def get_secret(key: str) -> str:
-    return read_secret(key).value
-
-
 def delete_secret(key: str) -> None:
     if winreg is None:
         return

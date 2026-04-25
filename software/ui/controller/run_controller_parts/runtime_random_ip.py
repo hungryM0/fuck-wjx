@@ -21,8 +21,11 @@ from software.network.proxy.session import (
 )
 from software.network.proxy import get_proxy_minute_by_answer_seconds, is_custom_proxy_api_active
 from software.network.proxy.policy import get_random_ip_counter_snapshot_local
+from software.logging.log_utils import log_deduped_message, reset_deduped_log_message
 
 from .runtime_constants import PROXY_SOURCE_BENEFIT
+
+_RANDOM_IP_SYNC_FAILURE_LOG_KEY = "random_ip_quota_sync_failure"
 
 if TYPE_CHECKING:
     from software.io.config import RuntimeConfig
@@ -177,14 +180,19 @@ class RunControllerRandomIPMixin:
         def _worker() -> None:
             succeeded = False
             try:
-                snapshot = sync_quota_snapshot_from_server()
+                snapshot = sync_quota_snapshot_from_server(emit_logs=not silent)
                 used, total = self._resolve_counter_snapshot_values(snapshot)
                 self._apply_random_ip_counter(adapter, used=used, total=total, custom_api=False)
+                reset_deduped_log_message(_RANDOM_IP_SYNC_FAILURE_LOG_KEY)
                 succeeded = True
             except Exception as exc:
                 message = format_random_ip_error(exc)
                 log_level = logging.INFO if silent else logging.WARNING
-                logging.log(log_level, "同步随机IP额度失败：%s", message)
+                log_deduped_message(
+                    _RANDOM_IP_SYNC_FAILURE_LOG_KEY,
+                    f"同步随机IP额度失败：{message}",
+                    level=log_level,
+                )
                 if not silent:
                     self._show_random_ip_message(adapter, "随机IP同步失败", message, level="warning")
                 try:

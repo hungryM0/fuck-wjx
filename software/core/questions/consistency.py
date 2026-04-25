@@ -12,12 +12,6 @@ _thread_local = threading.local()
 _CONDITION_MODES = {"selected", "not_selected"}
 _ACTION_MODES = {"must_select", "must_not_select"}
 _SUPPORTED_RULE_TYPE_CODES = {"3", "4", "5", "6"}
-_QUESTION_TYPE_LABELS = {
-    "3": "单选题",
-    "4": "多选题",
-    "5": "量表题",
-    "6": "矩阵题",
-}
 
 
 @dataclass
@@ -59,15 +53,6 @@ def _normalize_question_type_code(value: Any) -> str:
         return str(value or "").strip()
     except Exception:
         return ""
-
-
-def get_answer_rule_question_type_label(question: Any) -> str:
-    if not isinstance(question, dict):
-        return ""
-    type_code = _normalize_question_type_code(question.get("type_code"))
-    if type_code == "5" and question.get("is_rating"):
-        return "评价题"
-    return _QUESTION_TYPE_LABELS.get(type_code, "")
 
 
 def question_supports_answer_rule(question: Any) -> bool:

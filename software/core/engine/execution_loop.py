@@ -23,8 +23,43 @@ from software.network.browser import (
     is_playwright_startup_environment_error,
 )
 from software.network.session_policy import _discard_unresponsive_proxy, _record_bad_proxy_and_maybe_pause
+from software.providers.common import SURVEY_PROVIDER_CREDAMO, normalize_survey_provider
 from software.providers.registry import fill_survey as _provider_fill_survey
 from software.providers.registry import is_device_quota_limit_page as _provider_is_device_quota_limit_page
+
+_DEFAULT_PAGE_LOAD_TIMEOUT_MS = 20000
+_CREDAMO_PAGE_LOAD_TIMEOUT_MS = 45000
+
+
+def _load_survey_page(driver: Any, config: ExecutionConfig) -> None:
+    provider = normalize_survey_provider(getattr(config, "survey_provider", None))
+    if provider != SURVEY_PROVIDER_CREDAMO:
+        driver.get(config.url, timeout=_DEFAULT_PAGE_LOAD_TIMEOUT_MS)
+        return
+
+    last_exc: Exception | None = None
+    attempts = (
+        (_CREDAMO_PAGE_LOAD_TIMEOUT_MS, "domcontentloaded"),
+        (_CREDAMO_PAGE_LOAD_TIMEOUT_MS, "commit"),
+    )
+    for attempt_index, (timeout_ms, wait_until) in enumerate(attempts, start=1):
+        try:
+            driver.get(config.url, timeout=timeout_ms, wait_until=wait_until)
+            if attempt_index > 1:
+                logging.info("Credamo 问卷加载重试成功：wait_until=%s timeout=%sms", wait_until, timeout_ms)
+            return
+        except Exception as exc:
+            last_exc = exc
+            logging.warning(
+                "Credamo 问卷加载第%s次失败：wait_until=%s timeout=%sms，准备%s",
+                attempt_index,
+                wait_until,
+                timeout_ms,
+                "重试" if attempt_index < len(attempts) else "结束",
+            )
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Credamo 问卷加载失败")
 
 
 class ExecutionLoop:
@@ -160,7 +195,7 @@ class ExecutionLoop:
                                 stop_signal.set()
                             break
                     else:
-                        session.driver.get(self.config.url)
+                        _load_survey_page(session.driver, self.config)
                 except Exception as exc:
                     stopped = self.stop_policy.record_failure(
                         stop_signal,

@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from dataclasses import asdict
@@ -227,6 +228,27 @@ def parse_survey_with_cache(url: str, parser: Callable[[str], SurveyDefinition])
         return definition
 
 
+def clear_survey_parse_cache() -> int:
+    """清空问卷解析缓存目录，返回删除的文件/目录数量。"""
+    cache_dir = _cache_directory()
+    if not os.path.isdir(cache_dir):
+        return 0
+
+    removed_count = 0
+    with _LOCK:
+        for entry in os.scandir(cache_dir):
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    shutil.rmtree(entry.path)
+                else:
+                    os.remove(entry.path)
+                removed_count += 1
+            except FileNotFoundError:
+                continue
+    return removed_count
+
+
 __all__ = [
+    "clear_survey_parse_cache",
     "parse_survey_with_cache",
 ]

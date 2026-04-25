@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 """启动界面模块 - 使用 QFluentWidgets 的 SplashScreen 组件。"""
 
-__all__ = ["BootSplash", "create_boot_splash", "get_boot_splash", "finish_boot_splash"]
+from __future__ import annotations
 
 from typing import Optional
 
@@ -15,6 +13,8 @@ from qfluentwidgets import IndeterminateProgressBar, SplashScreen, isDarkTheme
 
 from software.app.runtime_paths import get_resource_path
 from software.app.version import __VERSION__
+
+__all__ = ["BootSplash", "create_boot_splash", "finish_boot_splash"]
 
 
 class BootSplash:
@@ -168,11 +168,6 @@ def create_boot_splash(window: QWidget) -> BootSplash:
     """创建启动画面"""
     global _boot_splash
     _boot_splash = BootSplash(window)
-    return _boot_splash
-
-
-def get_boot_splash() -> Optional[BootSplash]:
-    """获取当前启动画面实例"""
     return _boot_splash
 
 

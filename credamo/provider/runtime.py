@@ -23,6 +23,7 @@ from software.network.browser import BrowserDriver
 _CREDAMO_DYNAMIC_WAIT_TIMEOUT_MS = 20000
 _CREDAMO_DYNAMIC_WAIT_POLL_SECONDS = 0.5
 _CREDAMO_PAGE_TRANSITION_TIMEOUT_MS = 12000
+_CREDAMO_DYNAMIC_REVEAL_TIMEOUT_MS = 2000
 _QUESTION_NUMBER_RE = re.compile(r"\d+")
 _NEXT_BUTTON_MARKERS = ("下一页", "next", "继续")
 _SUBMIT_BUTTON_MARKERS = ("提交", "完成", "交卷", "submit", "finish", "done")
@@ -153,6 +154,60 @@ def _question_signature(page: Any) -> Tuple[Tuple[str, str], ...]:
     return tuple(signature)
 
 
+def _runtime_question_key(page: Any, root: Any, question_num: int) -> str:
+    try:
+        question_id = str(root.get_attribute("id") or root.get_attribute("data-id") or "").strip()
+    except Exception:
+        question_id = ""
+    if question_id:
+        return f"id:{question_id}"
+    return f"num:{question_num}|text:{_root_text(page, root)[:120]}"
+
+
+def _unanswered_question_roots(
+    page: Any,
+    roots: List[Any],
+    answered_keys: set[str],
+    *,
+    fallback_start: int = 0,
+) -> List[Tuple[Any, int, str]]:
+    pending: List[Tuple[Any, int, str]] = []
+    for local_index, root in enumerate(roots, start=1):
+        question_num = _question_number_from_root(page, root, fallback_start + local_index)
+        key = _runtime_question_key(page, root, question_num)
+        if key in answered_keys:
+            continue
+        pending.append((root, question_num, key))
+    return pending
+
+
+def _wait_for_dynamic_question_roots(
+    page: Any,
+    answered_keys: set[str],
+    stop_signal: Optional[threading.Event],
+    *,
+    timeout_ms: int = _CREDAMO_DYNAMIC_REVEAL_TIMEOUT_MS,
+    fallback_start: int = 0,
+) -> List[Any]:
+    deadline = time.monotonic() + max(0.0, timeout_ms / 1000)
+    latest_roots: List[Any] = []
+    while not _abort_requested(stop_signal):
+        try:
+            latest_roots = _question_roots(page)
+        except Exception:
+            logging.info("Credamo 等待动态题目显示时读取页面失败", exc_info=True)
+            latest_roots = []
+        if _unanswered_question_roots(page, latest_roots, answered_keys, fallback_start=fallback_start):
+            return latest_roots
+        if time.monotonic() >= deadline:
+            return latest_roots
+        if stop_signal is not None:
+            stop_signal.wait(_CREDAMO_DYNAMIC_WAIT_POLL_SECONDS)
+        else:
+            time.sleep(_CREDAMO_DYNAMIC_WAIT_POLL_SECONDS)
+    return latest_roots
+
+
 def _click_element(page: Any, element: Any) -> bool:
     try:
         element.scroll_into_view_if_needed(timeout=2000)
@@ -216,32 +271,111 @@ def _text_inputs(root: Any) -> List[Any]:
         return []
 
 
-def _answer_single_like(page: Any, root: Any, weights: Any, option_count: int) -> bool:
-    inputs = _option_inputs(root, "radio")
-    targets = _option_click_targets(root, "radio")
-    target_count = len(inputs) if inputs else len(targets)
-    if target_count <= 0:
+def _normalize_runtime_text(value: Any) -> str:
+    try:
+        text = str(value or "").strip()
+    except Exception:
+        return ""
+    return re.sub(r"\s+", " ", text)
+
+
+def _element_text(page: Any, element: Any) -> str:
+    for reader in (
+        lambda: element.inner_text(timeout=500),
+        lambda: element.text_content(timeout=500),
+        lambda: element.get_attribute("value"),
+        lambda: page.evaluate("el => (el.innerText || el.textContent || el.value || '').trim()", element),
+    ):
+        try:
+            text = _normalize_runtime_text(reader())
+        except Exception:
+            text = ""
+        if text:
+            return text
+    return ""
+
+
+def _question_title_text(page: Any, root: Any) -> str:
+    for selector in (".question-title", ".qstTitle", ".title", "[class*='title']"):
+        try:
+            title_node = root.query_selector(selector)
+        except Exception:
+            title_node = None
+        if title_node is None:
+            continue
+        text = _element_text(page, title_node)
+        if text:
+            return text
+    return _root_text(page, root)
+
+
+def _resolve_forced_choice_index(page: Any, root: Any, option_texts: List[str]) -> Optional[int]:
+    if not option_texts:
+        return None
+    try:
+        from credamo.provider import parser as credamo_parser
+    except Exception:
+        return None
+
+    title_text = _question_title_text(page, root)
+    extra_fragments = [_root_text(page, root)]
+    forced_index, _forced_text = credamo_parser._extract_force_select_option(
+        title_text,
+        option_texts,
+        extra_fragments=extra_fragments,
+    )
+    if forced_index is None:
+        forced_index, _forced_text = credamo_parser._extract_arithmetic_option(
+            title_text,
+            option_texts,
+            extra_fragments=extra_fragments,
+        )
+    if forced_index is None or forced_index < 0:
+        return None
+    if forced_index >= len(option_texts):
+        return None
+    return forced_index
+
+
+def _click_single_choice_at_index(page: Any, root: Any, target_index: int, inputs: List[Any], targets: List[Any]) -> bool:
+    if target_index < 0:
         return False
-    probabilities = normalize_droplist_probs(weights, target_count)
-    target_index = weighted_index(probabilities)
-    if inputs:
-        target = inputs[min(target_index, len(inputs) - 1)]
+    if inputs and target_index < len(inputs):
+        target = inputs[target_index]
         if _click_element(page, target) and _is_checked(page, target):
             return True
-    if targets:
-        target = targets[min(target_index, len(targets) - 1)]
+    if targets and target_index < len(targets):
+        target = targets[target_index]
         if _click_element(page, target):
             refreshed_inputs = _option_inputs(root, "radio")
             if target_index < len(refreshed_inputs) and _is_checked(page, refreshed_inputs[target_index]):
                 return True
-    if inputs:
-        target = inputs[min(target_index, len(inputs) - 1)]
+            if not refreshed_inputs:
+                return True
+    if inputs and target_index < len(inputs):
+        target = inputs[target_index]
         try:
             if bool(page.evaluate("el => { el.click(); return !!el.checked; }", target)):
                 return True
         except Exception:
             pass
     return False
+
+
+def _answer_single_like(page: Any, root: Any, weights: Any, option_count: int) -> bool:
+    inputs = _option_inputs(root, "radio")
+    targets = _option_click_targets(root, "radio")
+    target_count = len(inputs) if inputs else len(targets)
+    if target_count <= 0:
+        return False
+    forced_source = targets if targets else inputs
+    forced_option_texts = [_element_text(page, item) for item in forced_source]
+    forced_index = _resolve_forced_choice_index(page, root, forced_option_texts)
+    if forced_index is not None and _click_single_choice_at_index(page, root, forced_index, inputs, targets):
+        return True
+    probabilities = normalize_droplist_probs(weights, target_count)
+    target_index = weighted_index(probabilities)
+    return _click_single_choice_at_index(page, root, min(target_index, target_count - 1), inputs, targets)
 
 
 def _positive_multiple_indexes(weights: Any, option_count: int) -> List[int]:
@@ -347,6 +481,57 @@ def _answer_dropdown(page: Any, root: Any, weights: Any) -> bool:
             option_count = 1
     probabilities = normalize_droplist_probs(weights, option_count)
     target_index = min(weighted_index(probabilities), option_count - 1)
+
+    def visible_dropdown_options() -> List[Any]:
+        script = r"""
+() => {
+  const visible = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width >= 4 && rect.height >= 4;
+  };
+        return Array.from(document.querySelectorAll('.el-select-dropdown__item')).filter(visible);
+}
+"""
+        try:
+            handle = page.evaluate_handle(script)
+        except Exception:
+            return []
+        try:
+            properties = handle.get_properties()
+            return [prop.as_element() for prop in properties.values() if prop.as_element() is not None]
+        finally:
+            try:
+                handle.dispose()
+            except Exception:
+                pass
+
+    visible_options = visible_dropdown_options()
+    if visible_options:
+        forced_option_texts = [_element_text(page, item) for item in visible_options]
+        forced_index = _resolve_forced_choice_index(page, root, forced_option_texts)
+        if forced_index is not None and forced_index < len(visible_options):
+            target = visible_options[forced_index]
+            if _click_element(page, target):
+                try:
+                    page.wait_for_timeout(120)
+                except Exception:
+                    time.sleep(0.12)
+                current_value = _input_value(page, value_input)
+                if current_value and current_value != previous_value:
+                    return True
+        target = visible_options[min(target_index, len(visible_options) - 1)]
+        if _click_element(page, target):
+            try:
+                page.wait_for_timeout(120)
+            except Exception:
+                time.sleep(0.12)
+            current_value = _input_value(page, value_input)
+            if current_value and current_value != previous_value:
+                return True
+
     try:
         value_input.focus()
     except Exception:
@@ -407,6 +592,13 @@ def _answer_order(page: Any, root: Any) -> bool:
     return clicked
 
 
+def _locator_is_visible(locator: Any) -> bool:
+    try:
+        return bool(locator.is_visible(timeout=300))
+    except Exception:
+        return False
+
+
 def _navigation_action(page: Any) -> Optional[str]:
     locator = page.locator("button, a, [role='button'], input[type='button'], input[type='submit']")
     try:
@@ -416,6 +608,8 @@ def _navigation_action(page: Any) -> Optional[str]:
     found_next = False
     for index in range(count):
         item = locator.nth(index)
+        if not _locator_is_visible(item):
+            continue
         try:
             text = str(item.text_content(timeout=500) or "").strip()
         except Exception:
@@ -439,7 +633,7 @@ def _click_navigation(page: Any, action: str) -> bool:
         primary_count = int(primary_button.count())
     except Exception:
         primary_count = 0
-    if primary_count > 0:
+    if primary_count > 0 and _locator_is_visible(primary_button):
         try:
             primary_text = str(primary_button.text_content(timeout=500) or "").strip()
         except Exception:
@@ -471,6 +665,8 @@ def _click_navigation(page: Any, action: str) -> bool:
         count = 0
     for index in range(count):
         item = locator.nth(index)
+        if not _locator_is_visible(item):
+            continue
         try:
             text = str(item.text_content(timeout=500) or "").strip()
         except Exception:
@@ -568,55 +764,69 @@ def brush_credamo(
         if not roots:
             raise RuntimeError("Credamo 当前页未识别到题目")
 
-        for local_index, root in enumerate(roots, start=1):
-            if _abort_requested(active_stop):
+        answered_keys: set[str] = set()
+        page_fallback_start = answered_steps
+        while not _abort_requested(active_stop):
+            pending_roots = _unanswered_question_roots(page, roots, answered_keys, fallback_start=page_fallback_start)
+            if not pending_roots:
+                break
+
+            for root, question_num, question_key in pending_roots:
+                if _abort_requested(active_stop):
+                    try:
+                        state.update_thread_status(thread_name, "已中断", running=False)
+                    except Exception:
+                        pass
+                    return False
+
+                answered_keys.add(question_key)
+                config_entry = config.question_config_index_map.get(question_num)
+                if config_entry is None:
+                    fallback_kind = _question_kind_from_root(page, root)
+                    logging.info("Credamo 第%s题未匹配到配置，页面题型=%s，题面=%s", question_num, fallback_kind, _root_text(page, root))
+                    answered_steps = min(total_steps, answered_steps + 1)
+                    continue
+
+                entry_type, config_index = config_entry
                 try:
-                    state.update_thread_status(thread_name, "已中断", running=False)
+                    state.update_thread_step(
+                        thread_name,
+                        min(total_steps, answered_steps + 1),
+                        total_steps,
+                        status_text="答题中",
+                        running=True,
+                    )
                 except Exception:
-                    pass
-                return False
+                    logging.info("更新 Credamo 线程进度失败", exc_info=True)
 
-            question_num = _question_number_from_root(page, root, answered_steps + local_index)
-            config_entry = config.question_config_index_map.get(question_num)
-            if config_entry is None:
-                fallback_kind = _question_kind_from_root(page, root)
-                logging.info("Credamo 第%s题未匹配到配置，页面题型=%s，题面=%s", question_num, fallback_kind, _root_text(page, root))
-                continue
+                if entry_type == "single":
+                    weights = config.single_prob[config_index] if config_index < len(config.single_prob) else -1
+                    _answer_single_like(page, root, weights, 0)
+                elif entry_type in {"scale", "score"}:
+                    weights = config.scale_prob[config_index] if config_index < len(config.scale_prob) else -1
+                    _answer_scale(page, root, weights)
+                elif entry_type == "dropdown":
+                    weights = config.droplist_prob[config_index] if config_index < len(config.droplist_prob) else -1
+                    _answer_dropdown(page, root, weights)
+                elif entry_type == "multiple":
+                    weights = config.multiple_prob[config_index] if config_index < len(config.multiple_prob) else []
+                    _answer_multiple(page, root, weights)
+                elif entry_type == "order":
+                    _answer_order(page, root)
+                elif entry_type in {"text", "multi_text"}:
+                    text_config = config.texts[config_index] if config_index < len(config.texts) else [DEFAULT_FILL_TEXT]
+                    _answer_text(root, text_config)
+                else:
+                    logging.info("Credamo 第%s题暂未接入题型：%s", question_num, entry_type)
+                answered_steps = min(total_steps, answered_steps + 1)
+                time.sleep(random.uniform(0.08, 0.22))
 
-            entry_type, config_index = config_entry
-            try:
-                state.update_thread_step(
-                    thread_name,
-                    min(total_steps, answered_steps + local_index),
-                    total_steps,
-                    status_text="答题中",
-                    running=True,
-                )
-            except Exception:
-                logging.info("更新 Credamo 线程进度失败", exc_info=True)
-
-            if entry_type == "single":
-                weights = config.single_prob[config_index] if config_index < len(config.single_prob) else -1
-                _answer_single_like(page, root, weights, 0)
-            elif entry_type in {"scale", "score"}:
-                weights = config.scale_prob[config_index] if config_index < len(config.scale_prob) else -1
-                _answer_scale(page, root, weights)
-            elif entry_type == "dropdown":
-                weights = config.droplist_prob[config_index] if config_index < len(config.droplist_prob) else -1
-                _answer_dropdown(page, root, weights)
-            elif entry_type == "multiple":
-                weights = config.multiple_prob[config_index] if config_index < len(config.multiple_prob) else []
-                _answer_multiple(page, root, weights)
-            elif entry_type == "order":
-                _answer_order(page, root)
-            elif entry_type in {"text", "multi_text"}:
-                text_config = config.texts[config_index] if config_index < len(config.texts) else [DEFAULT_FILL_TEXT]
-                _answer_text(root, text_config)
-            else:
-                logging.info("Credamo 第%s题暂未接入题型：%s", question_num, entry_type)
-            time.sleep(random.uniform(0.08, 0.22))
-
-        answered_steps = min(total_steps, answered_steps + len(roots))
+            roots = _wait_for_dynamic_question_roots(
+                page,
+                answered_keys,
+                active_stop,
+                fallback_start=page_fallback_start,
+            )
         navigation_action = _navigation_action(page)
         if navigation_action != "next":
             break

@@ -22,6 +22,8 @@ _NOISY_LOG_PATTERNS = (
     "QFluentWidgets Pro is now released",
     "https://qfluentwidgets.com/pages/pro",
 )
+_DEDUPED_LOG_STATE: dict[str, str] = {}
+_DEDUPED_LOG_LOCK = threading.Lock()
 
 
 def _should_filter_noise(message: str) -> bool:
@@ -64,6 +66,41 @@ def log_suppressed_exception(
     except Exception as inner_exc:
         # 记录日志失败不应影响主流程
         _safe_internal_log("log_suppressed_exception failed", inner_exc)
+
+
+def log_deduped_message(
+    key: str,
+    message: str,
+    *,
+    level: int = logging.INFO,
+) -> bool:
+    """同一 key 下只记录内容发生变化的日志，避免后台任务刷屏。"""
+    normalized_key = str(key or "").strip()
+    normalized_message = str(message or "").strip()
+    if not normalized_key or not normalized_message:
+        return False
+    try:
+        with _DEDUPED_LOG_LOCK:
+            if _DEDUPED_LOG_STATE.get(normalized_key) == normalized_message:
+                return False
+            _DEDUPED_LOG_STATE[normalized_key] = normalized_message
+        logging.log(level, normalized_message)
+        return True
+    except Exception as inner_exc:
+        _safe_internal_log("log_deduped_message failed", inner_exc)
+        return False
+
+
+def reset_deduped_log_message(key: str) -> None:
+    """清空去重状态，让后续同类问题重新输出一次。"""
+    normalized_key = str(key or "").strip()
+    if not normalized_key:
+        return
+    try:
+        with _DEDUPED_LOG_LOCK:
+            _DEDUPED_LOG_STATE.pop(normalized_key, None)
+    except Exception as inner_exc:
+        _safe_internal_log("reset_deduped_log_message failed", inner_exc)
 
 
 class StreamToLogger:
@@ -448,33 +485,6 @@ def save_log_records_to_file(
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("\n".join(text_records))
     return file_path
-
-
-def dump_threads_to_file(tag: str, runtime_directory: str) -> Optional[str]:
-    try:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logs_dir = _ensure_logs_dir(runtime_directory)
-        file_path = os.path.join(logs_dir, f"thread_dump_{tag}_{ts}.txt")
-        frames = sys._current_frames()
-        lines: List[str] = []
-        for tid, frame in frames.items():
-            thr = next((t for t in threading.enumerate() if t.ident == tid), None)
-            name = thr.name if thr else "Unknown"
-            lines.append(f"### Thread {name} (id={tid}) ###")
-            lines.extend(traceback.format_stack(frame))
-            lines.append("")
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-        logging.info(f"[Debug] 线程堆栈已导出：{file_path}")
-        return file_path
-    except Exception as exc:
-        logging.info(f"导出线程堆栈失败: {exc}", exc_info=True)
-        return None
-
-
-def log_popup_info(title: str, message: str, **kwargs: Any):
-    """Informational popup routed to the active UI handler (if any)."""
-    return _dispatch_popup("info", title, message, default=True)
 
 
 def log_popup_error(title: str, message: str, **kwargs: Any):

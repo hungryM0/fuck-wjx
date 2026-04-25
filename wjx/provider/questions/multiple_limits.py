@@ -20,24 +20,12 @@ from software.app.config import (
     _SELECTION_KEYWORDS_EN,
 )
 from software.network.browser import By, BrowserDriver, NoSuchElementException
-from .multiple_dom import _WARNED_OPTION_LOCATOR
-from .multiple_rules import _WARNED_PROB_MISMATCH
 
 _DETECTED_MULTI_LIMITS: Dict[Tuple[str, int], Optional[int]] = {}
 
 _DETECTED_MULTI_LIMIT_RANGES: Dict[Tuple[str, int], Tuple[Optional[int], Optional[int]]] = {}
 
 _REPORTED_MULTI_LIMITS: Set[Tuple[str, int]] = set()
-
-
-def clear_multiple_choice_cache() -> None:
-    """清理多选题缓存（在任务结束时调用）"""
-    global _DETECTED_MULTI_LIMITS, _DETECTED_MULTI_LIMIT_RANGES, _REPORTED_MULTI_LIMITS, _WARNED_PROB_MISMATCH, _WARNED_OPTION_LOCATOR
-    _DETECTED_MULTI_LIMITS.clear()
-    _DETECTED_MULTI_LIMIT_RANGES.clear()
-    _REPORTED_MULTI_LIMITS.clear()
-    _WARNED_PROB_MISMATCH.clear()
-    _WARNED_OPTION_LOCATOR.clear()
 
 def _safe_positive_int(value: Any) -> Optional[int]:
     """安全转换为正整数"""

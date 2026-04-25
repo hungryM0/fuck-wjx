@@ -77,19 +77,6 @@ def _require_valid_user_id(value: Any) -> int:
         raise RandomIPAuthError("invalid_response:user_id_invalid")
     return int(value)
 
-def _to_optional_non_negative_int(value: Any) -> Optional[int]:
-    if value is None:
-        return None
-    if isinstance(value, str) and not value.strip():
-        return None
-    try:
-        parsed = int(value)
-    except Exception:
-        return None
-    if parsed < 0:
-        return None
-    return parsed
-
 def _to_optional_bool(value: Any) -> Optional[bool]:
     if value is None:
         return None

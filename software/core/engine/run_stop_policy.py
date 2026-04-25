@@ -8,7 +8,7 @@ import time
 from typing import Any, Optional
 
 from software.core.engine.failure_reason import FailureReason
-from software.core.task import EVENT_TARGET_REACHED, ExecutionConfig, ExecutionState, bus as _event_bus
+from software.core.task import ExecutionConfig, ExecutionState
 
 
 class RunStopPolicy:
@@ -131,7 +131,6 @@ class RunStopPolicy:
         self.state.mark_terminal_stop("target_reached", message="目标份数已达成")
         if stop_signal:
             stop_signal.set()
-        _event_bus.emit(EVENT_TARGET_REACHED, state=self.state, config=self.config)
 
 
 __all__ = ["RunStopPolicy"]

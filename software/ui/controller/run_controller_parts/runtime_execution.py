@@ -13,8 +13,7 @@ from software.app.config import STOP_FORCE_WAIT_SECONDS, app_settings, get_bool_
 from software.core.engine.failure_reason import FailureReason
 from software.core.engine.runner import run
 from software.core.questions.config import configure_probabilities, validate_question_config
-from software.core.task import EVENT_TASK_STARTED, EVENT_TASK_STOPPED, ExecutionConfig, ExecutionState, ProxyLease
-from software.core.task import bus as _event_bus
+from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
 from software.io.config import RuntimeConfig
 from software.network.proxy import set_proxy_occupy_minute_by_answer_duration
 
@@ -255,8 +254,6 @@ class RunControllerExecutionMixin:
             self.runStateChanged.emit(True)
         self._status_timer.start()
 
-        _event_bus.emit(EVENT_TASK_STARTED, state=execution_state, config=execution_config)
-
         logging.debug("创建%s个工作线程", config.threads)
         threads: List[threading.Thread] = []
         for idx in range(config.threads):
@@ -302,7 +299,6 @@ class RunControllerExecutionMixin:
         self._stopped_by_stop_run = False
         self._status_timer.stop()
         self._release_sleep_blocker()
-        _event_bus.emit(EVENT_TASK_STOPPED)
         if not already_stopped:
             self.running = False
             self.runStateChanged.emit(False)

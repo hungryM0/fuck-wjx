@@ -17,7 +17,7 @@ from wjx.provider._submission_core import (
     _is_device_quota_limit_page,
     submit,
 )
-from software.core.task import EVENT_CAPTCHA_DETECTED, ExecutionState, bus as _event_bus
+from software.core.task import ExecutionState
 from software.logging.log_utils import log_popup_confirm, log_popup_warning
 from software.network.browser import By, BrowserDriver
 
@@ -159,7 +159,6 @@ def _trigger_aliyun_captcha_stop(
         ctx._aliyun_captcha_stop_triggered = True
 
     logging.warning("检测到问卷星阿里云智能验证，已触发全局暂停。")
-    _event_bus.emit(EVENT_CAPTCHA_DETECTED, ctx=ctx)
 
     if stop_signal and not stop_signal.is_set():
         stop_signal.set()

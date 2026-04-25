@@ -48,6 +48,7 @@ def _normalize_question(question: Dict[str, Any], provider: str, index: int) -> 
     option_texts = _normalize_text_list(normalized.get("option_texts"))
     row_texts = _normalize_text_list(normalized.get("row_texts"))
     text_input_labels = _normalize_text_list(normalized.get("text_input_labels"))
+    forced_texts = _normalize_text_list(normalized.get("forced_texts"))
     fillable_options_raw = normalized.get("fillable_options")
     if isinstance(fillable_options_raw, list):
         fillable_options: List[int] = []
@@ -79,6 +80,7 @@ def _normalize_question(question: Dict[str, Any], provider: str, index: int) -> 
         "option_texts": option_texts,
         "forced_option_index": normalized.get("forced_option_index"),
         "forced_option_text": str(normalized.get("forced_option_text") or "").strip(),
+        "forced_texts": forced_texts,
         "fillable_options": fillable_options,
         "attached_option_selects": attached_option_selects,
         "has_attached_option_select": bool(normalized.get("has_attached_option_select") or attached_option_selects),

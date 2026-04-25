@@ -201,6 +201,11 @@ def build_default_question_entries(
         rating_max = int(q.get("rating_max") or 0)
         title_text = str(q.get("title") or "").strip()
         forced_option_text = str(q.get("forced_option_text") or "").strip()
+        forced_texts = [
+            str(item or "").strip()
+            for item in (q.get("forced_texts") if isinstance(q.get("forced_texts"), list) else [])
+            if str(item or "").strip()
+        ]
         attached_option_selects = q.get("attached_option_selects") if isinstance(q.get("attached_option_selects"), list) else []
         survey_provider = normalize_survey_provider(q.get("provider"), default=detected_provider)
         provider_question_id = str(q.get("provider_question_id") or "").strip()
@@ -367,6 +372,9 @@ def build_default_question_entries(
                 forced_option_index + 1,
                 forced_option_text or "无文本",
             )
+        if forced_texts and q_type in ("text", "multi_text"):
+            texts = list(forced_texts)
+            logging.info("题号%s检测到指定填空内容，已自动填入固定答案", q.get("num"))
 
         fillable_option_indices = (
             _normalize_fillable_option_indices(
