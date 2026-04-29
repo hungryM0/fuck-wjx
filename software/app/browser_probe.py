@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
-from software.network.browser import create_playwright_driver
+from software.network.browser import classify_playwright_startup_error, create_playwright_driver
 
 
 BROWSER_PROBE_ARG = "--sc-browser-probe"
@@ -139,10 +139,11 @@ def probe_browser_environment(request: BrowserProbeRequest) -> BrowserProbeResul
             elapsed_ms=max(0, int((time.monotonic() - start_time) * 1000)),
         )
     except Exception as exc:
+        error_info = classify_playwright_startup_error(exc)
         return BrowserProbeResult(
             ok=False,
-            error_kind="launch_failed",
-            message=str(exc or "浏览器环境快速检查失败"),
+            error_kind=error_info.kind,
+            message=error_info.message or "浏览器环境快速检查失败",
             elapsed_ms=max(0, int((time.monotonic() - start_time) * 1000)),
         )
     finally:

@@ -3,7 +3,6 @@ import logging
 import threading
 import time
 from typing import Optional
-from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 
@@ -12,30 +11,29 @@ from software.core.questions.utils import extract_text_from_element as _extract_
 from software.core.task import ExecutionState
 from software.network.browser import By, BrowserDriver, NoSuchElementException, TimeoutException
 import software.network.http as http_client
-from software.network.proxy import (
-    PROXY_SOURCE_CUSTOM,
-    get_proxy_required_ttl_seconds,
-    get_proxy_source,
-    proxy_lease_has_sufficient_ttl,
-)
-from software.network.proxy.pool import coerce_proxy_lease, mask_proxy_for_log, normalize_proxy_address
-from software.network.proxy.api import fetch_proxy_batch
+from software.network.proxy.pool import mask_proxy_for_log
 from software.app.config import (
     HEADLESS_SUBMIT_CLICK_SETTLE_DELAY,
     HEADLESS_SUBMIT_INITIAL_DELAY,
     SUBMIT_CLICK_SETTLE_DELAY,
     SUBMIT_INITIAL_DELAY,
 )
-from software.app.config import get_proxy_auth
 from software.logging.log_utils import log_suppressed_exception
+from wjx.provider.submission_pages import (
+    _is_device_quota_limit_page,
+    _is_wjx_domain,
+    _looks_like_wjx_survey_url,
+    _normalize_url_for_compare,
+    _page_looks_like_wjx_questionnaire,
+    _resolve_completion_url,
+)
+from wjx.provider.submission_proxy import (
+    _acquire_replacement_submit_proxy,
+    _build_submit_proxy_url,
+    _is_retryable_submit_proxy_error,
+)
 
 _HEADLESS_SUBMIT_PROXY_RETRY_LIMIT = 1
-_HEADLESS_SUBMIT_RETRYABLE_ERRORS = (
-    httpx.RemoteProtocolError,
-    httpx.ConnectError,
-    httpx.ConnectTimeout,
-    httpx.ReadTimeout,
-)
 def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
     """点击“提交”按钮（简单版）。"""
 
@@ -185,18 +183,6 @@ def _parse_submit_response(raw_text: str) -> tuple[str, str]:
     return code.strip(), payload.strip()
 
 
-def _resolve_completion_url(submit_url: str, payload: str) -> str:
-    """把提交响应中的完成页路径转为可访问 URL。"""
-    value = str(payload or "").strip()
-    if not value:
-        return ""
-    if value.startswith("http://") or value.startswith("https://"):
-        return value
-    if value.startswith("/"):
-        return urljoin(submit_url, value)
-    return urljoin(submit_url, f"/{value}")
-
-
 def _sanitize_request_headers(headers: dict) -> dict:
     """过滤不适合原样透传给 httpx 的头字段。"""
     if not isinstance(headers, dict):
@@ -231,153 +217,6 @@ def _collect_page_cookies(driver: BrowserDriver, submit_url: str) -> dict:
     return cookie_map
 
 
-def _build_submit_proxy_url(proxy_address: Optional[str]) -> Optional[str]:
-    """构造给 httpx 使用的代理 URL，必要时补全认证信息。"""
-    normalized = normalize_proxy_address(proxy_address)
-    if not normalized:
-        return None
-
-    try:
-        parsed = urlparse(normalized)
-    except Exception:
-        return normalized
-
-    scheme = str(parsed.scheme or "http").lower()
-    host = str(parsed.hostname or "").strip()
-    if not host:
-        return normalized
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    host_port = f"{host}:{parsed.port}" if parsed.port else host
-
-    username = parsed.username
-    password = parsed.password
-    if (
-        not username
-        and get_proxy_source() == PROXY_SOURCE_CUSTOM
-    ):
-        try:
-            auth = get_proxy_auth()
-            username, password = auth.split(":", 1)
-        except Exception:
-            username = None
-            password = None
-
-    if username:
-        user = quote(str(username), safe="")
-        pwd = quote("" if password is None else str(password), safe="")
-        netloc = f"{user}:{pwd}@{host_port}"
-    else:
-        netloc = host_port
-
-    return f"{scheme}://{netloc}"
-
-
-def _is_retryable_submit_proxy_error(exc: BaseException) -> bool:
-    return isinstance(exc, _HEADLESS_SUBMIT_RETRYABLE_ERRORS)
-
-
-def _required_submit_proxy_ttl_seconds(ctx: Optional[ExecutionState]) -> int:
-    if ctx is None:
-        return 20
-    return int(get_proxy_required_ttl_seconds(getattr(ctx, "answer_duration_range_seconds", (0, 0))))
-
-
-def _remove_proxy_from_ctx_pool(ctx: ExecutionState, proxy_address: Optional[str]) -> bool:
-    normalized = normalize_proxy_address(proxy_address)
-    if not normalized:
-        return False
-
-    removed = False
-    with ctx.lock:
-        retained = []
-        for item in list(ctx.proxy_ip_pool or []):
-            lease = coerce_proxy_lease(item)
-            if lease is None:
-                continue
-            if lease.address == normalized:
-                removed = True
-                continue
-            retained.append(lease)
-        ctx.proxy_ip_pool = retained
-    return removed
-
-
-def _pop_replacement_proxy_from_pool_locked(ctx: ExecutionState, current_proxy: Optional[str]) -> Optional[str]:
-    required_ttl = _required_submit_proxy_ttl_seconds(ctx)
-    current = normalize_proxy_address(current_proxy)
-    retained = []
-    selected = None
-    for item in list(ctx.proxy_ip_pool or []):
-        lease = coerce_proxy_lease(item)
-        if lease is None:
-            continue
-        if lease.address == current:
-            continue
-        if not proxy_lease_has_sufficient_ttl(lease, required_ttl_seconds=required_ttl):
-            logging.info("已丢弃即将过期的提交代理：%s", mask_proxy_for_log(lease.address))
-            continue
-        if selected is None:
-            selected = lease.address
-            continue
-        retained.append(lease)
-    ctx.proxy_ip_pool = retained
-    return selected
-
-
-def _acquire_replacement_submit_proxy(
-    driver: BrowserDriver,
-    ctx: Optional[ExecutionState],
-    *,
-    stop_signal: Optional[threading.Event],
-) -> Optional[str]:
-    if ctx is None or not bool(getattr(ctx, "random_proxy_ip_enabled", False)):
-        return None
-    if stop_signal and stop_signal.is_set():
-        return None
-
-    current_proxy = normalize_proxy_address(getattr(driver, "_submit_proxy_address", None))
-    removed_from_pool = _remove_proxy_from_ctx_pool(ctx, current_proxy)
-    if current_proxy:
-        logging.warning("无头提交代理疑似失效，已废弃：%s", mask_proxy_for_log(current_proxy))
-    elif removed_from_pool:
-        logging.info("已从代理池移除重复的失效提交代理")
-
-    with ctx.lock:
-        candidate = _pop_replacement_proxy_from_pool_locked(ctx, current_proxy)
-    if candidate:
-        setattr(driver, "_submit_proxy_address", candidate)
-        logging.info("无头提交改用代理池中的新代理：%s", mask_proxy_for_log(candidate))
-        return candidate
-
-    with ctx._proxy_fetch_lock:
-        with ctx.lock:
-            candidate = _pop_replacement_proxy_from_pool_locked(ctx, current_proxy)
-        if candidate:
-            setattr(driver, "_submit_proxy_address", candidate)
-            logging.info("无头提交改用代理池中的新代理：%s", mask_proxy_for_log(candidate))
-            return candidate
-
-        if stop_signal and stop_signal.is_set():
-            return None
-
-        try:
-            fetched = fetch_proxy_batch(expected_count=1, stop_signal=stop_signal)
-        except Exception as exc:
-            logging.warning("无头提交切换新代理失败：%s", exc)
-            return None
-        for item in fetched or []:
-            lease = coerce_proxy_lease(item)
-            candidate = lease.address if lease is not None else ""
-            if not candidate or candidate == current_proxy:
-                continue
-            if not proxy_lease_has_sufficient_ttl(lease, required_ttl_seconds=_required_submit_proxy_ttl_seconds(ctx)):
-                logging.info("已跳过即将过期的新提交代理：%s", mask_proxy_for_log(candidate))
-                continue
-            setattr(driver, "_submit_proxy_address", candidate)
-            logging.info("无头提交已切换为新提取代理：%s", mask_proxy_for_log(candidate))
-            return candidate
-    return None
 
 
 def _capture_submit_request_via_route(
@@ -677,152 +516,6 @@ def submit(
     _click_submit_confirm_button(driver, settle_delay=settle_delay)
 
 
-def _normalize_url_for_compare(value: str) -> str:
-    """用于比较的 URL 归一化：去掉 fragment，去掉首尾空白。"""
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    try:
-        parsed = urlparse(text)
-    except Exception:
-        return text
-    try:
-        if parsed.fragment:
-            parsed = parsed._replace(fragment="")
-        return parsed.geturl()
-    except Exception:
-        return text
-
-
-def _is_wjx_domain(url_value: str) -> bool:
-    try:
-        parsed = urlparse(str(url_value))
-    except Exception:
-        return False
-    host = (parsed.netloc or "").split(":", 1)[0].lower()
-    return bool(host == "wjx.cn" or host.endswith(".wjx.cn"))
-
-
-def _looks_like_wjx_survey_url(url_value: str) -> bool:
-    """粗略判断是否像问卷星问卷链接（用于“提交后分流到下一问卷”的识别）。"""
-    if not url_value:
-        return False
-    text = str(url_value).strip()
-    if not text:
-        return False
-    if not _is_wjx_domain(text):
-        return False
-    try:
-        parsed = urlparse(text)
-    except Exception:
-        return False
-    path = (parsed.path or "").lower()
-    if "complete" in path:
-        return False
-    if not path.endswith(".aspx"):
-        return False
-    # 常见路径：/vm/xxxxx.aspx、/jq/xxxxx.aspx、/vj/xxxxx.aspx
-    if any(segment in path for segment in ("/vm/", "/jq/", "/vj/")):
-        return True
-    return True
-
-
-def _page_looks_like_wjx_questionnaire(driver: BrowserDriver) -> bool:
-    """用 DOM 特征判断当前页是否为可作答的问卷页。"""
-    script = r"""
-        return (() => {
-            const normalize = (text) => (text || '').replace(/\s+/g, '').toLowerCase();
-            const bodyText = normalize(document.body?.innerText || '');
-            const completeMarkers = ['答卷已经提交', '感谢您的参与', '感谢参与'];
-            if (completeMarkers.some(m => bodyText.includes(m))) return false;
-
-            // 开屏“开始作答”页（还未展示题目）
-            const startLabels = [
-                '开始作答', '开始答题', '开始填写',
-                'startanswering', 'startsurvey', 'startquestionnaire',
-                'beginanswering', 'beginsurvey', 'beginquestionnaire'
-            ];
-            if (startLabels.some(label => bodyText.includes(label))) {
-                const startLike = Array.from(document.querySelectorAll('div, a, button, span, input[type="button"], input[type="submit"], [role="button"]')).some(el => {
-                    const t = normalize(el.innerText || el.textContent || el.value || '');
-                    return startLabels.includes(t);
-                });
-                if (startLike) return true;
-            }
-
-            const questionLike = document.querySelector(
-                '#div1, #divQuestion, [id^="divquestion"], .div_question, .question, .wjx_question, [topic]'
-            );
-
-            const actionLike = document.querySelector(
-                '#submit_button, #divSubmit, #ctlNext, #divNext, #btnNext, #next, ' +
-                '.next, .next-btn, .next-button, .btn-next, button[type="submit"], a.button.mainBgColor'
-            );
-
-            return !!(questionLike && actionLike);
-        })();
-    """
-    try:
-        return bool(driver.execute_script(script))
-    except Exception:
-        return False
-
-
-def _is_device_quota_limit_page(driver: BrowserDriver) -> bool:
-    """检测"设备已达到最大填写次数"提示页。"""
-    script = r"""
-        return (() => {
-            const text = (document.body?.innerText || '').replace(/\s+/g, '').toLowerCase();
-            if (!text) return false;
-
-            const limitMarkers = [
-                '设备已达到最大填写次数',
-                '已达到最大填写次数',
-                '达到最大填写次数',
-                '填写次数已达上限',
-                '超过最大填写次数',
-            ];
-            const hasLimit = limitMarkers.some(marker => text.includes(marker));
-            if (!hasLimit) return false;
-
-            const hasThanks = text.includes('感谢参与') || text.includes('感谢参与!');
-            const hasApology = text.includes('很抱歉') || text.includes('提示');
-            if (!(hasThanks || hasApology)) return false;
-
-            const questionLike = document.querySelector(
-                '#divQuestion, [id^="divquestion"], .div_question, .question, .wjx_question, [topic]'
-            );
-            if (questionLike) return false;
-
-            const startHints = [
-                '开始作答', '开始答题', '开始填写', '继续作答', '继续填写',
-                'startanswering', 'startsurvey', 'startquestionnaire',
-                'beginanswering', 'beginsurvey', 'beginquestionnaire',
-                'continueanswering', 'continuesurvey', 'resumeanswering', 'resumesurvey'
-            ];
-            if (startHints.some(hint => text.includes(hint))) return false;
-
-            const submitSelectors = [
-                '#submit_button',
-                '#divSubmit',
-                '#ctlNext',
-                '#SM_BTN_1',
-                '.submitDiv a',
-                '.btn-submit',
-                'button[type="submit"]',
-                'a.mainBgColor',
-            ];
-            if (submitSelectors.some(sel => document.querySelector(sel))) return false;
-
-            return true;
-        })();
-    """
-    try:
-        return bool(driver.execute_script(script))
-    except Exception:
-        return False
 
 
 

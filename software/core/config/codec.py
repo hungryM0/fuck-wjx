@@ -18,6 +18,11 @@ from software.providers.common import (
     ensure_questions_provider_fields,
     normalize_survey_provider,
 )
+from software.providers.contracts import (
+    SurveyQuestionMeta,
+    ensure_survey_question_metas,
+    survey_question_meta_to_dict,
+)
 from software.logging.log_utils import log_suppressed_exception
 from software.app.config import BROWSER_PREFERENCE, USER_AGENT_PRESETS
 
@@ -264,6 +269,16 @@ def deserialize_question_entry(data: Dict[str, Any]):
     )
 
 
+def _serialize_questions_info(questions: Any) -> List[Dict[str, Any]]:
+    serialized: List[Dict[str, Any]] = []
+    for item in list(questions or []):
+        if isinstance(item, SurveyQuestionMeta):
+            serialized.append(survey_question_meta_to_dict(item))
+        elif isinstance(item, dict):
+            serialized.append(dict(item))
+    return serialized
+
+
 def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     """将磁盘载荷规整为 RuntimeConfig。"""
 
@@ -422,8 +437,12 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
 
     questions_info_data = raw.get("questions_info") or []
     if isinstance(questions_info_data, list):
-        config.questions_info = ensure_questions_provider_fields(
+        normalized_questions = ensure_questions_provider_fields(
             questions_info_data,
+            default_provider=config.survey_provider,
+        )
+        config.questions_info = ensure_survey_question_metas(
+            normalized_questions,
             default_provider=config.survey_provider,
         )
     else:
@@ -473,6 +492,7 @@ def serialize_runtime_config(config: RuntimeConfig) -> Dict[str, Any]:
     payload["question_entries"] = [
         serialize_question_entry(entry) for entry in list(config.question_entries or [])
     ]
+    payload["questions_info"] = _serialize_questions_info(config.questions_info)
     payload["config_schema_version"] = CURRENT_CONFIG_SCHEMA_VERSION
     return payload
 

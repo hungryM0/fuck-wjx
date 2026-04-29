@@ -1,11 +1,12 @@
 """题目配置数据容器。"""
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog
 from qfluentwidgets import ScrollArea
 
 from software.core.questions.config import QuestionEntry
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_metas
 
 from .add_dialog import QuestionAddDialog
 from .utils import build_entry_info_list
@@ -19,27 +20,29 @@ class QuestionStore(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._entries: List[QuestionEntry] = []
-        self._questions_info: List[Dict[str, Any]] = []
-        self._entry_questions_info: List[Dict[str, Any]] = []
+        self._questions_info: List[SurveyQuestionMeta] = []
+        self._entry_questions_info: List[SurveyQuestionMeta] = []
 
     @property
     def entries(self) -> List[QuestionEntry]:
         return self._entries
 
     @property
-    def questions_info(self) -> List[Dict[str, Any]]:
+    def questions_info(self) -> List[SurveyQuestionMeta]:
         return self._questions_info
 
     @property
-    def entry_questions_info(self) -> List[Dict[str, Any]]:
+    def entry_questions_info(self) -> List[SurveyQuestionMeta]:
         return self._entry_questions_info
 
-    def set_questions(self, info: List[Dict[str, Any]], entries: List[QuestionEntry]):
-        self._questions_info = info or []
-        self.set_entries(entries, info)
+    def set_questions(self, info: List[SurveyQuestionMeta], entries: List[QuestionEntry]):
+        normalized_info = ensure_survey_question_metas(info or [])
+        self._questions_info = normalized_info
+        self.set_entries(entries, normalized_info)
 
-    def set_entries(self, entries: List[QuestionEntry], info: Optional[List[Dict[str, Any]]] = None):
-        self._questions_info = info or self._questions_info
+    def set_entries(self, entries: List[QuestionEntry], info: Optional[List[SurveyQuestionMeta]] = None):
+        if info is not None:
+            self._questions_info = ensure_survey_question_metas(info or [])
         self._entries = list(entries or [])
         self._entry_questions_info = build_entry_info_list(self._entries, self._questions_info)
         for idx, entry in enumerate(self._entries):
@@ -91,21 +94,21 @@ class QuestionPage(ScrollArea):
         return self.store.entries
 
     @property
-    def questions_info(self) -> List[Dict[str, Any]]:
+    def questions_info(self) -> List[SurveyQuestionMeta]:
         return self.store.questions_info
 
     @property
-    def entry_questions_info(self) -> List[Dict[str, Any]]:
+    def entry_questions_info(self) -> List[SurveyQuestionMeta]:
         return self.store.entry_questions_info
 
     def get_entries(self) -> List[QuestionEntry]:
         return self.store.get_entries()
 
     # ---------- data helpers ----------
-    def set_questions(self, info: List[Dict[str, Any]], entries: List[QuestionEntry]):
+    def set_questions(self, info: List[SurveyQuestionMeta], entries: List[QuestionEntry]):
         self.store.set_questions(info, entries)
 
-    def set_entries(self, entries: List[QuestionEntry], info: Optional[List[Dict[str, Any]]] = None):
+    def set_entries(self, entries: List[QuestionEntry], info: Optional[List[SurveyQuestionMeta]] = None):
         self.store.set_entries(entries, info)
 
     # ---------- UI actions ----------

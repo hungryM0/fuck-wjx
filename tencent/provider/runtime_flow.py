@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 from software.core.task import ExecutionState
 from software.network.browser import BrowserDriver
+from software.providers.contracts import SurveyQuestionMeta
 
 QQ_COMPLETION_MARKERS = (
     "感谢您的参与",
@@ -131,13 +132,13 @@ def qq_is_completion_page(driver: BrowserDriver) -> bool:
     except Exception:
         return False
 
-def _group_questions_by_page(ctx: ExecutionState) -> List[List[Dict[str, Any]]]:
-    grouped: Dict[int, List[Dict[str, Any]]] = {}
+def _group_questions_by_page(ctx: ExecutionState) -> List[List[SurveyQuestionMeta]]:
+    grouped: Dict[int, List[SurveyQuestionMeta]] = {}
     for question_num in sorted(ctx.questions_metadata.keys()):
-        item = dict(ctx.questions_metadata.get(question_num) or {})
-        if not item or bool(item.get("is_description")):
+        item = ctx.questions_metadata.get(question_num)
+        if not item or bool(item.is_description):
             continue
-        page_number = max(1, int(item.get("page") or 1))
+        page_number = max(1, int(item.page or 1))
         grouped.setdefault(page_number, []).append(item)
     return [grouped[key] for key in sorted(grouped.keys())]
 

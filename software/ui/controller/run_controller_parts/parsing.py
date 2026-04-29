@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, List
 
 from software.core.questions.config import QuestionEntry, build_default_question_entries
 from software.providers.common import is_supported_survey_url
-from software.providers.contracts import SurveyDefinition
+from software.providers.contracts import SurveyDefinition, SurveyQuestionMeta
 
 if TYPE_CHECKING:
     from software.io.config import RuntimeConfig
@@ -18,7 +18,7 @@ class RunControllerParsingMixin:
         surveyParsed: Any
         surveyParseFailed: Any
         config: RuntimeConfig
-        questions_info: List[Dict[str, Any]]
+        questions_info: List[SurveyQuestionMeta]
         question_entries: List[QuestionEntry]
         survey_title: str
         survey_provider: str
@@ -38,7 +38,7 @@ class RunControllerParsingMixin:
             return
 
         def _apply_parse_success(definition: SurveyDefinition) -> None:
-            info = [q for q in definition.questions if not q.get("is_description")]
+            info = [q for q in definition.questions if not q.is_description]
             title = definition.title
             provider = definition.provider
             self.questions_info = info

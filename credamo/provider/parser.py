@@ -26,6 +26,13 @@ _FORCE_SELECT_OPTION_LABEL_RE = re.compile(
 _ARITHMETIC_EXPR_RE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?(?:\s*[+\-*/×xX÷]\s*\d+(?:\.\d+)?)+)(?!\d)")
 _OPTION_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 _FORCE_TEXT_RE = re.compile(r"请(?:务必|一定|必须|直接)?\s*(?:输入|填写|填入|写入)\s*[：:\s]*[\"“'‘]?([^\"”'’\s，,。；;！!？?）)]+)")
+_MULTI_SELECT_LIMIT_RE = re.compile(
+    r"(?:[\[【（(]\s*)?"
+    r"(?P<kind>至多|最多|不超过|至多可|最多可|至少|最少|不少于)"
+    r"\s*(?:可)?(?:选择|选)?\s*"
+    r"(?P<count>\d{1,3})\s*(?:个)?(?:选项|项)?"
+    r"(?:\s*[\]】）)])?"
+)
 _MAX_PARSE_PAGES = 20
 _MAX_DYNAMIC_REVEAL_ROUNDS = 20
 _PARSE_POLL_SECONDS = 0.2
@@ -240,6 +247,44 @@ def _extract_forced_texts(title_text: str, extra_fragments: Optional[List[Any]] 
     return forced
 
 
+def _extract_multi_select_limits(
+    title_text: str,
+    *,
+    option_count: int = 0,
+    extra_fragments: Optional[List[Any]] = None,
+) -> Tuple[Optional[int], Optional[int]]:
+    """识别 Credamo 题干中的“至少/至多选 N 项”多选限制。"""
+    min_limit: Optional[int] = None
+    max_limit: Optional[int] = None
+    fragments: List[str] = []
+    seen: set[str] = set()
+    for candidate in [title_text, *(extra_fragments or [])]:
+        fragment = _normalize_text(candidate)
+        if not fragment or fragment in seen:
+            continue
+        seen.add(fragment)
+        fragments.append(fragment)
+
+    upper_bound = max(0, int(option_count or 0))
+    for fragment in fragments:
+        for match in _MULTI_SELECT_LIMIT_RE.finditer(fragment):
+            try:
+                count = max(1, int(match.group("count") or 0))
+            except Exception:
+                continue
+            if upper_bound > 0:
+                count = min(count, upper_bound)
+            kind = str(match.group("kind") or "")
+            if kind in {"至少", "最少", "不少于"}:
+                min_limit = count if min_limit is None else max(min_limit, count)
+            elif kind in {"至多", "最多", "不超过", "至多可", "最多可"}:
+                max_limit = count if max_limit is None else min(max_limit, count)
+
+    if min_limit is not None and max_limit is not None and min_limit > max_limit:
+        min_limit = max_limit
+    return min_limit, max_limit
+
+
 def _normalize_question_number(raw: Any, fallback_num: int) -> int:
     try:
         match = re.search(r"\d+", str(raw or ""))
@@ -318,6 +363,17 @@ def _normalize_question(raw: Dict[str, Any], fallback_num: int) -> Dict[str, Any
             raw.get("tip_text"),
         ],
     )
+    multi_min_limit: Optional[int] = None
+    multi_max_limit: Optional[int] = None
+    if type_code == "4":
+        multi_min_limit, multi_max_limit = _extract_multi_select_limits(
+            raw_title or title,
+            option_count=len(option_texts),
+            extra_fragments=[
+                raw.get("title_text"),
+                raw.get("tip_text"),
+            ],
+        )
 
     normalized: Dict[str, Any] = {
         "num": question_num,
@@ -343,6 +399,8 @@ def _normalize_question(raw: Dict[str, Any], fallback_num: int) -> Dict[str, Any
         "forced_option_index": forced_option_index,
         "forced_option_text": forced_option_text,
         "forced_texts": forced_texts,
+        "multi_min_limit": multi_min_limit,
+        "multi_max_limit": multi_max_limit,
     }
     if normalized["type_code"] == "5":
         normalized["rating_max"] = max(len(option_texts), 1)

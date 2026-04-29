@@ -7,6 +7,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from software.providers.contracts import SurveyQuestionMeta
 from software.core.reverse_fill import (
     ReverseFillAcquireResult,
     ReverseFillAnswer,
@@ -74,7 +75,7 @@ class ExecutionConfig:
     question_dimension_map: Dict[int, Optional[str]] = field(default_factory=dict)
     question_strict_ratio_map: Dict[int, bool] = field(default_factory=dict)
     question_psycho_bias_map: Dict[int, Any] = field(default_factory=dict)
-    questions_metadata: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    questions_metadata: Dict[int, SurveyQuestionMeta] = field(default_factory=dict)
     joint_psychometric_answer_plan: Optional[Any] = None
 
     psycho_target_alpha: float = 0.9

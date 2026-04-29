@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import random
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from software.app.config import DEFAULT_FILL_TEXT
 from software.core.ai.runtime import AIRuntimeError, generate_ai_answer
@@ -22,6 +22,7 @@ from software.core.questions.utils import (
 )
 from software.core.task import ExecutionState
 from software.network.browser import BrowserDriver
+from software.providers.contracts import SurveyQuestionMeta
 
 from .runtime_interactions import (
     _apply_multiple_constraints,
@@ -81,13 +82,13 @@ def _log_qq_matrix_row_choice(
 
 def _answer_qq_single(
     driver: BrowserDriver,
-    question: Dict[str, Any],
+    question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
 ) -> None:
-    current = int(question.get("num") or 0)
-    option_texts = list(question.get("option_texts") or [])
-    option_count = max(1, len(option_texts) or int(question.get("options") or 0))
+    current = int(question.num or 0)
+    option_texts = list(question.option_texts or [])
+    option_count = max(1, len(option_texts) or int(question.options or 0))
     probabilities = ctx.single_prob[config_index] if config_index < len(ctx.single_prob) else -1
     probabilities = normalize_droplist_probs(probabilities, option_count)
     strict_ratio = is_strict_ratio_question(ctx, current)
@@ -99,7 +100,7 @@ def _answer_qq_single(
         probabilities = resolve_distribution_probabilities(probabilities, option_count, ctx, current)
         probabilities = enforce_reference_rank_order(probabilities, strict_reference)
     selected_index = weighted_index(probabilities)
-    if not _click_choice_input(driver, str(question.get("provider_question_id") or ""), "radio", selected_index):
+    if not _click_choice_input(driver, str(question.provider_question_id or ""), "radio", selected_index):
         logging.warning("腾讯问卷第%d题（单选）点击未生效，已跳过。", current)
         return
     if strict_ratio:
@@ -115,7 +116,7 @@ def _answer_qq_single(
     )
     if fill_value and _fill_choice_option_additional_text(
             driver,
-            str(question.get("provider_question_id") or ""),
+            str(question.provider_question_id or ""),
             selected_index,
             fill_value,
             input_type="radio",
@@ -125,15 +126,15 @@ def _answer_qq_single(
 
 def _answer_qq_dropdown(
     driver: BrowserDriver,
-    question: Dict[str, Any],
+    question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
 ) -> None:
-    current = int(question.get("num") or 0)
-    option_texts = list(question.get("option_texts") or [])
-    option_count = max(1, len(option_texts) or int(question.get("options") or 0))
+    current = int(question.num or 0)
+    option_texts = list(question.option_texts or [])
+    option_count = max(1, len(option_texts) or int(question.options or 0))
     probabilities = ctx.droplist_prob[config_index] if config_index < len(ctx.droplist_prob) else -1
     probabilities = normalize_droplist_probs(probabilities, option_count)
     strict_ratio = is_strict_ratio_question(ctx, current)
@@ -163,7 +164,7 @@ def _answer_qq_dropdown(
     else:
         selected_index = weighted_index(probabilities)
     selected_text = option_texts[selected_index] if selected_index < len(option_texts) else ""
-    question_id = str(question.get("provider_question_id") or "")
+    question_id = str(question.provider_question_id or "")
     selected_ok = False
     for attempt in range(2):
         _prepare_question_interaction(
@@ -214,11 +215,11 @@ def _answer_qq_dropdown(
 
 def _answer_qq_text(
     driver: BrowserDriver,
-    question: Dict[str, Any],
+    question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
 ) -> None:
-    current = int(question.get("num") or 0)
+    current = int(question.num or 0)
     answer_candidates = ctx.texts[config_index] if config_index < len(ctx.texts) else [DEFAULT_FILL_TEXT]
     probabilities = ctx.texts_prob[config_index] if config_index < len(ctx.texts_prob) else [1.0]
     if not answer_candidates:
@@ -229,8 +230,8 @@ def _answer_qq_text(
     selected_index = weighted_index(probabilities)
     selected_answer = str(resolved_candidates[selected_index] or DEFAULT_FILL_TEXT).strip() or DEFAULT_FILL_TEXT
     ai_enabled = bool(ctx.text_ai_flags[config_index]) if config_index < len(ctx.text_ai_flags) else False
-    title = str(question.get("title") or "")
-    description = str(question.get("description") or "").strip()
+    title = str(question.title or "")
+    description = str(question.description or "").strip()
     ai_prompt = title.strip()
     if description and description not in ai_prompt:
         ai_prompt = f"{ai_prompt}\n补充说明：{description}"
@@ -243,21 +244,21 @@ def _answer_qq_text(
             selected_answer = str(generated[0]).strip() if generated else DEFAULT_FILL_TEXT
         else:
             selected_answer = str(generated or "").strip() or DEFAULT_FILL_TEXT
-    if not _fill_text_question(driver, str(question.get("provider_question_id") or ""), selected_answer):
+    if not _fill_text_question(driver, str(question.provider_question_id or ""), selected_answer):
         logging.warning("腾讯问卷第%d题（文本）填写失败。", current)
         return
     record_answer(current, "text", text_answer=selected_answer)
 
 def _answer_qq_score_like(
     driver: BrowserDriver,
-    question: Dict[str, Any],
+    question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
 ) -> None:
-    current = int(question.get("num") or 0)
-    option_count = max(2, int(question.get("options") or 0))
+    current = int(question.num or 0)
+    option_count = max(2, int(question.options or 0))
     probabilities = ctx.scale_prob[config_index] if config_index < len(ctx.scale_prob) else -1
     probs = normalize_droplist_probs(probabilities, option_count)
     probs = apply_single_like_consistency(probs, current)
@@ -275,7 +276,7 @@ def _answer_qq_score_like(
         psycho_plan=psycho_plan,
         question_index=current,
     )
-    if not _click_choice_input(driver, str(question.get("provider_question_id") or ""), "radio", selected_index):
+    if not _click_choice_input(driver, str(question.provider_question_id or ""), "radio", selected_index):
         logging.warning("腾讯问卷第%d题（评分）点击未生效。", current)
         return
     record_pending_distribution_choice(ctx, current, selected_index, option_count)
@@ -283,17 +284,17 @@ def _answer_qq_score_like(
 
 def _answer_qq_matrix(
     driver: BrowserDriver,
-    question: Dict[str, Any],
+    question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
 ) -> int:
-    current = int(question.get("num") or 0)
-    question_id = str(question.get("provider_question_id") or "")
-    row_count = max(1, int(question.get("rows") or 1))
-    option_count = max(2, int(question.get("options") or 0))
-    option_texts = list(question.get("option_texts") or [])
+    current = int(question.num or 0)
+    question_id = str(question.provider_question_id or "")
+    row_count = max(1, int(question.rows or 1))
+    option_count = max(2, int(question.options or 0))
+    option_texts = list(question.option_texts or [])
     strict_ratio_question = is_strict_ratio_question(ctx, current)
     next_index = config_index
     for row_index in range(row_count):
@@ -357,15 +358,15 @@ def _answer_qq_matrix(
 
 def _answer_qq_multiple(
     driver: BrowserDriver,
-    question: Dict[str, Any],
+    question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
 ) -> None:
-    current = int(question.get("num") or 0)
-    option_texts = list(question.get("option_texts") or [])
-    option_count = max(1, len(option_texts) or int(question.get("options") or 0))
-    min_required = int(question.get("multi_min_limit") or 1)
-    max_allowed = int(question.get("multi_max_limit") or option_count or 1)
+    current = int(question.num or 0)
+    option_texts = list(question.option_texts or [])
+    option_count = max(1, len(option_texts) or int(question.options or 0))
+    min_required = int(question.multi_min_limit or 1)
+    max_allowed = int(question.multi_max_limit or option_count or 1)
     min_required = max(1, min(min_required, option_count))
     max_allowed = max(1, min(max_allowed, option_count))
     if min_required > max_allowed:
@@ -377,7 +378,7 @@ def _answer_qq_multiple(
 
     def _apply(selected_indices: Sequence[int]) -> List[int]:
         applied = []
-        question_id = str(question.get("provider_question_id") or "")
+        question_id = str(question.provider_question_id or "")
         fill_entries = ctx.multiple_option_fill_texts[config_index] if config_index < len(ctx.multiple_option_fill_texts) else None
         for option_idx in selected_indices:
             if _click_choice_input(driver, question_id, "checkbox", option_idx):
@@ -515,7 +516,7 @@ def _answer_qq_multiple(
 
 def _answer_qq_matrix_star(
     driver: BrowserDriver,
-    question: Dict[str, Any],
+    question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
     *,
@@ -526,11 +527,11 @@ def _answer_qq_matrix_star(
     逻辑与普通矩阵题相同，但用 _click_star_cell 代替 _click_matrix_cell，
     因为星级组件基于 TDesign t-rate，不含 input[type="radio"]。
     """
-    current = int(question.get("num") or 0)
-    question_id = str(question.get("provider_question_id") or "")
-    row_count = max(1, int(question.get("rows") or 1))
-    option_count = max(2, int(question.get("options") or 0))
-    option_texts = list(question.get("option_texts") or [])
+    current = int(question.num or 0)
+    question_id = str(question.provider_question_id or "")
+    row_count = max(1, int(question.rows or 1))
+    option_count = max(2, int(question.options or 0))
+    option_texts = list(question.option_texts or [])
     strict_ratio_question = is_strict_ratio_question(ctx, current)
     next_index = config_index
     for row_index in range(row_count):

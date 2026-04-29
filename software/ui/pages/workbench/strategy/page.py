@@ -27,6 +27,7 @@ from qfluentwidgets import (
 )
 
 from software.core.questions.consistency import sanitize_answer_rules
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_metas
 
 from .dimension_panel import DimensionGroupingPanel
 from .rule_dialog import (
@@ -58,8 +59,8 @@ class ConditionRulePanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rules: List[Dict[str, Any]] = []
-        self._questions_info: List[Dict[str, Any]] = []
-        self._question_map: Dict[int, Dict[str, Any]] = {}
+        self._questions_info: List[SurveyQuestionMeta] = []
+        self._question_map: Dict[int, SurveyQuestionMeta] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -104,13 +105,13 @@ class ConditionRulePanel(QWidget):
         self.del_btn.clicked.connect(self._on_delete_rule)
         self.table.doubleClicked.connect(lambda _idx: self._on_edit_rule())
 
-    def set_questions_info(self, info: Sequence[Dict[str, Any]]) -> None:
-        self._questions_info = list(info or [])
+    def set_questions_info(self, info: Sequence[SurveyQuestionMeta]) -> None:
+        self._questions_info = ensure_survey_question_metas(info or [])
         self._question_map.clear()
         for question in self._questions_info:
             q_num = to_int(question.get("num"), 0)
             if q_num > 0:
-                self._question_map[q_num] = dict(question)
+                self._question_map[q_num] = question
         self._rules = self._sanitize_rules(self._rules, show_removed_toast=True)
         self._refresh_table()
 
@@ -145,8 +146,8 @@ class ConditionRulePanel(QWidget):
             return []
         return sorted({idx.row() for idx in selection.selectedRows()})
 
-    def _get_selectable_questions(self) -> List[Dict[str, Any]]:
-        result: List[Dict[str, Any]] = []
+    def _get_selectable_questions(self) -> List[SurveyQuestionMeta]:
+        result: List[SurveyQuestionMeta] = []
         for question in self._questions_info:
             type_code = normalize_question_type_code(question.get("type_code"))
             if type_code not in ALLOWED_RULE_TYPE_CODES:
@@ -333,12 +334,12 @@ class QuestionStrategyPage(ScrollArea):
             return
         self.stack.setCurrentWidget(self.rule_panel)
 
-    def set_questions_info(self, info: Sequence[Dict[str, Any]]) -> None:
-        questions = list(info or [])
+    def set_questions_info(self, info: Sequence[SurveyQuestionMeta]) -> None:
+        questions = ensure_survey_question_metas(info or [])
         self.rule_panel.set_questions_info(questions)
         self.dimension_panel.set_entries(self.dimension_panel._entries, questions)
 
-    def set_entries(self, entries: Sequence[Any], info: Optional[Sequence[Dict[str, Any]]] = None) -> None:
+    def set_entries(self, entries: Sequence[Any], info: Optional[Sequence[SurveyQuestionMeta]] = None) -> None:
         self.dimension_panel.set_entries(entries, info)
 
     def set_rules(self, rules: Sequence[Dict[str, Any]]) -> None:

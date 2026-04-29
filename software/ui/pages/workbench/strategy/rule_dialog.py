@@ -27,6 +27,7 @@ from qfluentwidgets import (
 )
 
 from software.core.questions.consistency import normalize_rule_dict
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_metas
 
 ALLOWED_RULE_TYPE_CODES = {"3", "4", "5", "6"}
 RULE_TYPE_CODE_LABELS = {"3": "单选题", "4": "多选题", "5": "量表题", "6": "矩阵题"}
@@ -71,7 +72,7 @@ def normalize_question_type_code(value: Any) -> str:
         return ""
 
 
-def build_question_label(question: Dict[str, Any]) -> str:
+def build_question_label(question: SurveyQuestionMeta) -> str:
     q_num = to_int(question.get("num"), 0)
     title = str(question.get("title") or "").strip()
     type_code = normalize_question_type_code(question.get("type_code"))
@@ -111,7 +112,7 @@ class ConditionRuleDialog(QDialog):
 
     def __init__(
         self,
-        questions_info: List[Dict[str, Any]],
+        questions_info: List[SurveyQuestionMeta],
         parent=None,
         rule_data: Optional[Dict[str, Any]] = None,
     ):
@@ -120,8 +121,8 @@ class ConditionRuleDialog(QDialog):
         self.resize(860, 760)
         self._rule_data = copy.deepcopy(rule_data) if rule_data else None
         self._result_rule: Optional[Dict[str, Any]] = None
-        self._questions_info = list(questions_info or [])
-        self._question_map: Dict[int, Dict[str, Any]] = {}
+        self._questions_info = ensure_survey_question_metas(questions_info or [])
+        self._question_map: Dict[int, SurveyQuestionMeta] = {}
         self._condition_checks: List[CheckBox] = []
         self._target_checks: List[CheckBox] = []
         self._build_question_map()

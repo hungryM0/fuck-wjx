@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
+from software.providers.contracts import ensure_survey_question_metas
 
 from software.providers.common import (
     SURVEY_PROVIDER_CREDAMO,
@@ -91,7 +92,7 @@ class DashboardSurveyParseMixin:
             self._progress_infobar = None
 
         count = len(info) if info else 0
-        unsupported_count = sum(1 for item in (info or []) if isinstance(item, dict) and item.get("unsupported"))
+        unsupported_count = sum(1 for item in ensure_survey_question_metas(info or []) if bool(item.unsupported))
         if unsupported_count > 0:
             log_action(
                 "UI",

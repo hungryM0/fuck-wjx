@@ -8,6 +8,7 @@ from qfluentwidgets import LineEdit
 
 from software.core.questions.config import QuestionEntry
 from software.providers.common import SURVEY_PROVIDER_WJX, normalize_survey_provider
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_meta
 from software.ui.widgets.no_wheel import NoWheelSlider
 
 
@@ -108,7 +109,7 @@ def _normalize_provider_key(raw_provider: Any, raw_question_id: Any) -> Optional
     return provider, question_id
 
 
-def _build_entry_info_fallback(entry: QuestionEntry) -> Dict[str, Any]:
+def _build_entry_info_fallback(entry: QuestionEntry) -> SurveyQuestionMeta:
     info: Dict[str, Any] = {
         "provider": normalize_survey_provider(getattr(entry, "survey_provider", None), default=SURVEY_PROVIDER_WJX),
         "title": str(getattr(entry, "question_title", None) or "").strip(),
@@ -153,51 +154,54 @@ def _build_entry_info_fallback(entry: QuestionEntry) -> Dict[str, Any]:
     provider_page_id = str(getattr(entry, "provider_page_id", None) or "").strip()
     if provider_page_id:
         info["provider_page_id"] = provider_page_id
-    return info
+    return ensure_survey_question_meta(info)
 
 
-def build_entry_info_list(entries: List[QuestionEntry], questions_info: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+def build_entry_info_list(
+    entries: List[QuestionEntry],
+    questions_info: Optional[List[SurveyQuestionMeta | Dict[str, Any]]],
+) -> List[SurveyQuestionMeta]:
     """将当前配置题目与原始题目元数据按稳定标识对齐，避免依赖裸下标。"""
-    selectable_info: List[Dict[str, Any]] = []
+    selectable_info: List[SurveyQuestionMeta] = []
     provider_map: Dict[Tuple[str, str], List[int]] = {}
     question_num_map: Dict[int, List[int]] = {}
     title_map: Dict[str, List[int]] = {}
 
-    for raw_item in questions_info or []:
-        if not isinstance(raw_item, dict):
+    for info_index, raw_item in enumerate(questions_info or [], start=1):
+        if not isinstance(raw_item, (dict, SurveyQuestionMeta)):
             continue
-        if bool(raw_item.get("is_description")) or bool(raw_item.get("unsupported")):
+        item = ensure_survey_question_meta(raw_item, index=info_index)
+        if bool(item.is_description) or bool(item.unsupported):
             continue
-        item = dict(raw_item)
         info_index = len(selectable_info)
         selectable_info.append(item)
 
-        provider_key = _normalize_provider_key(item.get("provider"), item.get("provider_question_id"))
+        provider_key = _normalize_provider_key(item.provider, item.provider_question_id)
         if provider_key:
             provider_map.setdefault(provider_key, []).append(info_index)
 
-        question_num = _normalize_question_num(item.get("num"))
+        question_num = _normalize_question_num(item.num)
         if question_num is not None:
             question_num_map.setdefault(question_num, []).append(info_index)
 
-        title_key = _normalize_question_title(item.get("title"))
+        title_key = _normalize_question_title(item.title)
         if title_key:
             title_map.setdefault(title_key, []).append(info_index)
 
     unused_indices = set(range(len(selectable_info)))
-    aligned_info: List[Dict[str, Any]] = []
+    aligned_info: List[SurveyQuestionMeta] = []
 
-    def _take_first(indices: Optional[List[int]]) -> Optional[Dict[str, Any]]:
+    def _take_first(indices: Optional[List[int]]) -> Optional[SurveyQuestionMeta]:
         if not indices:
             return None
         for candidate in indices:
             if candidate in unused_indices:
                 unused_indices.remove(candidate)
-                return dict(selectable_info[candidate])
+                return selectable_info[candidate]
         return None
 
     for idx, entry in enumerate(entries or []):
-        matched_info: Optional[Dict[str, Any]] = None
+        matched_info: Optional[SurveyQuestionMeta] = None
 
         provider_key = _normalize_provider_key(
             getattr(entry, "survey_provider", None),
@@ -218,7 +222,7 @@ def build_entry_info_list(entries: List[QuestionEntry], questions_info: Optional
 
         if matched_info is None and idx in unused_indices:
             unused_indices.remove(idx)
-            matched_info = dict(selectable_info[idx])
+            matched_info = selectable_info[idx]
 
         aligned_info.append(matched_info or _build_entry_info_fallback(entry))
 

@@ -1,376 +1,126 @@
-"""答题核心逻辑 - 按配置策略自动填写问卷"""
-from dataclasses import dataclass
+"""答题核心逻辑 - 按配置策略自动填写问卷。"""
+
+from __future__ import annotations
+
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
-from software.core.task import ExecutionConfig, ExecutionState
+from software.app.config import HEADLESS_PAGE_BUFFER_DELAY, HEADLESS_PAGE_CLICK_DELAY
 from software.core.engine.dom_helpers import (
     _count_choice_inputs_driver,
     _driver_question_looks_like_description,
-    _driver_question_looks_like_rating,
-    _driver_question_looks_like_reorder,
     _driver_question_looks_like_slider_matrix,
 )
-from software.core.modes.duration_control import has_configured_answer_duration, simulate_answer_duration_delay
 from software.core.engine.runtime_control import _is_headless_mode
+from software.core.modes.duration_control import has_configured_answer_duration, simulate_answer_duration_delay
 from software.core.questions.utils import _should_treat_question_as_text_like
-from software.core.ai.runtime import extract_question_title_from_dom
 from software.core.reverse_fill.runtime import resolve_current_reverse_fill_answer
+from software.core.task import ExecutionConfig, ExecutionState
 from software.network.browser import BrowserDriver, By, NoSuchElementException
-from software.app.config import HEADLESS_PAGE_BUFFER_DELAY, HEADLESS_PAGE_CLICK_DELAY
 from wjx.provider.detection import detect as _wjx_detect
 from wjx.provider.navigation import _click_next_page_button, _human_scroll_after_question
-from wjx.provider.questions.dropdown import dropdown as _dropdown_impl
-from wjx.provider.questions.matrix import matrix as _matrix_impl
 from wjx.provider.questions.multiple import multiple as _multiple_impl
-from wjx.provider.questions.reorder import reorder as _reorder_impl
-from wjx.provider.questions.scale import scale as _scale_impl
-from wjx.provider.questions.score import score as _score_impl
 from wjx.provider.questions.single import single as _single_impl
-from wjx.provider.questions.slider import slider as _slider_impl, _resolve_slider_score
 from wjx.provider.questions.text import (
     count_visible_text_inputs as _count_visible_text_inputs_driver,
-    driver_question_is_location as _driver_question_is_location,
     text as _text_impl,
 )
+from wjx.provider.runtime_dispatch import _dispatcher, _question_title_for_log
 from wjx.provider.submission import submit
 
-QuestionHandler = Callable[..., Optional[int]]
+
+def _build_initial_indices() -> Dict[str, int]:
+    return {
+        "single": 0,
+        "text": 0,
+        "dropdown": 0,
+        "multiple": 0,
+        "matrix": 0,
+        "scale": 0,
+        "slider": 0,
+    }
 
 
-@dataclass(frozen=True)
-class _QuestionHandlerSpec:
-    index_key: str
-    handler: QuestionHandler
-    config_aliases: Tuple[str, ...] = ()
-    needs_question_div: bool = False
-    needs_psycho_plan: bool = False
-
-
-def _question_title_for_log(driver: BrowserDriver, question_num: int, question_div) -> str:
+def _update_abort_status(ctx: ExecutionState, thread_name: str) -> None:
     try:
-        title = extract_question_title_from_dom(driver, question_num)
+        ctx.update_thread_status(thread_name, "已中断", running=False)
     except Exception:
-        title = ""
-    if title:
-        return title
-    if question_div is None:
-        return ""
-    try:
-        raw_text = str(question_div.text or "").strip()
-    except Exception:
-        raw_text = ""
-    if not raw_text:
-        return ""
-    compact = " ".join(raw_text.split())
-    return compact[:60] + "..." if len(compact) > 60 else compact
+        logging.info("更新线程状态失败：已中断", exc_info=True)
 
 
-def _should_advance_reverse_fill_index(
-    config_entry: Optional[Tuple[str, int]],
-    index_key: str,
-    config_aliases: Tuple[str, ...],
-    reverse_fill_answer: Any,
-) -> bool:
-    if reverse_fill_answer is None:
-        return True
-    if config_entry and config_entry[0] in (index_key, *config_aliases):
-        return True
-    return False
-
-
-# ---------------------------------------------------------------------------
-# 策略模式题型分发器
-# ---------------------------------------------------------------------------
-
-class _QuestionDispatcher:
-    """题型分发器 - 策略模式实现。
-
-    每种题型对应一个 callable，签名为:
-        handler(driver, question_num, type_index, ctx) -> Optional[int]
-    返回值：
-        - None   : 按验，计数器 += 1
-        - int    : 直接用返回值覆盖计数器（矩阵题）
-        - False  : 是一个哨兵标识（不支持/跳过）
-    """
-
-    def __init__(self) -> None:
-        self._registry: Dict[str, _QuestionHandlerSpec] = {}
-        self._lock = threading.Lock()
-        self._register_defaults()
-
-    def register(
-        self,
-        question_type: str,
-        *,
-        index_key: str,
-        handler: QuestionHandler,
-        config_aliases: Tuple[str, ...] = (),
-        needs_question_div: bool = False,
-        needs_psycho_plan: bool = False,
-    ) -> None:
-        with self._lock:
-            self._registry[str(question_type)] = _QuestionHandlerSpec(
-                index_key=index_key,
-                handler=handler,
-                config_aliases=tuple(config_aliases),
-                needs_question_div=bool(needs_question_div),
-                needs_psycho_plan=bool(needs_psycho_plan),
-            )
-
-    def _register_defaults(self) -> None:
-        self.register("3", index_key="single", handler=self._handle_single)
-        self.register("4", index_key="multiple", handler=self._handle_multiple)
-        self.register(
-            "5",
-            index_key="scale",
-            handler=self._handle_scale,
-            config_aliases=("score",),
-            needs_question_div=True,
-            needs_psycho_plan=True,
-        )
-        self.register(
-            "6",
-            index_key="matrix",
-            handler=self._handle_matrix,
-            needs_psycho_plan=True,
-        )
-        self.register(
-            "9",
-            index_key="matrix",
-            handler=self._handle_matrix,
-            needs_psycho_plan=True,
-        )
-        self.register("7", index_key="dropdown", handler=self._handle_dropdown, needs_psycho_plan=True)
-        self.register("8", index_key="slider", handler=self._handle_slider)
-
-    # -- 各题型处理器 --------------------------------------------------
-
-    def _handle_single(self, driver, q_num, idx, ctx: ExecutionState):
-        _single_impl(
-            driver,
-            q_num,
-            idx,
-            ctx.single_prob,
-            ctx.single_option_fill_texts,
-            ctx.single_attached_option_selects,
-            task_ctx=ctx,
-        )
-
-    def _handle_multiple(self, driver, q_num, idx, ctx: ExecutionState):
-        _multiple_impl(driver, q_num, idx, ctx.multiple_prob, ctx.multiple_option_fill_texts, task_ctx=ctx)
-
-    def _handle_scale(self, driver, q_num, idx, ctx: ExecutionState, question_div=None, psycho_plan=None):
-        dim = ctx.question_dimension_map.get(q_num)
-        if question_div is not None and _driver_question_looks_like_rating(question_div):
-            _score_impl(
-                driver,
-                q_num,
-                idx,
-                ctx.scale_prob,
-                dimension=dim,
-                psycho_plan=psycho_plan,
-                question_index=q_num,
-                task_ctx=ctx,
-            )
-        else:
-            _scale_impl(
-                driver,
-                q_num,
-                idx,
-                ctx.scale_prob,
-                dimension=dim,
-                psycho_plan=psycho_plan,
-                question_index=q_num,
-                task_ctx=ctx,
-            )
-
-    def _handle_matrix(self, driver, q_num, idx, ctx: ExecutionState, psycho_plan=None):
-        dim = ctx.question_dimension_map.get(q_num)
-        return _matrix_impl(
-            driver,
-            q_num,
-            idx,
-            ctx.matrix_prob,
-            dimension=dim,
-            psycho_plan=psycho_plan,
-            question_index=q_num,
-            task_ctx=ctx,
-        )
-
-    def _handle_dropdown(self, driver, q_num, idx, ctx: ExecutionState, psycho_plan=None):
-        _dropdown_impl(
-            driver,
-            q_num,
-            idx,
-            ctx.droplist_prob,
-            ctx.droplist_option_fill_texts,
-            dimension=ctx.question_dimension_map.get(q_num),
-            psycho_plan=psycho_plan,
-            question_index=q_num,
-            task_ctx=ctx,
-        )
-
-    def _handle_slider(self, driver, q_num, idx, ctx: ExecutionState):
-        slider_score = _resolve_slider_score(idx, ctx.slider_targets)
-        _slider_impl(driver, q_num, slider_score)
-
-    def fill(
-        self,
-        driver: BrowserDriver,
-        question_type: str,
-        question_num: int,
-        question_div,
-        config_entry: Optional[Tuple[str, int]],
-        indices: Dict[str, int],
-        ctx: ExecutionState,
-        psycho_plan: Optional[Any] = None,
-    ) -> Optional[bool]:
-        """分发题型并填写。"""
-        is_reorder = (question_type == "11") or _driver_question_looks_like_reorder(question_div)
-        reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, question_num)
-
-        # 排序题
-        if is_reorder:
-            _reorder_impl(driver, question_num)
-            return None
-
-        # 文本题 (type 1/2)
-        if question_type in ("1", "2"):
-            is_location = _driver_question_is_location(question_div) if question_div is not None else False
-            if is_location:
-                print(f"第{question_num}题为位置题，暂不支持，已跳过")
-                return False
-            _idx = config_entry[1] if config_entry and config_entry[0] == "text" else indices.get("text", 0)
-            _text_impl(
-                driver,
-                question_num,
-                _idx,
-                ctx.texts,
-                ctx.texts_prob,
-                ctx.text_entry_types,
-                ctx.text_ai_flags,
-                ctx.text_titles,
-                ctx.multi_text_blank_modes,
-                ctx.multi_text_blank_ai_flags,
-                ctx.multi_text_blank_int_ranges,
-                task_ctx=ctx,
-            )
-            if _should_advance_reverse_fill_index(config_entry, "text", (), reverse_fill_answer):
-                indices["text"] = _idx + 1
-            return None  # 文本题内部已处理计数，返回 None
-
-        # 某些问卷会把多项填空题挂在 type=9 等非文本 type 上；只要配置映射为 text 且 DOM 呈现为填空特征，
-        # 就应优先走填空处理，避免被矩阵分发器误吞。
-        if question_div is not None and config_entry and config_entry[0] == "text":
-            checkbox_count, radio_count = _count_choice_inputs_driver(question_div)
-            option_count = checkbox_count + radio_count
-            text_input_count = _count_visible_text_inputs_driver(question_div)
-            has_slider_matrix = _driver_question_looks_like_slider_matrix(question_div)
-            if _should_treat_question_as_text_like(
-                question_type,
-                option_count,
-                text_input_count,
-                has_slider_matrix=has_slider_matrix,
-            ):
-                sequential_idx = int(indices.get("text", 0) or 0)
-                mapped_idx: Optional[int] = None
-                try:
-                    mapped_idx = max(0, int(config_entry[1]))
-                except Exception:
-                    mapped_idx = None
-                if mapped_idx is not None and mapped_idx < sequential_idx:
-                    logging.warning(
-                        "文本题索引回拨已拦截：题号=%s 类型=%s 映射索引=%s 当前顺序索引=%s，继续沿用顺序索引",
-                        question_num,
-                        question_type,
-                        mapped_idx,
-                        sequential_idx,
-                    )
-                _idx = sequential_idx if mapped_idx is None or mapped_idx < sequential_idx else mapped_idx
-                _text_impl(
+def _fallback_unknown_question(
+    driver: BrowserDriver,
+    ctx: ExecutionState,
+    *,
+    question_num: int,
+    question_type: str,
+    question_div,
+    indices: Dict[str, int],
+) -> None:
+    handled = False
+    if question_div is not None:
+        checkbox_count, radio_count = _count_choice_inputs_driver(question_div)
+        if checkbox_count or radio_count:
+            if checkbox_count >= radio_count:
+                _multiple_impl(driver, question_num, indices["multiple"], ctx.multiple_prob, ctx.multiple_option_fill_texts)
+                indices["multiple"] += 1
+            else:
+                _single_impl(
                     driver,
                     question_num,
-                    _idx,
-                    ctx.texts,
-                    ctx.texts_prob,
-                    ctx.text_entry_types,
-                    ctx.text_ai_flags,
-                    ctx.text_titles,
-                    ctx.multi_text_blank_modes,
-                    ctx.multi_text_blank_ai_flags,
-                    ctx.multi_text_blank_int_ranges,
+                    indices["single"],
+                    ctx.single_prob,
+                    ctx.single_option_fill_texts,
+                    ctx.single_attached_option_selects,
                     task_ctx=ctx,
                 )
-                if _should_advance_reverse_fill_index(config_entry, "text", (), reverse_fill_answer):
-                    indices["text"] = _idx + 1
-                return None
+                indices["single"] += 1
+            handled = True
 
-        # 多行滑块题：不同问卷可能挂在 type=9 / type=12 等模板上，不能继续按题号硬编码。
-        if _driver_question_looks_like_slider_matrix(question_div):
-            sequential_idx = int(indices.get("matrix", 0) or 0)
-            mapped_idx: Optional[int] = None
-            if config_entry and config_entry[0] == "matrix":
-                try:
-                    mapped_idx = max(0, int(config_entry[1]))
-                except Exception:
-                    mapped_idx = None
-            if mapped_idx is not None and mapped_idx >= sequential_idx:
-                _idx = mapped_idx
-            else:
-                _idx = sequential_idx
-            result = self._handle_matrix(driver, question_num, _idx, ctx, psycho_plan=psycho_plan)
-            if _should_advance_reverse_fill_index(config_entry, "matrix", (), reverse_fill_answer):
-                indices["matrix"] = result if isinstance(result, int) else (_idx + 1)
-            return None
+    if handled:
+        return
 
-        # 常规题型分发
-        with self._lock:
-            spec = self._registry.get(question_type)
-        if spec is None:
-            return False  # 未知题型
+    option_count = 0
+    if question_div is not None:
+        try:
+            option_elements = question_div.find_elements(By.CSS_SELECTOR, ".ui-controlgroup > div")
+            option_count = len(option_elements)
+        except Exception:
+            option_count = 0
+    text_input_count = _count_visible_text_inputs_driver(question_div) if question_div is not None else 0
+    has_slider_matrix = _driver_question_looks_like_slider_matrix(question_div)
+    is_text_like_question = _should_treat_question_as_text_like(
+        question_type,
+        option_count,
+        text_input_count,
+        has_slider_matrix=has_slider_matrix,
+    )
 
-        index_key = spec.index_key
-        sequential_idx = int(indices.get(index_key, 0) or 0)
-        mapped_idx: Optional[int] = None
-        if config_entry and config_entry[0] in (index_key, *spec.config_aliases):
-            try:
-                mapped_idx = max(0, int(config_entry[1]))
-            except Exception:
-                mapped_idx = None
-        if mapped_idx is not None:
-            if mapped_idx < sequential_idx:
-                logging.warning(
-                    "题型索引回拨已拦截：题号=%s 类型=%s 映射索引=%s 当前顺序索引=%s，继续沿用顺序索引",
-                    question_num,
-                    question_type,
-                    mapped_idx,
-                    sequential_idx,
-                )
-                _idx = sequential_idx
-            else:
-                _idx = mapped_idx
-        else:
-            _idx = sequential_idx
+    if is_text_like_question:
+        reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, question_num)
+        _text_impl(
+            driver,
+            question_num,
+            indices["text"],
+            ctx.texts,
+            ctx.texts_prob,
+            ctx.text_entry_types,
+            ctx.text_ai_flags,
+            ctx.text_titles,
+            ctx.multi_text_blank_modes,
+            ctx.multi_text_blank_ai_flags,
+            ctx.multi_text_blank_int_ranges,
+            task_ctx=ctx,
+        )
+        if reverse_fill_answer is None:
+            indices["text"] += 1
+        return
 
-        handler_kwargs: Dict[str, Any] = {}
-        if spec.needs_question_div:
-            handler_kwargs["question_div"] = question_div
-        if spec.needs_psycho_plan:
-            handler_kwargs["psycho_plan"] = psycho_plan
-        result = spec.handler(driver, question_num, _idx, ctx, **handler_kwargs)
-
-        if _should_advance_reverse_fill_index(config_entry, index_key, spec.config_aliases, reverse_fill_answer):
-            if isinstance(result, int):
-                indices[index_key] = result
-            else:
-                indices[index_key] = _idx + 1
-        return None
+    print(f"第{question_num}题为不支持类型(type={question_type})")
 
 
-_dispatcher = _QuestionDispatcher()
 def brush(
     driver: BrowserDriver,
     ctx: ExecutionState,
@@ -392,17 +142,7 @@ def brush(
     except Exception:
         logging.info("初始化线程步骤进度失败", exc_info=True)
 
-    # 各题型计数器统一放入字典，方便 dispatcher 内部修改
-    _indices: Dict[str, int] = {
-        "single": 0,
-        "text": 0,
-        "dropdown": 0,
-        "multiple": 0,
-        "matrix": 0,
-        "scale": 0,
-        "slider": 0,
-    }
-
+    indices = _build_initial_indices()
     current_question_number = 0
     active_stop = stop_signal or ctx.stop_event
 
@@ -410,20 +150,14 @@ def brush(
         return bool(active_stop and active_stop.is_set())
 
     if _abort_requested():
-        try:
-            ctx.update_thread_status(thread_name, "已中断", running=False)
-        except Exception:
-            logging.info("更新线程状态失败：已中断", exc_info=True)
+        _update_abort_status(ctx, thread_name)
         return False
 
     total_pages = len(questions_per_page)
     for page_index, questions_count in enumerate(questions_per_page):
         for _ in range(1, questions_count + 1):
             if _abort_requested():
-                try:
-                    ctx.update_thread_status(thread_name, "已中断", running=False)
-                except Exception:
-                    logging.info("更新线程状态失败：已中断", exc_info=True)
+                _update_abort_status(ctx, thread_name)
                 return False
             current_question_number += 1
             if total_steps > 0:
@@ -444,6 +178,7 @@ def brush(
                 question_div = None
             if question_div is None:
                 continue
+
             question_visible = False
             for attempt in range(5):
                 try:
@@ -455,10 +190,7 @@ def brush(
                 if attempt < 4:
                     time.sleep(0.1)
 
-            # 先读取题型（即使题目不可见也需要，用于维护索引）
             question_type = question_div.get_attribute("type")
-
-            # 检测说明页/阅读材料：有 type 属性但无可交互控件
             if question_type is None:
                 logging.info("跳过第%d题（type 属性为空）", current_question_number)
                 continue
@@ -478,96 +210,37 @@ def brush(
                     logging.info("跳过第%d题（未显示，type=%s）", current_question_number, question_type)
                 continue
 
-            # 通过配置映射表查找当前题号在对应题型概率列表中的正确索引
-            _config_entry = ctx.question_config_index_map.get(current_question_number)
-
-            # ── 策略模式分发 ─────────────────────────────────────────
+            config_entry = ctx.question_config_index_map.get(current_question_number)
             dispatch_result = _dispatcher.fill(
                 driver=driver,
                 question_type=question_type,
                 question_num=current_question_number,
                 question_div=question_div,
-                config_entry=_config_entry,
-                indices=_indices,
+                config_entry=config_entry,
+                indices=indices,
                 ctx=ctx,
                 psycho_plan=psycho_plan,
             )
 
             if dispatch_result is False:
-                # 未知题型处理：尝试选择题 / 填空题
-                handled = False
-                if question_div is not None:
-                    checkbox_count, radio_count = _count_choice_inputs_driver(question_div)
-                    if checkbox_count or radio_count:
-                        if checkbox_count >= radio_count:
-                            _multiple_impl(driver, current_question_number, _indices["multiple"], ctx.multiple_prob, ctx.multiple_option_fill_texts)
-                            _indices["multiple"] += 1
-                        else:
-                            _single_impl(
-                                driver,
-                                current_question_number,
-                                _indices["single"],
-                                ctx.single_prob,
-                                ctx.single_option_fill_texts,
-                                ctx.single_attached_option_selects,
-                                task_ctx=ctx,
-                            )
-                            _indices["single"] += 1
-                        handled = True
-
-                if not handled:
-                    option_count = 0
-                    if question_div is not None:
-                        try:
-                            option_elements = question_div.find_elements(By.CSS_SELECTOR, ".ui-controlgroup > div")
-                            option_count = len(option_elements)
-                        except Exception:
-                            option_count = 0
-                    text_input_count = _count_visible_text_inputs_driver(question_div) if question_div is not None else 0
-                    has_slider_matrix = _driver_question_looks_like_slider_matrix(question_div)
-                    is_text_like_question = _should_treat_question_as_text_like(
-                        question_type,
-                        option_count,
-                        text_input_count,
-                        has_slider_matrix=has_slider_matrix,
-                    )
-
-                    if is_text_like_question:
-                        reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, current_question_number)
-                        _text_impl(
-                            driver,
-                            current_question_number,
-                            _indices["text"],
-                            ctx.texts,
-                            ctx.texts_prob,
-                            ctx.text_entry_types,
-                            ctx.text_ai_flags,
-                            ctx.text_titles,
-                            ctx.multi_text_blank_modes,
-                            ctx.multi_text_blank_ai_flags,
-                            ctx.multi_text_blank_int_ranges,
-                            task_ctx=ctx,
-                        )
-                        if reverse_fill_answer is None:
-                            _indices["text"] += 1
-                    else:
-                        print(f"第{current_question_number}题为不支持类型(type={question_type})")
+                _fallback_unknown_question(
+                    driver,
+                    ctx,
+                    question_num=current_question_number,
+                    question_type=question_type,
+                    question_div=question_div,
+                    indices=indices,
+                )
 
         _human_scroll_after_question(driver)
         if _abort_requested():
-            try:
-                ctx.update_thread_status(thread_name, "已中断", running=False)
-            except Exception:
-                logging.info("更新线程状态失败：已中断", exc_info=True)
+            _update_abort_status(ctx, thread_name)
             return False
         buffer_delay = float(HEADLESS_PAGE_BUFFER_DELAY if headless_mode else 0.5)
         if buffer_delay > 0:
             if active_stop:
                 if active_stop.wait(buffer_delay):
-                    try:
-                        ctx.update_thread_status(thread_name, "已中断", running=False)
-                    except Exception:
-                        logging.info("更新线程状态失败：已中断", exc_info=True)
+                    _update_abort_status(ctx, thread_name)
                     return False
             else:
                 time.sleep(buffer_delay)
@@ -579,18 +252,11 @@ def brush(
                 except Exception:
                     logging.info("更新线程状态失败：等待时长中", exc_info=True)
             if simulate_answer_duration_delay(active_stop, ctx.answer_duration_range_seconds):
-                try:
-                    ctx.update_thread_status(thread_name, "已中断", running=False)
-                except Exception:
-                    logging.info("更新线程状态失败：已中断", exc_info=True)
+                _update_abort_status(ctx, thread_name)
                 return False
             if _abort_requested():
-                try:
-                    ctx.update_thread_status(thread_name, "已中断", running=False)
-                except Exception:
-                    logging.info("更新线程状态失败：已中断", exc_info=True)
+                _update_abort_status(ctx, thread_name)
                 return False
-            # 最后一页直接跳出循环，由后续的 submit() 处理提交
             break
         clicked = _click_next_page_button(driver)
         if not clicked:
@@ -599,18 +265,13 @@ def brush(
         if click_delay > 0:
             if active_stop:
                 if active_stop.wait(click_delay):
-                    try:
-                        ctx.update_thread_status(thread_name, "已中断", running=False)
-                    except Exception:
-                        logging.info("更新线程状态失败：已中断", exc_info=True)
+                    _update_abort_status(ctx, thread_name)
                     return False
             else:
                 time.sleep(click_delay)
+
     if _abort_requested():
-        try:
-            ctx.update_thread_status(thread_name, "已中断", running=False)
-        except Exception:
-            logging.info("更新线程状态失败：已中断", exc_info=True)
+        _update_abort_status(ctx, thread_name)
         return False
     try:
         ctx.update_thread_status(thread_name, "提交中", running=True)
@@ -641,6 +302,3 @@ def brush_wjx(
         thread_name=thread_name,
         psycho_plan=psycho_plan,
     )
-
-
-

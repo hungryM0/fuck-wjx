@@ -2,29 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
+from software.core.questions.meta_helpers import (
+    count_positive_weights,
+    find_all_zero_attached_selects,
+    find_all_zero_matrix_rows,
+)
 from software.core.questions.schema import QuestionEntry
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_meta
 
 __all__ = ["validate_question_config"]
 
 
-def validate_question_config(entries: List[QuestionEntry], questions_info: Optional[List[dict]] = None) -> Optional[str]:
+def validate_question_config(
+    entries: List[QuestionEntry],
+    questions_info: Optional[List[SurveyQuestionMeta | Dict[str, Any]]] = None,
+) -> Optional[str]:
     """验证题目配置是否存在冲突，返回错误信息。"""
     if not entries:
         return "未配置任何题目"
-
-    def _count_positive_weights(raw_weights: Any) -> int:
-        if not isinstance(raw_weights, (list, tuple)):
-            return 0
-        count = 0
-        for value in raw_weights:
-            try:
-                if float(value) > 0:
-                    count += 1
-            except Exception:
-                continue
-        return count
 
     def _pick_config_weights(entry: QuestionEntry) -> Any:
         distribution_mode = str(getattr(entry, "distribution_mode", "") or "").strip().lower()
@@ -34,30 +31,24 @@ def validate_question_config(entries: List[QuestionEntry], questions_info: Optio
 
     errors: List[str] = []
     question_info_map = {}
-    unsupported_questions: List[dict] = []
+    unsupported_questions: List[SurveyQuestionMeta] = []
     for item in questions_info or []:
-        if not isinstance(item, dict):
+        if not isinstance(item, (dict, SurveyQuestionMeta)):
             continue
-        q_num = item.get("num")
-        if q_num is None:
-            continue
-        try:
-            q_num = int(q_num)
-        except Exception:
-            q_num = None
-        if q_num is not None:
-            question_info_map[q_num] = item
-        if bool(item.get("unsupported")):
-            unsupported_questions.append(item)
+        meta = ensure_survey_question_meta(item)
+        if meta.num > 0:
+            question_info_map[meta.num] = meta
+        if bool(meta.unsupported):
+            unsupported_questions.append(meta)
 
     if unsupported_questions:
         lines = ["当前问卷包含暂不支持的题型，已禁止启动："]
         for item in unsupported_questions[:12]:
-            title = str(item.get("title") or f"第{item.get('num')}题").strip()
-            provider_type = str(item.get("provider_type") or item.get("type_code") or "未知类型").strip()
-            reason = str(item.get("unsupported_reason") or "").strip()
+            title = str(item.title or f"第{item.num}题").strip()
+            provider_type = str(item.provider_type or item.type_code or "未知类型").strip()
+            reason = str(item.unsupported_reason or "").strip()
             suffix = f"（{provider_type}，{reason}）" if reason else f"（{provider_type}）"
-            lines.append(f"  - 第 {item.get('num')} 题：{title}{suffix}")
+            lines.append(f"  - 第 {item.num} 题：{title}{suffix}")
         if len(unsupported_questions) > 12:
             lines.append(f"  - 其余 {len(unsupported_questions) - 12} 道暂不支持题目已省略")
         return "\n".join(lines)
@@ -74,17 +65,11 @@ def validate_question_config(entries: List[QuestionEntry], questions_info: Optio
             multi_min_limit: Optional[int] = None
             question_info = question_info_map.get(normalized_question_num)
             if question_info:
-                multi_min_limit = question_info.get("multi_min_limit")
+                multi_min_limit = question_info.multi_min_limit
 
             probs = getattr(entry, "custom_weights", None) or getattr(entry, "probabilities", None)
             if isinstance(probs, list):
-                positive_count = 0
-                for prob in probs:
-                    try:
-                        if float(prob) > 0:
-                            positive_count += 1
-                    except Exception:
-                        continue
+                positive_count = count_positive_weights(probs)
                 if positive_count <= 0:
                     errors.append(
                         f"第 {question_num} 题（多选题）配置无效：\n"
@@ -106,7 +91,7 @@ def validate_question_config(entries: List[QuestionEntry], questions_info: Optio
 
         configured_weights = _pick_config_weights(entry)
         if question_type in ("single", "dropdown", "scale", "score") and isinstance(configured_weights, list):
-            if configured_weights and _count_positive_weights(configured_weights) <= 0:
+            if configured_weights and count_positive_weights(configured_weights) <= 0:
                 errors.append(
                     f"第 {question_num} 题（{question_type}）配置无效：\n"
                     "  - 当前所有选项配比都小于等于 0\n"
@@ -114,33 +99,27 @@ def validate_question_config(entries: List[QuestionEntry], questions_info: Optio
                 )
 
         if question_type == "matrix":
-            row_weights_source = configured_weights
-            if isinstance(row_weights_source, list) and any(isinstance(item, (list, tuple)) for item in row_weights_source):
-                for row_idx, row_weights in enumerate(row_weights_source, start=1):
-                    if isinstance(row_weights, (list, tuple)) and row_weights and _count_positive_weights(row_weights) <= 0:
-                        errors.append(
-                            f"第 {question_num} 题（矩阵题）配置无效：\n"
-                            f"  - 第 {row_idx} 行所有选项配比都小于等于 0\n"
-                            "  - 请至少将 1 个选项的配比设为大于 0"
-                        )
-            elif isinstance(row_weights_source, list) and row_weights_source and _count_positive_weights(row_weights_source) <= 0:
+            invalid_rows = find_all_zero_matrix_rows(configured_weights)
+            if invalid_rows == [0]:
                 errors.append(
                     f"第 {question_num} 题（矩阵题）配置无效：\n"
                     "  - 当前所有选项配比都小于等于 0\n"
                     "  - 请至少将 1 个选项的配比设为大于 0"
                 )
+            else:
+                for row_idx in invalid_rows:
+                    errors.append(
+                        f"第 {question_num} 题（矩阵题）配置无效：\n"
+                        f"  - 第 {row_idx} 行所有选项配比都小于等于 0\n"
+                        "  - 请至少将 1 个选项的配比设为大于 0"
+                    )
 
-        for cfg_idx, cfg in enumerate(list(getattr(entry, "attached_option_selects", []) or []), start=1):
-            if not isinstance(cfg, dict):
-                continue
-            weights = cfg.get("weights")
-            if isinstance(weights, list) and weights and _count_positive_weights(weights) <= 0:
-                option_text = str(cfg.get("option_text") or "").strip()
-                errors.append(
-                    f"第 {question_num} 题（嵌入式下拉）配置无效：\n"
-                    f"  - 第 {cfg_idx} 组（{option_text or '未命名选项'}）所有配比都小于等于 0\n"
-                    "  - 请至少将 1 个选项的配比设为大于 0"
-                )
+        for cfg_idx, option_text in find_all_zero_attached_selects(getattr(entry, "attached_option_selects", []) or []):
+            errors.append(
+                f"第 {question_num} 题（嵌入式下拉）配置无效：\n"
+                f"  - 第 {cfg_idx} 组（{option_text or '未命名选项'}）所有配比都小于等于 0\n"
+                "  - 请至少将 1 个选项的配比设为大于 0"
+            )
 
     if errors:
         return "\n\n".join(errors)

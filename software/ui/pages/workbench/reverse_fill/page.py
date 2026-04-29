@@ -55,6 +55,7 @@ from software.providers.common import (
     is_supported_survey_url,
     is_wjx_survey_url,
 )
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_metas
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.pages.workbench.dashboard.parts.clipboard import DashboardClipboardMixin
 from software.ui.widgets.paste_only_menu import PasteOnlyMenu
@@ -86,7 +87,7 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
     def __init__(self, controller: "RunController", parent=None):
         super().__init__(parent)
         self.controller = controller
-        self._questions_info: List[Dict[str, Any]] = []
+        self._questions_info: List[SurveyQuestionMeta] = []
         self._question_entries: List[Any] = []
         self._survey_provider: str = ""
         self._survey_title: str = ""
@@ -369,13 +370,13 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
 
     def set_question_context(
         self,
-        questions_info: Sequence[Dict[str, Any]],
+        questions_info: Sequence[SurveyQuestionMeta],
         question_entries: Sequence[Any],
         *,
         survey_title: str = "",
         survey_provider: str = "",
     ) -> None:
-        self._questions_info = [dict(item or {}) for item in list(questions_info or []) if isinstance(item, dict)]
+        self._questions_info = ensure_survey_question_metas(questions_info or [])
         self._question_entries = list(copy.deepcopy(list(question_entries or [])))
         self._survey_title = str(survey_title or "").strip()
         self._survey_provider = str(survey_provider or "").strip()
@@ -467,7 +468,8 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
         if not self._parse_requested_from_reverse_fill:
             return
         self._parse_requested_from_reverse_fill = False
-        unsupported_count = sum(1 for item in (info or []) if isinstance(item, dict) and item.get("unsupported"))
+        parsed_info = ensure_survey_question_metas(info or [])
+        unsupported_count = sum(1 for item in parsed_info if bool(item.unsupported))
         self._survey_title = str(title or "").strip()
         self._survey_provider = normalize_survey_provider(
             getattr(self.controller, "survey_provider", "") or detect_survey_provider(self.url_edit.text().strip(), default=""),

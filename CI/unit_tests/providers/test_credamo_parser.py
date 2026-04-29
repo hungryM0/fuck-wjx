@@ -132,6 +132,64 @@ class CredamoParserTests(unittest.TestCase):
 
         self.assertEqual(question["forced_texts"], ["你好"])
 
+    def test_normalize_question_detects_title_max_multi_select_limit(self) -> None:
+        question = parser._normalize_question(
+            {
+                "question_num": "Q17",
+                "title": "Q17 正餐替代时，你最看重的3个属性？ [至多选3项]",
+                "title_text": "正餐替代时，你最看重的3个属性？",
+                "tip_text": "[至多选3项]",
+                "question_kind": "multiple",
+                "provider_type": "multiple",
+                "option_texts": ["分量足", "方便", "便宜", "口味好", "可宿舍煮"],
+                "text_inputs": 0,
+                "page": 1,
+                "question_id": "question-17",
+            },
+            fallback_num=17,
+        )
+
+        self.assertIsNone(question["multi_min_limit"])
+        self.assertEqual(question["multi_max_limit"], 3)
+
+    def test_normalize_question_detects_title_min_multi_select_limit(self) -> None:
+        question = parser._normalize_question(
+            {
+                "question_num": "Q30",
+                "title": "Q30 哪种周边会让你更想集体购买？ [至少选2项]",
+                "title_text": "哪种周边会让你更想集体购买？",
+                "tip_text": "[至少选2项]",
+                "question_kind": "multiple",
+                "provider_type": "multiple",
+                "option_texts": ["宿舍小煮锅", "超大分享碗", "非遗文创", "趣味贴纸"],
+                "text_inputs": 0,
+                "page": 1,
+                "question_id": "question-30",
+            },
+            fallback_num=30,
+        )
+
+        self.assertEqual(question["multi_min_limit"], 2)
+        self.assertIsNone(question["multi_max_limit"])
+
+    def test_normalize_question_ignores_multi_select_limit_for_single_choice(self) -> None:
+        question = parser._normalize_question(
+            {
+                "question_num": "Q31",
+                "title": "Q31 单选题示例 [至多选2项]",
+                "question_kind": "single",
+                "provider_type": "single",
+                "option_texts": ["愿意", "不愿意", "无所谓"],
+                "text_inputs": 0,
+                "page": 1,
+                "question_id": "question-31",
+            },
+            fallback_num=31,
+        )
+
+        self.assertIsNone(question["multi_min_limit"])
+        self.assertIsNone(question["multi_max_limit"])
+
     def test_normalize_question_does_not_treat_plain_select_prompt_as_forced_choice(self) -> None:
         question = parser._normalize_question(
             {

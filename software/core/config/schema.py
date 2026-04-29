@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from software.providers.common import SURVEY_PROVIDER_WJX
+from software.providers.contracts import SurveyQuestionMeta
 from software.app.config import DEFAULT_RANDOM_UA_KEYS
 
 if TYPE_CHECKING:
@@ -51,6 +52,6 @@ class RuntimeConfig:
     answer_rules: List[Dict[str, Any]] = field(default_factory=list)
     dimension_groups: List[str] = field(default_factory=list)
     question_entries: List[QuestionEntry] = field(default_factory=list)
-    questions_info: Optional[List[Dict[str, Any]]] = field(default_factory=list)
+    questions_info: Optional[List[SurveyQuestionMeta]] = field(default_factory=list)
     _ai_config_present: bool = field(default=False, init=False, repr=False)
 

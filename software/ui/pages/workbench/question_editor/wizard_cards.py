@@ -8,6 +8,7 @@ from qfluentwidgets import BodyLabel, CardWidget, LineEdit, MessageBox, Subtitle
 
 from software.core.questions.config import QuestionEntry
 from software.core.questions.utils import try_parse_random_int_range
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_meta
 from software.ui.widgets.no_wheel import NoWheelSlider
 
 from .constants import _get_entry_type_label
@@ -16,7 +17,7 @@ from .utils import _apply_label_color, _bind_slider_input, _configure_wrapped_te
 
 class WizardCardsMixin:
     if TYPE_CHECKING:
-        info: List[Dict[str, Any]]
+        info: List[SurveyQuestionMeta]
         entries: List[QuestionEntry]
         slider_map: Dict[int, List[NoWheelSlider]]
         matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]]
@@ -105,27 +106,27 @@ class WizardCardsMixin:
             return float(value)
         except Exception:
             return float(default)
-    def _get_entry_info(self, idx: int) -> Dict[str, Any]:
+    def _get_entry_info(self, idx: int) -> SurveyQuestionMeta:
         if 0 <= idx < len(self.info):
             info = self.info[idx]
-            if isinstance(info, dict):
+            if isinstance(info, SurveyQuestionMeta):
                 return info
-        return {}
+        return ensure_survey_question_meta({}, index=idx + 1)
     def _format_question_label(self, idx: int) -> str:
         info = self._get_entry_info(idx)
         qnum = str(info.get("num") or "").strip()
         return f"第{qnum or idx + 1}题"
-    def _find_info_by_question_num(self, question_num: int) -> Dict[str, Any]:
+    def _find_info_by_question_num(self, question_num: int) -> SurveyQuestionMeta:
         for info in self.info:
-            if not isinstance(info, dict):
+            if not isinstance(info, SurveyQuestionMeta):
                 continue
             try:
-                current_num = int(info.get("num") or 0)
+                current_num = int(info.num or 0)
             except Exception:
                 current_num = 0
             if current_num == question_num:
                 return info
-        return {}
+        return ensure_survey_question_meta({}, index=question_num)
     @staticmethod
     def _format_question_num_list(question_nums: List[int]) -> str:
         normalized: List[int] = []

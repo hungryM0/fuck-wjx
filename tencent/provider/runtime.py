@@ -43,7 +43,7 @@ def brush_qq(
     psycho_plan: Optional[Any],
 ) -> bool:
     del config
-    unsupported = [item for item in list((ctx.questions_metadata or {}).values()) if bool(item.get("unsupported"))]
+    unsupported = [item for item in list((ctx.questions_metadata or {}).values()) if bool(item.unsupported)]
     if unsupported:
         raise RuntimeError("当前腾讯问卷仍包含未支持题型，已阻止启动")
 
@@ -72,8 +72,8 @@ def brush_qq(
                     logging.info("更新线程状态失败：已中断", exc_info=True)
                 return False
 
-            question_num = int(question.get("num") or 0)
-            question_id = str(question.get("provider_question_id") or "")
+            question_num = int(question.num or 0)
+            question_id = str(question.provider_question_id or "")
             if question_num <= 0 or not question_id:
                 continue
             if not _wait_for_question_visible(driver, question_id, timeout_ms=8000):
@@ -111,7 +111,7 @@ def brush_qq(
             elif entry_type in {"scale", "score"}:
                 _answer_qq_score_like(driver, question, config_index, ctx, psycho_plan=psycho_plan)
             elif entry_type == "matrix":
-                if question.get("provider_type") == "matrix_star":
+                if question.provider_type == "matrix_star":
                     _answer_qq_matrix_star(driver, question, config_index, ctx, psycho_plan=psycho_plan)
                 else:
                     _answer_qq_matrix(driver, question, config_index, ctx, psycho_plan=psycho_plan)
@@ -152,8 +152,8 @@ def brush_qq(
                 return False
             break
 
-        current_first = str(questions[0].get("provider_question_id") or "")
-        next_first = str(page_groups[page_index + 1][0].get("provider_question_id") or "")
+        current_first = str(questions[0].provider_question_id or "")
+        next_first = str(page_groups[page_index + 1][0].provider_question_id or "")
         clicked = _click_next_page_button(driver)
         if not clicked:
             raise NoSuchElementException("腾讯问卷下一页按钮未找到")

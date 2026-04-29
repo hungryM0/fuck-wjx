@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from software.core.persona.context import get_answered
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_meta
 
 _thread_local = threading.local()
 _CONDITION_MODES = {"selected", "not_selected"}
@@ -56,27 +57,29 @@ def _normalize_question_type_code(value: Any) -> str:
 
 
 def question_supports_answer_rule(question: Any) -> bool:
-    if not isinstance(question, dict):
+    if not isinstance(question, (dict, SurveyQuestionMeta)):
         return False
-    type_code = _normalize_question_type_code(question.get("type_code"))
+    question_meta = ensure_survey_question_meta(question)
+    type_code = _normalize_question_type_code(question_meta.type_code)
     return type_code in _SUPPORTED_RULE_TYPE_CODES
 
 
-def _build_question_info_map(questions_info: Optional[Sequence[Dict[str, Any]]]) -> Dict[int, Dict[str, Any]]:
-    question_map: Dict[int, Dict[str, Any]] = {}
+def _build_question_info_map(questions_info: Optional[Sequence[SurveyQuestionMeta | Dict[str, Any]]]) -> Dict[int, SurveyQuestionMeta]:
+    question_map: Dict[int, SurveyQuestionMeta] = {}
     for item in questions_info or []:
-        if not isinstance(item, dict):
+        if not isinstance(item, (dict, SurveyQuestionMeta)):
             continue
-        q_num = _to_int(item.get("num"), 0)
+        question = ensure_survey_question_meta(item)
+        q_num = _to_int(question.num, 0)
         if q_num <= 0:
             continue
-        question_map[q_num] = item
+        question_map[q_num] = question
     return question_map
 
 
 def sanitize_answer_rules(
     answer_rules: Optional[Sequence[Dict[str, Any]]],
-    questions_info: Optional[Sequence[Dict[str, Any]]] = None,
+    questions_info: Optional[Sequence[SurveyQuestionMeta | Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """清洗规则，并在提供题目信息时移除已不再受支持的题型规则。"""
     stats = {"invalid": 0, "unsupported": 0}
@@ -170,7 +173,7 @@ def _normalize_rule(raw: Any) -> Optional[AnswerRule]:
 
 def reset_consistency_context(
     answer_rules: Optional[Sequence[Dict[str, Any]]] = None,
-    questions_info: Optional[Sequence[Dict[str, Any]]] = None,
+    questions_info: Optional[Sequence[SurveyQuestionMeta | Dict[str, Any]]] = None,
 ) -> None:
     """每份问卷开始时调用，注入并重置条件规则上下文。"""
     parsed_rules: List[AnswerRule] = []

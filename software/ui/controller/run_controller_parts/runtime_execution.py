@@ -17,6 +17,7 @@ from software.core.reverse_fill.validation import build_enabled_reverse_fill_spe
 from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
 from software.io.config import RuntimeConfig
 from software.network.proxy import set_proxy_occupy_minute_by_answer_duration
+from software.providers.contracts import SurveyQuestionMeta
 
 
 class RunControllerExecutionMixin:
@@ -65,7 +66,7 @@ class RunControllerExecutionMixin:
         _startup_service_warnings: List[str]
         survey_provider: str
         question_entries: List[Any]
-        questions_info: List[Dict[str, Any]]
+        questions_info: List[SurveyQuestionMeta]
 
         def _dispatch_to_ui_async(self, callback: Callable[[], Any]) -> None: ...
         def _enqueue_ui_callback(self, callback: Callable[[], Any]) -> bool: ...
@@ -169,7 +170,7 @@ class RunControllerExecutionMixin:
             return
 
         logging.debug("验证题目配置...")
-        questions_info = getattr(config, "questions_info", None)
+        questions_info = list(getattr(config, "questions_info", None) or [])
         validation_error = validate_question_config(config.question_entries, questions_info)
         if validation_error:
             logging.error("题目配置验证失败：%s", validation_error)
@@ -180,7 +181,7 @@ class RunControllerExecutionMixin:
         try:
             reverse_fill_spec = build_enabled_reverse_fill_spec(
                 config,
-                list(questions_info or []),
+                questions_info,
                 list(config.question_entries or []),
             )
         except Exception as exc:
@@ -239,7 +240,7 @@ class RunControllerExecutionMixin:
         pending_config.questions_metadata = {}
         if hasattr(self, "questions_info") and self.questions_info:
             for q_info in self.questions_info:
-                q_num = q_info.get("num")
+                q_num = int(q_info.num or 0)
                 if q_num:
                     pending_config.questions_metadata[q_num] = q_info
         self._pending_execution_config = pending_config

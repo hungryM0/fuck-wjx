@@ -10,6 +10,7 @@ from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal, Slot
 
 from software.core.questions.config import QuestionEntry
 from software.core.task import ExecutionConfig, ExecutionState
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.controller.run_controller_parts import (
     RunControllerParsingMixin,
     RunControllerPersistenceMixin,
@@ -232,7 +233,7 @@ class RunController(
     def __init__(self, parent=None):
         super().__init__(parent)
         self.config = RuntimeConfig()
-        self.questions_info: List[Dict[str, Any]] = []
+        self.questions_info: List[SurveyQuestionMeta] = []
         self.question_entries: List[QuestionEntry] = []
         self.survey_title = ""
         self.survey_provider = "wjx"

@@ -21,6 +21,7 @@ from qfluentwidgets import (
 from software.app.config import DEFAULT_FILL_TEXT
 from software.core.questions.config import QuestionEntry
 from software.core.questions.utils import OPTION_FILL_AI_TOKEN, build_random_int_token, serialize_random_int_range
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.widgets.no_wheel import NoWheelSlider
 
 from .psycho_config import BIAS_PRESET_CHOICES
@@ -53,7 +54,7 @@ class QuestionWizardDialog(
     def __init__(
         self,
         entries: List[QuestionEntry],
-        info: List[Dict[str, Any]],
+        info: List[SurveyQuestionMeta | Dict[str, Any]],
         survey_title: Optional[str] = None,
         parent=None,
         reliability_mode_enabled: bool = True,

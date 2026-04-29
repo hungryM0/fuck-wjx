@@ -7,8 +7,13 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from software.app.config import DEFAULT_FILL_TEXT
+from software.core.questions.meta_helpers import (
+    infer_question_entry_type,
+    normalize_attached_option_selects,
+    normalize_fillable_option_indices,
+)
 from software.core.questions.schema import QuestionEntry
-from software.core.questions.utils import _normalize_question_type_code
+from software.providers.contracts import SurveyQuestionMeta
 from software.providers.common import (
     SURVEY_PROVIDER_WJX,
     detect_survey_provider,
@@ -73,90 +78,8 @@ def _build_forced_single_weights(option_count: int, forced_index: int) -> List[f
     return [1.0 if idx == forced_index else 0.0 for idx in range(total)]
 
 
-def _normalize_attached_option_selects(
-    parsed_configs: Any,
-    existing_configs: Any = None,
-) -> List[Dict[str, Any]]:
-    parsed_list = parsed_configs if isinstance(parsed_configs, list) else []
-    existing_map: Dict[int, Dict[str, Any]] = {}
-    if isinstance(existing_configs, list):
-        for item in existing_configs:
-            if not isinstance(item, dict):
-                continue
-            raw_option_index = item.get("option_index")
-            if raw_option_index is None:
-                continue
-            try:
-                option_index = int(raw_option_index)
-            except Exception:
-                continue
-            existing_map[option_index] = item
-    normalized: List[Dict[str, Any]] = []
-    for item in parsed_list:
-        if not isinstance(item, dict):
-            continue
-        raw_option_index = item.get("option_index")
-        if raw_option_index is None:
-            continue
-        try:
-            option_index = int(raw_option_index)
-        except Exception:
-            continue
-        option_text = str(item.get("option_text") or "").strip()
-        select_options_raw = item.get("select_options")
-        if not isinstance(select_options_raw, list):
-            continue
-        select_options = [str(opt or "").strip() for opt in select_options_raw if str(opt or "").strip()]
-        if not select_options:
-            continue
-        weights = None
-        existing_item = existing_map.get(option_index)
-        if existing_item is not None:
-            existing_weights = existing_item.get("weights")
-            if isinstance(existing_weights, list) and existing_weights:
-                weights = []
-                for idx in range(len(select_options)):
-                    raw_weight = existing_weights[idx] if idx < len(existing_weights) else 0.0
-                    try:
-                        weights.append(max(0.0, float(raw_weight)))
-                    except Exception:
-                        weights.append(0.0)
-                if not any(weight > 0 for weight in weights):
-                    weights = None
-        normalized.append({
-            "option_index": option_index,
-            "option_text": option_text,
-            "select_options": select_options,
-            "weights": weights,
-        })
-    return normalized
-
-
-def _normalize_fillable_option_indices(
-    parsed_indices: Any,
-    option_count: int,
-    existing_indices: Any = None,
-) -> List[int]:
-    source = parsed_indices if isinstance(parsed_indices, list) else existing_indices
-    if not isinstance(source, list):
-        return []
-    total = max(0, int(option_count or 0))
-    normalized: List[int] = []
-    seen: set[int] = set()
-    for raw in source:
-        try:
-            index = int(raw)
-        except Exception:
-            continue
-        if index < 0 or index >= total or index in seen:
-            continue
-        seen.add(index)
-        normalized.append(index)
-    return normalized
-
-
 def build_default_question_entries(
-    questions_info: List[Dict[str, Any]],
+    questions_info: List[SurveyQuestionMeta],
     *,
     survey_url: str = "",
     existing_entries: Optional[List[QuestionEntry]] = None,
@@ -184,7 +107,6 @@ def build_default_question_entries(
     detected_provider = detect_survey_provider(survey_url)
     entries: List[QuestionEntry] = []
     for q in questions_info:
-        type_code = _normalize_question_type_code(q.get("type_code"))
         if bool(q.get("is_description")) or bool(q.get("unsupported")):
             continue
 
@@ -212,28 +134,7 @@ def build_default_question_entries(
         provider_question_id = str(q.get("provider_question_id") or "").strip()
         provider_page_id = str(q.get("provider_page_id") or "").strip()
 
-        if is_slider_matrix:
-            q_type = "matrix"
-        elif is_multi_text or (is_text_like and text_inputs > 1):
-            q_type = "multi_text"
-        elif is_text_like or type_code in ("1", "2"):
-            q_type = "text"
-        elif type_code == "3":
-            q_type = "single"
-        elif type_code == "4":
-            q_type = "multiple"
-        elif type_code == "5":
-            q_type = "score" if is_rating else "scale"
-        elif type_code == "6":
-            q_type = "matrix"
-        elif type_code == "7":
-            q_type = "dropdown"
-        elif type_code == "8":
-            q_type = "slider"
-        elif type_code == "11":
-            q_type = "order"
-        else:
-            q_type = "single"
+        q_type = infer_question_entry_type(q)
 
         base_option_count = max(option_count, rating_max, 1)
         if q_type in ("text", "multi_text"):
@@ -378,7 +279,7 @@ def build_default_question_entries(
             logging.info("题号%s检测到指定填空内容，已自动填入固定答案", q.get("num"))
 
         fillable_option_indices = (
-            _normalize_fillable_option_indices(
+            normalize_fillable_option_indices(
                 q.get("fillable_options"),
                 option_count,
                 fillable_indices_from_existing,
@@ -409,7 +310,7 @@ def build_default_question_entries(
                 option_fill_texts=option_fill_texts_from_existing if q_type in ("single", "multiple", "dropdown") else None,
                 fillable_option_indices=fillable_option_indices,
                 attached_option_selects=(
-                    _normalize_attached_option_selects(
+                    normalize_attached_option_selects(
                         attached_option_selects,
                         attached_selects_from_existing if q_type == "single" else None,
                     )

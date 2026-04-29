@@ -22,6 +22,11 @@ from qfluentwidgets import (
 
 from software.app.config import DIMENSION_UNGROUPED, PRESET_DIMENSIONS
 from software.core.questions.config import QuestionEntry
+from software.providers.contracts import (
+    SurveyQuestionMeta,
+    ensure_survey_question_meta,
+    ensure_survey_question_metas,
+)
 
 from .dimension_sections import DimensionSectionWidget
 from .question_selector_dialog import QuestionSelectorDialog
@@ -81,8 +86,8 @@ class DimensionGroupingPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._entries: List[QuestionEntry] = []
-        self._questions_info: List[Dict[str, Any]] = []
-        self._question_info_map: Dict[int, Dict[str, Any]] = {}
+        self._questions_info: List[SurveyQuestionMeta] = []
+        self._question_info_map: Dict[int, SurveyQuestionMeta] = {}
         self._dimension_groups: List[str] = []
         self._section_widgets: Dict[str, DimensionSectionWidget] = {}
         self._build_ui()
@@ -125,15 +130,15 @@ class DimensionGroupingPanel(QWidget):
 
         self.add_btn.clicked.connect(self._on_add_dimension)
 
-    def set_entries(self, entries: Sequence[QuestionEntry], questions_info: Optional[Sequence[Dict[str, Any]]] = None) -> None:
+    def set_entries(self, entries: Sequence[QuestionEntry], questions_info: Optional[Sequence[SurveyQuestionMeta]] = None) -> None:
         self._entries = list(entries or [])
         if questions_info is not None:
-            self._questions_info = list(questions_info or [])
+            self._questions_info = ensure_survey_question_metas(questions_info or [])
             self._question_info_map = {}
             for info in self._questions_info:
                 q_num = to_int(info.get("num"), 0)
                 if q_num > 0:
-                    self._question_info_map[q_num] = dict(info)
+                    self._question_info_map[q_num] = info
         self._dimension_groups = sanitize_dimension_groups(self._dimension_groups, self._entries)
         self._refresh_sections()
 
@@ -210,17 +215,17 @@ class DimensionGroupingPanel(QWidget):
             rows_by_group.setdefault(group_name, []).append(row)
         return rows_by_group
 
-    def _supported_entry_rows(self) -> List[Tuple[int, QuestionEntry, Dict[str, Any]]]:
-        rows: List[Tuple[int, QuestionEntry, Dict[str, Any]]] = []
+    def _supported_entry_rows(self) -> List[Tuple[int, QuestionEntry, SurveyQuestionMeta]]:
+        rows: List[Tuple[int, QuestionEntry, SurveyQuestionMeta]] = []
         for idx, entry in enumerate(self._entries):
             if not question_supports_dimension_grouping(entry):
                 continue
             question_num = to_int(getattr(entry, "question_num", idx + 1), idx + 1)
-            info = self._question_info_map.get(question_num, {})
+            info = self._question_info_map.get(question_num, ensure_survey_question_meta({}, index=question_num))
             rows.append((idx, entry, info))
         return rows
 
-    def _resolve_entry_title(self, entry: QuestionEntry, info: Dict[str, Any], index: int) -> str:
+    def _resolve_entry_title(self, entry: QuestionEntry, info: SurveyQuestionMeta, index: int) -> str:
         title = str(getattr(entry, "question_title", "") or "").strip()
         if title:
             return title
@@ -229,7 +234,7 @@ class DimensionGroupingPanel(QWidget):
             return title
         return f"第{index + 1}题"
 
-    def _resolve_entry_type_label(self, entry: QuestionEntry, info: Dict[str, Any]) -> str:
+    def _resolve_entry_type_label(self, entry: QuestionEntry, info: SurveyQuestionMeta) -> str:
         type_code = normalize_question_type_code(info.get("type_code"))
         if type_code == "5" and info.get("is_rating"):
             return "评价题"

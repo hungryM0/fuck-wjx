@@ -20,6 +20,11 @@ from software.core.questions.schema import (
     _TEXT_RANDOM_NONE,
     _infer_option_count,
 )
+from software.core.questions.meta_helpers import (
+    count_positive_weights,
+    find_all_zero_attached_selects,
+    find_all_zero_matrix_rows,
+)
 from software.core.questions.strict_ratio import is_strict_custom_ratio_mode
 from software.core.questions.utils import (
     build_random_int_token,
@@ -57,49 +62,32 @@ def configure_probabilities(
     ctx: "ExecutionConfig",
     reliability_mode_enabled: bool = True,
 ) -> None:
-    def _count_positive_weights(raw_weights: Any) -> int:
-        if not isinstance(raw_weights, (list, tuple)):
-            return 0
-        count = 0
-        for value in raw_weights:
-            try:
-                if float(value) > 0:
-                    count += 1
-            except Exception:
-                continue
-        return count
-
     def _raise_if_all_zero_single_like(raw_weights: Any, question_num: int, question_type: str) -> None:
-        if isinstance(raw_weights, list) and raw_weights and _count_positive_weights(raw_weights) <= 0:
+        if isinstance(raw_weights, list) and raw_weights and count_positive_weights(raw_weights) <= 0:
             raise ValueError(
                 f"第 {question_num} 题（{question_type}）配置无效：所有选项配比均为 0，请至少保留一个大于 0 的选项。"
             )
 
     def _raise_if_all_zero_matrix(raw_weights: Any, question_num: int) -> None:
-        if not isinstance(raw_weights, list) or not raw_weights:
+        invalid_rows = find_all_zero_matrix_rows(raw_weights)
+        if not invalid_rows:
             return
-        if any(isinstance(item, (list, tuple)) for item in raw_weights):
-            for row_idx, row_weights in enumerate(raw_weights, start=1):
-                if isinstance(row_weights, (list, tuple)) and _count_positive_weights(row_weights) <= 0:
-                    raise ValueError(
-                        f"第 {question_num} 题（矩阵题）配置无效：第 {row_idx} 行配比全部为 0，请至少保留一个大于 0 的选项。"
-                    )
-            return
-        if _count_positive_weights(raw_weights) <= 0:
+        if invalid_rows == [0]:
             raise ValueError(
                 f"第 {question_num} 题（矩阵题）配置无效：所有选项配比均为 0，请至少保留一个大于 0 的选项。"
             )
+        raise ValueError(
+            f"第 {question_num} 题（矩阵题）配置无效：第 {invalid_rows[0]} 行配比全部为 0，请至少保留一个大于 0 的选项。"
+        )
 
     def _raise_if_all_zero_attached_selects(entry: QuestionEntry, question_num: int) -> None:
-        for cfg_idx, cfg in enumerate(list(getattr(entry, "attached_option_selects", []) or []), start=1):
-            if not isinstance(cfg, dict):
-                continue
-            weights = cfg.get("weights")
-            if isinstance(weights, list) and weights and _count_positive_weights(weights) <= 0:
-                option_text = str(cfg.get("option_text") or "").strip()
-                raise ValueError(
-                    f"第 {question_num} 题（嵌入式下拉）配置无效：第 {cfg_idx} 组（{option_text or '未命名选项'}）配比全部为 0，请至少保留一个大于 0 的选项。"
-                )
+        issues = find_all_zero_attached_selects(getattr(entry, "attached_option_selects", []) or [])
+        if not issues:
+            return
+        cfg_idx, option_text = issues[0]
+        raise ValueError(
+            f"第 {question_num} 题（嵌入式下拉）配置无效：第 {cfg_idx} 组（{option_text or '未命名选项'}）配比全部为 0，请至少保留一个大于 0 的选项。"
+        )
 
     target = ctx
     target.single_prob = []

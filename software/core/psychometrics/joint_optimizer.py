@@ -19,6 +19,7 @@ from software.core.psychometrics.psychometric import (
 )
 from software.core.psychometrics.utils import cronbach_alpha, randn
 from software.core.questions.utils import normalize_droplist_probs
+from software.providers.contracts import ensure_survey_question_meta
 
 if TYPE_CHECKING:
     from software.core.task import ExecutionConfig
@@ -228,8 +229,12 @@ def build_psychometric_blueprint(config: "ExecutionConfig") -> Dict[str, List[Ps
         if not dimension:
             continue
 
-        question_meta = config.questions_metadata.get(question_num) or {}
-        meta_option_count = int(question_meta.get("options") or 0)
+        question_meta = ensure_survey_question_meta(
+            config.questions_metadata.get(question_num),
+            default_provider=getattr(config, "survey_provider", "wjx"),
+            index=question_num,
+        )
+        meta_option_count = int(question_meta.options or 0)
         saved_bias = config.question_psycho_bias_map.get(question_num, "custom")
 
         if question_type in {"scale", "score"}:
@@ -267,7 +272,7 @@ def build_psychometric_blueprint(config: "ExecutionConfig") -> Dict[str, List[Ps
             continue
 
         if question_type == "matrix":
-            row_count = int(question_meta.get("rows") or 0)
+            row_count = int(question_meta.rows or 0)
             if row_count <= 0:
                 row_count = 1
 

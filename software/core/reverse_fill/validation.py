@@ -33,6 +33,7 @@ from software.core.reverse_fill.schema import (
 from software.io.spreadsheets import load_wjx_excel_export
 from software.io.config import RuntimeConfig
 from software.providers.common import SURVEY_PROVIDER_WJX, normalize_survey_provider
+from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_meta
 
 
 def _detail_from_columns(columns: List[Any]) -> str:
@@ -40,13 +41,13 @@ def _detail_from_columns(columns: List[Any]) -> str:
     return " / ".join(headers)
 
 
-def _regular_config_ready(entry: Optional[QuestionEntry], info: Dict[str, Any], expected_type: str) -> bool:
+def _regular_config_ready(entry: Optional[QuestionEntry], info: SurveyQuestionMeta | Dict[str, Any], expected_type: str) -> bool:
     if entry is None:
         return False
     if str(getattr(entry, "question_type", "") or "").strip() != str(expected_type or "").strip():
         return False
     copied_entry = copy.deepcopy(entry)
-    copied_info = dict(info or {})
+    copied_info = ensure_survey_question_meta(info)
     return validate_question_config([copied_entry], [copied_info]) is None
 
 
@@ -109,7 +110,7 @@ def build_reverse_fill_spec(
     *,
     source_path: str,
     survey_provider: str,
-    questions_info: List[Dict[str, Any]],
+    questions_info: List[SurveyQuestionMeta | Dict[str, Any]],
     question_entries: List[QuestionEntry],
     selected_format: str = REVERSE_FILL_FORMAT_AUTO,
     start_row: int = 1,
@@ -136,20 +137,23 @@ def build_reverse_fill_spec(
     if target_num > 0 and target_num > available_rows:
         issues.append(_build_global_issue(target_num=target_num, available_samples=available_rows))
 
-    for info in list(questions_info or []):
-        if not isinstance(info, dict) or bool(info.get("is_description")):
+    for info_index, raw_info in enumerate(list(questions_info or []), start=1):
+        if not isinstance(raw_info, (dict, SurveyQuestionMeta)):
             continue
-        question_num = int(info.get("num") or 0)
+        info = ensure_survey_question_meta(raw_info, index=info_index)
+        if bool(info.is_description):
+            continue
+        question_num = int(info.num or 0)
         if question_num <= 0:
             continue
-        title = str(info.get("title") or f"第{question_num}题").strip()
+        title = str(info.title or f"第{question_num}题").strip()
         entry = resolve_question_entry(info, question_entries)
         question_type = infer_reverse_fill_question_type(info, entry)
         columns = list((export.question_columns or {}).get(question_num) or [])
         fallback_ready = _regular_config_ready(entry, info, question_type)
 
-        if bool(info.get("unsupported")):
-            reason = str(info.get("unsupported_reason") or "当前程序暂不支持这道题").strip()
+        if bool(info.unsupported):
+            reason = str(info.unsupported_reason or "当前程序暂不支持这道题").strip()
             issues.append(
                 ReverseFillIssue(
                     question_num=question_num,
@@ -247,7 +251,7 @@ def build_reverse_fill_spec(
             continue
 
         if question_type == "matrix":
-            row_texts = list(info.get("row_texts") or [])
+            row_texts = list(info.row_texts or [])
             if row_texts and len(columns) != len(row_texts):
                 reason = f"矩阵题解析出 {len(row_texts)} 行，但 Excel 里只有 {len(columns)} 列"
                 issues.append(
@@ -274,7 +278,7 @@ def build_reverse_fill_spec(
             ordered_columns = resolve_ordered_columns(columns, row_texts)
 
         if question_type == "multi_text":
-            blank_labels = list(info.get("text_input_labels") or [])
+            blank_labels = list(info.text_input_labels or [])
             if blank_labels and len(columns) != len(blank_labels):
                 reason = f"多项填空解析出 {len(blank_labels)} 个空，但 Excel 里只有 {len(columns)} 列"
                 issues.append(
@@ -309,7 +313,7 @@ def build_reverse_fill_spec(
                         question_type=question_type,
                         raw_value=(raw_row.values_by_column or {}).get(int(ordered_columns[0].column_index)),
                         export_format=export.selected_format,
-                        option_texts=list(info.get("option_texts") or []),
+                        option_texts=list(info.option_texts or []),
                     )
                 elif question_type == "text":
                     answer = parse_text_answer(
@@ -328,7 +332,7 @@ def build_reverse_fill_spec(
                         ordered_columns=ordered_columns,
                         raw_row=raw_row,
                         export_format=export.selected_format,
-                        option_texts=list(info.get("option_texts") or []),
+                        option_texts=list(info.option_texts or []),
                     )
                 else:
                     answer = None
@@ -425,7 +429,11 @@ def format_reverse_fill_blocking_message(spec: ReverseFillSpec) -> str:
     return "\n".join(lines)
 
 
-def build_enabled_reverse_fill_spec(config: RuntimeConfig, questions_info: List[Dict[str, Any]], question_entries: List[QuestionEntry]) -> Optional[ReverseFillSpec]:
+def build_enabled_reverse_fill_spec(
+    config: RuntimeConfig,
+    questions_info: List[SurveyQuestionMeta | Dict[str, Any]],
+    question_entries: List[QuestionEntry],
+) -> Optional[ReverseFillSpec]:
     if not bool(getattr(config, "reverse_fill_enabled", False)):
         return None
     source_path = str(getattr(config, "reverse_fill_source_path", "") or "").strip()

@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional
 
 from software.core.questions.schema import QuestionEntry
+from software.core.questions.meta_helpers import infer_question_entry_type
 from software.core.reverse_fill.schema import (
     REVERSE_FILL_FORMAT_WJX_SCORE,
     REVERSE_FILL_FORMAT_WJX_SEQUENCE,
@@ -19,6 +20,7 @@ from software.core.reverse_fill.schema import (
     ReverseFillColumn,
     ReverseFillRawRow,
 )
+from software.providers.contracts import SurveyQuestionMeta
 
 _LEADING_INDEX_RE = re.compile(r"^[\(\[（【]?\s*\d+\s*[\)\]）】]?\s*")
 _NUMBER_TEXT_RE = re.compile(r"^\d+(?:\.0+)?$")
@@ -75,34 +77,16 @@ def is_reverse_fill_blank(value: Any) -> bool:
     return not normalize_reverse_fill_text(value)
 
 
-def infer_reverse_fill_question_type(info: Dict[str, Any], entry: Optional[QuestionEntry] = None) -> str:
-    type_code = str(info.get("type_code") or "").strip()
-    if bool(info.get("is_slider_matrix")):
-        return "matrix"
-    if bool(info.get("is_multi_text")):
-        return "multi_text"
-    if bool(info.get("is_text_like")) or type_code in {"1", "2"}:
-        return "text"
-    if type_code == "3":
-        return "single"
-    if type_code == "4":
-        return "multiple"
-    if type_code == "5":
-        return "score" if bool(info.get("is_rating")) else "scale"
-    if type_code in {"6", "9"}:
-        return "matrix"
-    if type_code == "7":
-        return "dropdown"
-    if type_code == "8":
-        return "slider"
-    if type_code == "11":
-        return "order"
+def infer_reverse_fill_question_type(info: SurveyQuestionMeta | Dict[str, Any], entry: Optional[QuestionEntry] = None) -> str:
+    inferred = infer_question_entry_type(info)
+    if inferred:
+        return inferred
     if entry is not None:
         return str(getattr(entry, "question_type", "") or "single").strip() or "single"
     return "single"
 
 
-def supports_reverse_fill_runtime(question_type: str, info: Dict[str, Any]) -> bool:
+def supports_reverse_fill_runtime(question_type: str, info: SurveyQuestionMeta | Dict[str, Any]) -> bool:
     normalized = str(question_type or "").strip().lower()
     if normalized not in REVERSE_FILL_RUNTIME_SUPPORTED_TYPES:
         return False
@@ -114,7 +98,7 @@ def supports_reverse_fill_runtime(question_type: str, info: Dict[str, Any]) -> b
     return True
 
 
-def resolve_question_entry(info: Dict[str, Any], entries: List[QuestionEntry]) -> Optional[QuestionEntry]:
+def resolve_question_entry(info: SurveyQuestionMeta | Dict[str, Any], entries: List[QuestionEntry]) -> Optional[QuestionEntry]:
     raw_question_num = info.get("num")
     try:
         question_num = int(raw_question_num) if raw_question_num is not None else None
