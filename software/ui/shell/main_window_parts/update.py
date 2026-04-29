@@ -329,7 +329,7 @@ class MainWindowUpdateMixin:
     def _show_update_notification(self):
         """显示更新通知并更新标题栏徽章。"""
         self._show_outdated_badge()
-        self._do_show_update_notification()
+        QTimer.singleShot(0, cast(QObject, self), self._do_show_update_notification)
 
     def _do_show_update_notification(self):
         """实际显示更新通知（使用简单纯文本样式）"""

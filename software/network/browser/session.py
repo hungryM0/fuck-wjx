@@ -14,6 +14,7 @@ from software.network.browser.element import PlaywrightElement
 from software.network.browser.exceptions import NoSuchElementException, ProxyConnectionError
 from software.network.browser.options import _build_selector, _is_proxy_tunnel_error
 from software.network.browser.startup import _load_playwright_sync
+from software.network.browser.subprocess_utils import build_local_text_subprocess_kwargs
 
 if TYPE_CHECKING:
     from playwright.sync_api import Browser, BrowserContext, Page, Playwright
@@ -168,9 +169,9 @@ class PlaywrightDriver:
                 result = subprocess.run(
                     ["taskkill", "/PID", str(pid), "/T", "/F"],
                     capture_output=True,
-                    text=True,
                     timeout=5,
                     creationflags=_no_window,
+                    **build_local_text_subprocess_kwargs(),
                 )
             except Exception as exc:
                 log_suppressed_exception(

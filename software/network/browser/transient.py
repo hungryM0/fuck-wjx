@@ -23,6 +23,7 @@ from software.network.browser.startup import (
     classify_playwright_startup_error,
     is_playwright_startup_environment_error,
 )
+from software.network.browser.subprocess_utils import build_local_text_subprocess_kwargs
 from software.network.proxy.pool import normalize_proxy_address
 
 if TYPE_CHECKING:
@@ -39,9 +40,9 @@ def list_browser_pids() -> Set[int]:
             result = subprocess.run(
                 ["tasklist", "/FI", f"IMAGENAME eq {name}", "/FO", "CSV", "/NH"],
                 capture_output=True,
-                text=True,
                 timeout=5,
                 creationflags=_no_window,
+                **build_local_text_subprocess_kwargs(),
             )
             for line in result.stdout.splitlines():
                 parts = line.strip().strip('"').split('","')

@@ -29,7 +29,8 @@ class MainWindowDialogsMixin:
             finally:
                 done.set()
 
-        QTimer.singleShot(0, _wrapper)
+        # 使用带 receiver 的 singleShot，确保回调回到主窗口所属线程执行。
+        QTimer.singleShot(0, self, _wrapper)
 
         if not done.wait(timeout=5):
             logging.warning("UI 调度超时，放弃执行回调以避免阻塞")
@@ -54,7 +55,7 @@ class MainWindowDialogsMixin:
         if QCoreApplication.instance() is None:
             func()
             return
-        QTimer.singleShot(0, func)
+        QTimer.singleShot(0, self, func)
 
     def _track_async_dialog(self, dialog: QDialog) -> None:
         dialogs = getattr(self, "_async_dialog_refs", None)

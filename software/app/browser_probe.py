@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
 from software.network.browser import classify_playwright_startup_error, create_playwright_driver
+from software.network.browser.subprocess_utils import build_local_text_subprocess_kwargs
 
 
 BROWSER_PROBE_ARG = "--sc-browser-probe"
@@ -98,9 +99,9 @@ def _kill_process_tree(process: subprocess.Popen[Any]) -> None:
             subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 capture_output=True,
-                text=True,
                 timeout=5,
                 creationflags=_NO_WINDOW_FLAG,
+                **build_local_text_subprocess_kwargs(),
             )
         except Exception:
             logging.info("结束浏览器快检子进程树失败，准备回退到 kill", exc_info=True)

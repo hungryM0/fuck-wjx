@@ -5,7 +5,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any, cast
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QFileDialog, QWidget
 from qfluentwidgets import MessageBox, PushButton
 
@@ -27,12 +27,15 @@ class MainWindowLifecycleMixin:
         _random_ip_quota_auto_sync_timer: Any
         _skip_save_on_close: bool
         _base_window_title: str
+        _close_request_pending: bool
+        _close_request_confirmed: bool
         dashboard: Any
         question_page: Any
         runtime_page: Any
         strategy_page: Any
         controller: Any
 
+        def close(self) -> None: ...
         def _stop_update_check_worker(self) -> None: ...
         def _cancel_startup_update_check(self) -> None: ...
 
@@ -177,6 +180,32 @@ class MainWindowLifecycleMixin:
 
         self._persist_last_session_log()
         return True
+
+    def _schedule_deferred_close_confirmation(self) -> None:
+        if bool(getattr(self, "_close_request_pending", False)):
+            return
+        if bool(getattr(self, "_close_request_confirmed", False)):
+            return
+
+        self._close_request_pending = True
+        parent_widget = cast(QWidget, self)
+
+        def _continue_close() -> None:
+            self._close_request_pending = False
+            if not self._confirm_close_with_optional_save():
+                return
+            self._close_request_confirmed = True
+            try:
+                self.close()
+            except Exception as exc:
+                self._close_request_confirmed = False
+                log_suppressed_exception("_schedule_deferred_close_confirmation: self.close()", exc, level=logging.WARNING)
+
+        QTimer.singleShot(0, parent_widget, _continue_close)
+
+    def _finalize_confirmed_close(self) -> None:
+        self._close_request_confirmed = False
+        self._cleanup_runtime_resources_on_close()
 
     def _load_saved_config(self):
         cfg = RuntimeConfig()

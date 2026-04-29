@@ -319,11 +319,12 @@ class MainWindow(
 
     def closeEvent(self, e):
         """窗口关闭时询问用户是否保存配置"""
-        if not self._confirm_close_with_optional_save():
-            e.ignore()
+        if getattr(self, "_close_request_confirmed", False):
+            self._finalize_confirmed_close()
+            super().closeEvent(e)
             return
-        self._cleanup_runtime_resources_on_close()
-        super().closeEvent(e)
+        e.ignore()
+        self._schedule_deferred_close_confirmation()
 
     def _init_community_hint_badge_state(self):
         settings = app_settings()
