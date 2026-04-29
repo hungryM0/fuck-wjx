@@ -144,14 +144,93 @@ def _positive_multiple_indexes(weights: Any, option_count: int) -> List[int]:
     return selected
 
 
-def _answer_multiple(page: Any, root: Any, weights: Any) -> bool:
+def _resolve_multi_select_limits(page: Any, root: Any, option_count: int) -> Tuple[Optional[int], Optional[int]]:
+    try:
+        from credamo.provider import parser as credamo_parser
+    except Exception:
+        return None, None
+
+    title_text = _question_title_text(page, root)
+    extra_fragments = [_root_text(page, root)]
+    try:
+        return credamo_parser._extract_multi_select_limits(
+            title_text,
+            option_count=option_count,
+            extra_fragments=extra_fragments,
+        )
+    except Exception:
+        return None, None
+
+
+def _positive_multiple_indexes_with_limits(
+    weights: Any,
+    option_count: int,
+    *,
+    min_limit: Optional[int] = None,
+    max_limit: Optional[int] = None,
+) -> List[int]:
+    count = max(0, int(option_count or 0))
+    if count <= 0:
+        return []
+
+    resolved_min = max(0, min(count, int(min_limit or 0)))
+    resolved_max = count if max_limit is None else max(0, min(count, int(max_limit or 0)))
+    if resolved_max <= 0:
+        resolved_max = count
+    if resolved_min > resolved_max:
+        resolved_min = resolved_max
+
+    selected = list(dict.fromkeys(_positive_multiple_indexes(weights, count)))
+    if resolved_max < len(selected):
+        selected = random.sample(selected, resolved_max)
+
+    remaining_positive: List[int] = []
+    remaining_any: List[int] = []
+    if isinstance(weights, list) and weights:
+        for idx in range(count):
+            raw = weights[idx] if idx < len(weights) else 0.0
+            try:
+                weight = max(0.0, float(raw))
+            except Exception:
+                weight = 0.0
+            if idx not in selected and weight > 0:
+                remaining_positive.append(idx)
+    remaining_any = [idx for idx in range(count) if idx not in selected and idx not in remaining_positive]
+    random.shuffle(remaining_positive)
+    random.shuffle(remaining_any)
+
+    while len(selected) < resolved_min and (remaining_positive or remaining_any):
+        if remaining_positive:
+            selected.append(remaining_positive.pop())
+            continue
+        selected.append(remaining_any.pop())
+
+    return sorted(dict.fromkeys(selected))
+
+
+def _answer_multiple(
+    page: Any,
+    root: Any,
+    weights: Any,
+    *,
+    min_limit: Optional[int] = None,
+    max_limit: Optional[int] = None,
+) -> bool:
     inputs = _option_inputs(root, "checkbox")
     targets = _option_click_targets(root, "checkbox")
     total = len(inputs) if inputs else len(targets)
     if total <= 0:
         return False
+    live_min_limit, live_max_limit = _resolve_multi_select_limits(page, root, total)
+    resolved_min_limit = min_limit if min_limit is not None else live_min_limit
+    resolved_max_limit = max_limit if max_limit is not None else live_max_limit
     clicked = False
-    for index in _positive_multiple_indexes(weights, total):
+    for index in _positive_multiple_indexes_with_limits(
+        weights,
+        total,
+        min_limit=resolved_min_limit,
+        max_limit=resolved_max_limit,
+    ):
         if index < len(inputs):
             clicked_now = _click_element(page, inputs[index]) and _is_checked(page, inputs[index])
             if not clicked_now:

@@ -114,9 +114,22 @@ def _answer_single_like(page: Any, root: Any, weights: Any, option_count: int) -
     return _ANSWER_SINGLE_LIKE(page, root, weights, option_count)
 
 
-def _answer_multiple(page: Any, root: Any, weights: Any) -> bool:
+def _answer_multiple(
+    page: Any,
+    root: Any,
+    weights: Any,
+    *,
+    min_limit: Optional[int] = None,
+    max_limit: Optional[int] = None,
+) -> bool:
     _sync_runtime_answerer_patch_points()
-    return _ANSWER_MULTIPLE(page, root, weights)
+    return _ANSWER_MULTIPLE(
+        page,
+        root,
+        weights,
+        min_limit=min_limit,
+        max_limit=max_limit,
+    )
 
 
 def _answer_text(root: Any, text_config: Any) -> bool:
@@ -209,7 +222,16 @@ def brush_credamo(
                     _answer_dropdown(page, root, weights)
                 elif entry_type == "multiple":
                     weights = config.multiple_prob[config_index] if config_index < len(config.multiple_prob) else []
-                    _answer_multiple(page, root, weights)
+                    question_meta = config.questions_metadata.get(question_num)
+                    min_limit = getattr(question_meta, "multi_min_limit", None) if question_meta is not None else None
+                    max_limit = getattr(question_meta, "multi_max_limit", None) if question_meta is not None else None
+                    _answer_multiple(
+                        page,
+                        root,
+                        weights,
+                        min_limit=min_limit,
+                        max_limit=max_limit,
+                    )
                 elif entry_type == "order":
                     _answer_order(page, root)
                 elif entry_type in {"text", "multi_text"}:

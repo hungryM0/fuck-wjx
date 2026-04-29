@@ -172,6 +172,41 @@ class CredamoParserTests(unittest.TestCase):
         self.assertEqual(question["multi_min_limit"], 2)
         self.assertIsNone(question["multi_max_limit"])
 
+    def test_normalize_question_detects_range_multi_select_limit(self) -> None:
+        question = parser._normalize_question(
+            {
+                "question_num": "Q32",
+                "title": "Q32 请选择2-4项你最常用的功能",
+                "question_kind": "multiple",
+                "provider_type": "multiple",
+                "option_texts": ["功能A", "功能B", "功能C", "功能D", "功能E"],
+                "text_inputs": 0,
+                "page": 1,
+                "question_id": "question-32",
+            },
+            fallback_num=32,
+        )
+
+        self.assertEqual(question["multi_min_limit"], 2)
+        self.assertEqual(question["multi_max_limit"], 4)
+
+    def test_normalize_question_detects_chinese_multi_select_limit(self) -> None:
+        question = parser._normalize_question(
+            {
+                "question_num": "Q33",
+                "title": "Q33 以下渠道最少选两项",
+                "question_kind": "multiple",
+                "provider_type": "multiple",
+                "option_texts": ["渠道A", "渠道B", "渠道C", "渠道D"],
+                "text_inputs": 0,
+                "page": 1,
+                "question_id": "question-33",
+            },
+            fallback_num=33,
+        )
+
+        self.assertEqual(question["multi_min_limit"], 2)
+
     def test_normalize_question_ignores_multi_select_limit_for_single_choice(self) -> None:
         question = parser._normalize_question(
             {

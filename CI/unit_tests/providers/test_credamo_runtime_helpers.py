@@ -51,6 +51,31 @@ class CredamoRuntimeHelperTests(unittest.TestCase):
 
         self.assertEqual(selected, [1])
 
+    def test_positive_multiple_indexes_with_limits_tops_up_to_min_limit(self):
+        random.seed(3)
+
+        selected = runtime_answerers._positive_multiple_indexes_with_limits(
+            [100, 0, 0, 0],
+            4,
+            min_limit=2,
+            max_limit=4,
+        )
+
+        self.assertEqual(len(selected), 2)
+        self.assertIn(0, selected)
+
+    def test_positive_multiple_indexes_with_limits_trims_to_max_limit(self):
+        random.seed(4)
+
+        selected = runtime_answerers._positive_multiple_indexes_with_limits(
+            [100, 100, 100, 100],
+            4,
+            min_limit=1,
+            max_limit=2,
+        )
+
+        self.assertEqual(len(selected), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

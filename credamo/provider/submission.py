@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Optional
 
@@ -18,6 +19,30 @@ _COMPLETION_MARKERS = (
     "success",
 )
 _VERIFICATION_MARKERS = ("验证码", "验证", "captcha", "滑块")
+_VISIBLE_FEEDBACK_SELECTORS = (
+    ".el-message",
+    ".el-message__content",
+    ".el-message-box",
+    ".el-message-box__message",
+    ".el-form-item__error",
+    ".el-notification",
+    ".el-notification__content",
+    "[role='alert']",
+    ".ant-message",
+    ".ant-message-notice-content",
+    ".ant-notification-notice-message",
+    ".ant-notification-notice-description",
+    ".toast",
+    ".toast-message",
+    ".van-toast",
+    ".ivu-message-notice-content",
+)
+_SELECTION_VALIDATION_PATTERNS = (
+    re.compile(r"(?:请|需)?(?:至少|最少|不少于)\s*(?:选择|选)\s*\d+\s*(?:个)?(?:选项|答案|项)"),
+    re.compile(r"(?:请|需)?(?:至多|最多|不超过)\s*(?:选择|选)\s*\d+\s*(?:个)?(?:选项|答案|项)"),
+    re.compile(r"(?:请|需)?(?:选择|选)\s*\d+\s*(?:[-~～至到]\s*\d+)\s*(?:个)?(?:选项|答案|项)"),
+    re.compile(r"(?:还需|还要|还差)\s*(?:选择|选)\s*\d+\s*(?:个)?(?:选项|答案|项)"),
+)
 
 
 def _body_text(driver: BrowserDriver) -> str:
@@ -25,6 +50,40 @@ def _body_text(driver: BrowserDriver) -> str:
         return str(driver.execute_script("return document.body ? document.body.innerText || '' : ''; ") or "")
     except Exception:
         return ""
+
+
+def _visible_feedback_text(driver: BrowserDriver) -> str:
+    selector = ",".join(_VISIBLE_FEEDBACK_SELECTORS)
+    script = f"""
+return (() => {{
+    const visible = (el) => {{
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (!style) return false;
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    }};
+    const texts = [];
+    for (const el of document.querySelectorAll({selector!r})) {{
+        if (!visible(el)) continue;
+        const text = String(el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (text) texts.push(text);
+    }}
+    return texts.join('\\n');
+}})();
+"""
+    try:
+        return str(driver.execute_script(script) or "")
+    except Exception:
+        return ""
+
+
+def _looks_like_selection_validation(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in _SELECTION_VALIDATION_PATTERNS)
 
 
 def is_completion_page(driver: BrowserDriver) -> bool:
@@ -39,6 +98,11 @@ def is_completion_page(driver: BrowserDriver) -> bool:
 
 
 def submission_requires_verification(driver: BrowserDriver) -> bool:
+    feedback_text = _visible_feedback_text(driver)
+    if _looks_like_selection_validation(feedback_text):
+        return False
+    if feedback_text and any(marker.lower() in feedback_text.lower() for marker in _VERIFICATION_MARKERS):
+        return True
     text = _body_text(driver).lower()
     return any(marker.lower() in text for marker in _VERIFICATION_MARKERS)
 

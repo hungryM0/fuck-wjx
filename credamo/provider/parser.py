@@ -30,7 +30,16 @@ _MULTI_SELECT_LIMIT_RE = re.compile(
     r"(?:[\[【（(]\s*)?"
     r"(?P<kind>至多|最多|不超过|至多可|最多可|至少|最少|不少于)"
     r"\s*(?:可)?(?:选择|选)?\s*"
-    r"(?P<count>\d{1,3})\s*(?:个)?(?:选项|项)?"
+    r"(?P<count>\d{1,3}|[零〇一二两三四五六七八九十百]{1,4})\s*(?:个)?(?:选项|项)?"
+    r"(?:\s*[\]】）)])?"
+)
+_MULTI_SELECT_RANGE_RE = re.compile(
+    r"(?:[\[【（(]\s*)?"
+    r"(?:请)?(?:选择|选)\s*"
+    r"(?P<min>\d{1,3}|[零〇一二两三四五六七八九十百]{1,4})\s*"
+    r"(?:-|~|～|至|到)\s*"
+    r"(?P<max>\d{1,3}|[零〇一二两三四五六七八九十百]{1,4})\s*"
+    r"(?:个)?(?:选项|项)"
     r"(?:\s*[\]】）)])?"
 )
 _MAX_PARSE_PAGES = 20
@@ -193,6 +202,48 @@ def _safe_eval_arithmetic_expression(expression: str) -> Optional[float]:
     return eval_node(node)
 
 
+def _parse_count_token(raw: Any) -> Optional[int]:
+    text = _normalize_text(raw)
+    if not text:
+        return None
+    if text.isdigit():
+        try:
+            return int(text)
+        except Exception:
+            return None
+    digit_map = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    total = 0
+    current = 0
+    for ch in text:
+        if ch in digit_map:
+            current = digit_map[ch]
+            continue
+        if ch == "十":
+            total += (current or 1) * 10
+            current = 0
+            continue
+        if ch == "百":
+            total += (current or 1) * 100
+            current = 0
+            continue
+        return None
+    result = total + current
+    return result if result > 0 else None
+
+
 def _extract_numeric_option_value(option_text: Any) -> Optional[float]:
     text = _normalize_text(option_text)
     if not text:
@@ -268,10 +319,10 @@ def _extract_multi_select_limits(
     upper_bound = max(0, int(option_count or 0))
     for fragment in fragments:
         for match in _MULTI_SELECT_LIMIT_RE.finditer(fragment):
-            try:
-                count = max(1, int(match.group("count") or 0))
-            except Exception:
+            parsed_count = _parse_count_token(match.group("count"))
+            if parsed_count is None:
                 continue
+            count = max(1, parsed_count)
             if upper_bound > 0:
                 count = min(count, upper_bound)
             kind = str(match.group("kind") or "")
@@ -279,6 +330,18 @@ def _extract_multi_select_limits(
                 min_limit = count if min_limit is None else max(min_limit, count)
             elif kind in {"至多", "最多", "不超过", "至多可", "最多可"}:
                 max_limit = count if max_limit is None else min(max_limit, count)
+        for match in _MULTI_SELECT_RANGE_RE.finditer(fragment):
+            parsed_min = _parse_count_token(match.group("min"))
+            parsed_max = _parse_count_token(match.group("max"))
+            if parsed_min is None or parsed_max is None:
+                continue
+            range_min = max(1, parsed_min)
+            range_max = max(range_min, parsed_max)
+            if upper_bound > 0:
+                range_min = min(range_min, upper_bound)
+                range_max = min(range_max, upper_bound)
+            min_limit = range_min if min_limit is None else max(min_limit, range_min)
+            max_limit = range_max if max_limit is None else min(max_limit, range_max)
 
     if min_limit is not None and max_limit is not None and min_limit > max_limit:
         min_limit = max_limit

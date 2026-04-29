@@ -249,6 +249,52 @@ class CredamoRuntimeTests(unittest.TestCase):
         self.assertTrue(answered)
         self.assertEqual(value_input.value, "选项 2")
 
+    def test_brush_credamo_passes_multi_select_limits_into_answerer(self) -> None:
+        stop_signal = threading.Event()
+        state = SimpleNamespace(
+            stop_event=stop_signal,
+            update_thread_step=lambda *args, **kwargs: None,
+            update_thread_status=lambda *args, **kwargs: None,
+        )
+        config = SimpleNamespace(
+            question_config_index_map={5: ("multiple", 0)},
+            questions_metadata={5: SimpleNamespace(multi_min_limit=2, multi_max_limit=3)},
+            single_prob=[],
+            droplist_prob=[],
+            scale_prob=[],
+            multiple_prob=[[100.0, 100.0, 100.0, 100.0]],
+            texts=[],
+            answer_duration_range_seconds=[0, 0],
+        )
+        driver = SimpleNamespace(page=object())
+        root = self._FakeQuestionRoot(5)
+
+        with patch("credamo.provider.runtime._wait_for_question_roots", return_value=[root]), \
+             patch("credamo.provider.runtime._wait_for_dynamic_question_roots", side_effect=[[root], [root]]), \
+             patch("credamo.provider.runtime._question_number_from_root", side_effect=lambda _page, current_root, _fallback: current_root.question_num), \
+             patch("credamo.provider.runtime._root_text", return_value="Q5"), \
+             patch("credamo.provider.runtime._navigation_action", return_value="submit"), \
+             patch("credamo.provider.runtime._click_submit", return_value=True), \
+             patch("credamo.provider.runtime._answer_multiple", return_value=True) as multiple_mock, \
+             patch("credamo.provider.runtime.simulate_answer_duration_delay", return_value=False), \
+             patch("credamo.provider.runtime.time.sleep"):
+            result = runtime.brush_credamo(
+                driver,
+                config,
+                state,
+                stop_signal=stop_signal,
+                thread_name="Worker-1",
+            )
+
+        self.assertTrue(result)
+        multiple_mock.assert_called_once_with(
+            driver.page,
+            root,
+            [100.0, 100.0, 100.0, 100.0],
+            min_limit=2,
+            max_limit=3,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
