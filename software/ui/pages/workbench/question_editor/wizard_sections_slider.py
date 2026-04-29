@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CardWidget, IndicatorPosition, LineEdit, RadioButton, SegmentedWidget, SwitchButton
 
 from software.core.questions.config import QuestionEntry
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.helpers.fluent_tooltip import install_tooltip_filters
 from software.ui.widgets.no_wheel import NoWheelSlider
 
@@ -31,7 +32,7 @@ class WizardSectionsSliderMixin:
         option_fill_state_map: Dict[int, Dict[int, Dict[str, Any]]]
 
         def _resolve_slider_bounds(self, idx: int, entry: QuestionEntry) -> tuple[int, int]: ...
-        def _get_entry_info(self, idx: int) -> Dict[str, Any]: ...
+        def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
         @staticmethod
         def _normalize_fillable_option_indices(raw_indices: Any, option_count: int) -> List[int]: ...
         @staticmethod

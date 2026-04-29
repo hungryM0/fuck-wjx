@@ -1,5 +1,5 @@
 """题目配置数据容器。"""
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 
 from software.core.questions.utils import _normalize_question_type_code
 from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_meta

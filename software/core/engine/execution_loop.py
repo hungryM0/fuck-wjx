@@ -196,9 +196,12 @@ class ExecutionLoop:
         self._update_thread_status(thread_name, "加载问卷", running=True)
 
         try:
+            driver = session.driver
+            if driver is None:
+                raise RuntimeError("浏览器会话未初始化")
             if timed_mode_on:
                 ready = timed_mode.wait_until_open(
-                    session.driver,
+                    driver,
                     self.config.url,
                     stop_signal,
                     refresh_interval=timed_refresh_interval,
@@ -209,7 +212,7 @@ class ExecutionLoop:
                         stop_signal.set()
                     return False
             else:
-                _load_survey_page(session.driver, self.config)
+                _load_survey_page(driver, self.config)
         except Exception as exc:
             self.stop_policy.record_failure(
                 stop_signal,

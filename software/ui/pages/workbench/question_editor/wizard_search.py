@@ -7,6 +7,8 @@ from PySide6.QtGui import QColor, QPainter, QTextDocument
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 from qfluentwidgets import SearchLineEdit, isDarkTheme
 
+from software.providers.contracts import SurveyQuestionMeta
+
 from .constants import _get_entry_type_label
 from .utils import _apply_label_color, _shorten_text
 
@@ -81,7 +83,7 @@ class WizardSearchMixin:
         _search_popup: Any
         _search_edit: Any
 
-        def _get_entry_info(self, idx: int) -> dict: ...
+        def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
         def _navigate_to_question(self, question_idx: int, animate: bool) -> None: ...
         def isVisible(self) -> bool: ...
 

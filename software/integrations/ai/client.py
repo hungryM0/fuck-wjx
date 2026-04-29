@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 from software.integrations.ai.free_api import FreeAITimeoutError, call_free_ai_api
 from software.integrations.ai.protocols import (

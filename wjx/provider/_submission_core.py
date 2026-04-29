@@ -33,6 +33,17 @@ from wjx.provider.submission_proxy import (
     _is_retryable_submit_proxy_error,
 )
 
+__all__ = [
+    "_click_submit_button",
+    "_is_device_quota_limit_page",
+    "_is_wjx_domain",
+    "_looks_like_wjx_survey_url",
+    "_normalize_url_for_compare",
+    "_page_looks_like_wjx_questionnaire",
+    "consume_headless_httpx_submit_success",
+    "submit",
+]
+
 _HEADLESS_SUBMIT_PROXY_RETRY_LIMIT = 1
 def _click_submit_button(driver: BrowserDriver, max_wait: float = 10.0) -> bool:
     """点击“提交”按钮（简单版）。"""

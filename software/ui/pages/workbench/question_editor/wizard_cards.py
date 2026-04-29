@@ -1,5 +1,6 @@
 """题目配置向导卡片与校验。"""
 import copy
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
 from PySide6.QtCore import QTimer, Qt
@@ -147,7 +148,7 @@ class WizardCardsMixin:
         if len(labels) <= 4:
             return "、".join(labels)
         return f"{'、'.join(labels[:4])} 等{len(labels)}题"
-    def _format_condition_option_text(self, source_info: Dict[str, Any], option_indices: List[Any]) -> str:
+    def _format_condition_option_text(self, source_info: SurveyQuestionMeta, option_indices: Sequence[Any]) -> str:
         option_texts = list(source_info.get("option_texts") or [])
         normalized_labels: List[str] = []
         seen = set()
@@ -172,7 +173,7 @@ class WizardCardsMixin:
         if len(normalized_labels) <= 3:
             return "、".join(normalized_labels)
         return f"以下任一项：{'、'.join(normalized_labels[:4])}"
-    def _build_display_condition_summary(self, info_entry: Dict[str, Any]) -> str:
+    def _build_display_condition_summary(self, info_entry: SurveyQuestionMeta) -> str:
         conditions = info_entry.get("display_conditions") or []
         if not isinstance(conditions, list) or not conditions:
             return ""
@@ -195,7 +196,7 @@ class WizardCardsMixin:
         if not segments:
             return "⚠️ 这题不是每份问卷都会出现，只有满足前面题目的条件时才会显示。"
         return f"⚠️ 这题不是每份问卷都会出现。仅在满足以下条件时显示：{'；'.join(segments)}。"
-    def _build_dependent_display_summary(self, info_entry: Dict[str, Any]) -> str:
+    def _build_dependent_display_summary(self, info_entry: SurveyQuestionMeta) -> str:
         targets = info_entry.get("controls_display_targets") or []
         if not isinstance(targets, list) or not targets:
             return ""

@@ -7,6 +7,7 @@ from qfluentwidgets import BodyLabel, CardWidget, IndicatorPosition, LineEdit, P
 from software.app.config import DEFAULT_FILL_TEXT
 from software.core.questions.config import QuestionEntry
 from software.core.questions.utils import try_parse_random_int_range
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.helpers.fluent_tooltip import install_tooltip_filters
 
 from .utils import _apply_label_color
@@ -41,7 +42,7 @@ class WizardSectionsTextMixin:
         multi_text_blank_radio_groups: Dict[int, List[QButtonGroup]]
         multi_text_blank_ai_checkboxes: Dict[int, List[SwitchButton]]
 
-        def _get_entry_info(self, idx: int) -> Dict[str, Any]: ...
+        def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
         @staticmethod
         def _resolve_text_random_int_range(entry: QuestionEntry) -> Tuple[Optional[int], Optional[int]]: ...
         @staticmethod

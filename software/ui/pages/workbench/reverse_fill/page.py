@@ -6,7 +6,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Sequence
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor

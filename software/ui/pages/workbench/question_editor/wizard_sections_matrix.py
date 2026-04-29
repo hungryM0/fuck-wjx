@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CardWidget, LineEdit, ScrollArea, SegmentedWidget
 
 from software.core.questions.config import QuestionEntry
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.widgets.no_wheel import NoWheelSlider
 
 from .psycho_config import BIAS_PRESET_CHOICES, PSYCHO_SUPPORTED_TYPES, build_bias_weights
@@ -18,7 +19,7 @@ class WizardSectionsMatrixMixin:
         matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]]
         bias_preset_map: Dict[int, Any]
 
-        def _get_entry_info(self, idx: int) -> Dict[str, Any]: ...
+        def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
         def _resolve_matrix_weights(self, entry: QuestionEntry, rows: int, columns: int) -> List[List[float]]: ...
         def _refresh_ratio_preview_label(
             self,

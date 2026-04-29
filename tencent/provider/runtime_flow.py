@@ -1,7 +1,7 @@
 """腾讯问卷流程判断与翻页辅助。"""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from software.core.task import ExecutionState
 from software.network.browser import BrowserDriver

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import os
+from collections.abc import Sequence
 from typing import Any, Dict, List, Optional
 
 from software.core.questions.schema import QuestionEntry
@@ -110,7 +111,7 @@ def build_reverse_fill_spec(
     *,
     source_path: str,
     survey_provider: str,
-    questions_info: List[SurveyQuestionMeta | Dict[str, Any]],
+    questions_info: Sequence[SurveyQuestionMeta | Dict[str, Any]],
     question_entries: List[QuestionEntry],
     selected_format: str = REVERSE_FILL_FORMAT_AUTO,
     start_row: int = 1,

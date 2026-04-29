@@ -1,6 +1,8 @@
 """WizardSectionsMixin：各题型配置区 UI 构建方法，供 QuestionWizardDialog 通过多继承引入。"""
 from typing import Any, Dict, List, Tuple
 
+from software.providers.contracts import SurveyQuestionMeta
+
 from .wizard_sections_common import (
     WizardSectionsCommonMixin,
     _TEXT_RANDOM_ID_CARD,
@@ -49,7 +51,7 @@ class WizardSectionsMixin(
     option_fill_edit_map: Dict[int, Any]
     option_fill_state_map: Dict[int, Any]
 
-    def _get_entry_info(self, idx: int) -> Dict[str, Any]: ...
+    def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
     def _resolve_matrix_weights(self, entry: Any, rows: int, columns: int) -> List[List[float]]: ...
     def _resolve_slider_bounds(self, idx: int, entry: Any) -> Tuple[int, int]: ...
 

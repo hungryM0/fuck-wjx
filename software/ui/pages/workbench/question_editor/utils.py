@@ -1,4 +1,5 @@
 """UI 辅助函数"""
+from collections.abc import Mapping, Sequence
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
@@ -158,8 +159,8 @@ def _build_entry_info_fallback(entry: QuestionEntry) -> SurveyQuestionMeta:
 
 
 def build_entry_info_list(
-    entries: List[QuestionEntry],
-    questions_info: Optional[List[SurveyQuestionMeta | Dict[str, Any]]],
+    entries: Sequence[QuestionEntry],
+    questions_info: Optional[Sequence[SurveyQuestionMeta | Mapping[str, Any]]],
 ) -> List[SurveyQuestionMeta]:
     """将当前配置题目与原始题目元数据按稳定标识对齐，避免依赖裸下标。"""
     selectable_info: List[SurveyQuestionMeta] = []
@@ -168,7 +169,7 @@ def build_entry_info_list(
     title_map: Dict[str, List[int]] = {}
 
     for info_index, raw_item in enumerate(questions_info or [], start=1):
-        if not isinstance(raw_item, (dict, SurveyQuestionMeta)):
+        if not isinstance(raw_item, (Mapping, SurveyQuestionMeta)):
             continue
         item = ensure_survey_question_meta(raw_item, index=info_index)
         if bool(item.is_description) or bool(item.unsupported):

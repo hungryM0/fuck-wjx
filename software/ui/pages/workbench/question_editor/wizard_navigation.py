@@ -8,6 +8,7 @@ from qfluentwidgets import CardWidget, VerticalPipsPager, isDarkTheme, themeColo
 from qfluentwidgets.components.widgets.pips_pager import PipsScrollButtonDisplayMode
 from qfluentwidgets.components.widgets.tool_tip import ItemViewToolTipDelegate, ItemViewToolTipType
 
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.helpers.fluent_tooltip import install_tooltip_filters
 
 def _color_with_alpha(color: QColor, alpha: int) -> QColor:
@@ -301,7 +302,7 @@ class WizardNavigationMixin:
         _search_edit: Any
         _search_popup: Any
 
-        def _get_entry_info(self, idx: int) -> dict: ...
+        def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
         def _hide_search_popup(self) -> None: ...
         def _activate_search_popup_item(self, item) -> None: ...
         def _restore_entries(self) -> None: ...

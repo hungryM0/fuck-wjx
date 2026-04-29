@@ -7,7 +7,7 @@ import random
 import subprocess
 import threading
 import time
-from typing import TYPE_CHECKING, Dict, Literal, Optional, Set
+from typing import TYPE_CHECKING, Literal, Optional, Set
 
 from software.logging.log_utils import log_suppressed_exception
 from software.network.browser.element import PlaywrightElement

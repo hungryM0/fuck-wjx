@@ -229,8 +229,9 @@ def build_psychometric_blueprint(config: "ExecutionConfig") -> Dict[str, List[Ps
         if not dimension:
             continue
 
+        raw_question_meta = config.questions_metadata.get(question_num) or {}
         question_meta = ensure_survey_question_meta(
-            config.questions_metadata.get(question_num),
+            raw_question_meta,
             default_provider=getattr(config, "survey_provider", "wjx"),
             index=question_num,
         )
