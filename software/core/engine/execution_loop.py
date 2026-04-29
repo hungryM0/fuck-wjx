@@ -412,7 +412,13 @@ class ExecutionLoop:
             min_wait, max_wait = self.config.submit_interval_range_seconds
             if max_wait > 0:
                 try:
-                    self.state.update_thread_status(thread_name, "等待提交间隔", running=True)
+                    self.state.update_thread_step(
+                        thread_name,
+                        0,
+                        0,
+                        status_text="等待提交间隔",
+                        running=True,
+                    )
                 except Exception:
                     logging.info("更新线程状态失败：等待提交间隔", exc_info=True)
                 wait_seconds = min_wait if max_wait == min_wait else random.uniform(min_wait, max_wait)
