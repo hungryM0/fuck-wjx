@@ -341,11 +341,11 @@ class ReverseFillPage(DashboardClipboardMixin, QWidget):
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(10)
 
-        self.scroll = ScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.enableTransparentBackground()
-        self.view = QWidget(self.scroll)
-        self.scroll.setWidget(self.view)
+        self.scroll_area = ScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.enableTransparentBackground()
+        self.view = QWidget(self.scroll_area)
+        self.scroll_area.setWidget(self.view)
 
         layout = QVBoxLayout(self.view)
         layout.setContentsMargins(32, 32, 32, 32)
@@ -358,7 +358,7 @@ class ReverseFillPage(DashboardClipboardMixin, QWidget):
         self._build_summary_banner(layout)
         self._build_details_tables(layout)
         layout.addStretch(1)
-        outer.addWidget(self.scroll, 1)
+        outer.addWidget(self.scroll_area, 1)
         self._build_bottom_status_card(outer)
         self.segment.setCurrentItem("mapping")
 
@@ -813,4 +813,3 @@ class ReverseFillPage(DashboardClipboardMixin, QWidget):
         self.segment.setItemText("issues", f"异常与回退拦截项 ({issue_cnt})")
         self._populate_plan_table(spec)
         self._populate_issue_table(spec)
-
