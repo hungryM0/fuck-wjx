@@ -68,7 +68,71 @@
 │   │   │   ├── test_credamo_parser.py
 │   │   │   ├── test_credamo_runtime.py
 │   │   │   ├── test_credamo_runtime_helpers.py
+```markdown
+仓库根目录
+├── .editorconfig
+├── .github/
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── 报错反馈.md
+│   │   └── 新功能请求.md
+│   └── workflows/
+│       ├── deploy-worker.yml
+│       ├── python-ci.yml
+│       └── release-to-r2.yml
+├── .gitignore
+├── assets/
+│   ├── AliDonate.jpg
+│   ├── community_qr.jpg
+│   ├── gui.png
+│   ├── icon.png
+│   └── WeDonate.png
+├── CI/
+│   ├── __init__.py
+│   ├── live_tests/
+│   │   ├── __init__.py
+│   │   └── test_survey_parsers.py
+│   ├── python_checks/
+│   │   ├── __init__.py
+│   │   ├── common.py
+│   │   ├── compile_check.py
+│   │   ├── import_check.py
+│   │   ├── pyright_check.py
+│   │   ├── ruff_check.py
+│   │   ├── unit_test_check.py
+│   │   └── window_smoke_check.py
+│   ├── python_ci.py
+│   ├── unit_tests/
+│   │   ├── __init__.py
+│   │   ├── app/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_browser_probe.py
+│   │   │   ├── test_browser_subprocess_utils.py
+│   │   │   ├── test_config_codec.py
+│   │   │   ├── test_config_snapshot_usage.py
+│   │   │   ├── test_main_window_modal_safety.py
+│   │   │   └── test_runtime_paths.py
+│   │   ├── engine/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_browser_session_service.py
+│   │   │   ├── test_cleanup.py
+│   │   │   ├── test_execution_loop.py
+│   │   │   ├── test_execution_state_config_guard.py
+│   │   │   ├── test_provider_common.py
+│   │   │   ├── test_reverse_fill_runtime.py
+│   │   │   ├── test_run_stop_policy.py
+│   │   │   ├── test_runtime_control.py
+│   │   │   ├── test_runtime_init_gate.py
+│   │   │   ├── test_runtime_preparation.py
+│   │   │   └── test_submission_service.py
+│   │   ├── providers/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_common.py
+│   │   │   ├── test_credamo_parser.py
+│   │   │   ├── test_credamo_runtime.py
+│   │   │   ├── test_credamo_runtime_helpers.py
 │   │   │   ├── test_credamo_runtime_waits.py
+│   │   │   ├── test_credamo_submission.py
+│   │   │   ├── test_registry.py
 │   │   │   ├── test_survey_cache.py
 │   │   │   ├── test_tencent_runtime.py
 │   │   │   ├── test_wjx_reverse_fill.py
@@ -92,7 +156,8 @@
 │       │   ├── response.js
 │       │   └── telegram.js
 │       └── wrangler.toml
-├── assets/
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
 ├── credamo/
 │   ├── __init__.py
 │   └── provider/
@@ -103,6 +168,8 @@
 │       ├── runtime_dom.py
 │       └── submission.py
 ├── icon.ico
+├── LICENSE
+├── README.md
 ├── requirements.txt
 ├── rthook_pyside6.py
 ├── Setup/
@@ -203,10 +270,20 @@
 │   ├── io/
 │   │   ├── __init__.py
 │   │   ├── config/
+│   │   │   ├── __init__.py
+│   │   │   └── store.py
 │   │   ├── markdown/
+│   │   │   ├── __init__.py
+│   │   │   └── utils.py
 │   │   ├── qr/
+│   │   │   ├── __init__.py
+│   │   │   └── utils.py
 │   │   ├── reports/
+│   │   │   ├── __init__.py
+│   │   │   └── ip_usage_log.py
 │   │   └── spreadsheets/
+│   │       ├── __init__.py
+│   │       └── wjx_excel.py
 │   ├── logging/
 │   │   ├── __init__.py
 │   │   ├── action_logger.py
@@ -222,6 +299,7 @@
 │   │   │   ├── options.py
 │   │   │   ├── session.py
 │   │   │   ├── startup.py
+│   │   │   ├── subprocess_utils.py
 │   │   │   └── transient.py
 │   │   ├── http/
 │   │   │   ├── __init__.py
@@ -252,6 +330,7 @@
 │   │   └── session_policy.py
 │   ├── providers/
 │   │   ├── __init__.py
+│   │   ├── adapter_base.py
 │   │   ├── common.py
 │   │   ├── contracts.py
 │   │   ├── registry.py
@@ -275,6 +354,7 @@
 │   │   │       ├── runtime_constants.py
 │   │   │       ├── runtime_execution.py
 │   │   │       ├── runtime_init_gate.py
+│   │   │       ├── runtime_preparation.py
 │   │   │       └── runtime_random_ip.py
 │   │   ├── dialogs/
 │   │   │   ├── __init__.py
@@ -389,6 +469,8 @@
 │   └── update/
 │       ├── __init__.py
 │       └── updater.py
+├── SurveyController.py
+├── SurveyController.spec
 ├── tencent/
 │   ├── __init__.py
 │   └── provider/
@@ -433,25 +515,3 @@
       ├── submission_pages.py
       └── submission_proxy.py
 ```
-
-</details>
-
-## PR 流程
-1. **Fork** 本仓库并创建特性分支。
-2. **开发**：
-   - 共享代码进入 `software/`。
-   - 平台专属逻辑进入对应的 `provider/` 子目录。
-   - 保持顶层包（`wjx/`、`tencent/`、`credamo/`）简洁，仅保留包标记；Credamo 见数没有旧共享兼容转发层，权威实现直接在 `credamo/provider/`。
-3. **自测**：
-   - 打开拉取请求先确保能够通过 CI 检查。
-   - 最少手动跑一次受影响的核心流程，并在 PR 里写清楚结果。
-4. **提交**：
-   - PR 描述请写明改动目的、测试结果，如果有的话关联相关 Issue。
-
-## 开发规范
-- **模块化**：按职责拆分文件，避免“巨型文件”；新功能应放入对应的子目录。
-- **UI 组件**：使用 `QfluentWidgets` 原生组件，保持界面风格统一。
-- **友好说明**：输出信息应简洁易懂，面向小白用户，避免过度使用专业术语。
-- **文档规范**：尽可能少地使用 emoji 表情符号。使用 HTML 标签折叠过长的文本内容，保持文档清晰。
-
-欢迎贡献新的题型支持、平台适配或性能优化，感谢你的支持！
