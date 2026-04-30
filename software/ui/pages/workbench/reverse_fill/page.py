@@ -8,7 +8,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Sequence
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QFileDialog, QHBoxLayout, QTableWidgetItem, QVBoxLayout, QWidget, QStackedWidget
 from qfluentwidgets import (
@@ -18,7 +18,10 @@ from qfluentwidgets import (
     InfoBadge,
     InfoBar,
     InfoBarPosition,
+    IndeterminateProgressBar,
+    IndeterminateProgressRing,
     LineEdit,
+    ProgressBar,
     PrimaryPushButton,
     PushButton,
     ScrollArea,
@@ -47,6 +50,7 @@ from software.core.reverse_fill.schema import (
 from software.core.reverse_fill.validation import build_reverse_fill_spec
 from software.io.config import RuntimeConfig
 from software.logging.action_logger import log_action
+from software.logging.log_utils import log_suppressed_exception
 from software.providers.common import SURVEY_PROVIDER_WJX, normalize_survey_provider
 from software.providers.common import (
     SURVEY_PROVIDER_CREDAMO,
@@ -79,7 +83,7 @@ _STATUS_LABELS = {
 }
 
 
-class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
+class ReverseFillPage(DashboardClipboardMixin, QWidget):
     """独立的反填数据源管理页。"""
 
     surveyUrlChanged = Signal(str)
@@ -99,17 +103,19 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
         self._open_wizard_handler: Optional[Callable[[], None]] = None
         self._clipboard_parse_ticket = 0
         self._parse_requested_from_reverse_fill = False
+        self._progress_infobar: Optional[InfoBar] = None
+        self._completion_notified = False
+        self._show_end_toast_after_cleanup = False
+        self._last_progress = 0
+        self._last_pause_reason = ""
+        self._main_progress_indeterminate = False
 
-        self.view = QWidget(self)
-        self.setWidget(self.view)
-        self.setWidgetResizable(True)
-        self.enableTransparentBackground()
-        
         self.setObjectName("reverseFillPage")
-        
+
         self._build_ui()
         self._bind_events()
         self._refresh_preview()
+        self._sync_start_button_state()
 
     def _build_title_area(self, layout: QVBoxLayout) -> None:
         title_row = QWidget(self.view)
@@ -117,7 +123,7 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
         title_row_layout.setContentsMargins(0, 0, 0, 0)
         title_row_layout.setSpacing(10)
 
-        title_label = SubtitleLabel("反填配置", title_row)
+        title_label = SubtitleLabel("Excel 反填", title_row)
         title_row_layout.addWidget(title_label)
 
         self.preview_badge = InfoBadge.custom(
@@ -331,6 +337,16 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
         layout.addWidget(self.table_panel)
 
     def _build_ui(self) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(10)
+
+        self.scroll = ScrollArea(self)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.enableTransparentBackground()
+        self.view = QWidget(self.scroll)
+        self.scroll.setWidget(self.view)
+
         layout = QVBoxLayout(self.view)
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(24)
@@ -342,7 +358,46 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
         self._build_summary_banner(layout)
         self._build_details_tables(layout)
         layout.addStretch(1)
+        outer.addWidget(self.scroll, 1)
+        self._build_bottom_status_card(outer)
         self.segment.setCurrentItem("mapping")
+
+    def _build_bottom_status_card(self, outer_layout: QVBoxLayout) -> None:
+        bottom = CardWidget(self)
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(12, 10, 12, 10)
+        bottom_layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+        self.status_label = StrongBodyLabel("等待配置...", bottom)
+        self.progress_bar = ProgressBar(bottom)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_indeterminate_bar = IndeterminateProgressBar(start=True, parent=bottom)
+        self.progress_indeterminate_bar.hide()
+        self.progress_pct = StrongBodyLabel("0%", bottom)
+        self.progress_pct.setMinimumWidth(50)
+        self.progress_pct.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_pct.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.start_btn = PrimaryPushButton("开始执行", bottom)
+        self.resume_btn = PrimaryPushButton("继续", bottom)
+        self.resume_btn.setEnabled(False)
+        self.resume_btn.hide()
+        self.stop_btn = PushButton("停止", bottom)
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setToolTip("请先在主页完成问卷解析和题目配置")
+        install_tooltip_filter(self.start_btn)
+
+        top_row.addWidget(self.status_label)
+        top_row.addWidget(self.progress_bar, 1)
+        top_row.addWidget(self.progress_indeterminate_bar, 1)
+        top_row.addWidget(self.progress_pct)
+        top_row.addWidget(self.start_btn)
+        top_row.addWidget(self.resume_btn)
+        top_row.addWidget(self.stop_btn)
+        bottom_layout.addLayout(top_row)
+        outer_layout.addWidget(bottom)
 
     def _switch_tab(self, index: int) -> None:
         self.stacked_widget.setCurrentIndex(index)
@@ -364,6 +419,9 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
         clipboard.dataChanged.connect(self._on_clipboard_changed)
         self.controller.surveyParsed.connect(self._on_survey_parsed)
         self.controller.surveyParseFailed.connect(self._on_survey_parse_failed)
+        self.start_btn.clicked.connect(self._on_start_clicked)
+        self.resume_btn.clicked.connect(self._on_resume_clicked)
+        self.stop_btn.clicked.connect(self.controller.stop_run)
 
     def set_open_wizard_handler(self, handler: Optional[Callable[[], None]]) -> None:
         self._open_wizard_handler = handler
@@ -381,6 +439,7 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
         self._survey_title = str(survey_title or "").strip()
         self._survey_provider = str(survey_provider or "").strip()
         self._refresh_preview()
+        self._sync_start_button_state()
 
     def update_config(self, cfg: RuntimeConfig) -> None:
         self._target_num = max(1, int(getattr(cfg, "target", self._target_num) or self._target_num))
@@ -408,18 +467,148 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
     def _selected_format(self) -> str:
         return str(self._selected_format_value or REVERSE_FILL_FORMAT_AUTO)
 
-    def _toast(self, message: str, level: str = "warning", duration: int = 2400) -> None:
+    def _toast(self, message: str, level: str = "warning", duration: int = 2400, show_progress: bool = False) -> Optional[InfoBar]:
+        if self._progress_infobar:
+            try:
+                self._progress_infobar.close()
+            except Exception as exc:
+                log_suppressed_exception("_toast: self._progress_infobar.close()", exc, level=logging.WARNING)
+            self._progress_infobar = None
+
         parent = self.window() or self
-        if level == "error":
-            InfoBar.error("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+        kind = str(level or "warning").lower()
+
+        if kind == "error":
+            infobar = InfoBar.error("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+        elif kind == "success":
+            infobar = InfoBar.success("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+        elif kind == "info":
+            infobar = InfoBar.info("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+        else:
+            infobar = InfoBar.warning("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+
+        if show_progress:
+            spinner = IndeterminateProgressRing()
+            spinner.setFixedSize(20, 20)
+            spinner.setStrokeWidth(3)
+            infobar.addWidget(spinner)
+            self._progress_infobar = infobar
+        return infobar
+
+    def _main_dashboard(self) -> Any:
+        return getattr(self.window(), "dashboard", None)
+
+    def _has_question_entries(self) -> bool:
+        try:
+            dashboard = self._main_dashboard()
+            return bool(dashboard and dashboard._has_question_entries())
+        except Exception:
+            return False
+
+    def _sync_start_button_state(self, running: Optional[bool] = None) -> None:
+        if running is None:
+            running = bool(getattr(self.controller, "running", False))
+        self.start_btn.setEnabled((not bool(running)) and self._has_question_entries())
+
+    def _set_main_progress_indeterminate(self, enabled: bool) -> None:
+        flag = bool(enabled)
+        if flag == self._main_progress_indeterminate:
             return
-        if level == "success":
-            InfoBar.success("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+        self._main_progress_indeterminate = flag
+        if flag:
+            self.progress_bar.hide()
+            self.progress_indeterminate_bar.show()
+            self.progress_pct.setText("...")
             return
-        if level == "info":
-            InfoBar.info("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+        self.progress_indeterminate_bar.hide()
+        self.progress_bar.show()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(max(0, min(100, int(self._last_progress or 0))))
+
+    def update_status(self, text: str, current: int, target: int) -> None:
+        if str(text or "").strip() == "正在初始化":
+            self.status_label.setText("正在初始化")
+            self._set_main_progress_indeterminate(True)
+            self.progress_pct.setText("...")
+            self._last_progress = 0
             return
-        InfoBar.warning("反填页提示", message, parent=parent, position=InfoBarPosition.TOP, duration=duration)
+
+        self._set_main_progress_indeterminate(False)
+        status_text = str(text or "").strip() or "等待配置..."
+        self.status_label.setText(status_text)
+        progress = 0
+        if int(target or 0) > 0:
+            progress = min(100, int((int(current or 0) / max(int(target or 0), 1)) * 100))
+        self.progress_bar.setValue(progress)
+        self.progress_pct.setText(f"{progress}%")
+        self._last_progress = progress
+        if int(target or 0) > 0 and int(current or 0) >= int(target or 0) and not self._completion_notified:
+            self._completion_notified = True
+            self._toast("全部份数已完成", "success", duration=5000)
+            self.stop_btn.setEnabled(False)
+
+    def on_run_state_changed(self, running: bool) -> None:
+        self._sync_start_button_state(running=running)
+        self.stop_btn.setEnabled(bool(running))
+        if running:
+            self.resume_btn.setEnabled(False)
+            self.resume_btn.hide()
+            self._completion_notified = False
+            self.start_btn.setText("执行中...")
+            self.start_btn.setEnabled(False)
+            return
+
+        self.resume_btn.setEnabled(False)
+        self.resume_btn.hide()
+        self._set_main_progress_indeterminate(False)
+        if self._completion_notified or self._last_progress >= 100:
+            self.start_btn.setText("重新开始")
+        else:
+            self.start_btn.setText("开始执行")
+        self.start_btn.setEnabled(self._has_question_entries())
+        self.stop_btn.setEnabled(False)
+        if not self._completion_notified:
+            self._show_end_toast_after_cleanup = True
+
+    def on_pause_state_changed(self, paused: bool, reason: str = "") -> None:
+        self._last_pause_reason = str(reason or "")
+        if not getattr(self.controller, "running", False):
+            self.resume_btn.setEnabled(False)
+            self.resume_btn.hide()
+            return
+        if paused:
+            self.resume_btn.show()
+            self.resume_btn.setEnabled(True)
+            msg = f"已暂停：{reason}" if reason else "已暂停"
+            self._toast(msg, "warning", 2200)
+            return
+        self.resume_btn.setEnabled(False)
+        self.resume_btn.hide()
+
+    def on_cleanup_finished(self) -> None:
+        if not self._show_end_toast_after_cleanup:
+            return
+        self._show_end_toast_after_cleanup = False
+
+    def _on_start_clicked(self) -> None:
+        dashboard = self._main_dashboard()
+        if dashboard is None:
+            self._toast("主页尚未完成初始化，暂时不能开始执行", "error", duration=3000)
+            return
+        should_reset = bool(getattr(dashboard, "_completion_notified", False) or getattr(dashboard, "_last_progress", 0) >= 100)
+        dashboard._on_start_clicked()
+        if should_reset:
+            self.progress_bar.setValue(0)
+            self.progress_pct.setText("0%")
+            self._last_progress = 0
+            self._completion_notified = False
+
+    def _on_resume_clicked(self) -> None:
+        dashboard = self._main_dashboard()
+        if dashboard is None:
+            self._toast("主页尚未完成初始化，暂时不能继续执行", "error", duration=3000)
+            return
+        dashboard._on_resume_clicked()
 
     def _context_ready(self) -> bool:
         provider = normalize_survey_provider(self._survey_provider, default="")
@@ -453,7 +642,7 @@ class ReverseFillPage(DashboardClipboardMixin, ScrollArea):
 
         self._parse_requested_from_reverse_fill = True
         self.surveyUrlChanged.emit(url)
-        self._toast("正在解析问卷结构...", "info", duration=-1)
+        self._toast("正在解析问卷结构...", "info", duration=-1, show_progress=True)
         self.controller.parse_survey(url)
         log_action(
             "UI",
