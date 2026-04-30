@@ -37,10 +37,12 @@ def _resolve_runtime_counts(
 
 
 def _has_active_runtime_dimension(ctx: Optional[Any], question_index: Optional[int]) -> bool:
-    if ctx is None or question_index is None or not hasattr(ctx, "question_dimension_map"):
+    if ctx is None or question_index is None:
         return False
     try:
-        dimension = getattr(ctx, "question_dimension_map", {}).get(question_index)
+        config = getattr(ctx, "config", ctx)
+        dimension_map = getattr(config, "question_dimension_map", {})
+        dimension = dimension_map.get(question_index) if isinstance(dimension_map, dict) else None
     except Exception:
         return False
     return isinstance(dimension, str) and bool(str(dimension).strip())

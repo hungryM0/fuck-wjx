@@ -47,8 +47,7 @@ class _FakeDriver:
 
 class _FakeState(SimpleNamespace):
     def __init__(self, **kwargs) -> None:
-        defaults = dict(
-            stop_event=threading.Event(),
+        config_defaults = dict(
             question_dimension_map={},
             question_config_index_map={},
             single_prob=[],
@@ -70,11 +69,20 @@ class _FakeState(SimpleNamespace):
             multi_text_blank_ai_flags=[],
             multi_text_blank_int_ranges=[],
             answer_duration_range_seconds=[0, 0],
+        )
+        base_defaults = dict(
+            stop_event=threading.Event(),
             step_updates=[],
             status_updates=[],
         )
-        defaults.update(kwargs)
-        super().__init__(**defaults)
+        config_overrides = dict(kwargs.pop("config", {}) or {})
+        for key in list(kwargs.keys()):
+            if key in config_defaults:
+                config_overrides[key] = kwargs.pop(key)
+        config_defaults.update(config_overrides)
+        base_defaults.update(kwargs)
+        base_defaults["config"] = SimpleNamespace(**config_defaults)
+        super().__init__(**base_defaults)
 
     def update_thread_step(self, _thread_name: str, current: int, total: int, *, status_text: str, running: bool) -> None:
         self.step_updates.append((current, total, status_text, running))

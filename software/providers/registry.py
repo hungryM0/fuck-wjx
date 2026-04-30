@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from software.core.engine.provider_common import provider_run_context
+from software.core.task import ExecutionConfig, ExecutionState
+from software.providers.adapter_base import CallableProviderAdapter, ProviderAdapterHooks
 from software.providers.common import (
     SURVEY_PROVIDER_CREDAMO,
     SURVEY_PROVIDER_QQ,
@@ -14,12 +16,9 @@ from software.providers.common import (
 )
 from software.providers.contracts import SurveyDefinition, build_survey_definition
 from software.providers.survey_cache import parse_survey_with_cache
-from software.core.task import ExecutionConfig, ExecutionState
 from credamo.provider.parser import parse_credamo_survey
-from credamo.provider.runtime import brush_credamo
 from tencent.provider.parser import parse_qq_survey
 from wjx.provider.parser import parse_wjx_survey
-from wjx.provider.runtime import brush_wjx
 
 
 def _resolve_provider(*, provider: Optional[str] = None, ctx: Any = None) -> str:
@@ -27,217 +26,248 @@ def _resolve_provider(*, provider: Optional[str] = None, ctx: Any = None) -> str
         return normalize_survey_provider(provider, default=SURVEY_PROVIDER_WJX)
     if ctx is not None:
         return normalize_survey_provider(
-            getattr(ctx, "survey_provider", None),
+            getattr(getattr(ctx, "config", ctx), "survey_provider", None),
             default=SURVEY_PROVIDER_WJX,
         )
     return SURVEY_PROVIDER_WJX
 
 
-class _WjxProviderAdapter:
-    provider = SURVEY_PROVIDER_WJX
+def _build_parse_hook(provider: str, parser):
+    def _parse(url: str) -> SurveyDefinition:
+        info, title = parser(url)
+        return build_survey_definition(provider, title, info)
 
-    def parse_survey(self, url: str) -> SurveyDefinition:
-        info, title = parse_wjx_survey(url)
-        return build_survey_definition(self.provider, title, info)
+    return _parse
 
-    def fill_survey(
-        self,
-        driver: Any,
-        config: ExecutionConfig,
-        state: ExecutionState,
-        *,
-        stop_signal: Any = None,
-        thread_name: str = "",
-        psycho_plan: Any = None,
-    ) -> bool:
-        return bool(
-            brush_wjx(
-                driver,
-                config,
-                state,
-                stop_signal=stop_signal,
-                thread_name=thread_name,
-                psycho_plan=psycho_plan,
-            )
+
+def _fill_wjx(
+    driver: Any,
+    config: ExecutionConfig,
+    state: ExecutionState,
+    *,
+    stop_signal: Any = None,
+    thread_name: str = "",
+    psycho_plan: Any = None,
+) -> bool:
+    from wjx.provider.runtime import brush_wjx
+
+    return bool(
+        brush_wjx(
+            driver,
+            config,
+            state,
+            stop_signal=stop_signal,
+            thread_name=thread_name,
+            psycho_plan=psycho_plan,
         )
+    )
 
-    def is_completion_page(self, driver: Any) -> bool:
-        return False
 
-    def submission_requires_verification(self, driver: Any) -> bool:
-        from wjx.provider.submission import submission_requires_verification as wjx_submission_requires_verification
+def _fill_qq(
+    driver: Any,
+    config: ExecutionConfig,
+    state: ExecutionState,
+    *,
+    stop_signal: Any = None,
+    thread_name: str = "",
+    psycho_plan: Any = None,
+) -> bool:
+    from tencent.provider.runtime import brush_qq
 
-        return bool(wjx_submission_requires_verification(driver))
-
-    def submission_validation_message(self, driver: Any) -> str:
-        from wjx.provider.submission import submission_validation_message as wjx_submission_validation_message
-
-        return str(wjx_submission_validation_message(driver) or "").strip()
-
-    def wait_for_submission_verification(self, driver: Any, *, timeout: int = 3, stop_signal: Any = None) -> bool:
-        from wjx.provider.submission import wait_for_submission_verification as wait_wjx_submission_verification
-
-        return bool(
-            wait_wjx_submission_verification(
-                driver,
-                timeout=timeout,
-                stop_signal=stop_signal,
-            )
+    return bool(
+        brush_qq(
+            driver,
+            config,
+            state,
+            stop_signal=stop_signal,
+            thread_name=thread_name,
+            psycho_plan=psycho_plan,
         )
-
-    def handle_submission_verification_detected(self, ctx: Any, gui_instance: Any, stop_signal: Any) -> None:
-        from wjx.provider.submission import handle_submission_verification_detected as handle_wjx_submission_verification_detected
-
-        handle_wjx_submission_verification_detected(ctx, gui_instance, stop_signal)
-
-    def consume_submission_success_signal(self, driver: Any) -> bool:
-        from wjx.provider.submission import consume_submission_success_signal as consume_wjx_submission_success_signal
-
-        return bool(consume_wjx_submission_success_signal(driver))
-
-    def is_device_quota_limit_page(self, driver: Any) -> bool:
-        from wjx.provider.submission import is_device_quota_limit_page as is_wjx_device_quota_limit_page
-
-        return bool(is_wjx_device_quota_limit_page(driver))
+    )
 
 
-class _QqProviderAdapter:
-    provider = SURVEY_PROVIDER_QQ
+def _fill_credamo(
+    driver: Any,
+    config: ExecutionConfig,
+    state: ExecutionState,
+    *,
+    stop_signal: Any = None,
+    thread_name: str = "",
+    psycho_plan: Any = None,
+) -> bool:
+    from credamo.provider.runtime import brush_credamo
 
-    def parse_survey(self, url: str) -> SurveyDefinition:
-        info, title = parse_qq_survey(url)
-        return build_survey_definition(self.provider, title, info)
-
-    def fill_survey(
-        self,
-        driver: Any,
-        config: ExecutionConfig,
-        state: ExecutionState,
-        *,
-        stop_signal: Any = None,
-        thread_name: str = "",
-        psycho_plan: Any = None,
-    ) -> bool:
-        from tencent.provider.runtime import brush_qq
-
-        return bool(
-            brush_qq(
-                driver,
-                config,
-                state,
-                stop_signal=stop_signal,
-                thread_name=thread_name,
-                psycho_plan=psycho_plan,
-            )
+    return bool(
+        brush_credamo(
+            driver,
+            config,
+            state,
+            stop_signal=stop_signal,
+            thread_name=thread_name,
+            psycho_plan=psycho_plan,
         )
-
-    def is_completion_page(self, driver: Any) -> bool:
-        from tencent.provider.runtime_flow import qq_is_completion_page
-
-        return bool(qq_is_completion_page(driver))
-
-    def submission_requires_verification(self, driver: Any) -> bool:
-        from tencent.provider.runtime_flow import qq_submission_requires_verification
-
-        return bool(qq_submission_requires_verification(driver))
-
-    def submission_validation_message(self, driver: Any) -> str:
-        from tencent.provider.runtime_flow import qq_submission_validation_message
-
-        return str(qq_submission_validation_message(driver) or "").strip()
-
-    def wait_for_submission_verification(self, driver: Any, *, timeout: int = 3, stop_signal: Any = None) -> bool:
-        del timeout, stop_signal
-        return self.submission_requires_verification(driver)
-
-    def handle_submission_verification_detected(self, ctx: Any, gui_instance: Any, stop_signal: Any) -> None:
-        del ctx, gui_instance, stop_signal
-
-    def consume_submission_success_signal(self, driver: Any) -> bool:
-        from tencent.provider.submission import consume_submission_success_signal as consume_qq_submission_success_signal
-
-        return bool(consume_qq_submission_success_signal(driver))
-
-    def is_device_quota_limit_page(self, driver: Any) -> bool:
-        from tencent.provider.submission import is_device_quota_limit_page as is_qq_device_quota_limit_page
-
-        return bool(is_qq_device_quota_limit_page(driver))
+    )
 
 
-class _CredamoProviderAdapter:
-    provider = SURVEY_PROVIDER_CREDAMO
+def _wjx_submission_requires_verification(driver: Any) -> bool:
+    from wjx.provider.submission import submission_requires_verification
 
-    def parse_survey(self, url: str) -> SurveyDefinition:
-        info, title = parse_credamo_survey(url)
-        return build_survey_definition(self.provider, title, info)
+    return bool(submission_requires_verification(driver))
 
-    def fill_survey(
-        self,
-        driver: Any,
-        config: ExecutionConfig,
-        state: ExecutionState,
-        *,
-        stop_signal: Any = None,
-        thread_name: str = "",
-        psycho_plan: Any = None,
-    ) -> bool:
-        return bool(
-            brush_credamo(
-                driver,
-                config,
-                state,
-                stop_signal=stop_signal,
-                thread_name=thread_name,
-                psycho_plan=psycho_plan,
-            )
-        )
 
-    def is_completion_page(self, driver: Any) -> bool:
-        from credamo.provider.submission import is_completion_page as is_credamo_completion_page
+def _wjx_submission_validation_message(driver: Any) -> str:
+    from wjx.provider.submission import submission_validation_message
 
-        return bool(is_credamo_completion_page(driver))
+    return str(submission_validation_message(driver) or "").strip()
 
-    def submission_requires_verification(self, driver: Any) -> bool:
-        from credamo.provider.submission import submission_requires_verification as credamo_submission_requires_verification
 
-        return bool(credamo_submission_requires_verification(driver))
+def _wjx_wait_for_submission_verification(driver: Any, *, timeout: int = 3, stop_signal: Any = None) -> bool:
+    from wjx.provider.submission import wait_for_submission_verification
 
-    def submission_validation_message(self, driver: Any) -> str:
-        from credamo.provider.submission import submission_validation_message as credamo_submission_validation_message
+    return bool(wait_for_submission_verification(driver, timeout=timeout, stop_signal=stop_signal))
 
-        return str(credamo_submission_validation_message(driver) or "").strip()
 
-    def wait_for_submission_verification(self, driver: Any, *, timeout: int = 3, stop_signal: Any = None) -> bool:
-        from credamo.provider.submission import wait_for_submission_verification as wait_credamo_submission_verification
+def _wjx_handle_submission_verification_detected(ctx: Any, gui_instance: Any, stop_signal: Any) -> None:
+    from wjx.provider.submission import handle_submission_verification_detected
 
-        return bool(
-            wait_credamo_submission_verification(
-                driver,
-                timeout=timeout,
-                stop_signal=stop_signal,
-            )
-        )
+    handle_submission_verification_detected(ctx, gui_instance, stop_signal)
 
-    def handle_submission_verification_detected(self, ctx: Any, gui_instance: Any, stop_signal: Any) -> None:
-        from credamo.provider.submission import handle_submission_verification_detected as handle_credamo_submission_verification_detected
 
-        handle_credamo_submission_verification_detected(ctx, gui_instance, stop_signal)
+def _wjx_consume_submission_success_signal(driver: Any) -> bool:
+    from wjx.provider.submission import consume_submission_success_signal
 
-    def consume_submission_success_signal(self, driver: Any) -> bool:
-        from credamo.provider.submission import consume_submission_success_signal as consume_credamo_submission_success_signal
+    return bool(consume_submission_success_signal(driver))
 
-        return bool(consume_credamo_submission_success_signal(driver))
 
-    def is_device_quota_limit_page(self, driver: Any) -> bool:
-        from credamo.provider.submission import is_device_quota_limit_page as is_credamo_device_quota_limit_page
+def _wjx_is_device_quota_limit_page(driver: Any) -> bool:
+    from wjx.provider.submission import is_device_quota_limit_page
 
-        return bool(is_credamo_device_quota_limit_page(driver))
+    return bool(is_device_quota_limit_page(driver))
+
+
+def _qq_is_completion_page(driver: Any) -> bool:
+    from tencent.provider.runtime_flow import qq_is_completion_page
+
+    return bool(qq_is_completion_page(driver))
+
+
+def _qq_submission_requires_verification(driver: Any) -> bool:
+    from tencent.provider.runtime_flow import qq_submission_requires_verification
+
+    return bool(qq_submission_requires_verification(driver))
+
+
+def _qq_submission_validation_message(driver: Any) -> str:
+    from tencent.provider.runtime_flow import qq_submission_validation_message
+
+    return str(qq_submission_validation_message(driver) or "").strip()
+
+
+def _qq_wait_for_submission_verification(driver: Any, *, timeout: int = 3, stop_signal: Any = None) -> bool:
+    del timeout, stop_signal
+    return _qq_submission_requires_verification(driver)
+
+
+def _qq_handle_submission_verification_detected(ctx: Any, gui_instance: Any, stop_signal: Any) -> None:
+    del ctx, gui_instance, stop_signal
+
+
+def _qq_consume_submission_success_signal(driver: Any) -> bool:
+    from tencent.provider.submission import consume_submission_success_signal
+
+    return bool(consume_submission_success_signal(driver))
+
+
+def _qq_is_device_quota_limit_page(driver: Any) -> bool:
+    from tencent.provider.submission import is_device_quota_limit_page
+
+    return bool(is_device_quota_limit_page(driver))
+
+
+def _credamo_is_completion_page(driver: Any) -> bool:
+    from credamo.provider.submission import is_completion_page
+
+    return bool(is_completion_page(driver))
+
+
+def _credamo_submission_requires_verification(driver: Any) -> bool:
+    from credamo.provider.submission import submission_requires_verification
+
+    return bool(submission_requires_verification(driver))
+
+
+def _credamo_submission_validation_message(driver: Any) -> str:
+    from credamo.provider.submission import submission_validation_message
+
+    return str(submission_validation_message(driver) or "").strip()
+
+
+def _credamo_wait_for_submission_verification(driver: Any, *, timeout: int = 3, stop_signal: Any = None) -> bool:
+    from credamo.provider.submission import wait_for_submission_verification
+
+    return bool(wait_for_submission_verification(driver, timeout=timeout, stop_signal=stop_signal))
+
+
+def _credamo_handle_submission_verification_detected(ctx: Any, gui_instance: Any, stop_signal: Any) -> None:
+    from credamo.provider.submission import handle_submission_verification_detected
+
+    handle_submission_verification_detected(ctx, gui_instance, stop_signal)
+
+
+def _credamo_consume_submission_success_signal(driver: Any) -> bool:
+    from credamo.provider.submission import consume_submission_success_signal
+
+    return bool(consume_submission_success_signal(driver))
+
+
+def _credamo_is_device_quota_limit_page(driver: Any) -> bool:
+    from credamo.provider.submission import is_device_quota_limit_page
+
+    return bool(is_device_quota_limit_page(driver))
 
 
 _PROVIDER_REGISTRY = {
-    SURVEY_PROVIDER_WJX: _WjxProviderAdapter(),
-    SURVEY_PROVIDER_QQ: _QqProviderAdapter(),
-    SURVEY_PROVIDER_CREDAMO: _CredamoProviderAdapter(),
+    SURVEY_PROVIDER_WJX: CallableProviderAdapter(
+        SURVEY_PROVIDER_WJX,
+        ProviderAdapterHooks(
+            parse_survey=_build_parse_hook(SURVEY_PROVIDER_WJX, parse_wjx_survey),
+            fill_survey=_fill_wjx,
+            submission_requires_verification=_wjx_submission_requires_verification,
+            submission_validation_message=_wjx_submission_validation_message,
+            wait_for_submission_verification=_wjx_wait_for_submission_verification,
+            handle_submission_verification_detected=_wjx_handle_submission_verification_detected,
+            consume_submission_success_signal=_wjx_consume_submission_success_signal,
+            is_device_quota_limit_page=_wjx_is_device_quota_limit_page,
+        ),
+    ),
+    SURVEY_PROVIDER_QQ: CallableProviderAdapter(
+        SURVEY_PROVIDER_QQ,
+        ProviderAdapterHooks(
+            parse_survey=_build_parse_hook(SURVEY_PROVIDER_QQ, parse_qq_survey),
+            fill_survey=_fill_qq,
+            is_completion_page=_qq_is_completion_page,
+            submission_requires_verification=_qq_submission_requires_verification,
+            submission_validation_message=_qq_submission_validation_message,
+            wait_for_submission_verification=_qq_wait_for_submission_verification,
+            handle_submission_verification_detected=_qq_handle_submission_verification_detected,
+            consume_submission_success_signal=_qq_consume_submission_success_signal,
+            is_device_quota_limit_page=_qq_is_device_quota_limit_page,
+        ),
+    ),
+    SURVEY_PROVIDER_CREDAMO: CallableProviderAdapter(
+        SURVEY_PROVIDER_CREDAMO,
+        ProviderAdapterHooks(
+            parse_survey=_build_parse_hook(SURVEY_PROVIDER_CREDAMO, parse_credamo_survey),
+            fill_survey=_fill_credamo,
+            is_completion_page=_credamo_is_completion_page,
+            submission_requires_verification=_credamo_submission_requires_verification,
+            submission_validation_message=_credamo_submission_validation_message,
+            wait_for_submission_verification=_credamo_wait_for_submission_verification,
+            handle_submission_verification_detected=_credamo_handle_submission_verification_detected,
+            consume_submission_success_signal=_credamo_consume_submission_success_signal,
+            is_device_quota_limit_page=_credamo_is_device_quota_limit_page,
+        ),
+    ),
 }
 
 

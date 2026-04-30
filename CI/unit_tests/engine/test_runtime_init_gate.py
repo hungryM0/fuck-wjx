@@ -5,12 +5,15 @@ from threading import Event, Lock
 from unittest.mock import patch
 
 from software.app.browser_probe import BrowserProbeResult
+from software.core.task import ExecutionConfig
 from software.io.config import RuntimeConfig
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.controller.run_controller_parts.runtime_init_gate import (
     RunControllerInitializationMixin,
     _extract_startup_service_warnings,
     _parse_status_page_monitor_names,
 )
+from software.ui.controller.run_controller_parts.runtime_preparation import PreparedExecutionArtifacts
 
 
 class _DummyInitGate(RunControllerInitializationMixin):
@@ -27,7 +30,7 @@ class _DummyInitGate(RunControllerInitializationMixin):
         self._init_current_step_key = "playwright"
         self._init_gate_stop_event = Event()
         self._status_timer = _FakeTimer()
-        self._pending_execution_config = None
+        self._prepared_execution_artifacts = None
         self._startup_status_check_lock = Lock()
         self._startup_status_check_active = False
         self._startup_service_warnings: list[str] = []
@@ -246,6 +249,32 @@ class RuntimeInitGateTests(unittest.TestCase):
         self.assertEqual(len(created_threads), 1)
         self.assertTrue(created_threads[0].started)
         self.assertEqual(created_threads[0].name, "InitGate")
+
+    def test_prepare_engine_state_clones_prepared_template_and_injects_proxy_pool(self) -> None:
+        template = ExecutionConfig(
+            survey_provider="qq",
+            num_threads=3,
+            random_proxy_ip_enabled=True,
+            questions_metadata={1: SurveyQuestionMeta(num=1, title="Q1")},
+            single_prob=[[1.0, 0.0]],
+        )
+        self.mixin._prepared_execution_artifacts = PreparedExecutionArtifacts(
+            execution_config_template=template,
+            survey_provider="qq",
+            question_entries=[],
+            questions_info=[SurveyQuestionMeta(num=1, title="Q1")],
+            reverse_fill_spec=None,
+        )
+
+        execution_config, execution_state = self.mixin._prepare_engine_state(["proxy-a"])
+
+        self.assertIsNot(execution_config, template)
+        self.assertEqual(execution_config.proxy_ip_pool, ["proxy-a"])
+        self.assertEqual(execution_config.questions_metadata[1].title, "Q1")
+        self.assertEqual(execution_state.config, execution_config)
+
+        template.single_prob[0][0] = 0.0
+        self.assertEqual(execution_config.single_prob[0][0], 1.0)
 
     def test_run_initialization_gate_dispatches_success_callback(self) -> None:
         config = RuntimeConfig()

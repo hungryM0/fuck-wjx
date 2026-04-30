@@ -43,7 +43,8 @@ def brush_qq(
     psycho_plan: Optional[Any],
 ) -> bool:
     del config
-    unsupported = [item for item in list((ctx.questions_metadata or {}).values()) if bool(item.unsupported)]
+    runtime_config = ctx.config
+    unsupported = [item for item in list((runtime_config.questions_metadata or {}).values()) if bool(item.unsupported)]
     if unsupported:
         raise RuntimeError("当前腾讯问卷仍包含未支持题型，已阻止启动")
 
@@ -95,7 +96,7 @@ def brush_qq(
                 except Exception:
                     logging.info("更新腾讯问卷线程步骤失败", exc_info=True)
 
-            config_entry = ctx.question_config_index_map.get(question_num)
+            config_entry = runtime_config.question_config_index_map.get(question_num)
             if not config_entry:
                 logging.warning("腾讯问卷第%d题缺少配置映射，已跳过。", question_num)
                 continue
@@ -139,12 +140,12 @@ def brush_qq(
 
         is_last_page = page_index == len(page_groups) - 1
         if is_last_page:
-            if has_configured_answer_duration(ctx.answer_duration_range_seconds):
+            if has_configured_answer_duration(runtime_config.answer_duration_range_seconds):
                 try:
                     ctx.update_thread_status(thread_name, "等待时长中", running=True)
                 except Exception:
                     logging.info("更新线程状态失败：等待时长中", exc_info=True)
-            if simulate_answer_duration_delay(active_stop, ctx.answer_duration_range_seconds):
+            if simulate_answer_duration_delay(active_stop, runtime_config.answer_duration_range_seconds):
                 try:
                     ctx.update_thread_status(thread_name, "已中断", running=False)
                 except Exception:

@@ -75,7 +75,7 @@ def _is_retryable_submit_proxy_error(exc: BaseException) -> bool:
 def _required_submit_proxy_ttl_seconds(ctx: Optional[ExecutionState]) -> int:
     if ctx is None:
         return 20
-    return int(get_proxy_required_ttl_seconds(getattr(ctx, "answer_duration_range_seconds", (0, 0))))
+    return int(get_proxy_required_ttl_seconds(getattr(ctx.config, "answer_duration_range_seconds", (0, 0))))
 
 
 def _remove_proxy_from_ctx_pool(ctx: ExecutionState, proxy_address: Optional[str]) -> bool:
@@ -86,7 +86,7 @@ def _remove_proxy_from_ctx_pool(ctx: ExecutionState, proxy_address: Optional[str
     removed = False
     with ctx.lock:
         retained = []
-        for item in list(ctx.proxy_ip_pool or []):
+        for item in list(ctx.config.proxy_ip_pool or []):
             lease = coerce_proxy_lease(item)
             if lease is None:
                 continue
@@ -94,7 +94,7 @@ def _remove_proxy_from_ctx_pool(ctx: ExecutionState, proxy_address: Optional[str
                 removed = True
                 continue
             retained.append(lease)
-        ctx.proxy_ip_pool = retained
+        ctx.config.proxy_ip_pool = retained
     return removed
 
 
@@ -103,7 +103,7 @@ def _pop_replacement_proxy_from_pool_locked(ctx: ExecutionState, current_proxy: 
     current = normalize_proxy_address(current_proxy)
     retained = []
     selected = None
-    for item in list(ctx.proxy_ip_pool or []):
+    for item in list(ctx.config.proxy_ip_pool or []):
         lease = coerce_proxy_lease(item)
         if lease is None:
             continue
@@ -116,7 +116,7 @@ def _pop_replacement_proxy_from_pool_locked(ctx: ExecutionState, current_proxy: 
             selected = lease.address
             continue
         retained.append(lease)
-    ctx.proxy_ip_pool = retained
+    ctx.config.proxy_ip_pool = retained
     return selected
 
 
@@ -126,7 +126,7 @@ def _acquire_replacement_submit_proxy(
     *,
     stop_signal: Optional[threading.Event],
 ) -> Optional[str]:
-    if ctx is None or not bool(getattr(ctx, "random_proxy_ip_enabled", False)):
+    if ctx is None or not bool(getattr(ctx.config, "random_proxy_ip_enabled", False)):
         return None
     if stop_signal and stop_signal.is_set():
         return None

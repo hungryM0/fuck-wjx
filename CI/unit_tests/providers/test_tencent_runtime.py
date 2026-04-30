@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 from contextlib import ExitStack, contextmanager
+from types import SimpleNamespace
 
 from software.providers.contracts import SurveyQuestionMeta
 from tencent.provider import runtime
@@ -20,9 +21,11 @@ def _patched_attr(target, name: str, value):
 
 class _FakeState:
     def __init__(self, questions_metadata, question_config_index_map=None):
-        self.questions_metadata = dict(questions_metadata or {})
-        self.question_config_index_map = dict(question_config_index_map or {})
-        self.answer_duration_range_seconds = [0, 0]
+        self.config = SimpleNamespace(
+            questions_metadata=dict(questions_metadata or {}),
+            question_config_index_map=dict(question_config_index_map or {}),
+            answer_duration_range_seconds=[0, 0],
+        )
         self.stop_event = threading.Event()
         self.step_updates: list[tuple[int, int, str, bool]] = []
         self.status_updates: list[tuple[str, bool]] = []

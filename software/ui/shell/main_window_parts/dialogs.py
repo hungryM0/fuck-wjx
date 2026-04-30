@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Dict
+from typing import Any, Callable, Dict, cast
 
-from PySide6.QtCore import QCoreApplication, QThread, QTimer
+from PySide6.QtCore import QObject, QCoreApplication, QThread, QTimer
 from PySide6.QtWidgets import QDialog
 from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox
 from software.logging.action_logger import log_action
@@ -14,7 +14,11 @@ from software.logging.action_logger import log_action
 class MainWindowDialogsMixin:
     """为主窗口提供线程安全的消息提示与确认对话框。"""
 
-    def _dispatch_to_ui(self, func):
+    def _qt_timer_context(self) -> QObject:
+        """声明该 mixin 只用于 QObject 宿主，统一提供定时器回调上下文。"""
+        return cast(QObject, self)
+
+    def _dispatch_to_ui(self, func: Callable[[], Any]) -> Any:
         if self.thread() == QThread.currentThread():  # type: ignore[attr-defined]
             return func()
         if QCoreApplication.instance() is None:
@@ -29,8 +33,7 @@ class MainWindowDialogsMixin:
             finally:
                 done.set()
 
-        # 使用带 receiver 的 singleShot，确保回调回到主窗口所属线程执行。
-        QTimer.singleShot(0, self, _wrapper)
+        QTimer.singleShot(0, self._qt_timer_context(), _wrapper)
 
         if not done.wait(timeout=5):
             logging.warning("UI 调度超时，放弃执行回调以避免阻塞")
@@ -48,14 +51,14 @@ class MainWindowDialogsMixin:
         else:
             InfoBar.info("", text, parent=self, position=InfoBarPosition.TOP, duration=duration)
 
-    def _dispatch_to_ui_async(self, func) -> None:
+    def _dispatch_to_ui_async(self, func: Callable[[], Any]) -> None:
         if self.thread() == QThread.currentThread():  # type: ignore[attr-defined]
             func()
             return
         if QCoreApplication.instance() is None:
             func()
             return
-        QTimer.singleShot(0, self, func)
+        QTimer.singleShot(0, self._qt_timer_context(), func)
 
     def _track_async_dialog(self, dialog: QDialog) -> None:
         dialogs = getattr(self, "_async_dialog_refs", None)

@@ -5,19 +5,21 @@ import logging
 import math
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QCoreApplication
 
 from software.app.config import STOP_FORCE_WAIT_SECONDS, app_settings, get_bool_from_qsettings
 from software.core.engine.failure_reason import FailureReason
 from software.core.engine.runner import run
-from software.core.questions.config import configure_probabilities, validate_question_config
-from software.core.reverse_fill.validation import build_enabled_reverse_fill_spec
 from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
 from software.io.config import RuntimeConfig
-from software.network.proxy import set_proxy_occupy_minute_by_answer_duration
 from software.providers.contracts import SurveyQuestionMeta
+from .runtime_preparation import (
+    PreparedExecutionArtifacts,
+    RuntimePreparationError,
+    prepare_execution_artifacts,
+)
 
 
 class RunControllerExecutionMixin:
@@ -59,7 +61,7 @@ class RunControllerExecutionMixin:
         _init_gate_stop_event: Optional[threading.Event]
         _init_gate_thread: Optional[threading.Thread]
         _monitor_thread: Optional[threading.Thread]
-        _pending_execution_config: Optional[ExecutionConfig]
+        _prepared_execution_artifacts: Optional[PreparedExecutionArtifacts]
         _execution_state: Optional[ExecutionState]
         _quick_feedback_prompt_emitted: bool
         _sleep_blocker: Any
@@ -77,8 +79,7 @@ class RunControllerExecutionMixin:
         def handle_random_ip_submission(self, *, stop_signal: Optional[threading.Event], adapter: Optional[Any] = None) -> None: ...
         def _start_with_initialization_gate(self, config: RuntimeConfig, proxy_pool: List[ProxyLease]) -> None: ...
         def _start_startup_status_check(self, config: RuntimeConfig) -> None: ...
-        def _prepare_engine_state(self, config: RuntimeConfig, proxy_pool: List[ProxyLease]) -> tuple[ExecutionConfig, ExecutionState]: ...
-        def _apply_pending_execution_config(self, config: ExecutionConfig, *, consume: bool) -> None: ...
+        def _prepare_engine_state(self, proxy_pool: List[ProxyLease]) -> tuple[ExecutionConfig, ExecutionState]: ...
         def _reset_initialization_state(self) -> None: ...
         def _build_initialization_logs(self) -> List[str]: ...
         def _emit_quick_bug_report_suggestion_if_needed(self) -> None: ...
@@ -164,39 +165,27 @@ class RunControllerExecutionMixin:
             logging.warning("任务已在运行中，忽略重复启动请求")
             return
 
-        if not getattr(config, "question_entries", None):
-            logging.error("未配置任何题目，无法启动")
-            self.runFailed.emit('未配置任何题目，无法开始执行（请先在"题目配置"页添加/配置题目）')
-            return
-
-        logging.debug("验证题目配置...")
-        questions_info = list(getattr(config, "questions_info", None) or [])
-        validation_error = validate_question_config(config.question_entries, questions_info)
-        if validation_error:
-            logging.error("题目配置验证失败：%s", validation_error)
-            self.runFailed.emit(f"题目配置存在冲突，无法启动：\n\n{validation_error}")
-            return
-
-        reverse_fill_spec = None
         try:
-            reverse_fill_spec = build_enabled_reverse_fill_spec(
+            prepared = prepare_execution_artifacts(
                 config,
-                questions_info,
-                list(config.question_entries or []),
+                fallback_survey_title=str(getattr(self, "survey_title", "") or ""),
             )
-        except Exception as exc:
-            logging.error("反填配置验证失败：%s", exc, exc_info=True)
-            self.runFailed.emit(str(exc))
+        except RuntimePreparationError as exc:
+            if exc.detailed:
+                logging.error(exc.log_message, exc_info=True)
+            else:
+                logging.error(exc.log_message)
+            self.runFailed.emit(exc.user_message)
             return
 
         logging.debug("开始配置任务：目标%s份，%s个线程", config.target, config.threads)
 
         self.config = config
         self.sync_runtime_ui_state_from_config(config)
-        self.survey_provider = str(getattr(config, "survey_provider", "wjx") or "wjx")
-        self.question_entries = list(getattr(config, "question_entries", []) or [])
-        if not self.questions_info and getattr(config, "questions_info", None):
-            self.questions_info = list(getattr(config, "questions_info") or [])
+        self.survey_provider = prepared.survey_provider
+        self.question_entries = list(prepared.question_entries)
+        self.questions_info = list(prepared.questions_info)
+        self._prepared_execution_artifacts = prepared
         self.stop_event = threading.Event()
         self.adapter = self._create_adapter(self.stop_event, random_ip_enabled=config.random_ip_enabled)
         self._paused_state = False
@@ -214,36 +203,6 @@ class RunControllerExecutionMixin:
         self._probe_hit_device_quota = False
         self._probe_failure_message = ""
         self._startup_service_warnings = []
-        _ad = config.answer_duration or (0, 0)
-        proxy_answer_duration: Tuple[int, int] = (0, 0) if config.timed_mode_enabled else (int(_ad[0]), int(_ad[1]))
-        try:
-            set_proxy_occupy_minute_by_answer_duration(proxy_answer_duration)
-        except Exception:
-            logging.debug("同步随机IP占用时长失败", exc_info=True)
-
-        logging.debug("配置题目概率分布（共%s题）", len(config.question_entries))
-        pending_config = ExecutionConfig()
-        pending_config.survey_provider = str(getattr(config, "survey_provider", "wjx") or "wjx")
-        pending_config.reverse_fill_spec = reverse_fill_spec
-        try:
-            configure_probabilities(
-                config.question_entries,
-                ctx=pending_config,
-                reliability_mode_enabled=getattr(config, "reliability_mode_enabled", True),
-            )
-        except Exception as exc:
-            logging.error("配置题目失败：%s", exc)
-            self._starting = False
-            self.runFailed.emit(str(exc))
-            return
-
-        pending_config.questions_metadata = {}
-        if hasattr(self, "questions_info") and self.questions_info:
-            for q_info in self.questions_info:
-                q_num = int(q_info.num or 0)
-                if q_num:
-                    pending_config.questions_metadata[q_num] = q_info
-        self._pending_execution_config = pending_config
         self._start_startup_status_check(config)
 
         self._start_with_initialization_gate(config, [])
@@ -254,15 +213,16 @@ class RunControllerExecutionMixin:
         *,
         emit_run_state: bool = True,
     ) -> None:
-        execution_config, execution_state = self._prepare_engine_state(config, proxy_pool)
-        execution_state.ensure_worker_threads(max(1, int(config.threads or 1)))
-        self._apply_pending_execution_config(execution_config, consume=True)
+        execution_config, execution_state = self._prepare_engine_state(proxy_pool)
+        worker_count = max(1, int(execution_config.num_threads or 1))
+        execution_state.ensure_worker_threads(worker_count)
         execution_state.initialize_reverse_fill_runtime()
         self._execution_state = execution_state
         self.adapter.execution_state = execution_state
+        self._prepared_execution_artifacts = None
 
-        self.config.headless_mode = bool(getattr(config, "headless_mode", False))
-        self.config.threads = max(1, int(config.threads or 1))
+        self.config.headless_mode = bool(execution_config.headless_mode)
+        self.config.threads = worker_count
         self._apply_sleep_blocker_for_run_start()
         self.running = True
         self._starting = False
@@ -270,9 +230,9 @@ class RunControllerExecutionMixin:
             self.runStateChanged.emit(True)
         self._status_timer.start()
 
-        logging.debug("创建%s个工作线程", config.threads)
+        logging.debug("创建%s个工作线程", worker_count)
         threads: List[threading.Thread] = []
-        for idx in range(config.threads):
+        for idx in range(worker_count):
             x = 50 + idx * 60
             y = 50 + idx * 60
             t = threading.Thread(
@@ -359,6 +319,7 @@ class RunControllerExecutionMixin:
             gate_stop = self._init_gate_stop_event
             if gate_stop is not None:
                 gate_stop.set()
+            self._prepared_execution_artifacts = None
             self._starting = False
             return
         if not self.running:
@@ -369,6 +330,7 @@ class RunControllerExecutionMixin:
             gate_stop.set()
         if self._initializing:
             self._reset_initialization_state()
+            self._prepared_execution_artifacts = None
         try:
             self._status_timer.stop()
         except Exception:
@@ -501,7 +463,7 @@ class RunControllerExecutionMixin:
 
         ctx = self._execution_state
         current = getattr(ctx, "cur_num", 0)
-        target = getattr(ctx, "target_num", 0)
+        target = getattr(getattr(ctx, "config", None), "target_num", 0)
         fail = getattr(ctx, "cur_fail", 0)
         device_quota_fail_count = getattr(ctx, "device_quota_fail_count", 0)
         paused = False
@@ -530,7 +492,7 @@ class RunControllerExecutionMixin:
                 logging.debug("获取线程进度快照失败", exc_info=True)
                 thread_rows = []
             try:
-                num_threads = max(1, int(getattr(ctx, "num_threads", 1) or 1))
+                num_threads = max(1, int(getattr(getattr(ctx, "config", None), "num_threads", 1) or 1))
             except Exception:
                 num_threads = 1
             if int(target or 0) > 0:

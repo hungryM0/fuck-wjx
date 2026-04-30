@@ -1,6 +1,7 @@
 """运行时配置序列化与校验逻辑。"""
 from __future__ import annotations
 
+import copy
 import logging
 import random
 from dataclasses import asdict
@@ -20,8 +21,9 @@ from software.providers.common import (
 )
 from software.providers.contracts import (
     SurveyQuestionMeta,
+    clone_survey_question_metas,
     ensure_survey_question_metas,
-    survey_question_meta_to_dict,
+    serialize_survey_question_metas,
 )
 from software.logging.log_utils import log_suppressed_exception
 from software.app.config import BROWSER_PREFERENCE, USER_AGENT_PRESETS
@@ -42,6 +44,9 @@ __all__ = [
     "_select_user_agent_from_ratios",
     "serialize_question_entry",
     "deserialize_question_entry",
+    "clone_question_entries",
+    "clone_questions_info",
+    "build_runtime_config_snapshot",
     "normalize_runtime_config_payload",
     "serialize_runtime_config",
     "deserialize_runtime_config",
@@ -269,14 +274,42 @@ def deserialize_question_entry(data: Dict[str, Any]):
     )
 
 
-def _serialize_questions_info(questions: Any) -> List[Dict[str, Any]]:
-    serialized: List[Dict[str, Any]] = []
-    for item in list(questions or []):
-        if isinstance(item, SurveyQuestionMeta):
-            serialized.append(survey_question_meta_to_dict(item))
-        elif isinstance(item, dict):
-            serialized.append(dict(item))
-    return serialized
+def clone_question_entries(entries: Any) -> List[Any]:
+    cloned: List[Any] = []
+    for item in list(entries or []):
+        try:
+            cloned.append(deserialize_question_entry(serialize_question_entry(item)))
+        except Exception as exc:
+            logging.info("跳过无法复制的题目配置: %s", exc)
+    return cloned
+
+
+def clone_questions_info(questions: Any, *, default_provider: str = SURVEY_PROVIDER_WJX) -> List[SurveyQuestionMeta]:
+    return clone_survey_question_metas(questions or [], default_provider=default_provider)
+
+
+def build_runtime_config_snapshot(
+    config: RuntimeConfig,
+    *,
+    question_entries: Any = None,
+    questions_info: Any = None,
+) -> RuntimeConfig:
+    snapshot = copy.deepcopy(config)
+    default_provider = normalize_survey_provider(
+        getattr(snapshot, "survey_provider", None),
+        default=detect_survey_provider(getattr(snapshot, "url", "")),
+    )
+    snapshot.survey_provider = default_provider
+    entry_source = question_entries if question_entries is not None else getattr(snapshot, "question_entries", [])
+    info_source = questions_info if questions_info is not None else getattr(snapshot, "questions_info", [])
+    snapshot.question_entries = clone_question_entries(entry_source)
+    snapshot.questions_info = clone_questions_info(info_source, default_provider=default_provider)
+    snapshot.answer_rules = copy.deepcopy(list(getattr(snapshot, "answer_rules", []) or []))
+    snapshot.dimension_groups = copy.deepcopy(list(getattr(snapshot, "dimension_groups", []) or []))
+    snapshot.browser_preference = copy.deepcopy(list(getattr(snapshot, "browser_preference", []) or []))
+    snapshot.random_ua_keys = copy.deepcopy(list(getattr(snapshot, "random_ua_keys", []) or []))
+    snapshot.random_ua_ratios = copy.deepcopy(dict(getattr(snapshot, "random_ua_ratios", {}) or {}))
+    return snapshot
 
 
 def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
@@ -492,7 +525,7 @@ def serialize_runtime_config(config: RuntimeConfig) -> Dict[str, Any]:
     payload["question_entries"] = [
         serialize_question_entry(entry) for entry in list(config.question_entries or [])
     ]
-    payload["questions_info"] = _serialize_questions_info(config.questions_info)
+    payload["questions_info"] = serialize_survey_question_metas(config.questions_info or [])
     payload["config_schema_version"] = CURRENT_CONFIG_SCHEMA_VERSION
     return payload
 

@@ -53,7 +53,8 @@ def is_strict_ratio_question(task_ctx: Any, question_number: Any) -> bool:
         q_num = int(question_number)
     except Exception:
         return False
-    strict_map = getattr(task_ctx, "question_strict_ratio_map", {})
+    config = getattr(task_ctx, "config", task_ctx)
+    strict_map = getattr(config, "question_strict_ratio_map", {})
     if not isinstance(strict_map, dict):
         return False
     return bool(strict_map.get(q_num, False))

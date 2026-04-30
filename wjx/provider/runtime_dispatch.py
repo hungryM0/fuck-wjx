@@ -120,27 +120,30 @@ class _QuestionDispatcher:
         self.register("8", index_key="slider", handler=self._handle_slider)
 
     def _handle_single(self, driver, q_num, idx, ctx: ExecutionState):
+        config = ctx.config
         _single_impl(
             driver,
             q_num,
             idx,
-            ctx.single_prob,
-            ctx.single_option_fill_texts,
-            ctx.single_attached_option_selects,
+            config.single_prob,
+            config.single_option_fill_texts,
+            config.single_attached_option_selects,
             task_ctx=ctx,
         )
 
     def _handle_multiple(self, driver, q_num, idx, ctx: ExecutionState):
-        _multiple_impl(driver, q_num, idx, ctx.multiple_prob, ctx.multiple_option_fill_texts, task_ctx=ctx)
+        config = ctx.config
+        _multiple_impl(driver, q_num, idx, config.multiple_prob, config.multiple_option_fill_texts, task_ctx=ctx)
 
     def _handle_scale(self, driver, q_num, idx, ctx: ExecutionState, question_div=None, psycho_plan=None):
-        dim = ctx.question_dimension_map.get(q_num)
+        config = ctx.config
+        dim = config.question_dimension_map.get(q_num)
         if question_div is not None and _driver_question_looks_like_rating(question_div):
             _score_impl(
                 driver,
                 q_num,
                 idx,
-                ctx.scale_prob,
+                config.scale_prob,
                 dimension=dim,
                 psycho_plan=psycho_plan,
                 question_index=q_num,
@@ -151,7 +154,7 @@ class _QuestionDispatcher:
                 driver,
                 q_num,
                 idx,
-                ctx.scale_prob,
+                config.scale_prob,
                 dimension=dim,
                 psycho_plan=psycho_plan,
                 question_index=q_num,
@@ -159,12 +162,13 @@ class _QuestionDispatcher:
             )
 
     def _handle_matrix(self, driver, q_num, idx, ctx: ExecutionState, psycho_plan=None):
-        dim = ctx.question_dimension_map.get(q_num)
+        config = ctx.config
+        dim = config.question_dimension_map.get(q_num)
         return _matrix_impl(
             driver,
             q_num,
             idx,
-            ctx.matrix_prob,
+            config.matrix_prob,
             dimension=dim,
             psycho_plan=psycho_plan,
             question_index=q_num,
@@ -172,20 +176,21 @@ class _QuestionDispatcher:
         )
 
     def _handle_dropdown(self, driver, q_num, idx, ctx: ExecutionState, psycho_plan=None):
+        config = ctx.config
         _dropdown_impl(
             driver,
             q_num,
             idx,
-            ctx.droplist_prob,
-            ctx.droplist_option_fill_texts,
-            dimension=ctx.question_dimension_map.get(q_num),
+            config.droplist_prob,
+            config.droplist_option_fill_texts,
+            dimension=config.question_dimension_map.get(q_num),
             psycho_plan=psycho_plan,
             question_index=q_num,
             task_ctx=ctx,
         )
 
     def _handle_slider(self, driver, q_num, idx, ctx: ExecutionState):
-        slider_score = _resolve_slider_score(idx, ctx.slider_targets)
+        slider_score = _resolve_slider_score(idx, ctx.config.slider_targets)
         _slider_impl(driver, q_num, slider_score)
 
     def fill(
@@ -211,19 +216,20 @@ class _QuestionDispatcher:
             if is_location:
                 print(f"第{question_num}题为位置题，暂不支持，已跳过")
                 return False
+            config = ctx.config
             _idx = config_entry[1] if config_entry and config_entry[0] == "text" else indices.get("text", 0)
             _text_impl(
                 driver,
                 question_num,
                 _idx,
-                ctx.texts,
-                ctx.texts_prob,
-                ctx.text_entry_types,
-                ctx.text_ai_flags,
-                ctx.text_titles,
-                ctx.multi_text_blank_modes,
-                ctx.multi_text_blank_ai_flags,
-                ctx.multi_text_blank_int_ranges,
+                config.texts,
+                config.texts_prob,
+                config.text_entry_types,
+                config.text_ai_flags,
+                config.text_titles,
+                config.multi_text_blank_modes,
+                config.multi_text_blank_ai_flags,
+                config.multi_text_blank_int_ranges,
                 task_ctx=ctx,
             )
             if _should_advance_reverse_fill_index(config_entry, "text", (), reverse_fill_answer):
@@ -241,6 +247,7 @@ class _QuestionDispatcher:
                 text_input_count,
                 has_slider_matrix=has_slider_matrix,
             ):
+                config = ctx.config
                 sequential_idx = int(indices.get("text", 0) or 0)
                 mapped_idx: Optional[int] = None
                 try:
@@ -260,14 +267,14 @@ class _QuestionDispatcher:
                     driver,
                     question_num,
                     _idx,
-                    ctx.texts,
-                    ctx.texts_prob,
-                    ctx.text_entry_types,
-                    ctx.text_ai_flags,
-                    ctx.text_titles,
-                    ctx.multi_text_blank_modes,
-                    ctx.multi_text_blank_ai_flags,
-                    ctx.multi_text_blank_int_ranges,
+                    config.texts,
+                    config.texts_prob,
+                    config.text_entry_types,
+                    config.text_ai_flags,
+                    config.text_titles,
+                    config.multi_text_blank_modes,
+                    config.multi_text_blank_ai_flags,
+                    config.multi_text_blank_int_ranges,
                     task_ctx=ctx,
                 )
                 if _should_advance_reverse_fill_index(config_entry, "text", (), reverse_fill_answer):

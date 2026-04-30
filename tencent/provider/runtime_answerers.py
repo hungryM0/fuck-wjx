@@ -86,10 +86,11 @@ def _answer_qq_single(
     config_index: int,
     ctx: ExecutionState,
 ) -> None:
+    config = ctx.config
     current = int(question.num or 0)
     option_texts = list(question.option_texts or [])
     option_count = max(1, len(option_texts) or int(question.options or 0))
-    probabilities = ctx.single_prob[config_index] if config_index < len(ctx.single_prob) else -1
+    probabilities = config.single_prob[config_index] if config_index < len(config.single_prob) else -1
     probabilities = normalize_droplist_probs(probabilities, option_count)
     strict_ratio = is_strict_ratio_question(ctx, current)
     if not strict_ratio:
@@ -106,7 +107,11 @@ def _answer_qq_single(
     if strict_ratio:
         record_pending_distribution_choice(ctx, current, selected_index, option_count)
     selected_text = option_texts[selected_index] if selected_index < len(option_texts) else ""
-    fill_entries = ctx.single_option_fill_texts[config_index] if config_index < len(ctx.single_option_fill_texts) else None
+    fill_entries = (
+        config.single_option_fill_texts[config_index]
+        if config_index < len(config.single_option_fill_texts)
+        else None
+    )
     fill_value = resolve_option_fill_text_from_config(
         fill_entries,
         selected_index,
@@ -132,13 +137,14 @@ def _answer_qq_dropdown(
     *,
     psycho_plan: Optional[Any],
 ) -> None:
+    config = ctx.config
     current = int(question.num or 0)
     option_texts = list(question.option_texts or [])
     option_count = max(1, len(option_texts) or int(question.options or 0))
-    probabilities = ctx.droplist_prob[config_index] if config_index < len(ctx.droplist_prob) else -1
+    probabilities = config.droplist_prob[config_index] if config_index < len(config.droplist_prob) else -1
     probabilities = normalize_droplist_probs(probabilities, option_count)
     strict_ratio = is_strict_ratio_question(ctx, current)
-    dimension = ctx.question_dimension_map.get(current)
+    dimension = config.question_dimension_map.get(current)
     has_reliability_dimension = isinstance(dimension, str) and bool(str(dimension).strip())
     if not strict_ratio:
         probabilities = apply_persona_boost(option_texts, probabilities)
@@ -193,7 +199,11 @@ def _answer_qq_dropdown(
             _describe_dropdown_state(driver, question_id),
         )
         return
-    fill_entries = ctx.droplist_option_fill_texts[config_index] if config_index < len(ctx.droplist_option_fill_texts) else None
+    fill_entries = (
+        config.droplist_option_fill_texts[config_index]
+        if config_index < len(config.droplist_option_fill_texts)
+        else None
+    )
     fill_value = resolve_option_fill_text_from_config(
         fill_entries,
         selected_index,
@@ -219,9 +229,10 @@ def _answer_qq_text(
     config_index: int,
     ctx: ExecutionState,
 ) -> None:
+    config = ctx.config
     current = int(question.num or 0)
-    answer_candidates = ctx.texts[config_index] if config_index < len(ctx.texts) else [DEFAULT_FILL_TEXT]
-    probabilities = ctx.texts_prob[config_index] if config_index < len(ctx.texts_prob) else [1.0]
+    answer_candidates = config.texts[config_index] if config_index < len(config.texts) else [DEFAULT_FILL_TEXT]
+    probabilities = config.texts_prob[config_index] if config_index < len(config.texts_prob) else [1.0]
     if not answer_candidates:
         answer_candidates = [DEFAULT_FILL_TEXT]
     if len(probabilities) != len(answer_candidates):
@@ -229,7 +240,7 @@ def _answer_qq_text(
     resolved_candidates = [resolve_dynamic_text_token(candidate) for candidate in answer_candidates]
     selected_index = weighted_index(probabilities)
     selected_answer = str(resolved_candidates[selected_index] or DEFAULT_FILL_TEXT).strip() or DEFAULT_FILL_TEXT
-    ai_enabled = bool(ctx.text_ai_flags[config_index]) if config_index < len(ctx.text_ai_flags) else False
+    ai_enabled = bool(config.text_ai_flags[config_index]) if config_index < len(config.text_ai_flags) else False
     title = str(question.title or "")
     description = str(question.description or "").strip()
     ai_prompt = title.strip()
@@ -257,9 +268,10 @@ def _answer_qq_score_like(
     *,
     psycho_plan: Optional[Any],
 ) -> None:
+    config = ctx.config
     current = int(question.num or 0)
     option_count = max(2, int(question.options or 0))
-    probabilities = ctx.scale_prob[config_index] if config_index < len(ctx.scale_prob) else -1
+    probabilities = config.scale_prob[config_index] if config_index < len(config.scale_prob) else -1
     probs = normalize_droplist_probs(probabilities, option_count)
     probs = apply_single_like_consistency(probs, current)
     probs = resolve_distribution_probabilities(
@@ -272,7 +284,7 @@ def _answer_qq_score_like(
     selected_index = get_tendency_index(
         option_count,
         probs,
-        dimension=ctx.question_dimension_map.get(current),
+        dimension=config.question_dimension_map.get(current),
         psycho_plan=psycho_plan,
         question_index=current,
     )
@@ -290,6 +302,7 @@ def _answer_qq_matrix(
     *,
     psycho_plan: Optional[Any],
 ) -> int:
+    config = ctx.config
     current = int(question.num or 0)
     question_id = str(question.provider_question_id or "")
     row_count = max(1, int(question.rows or 1))
@@ -298,7 +311,7 @@ def _answer_qq_matrix(
     strict_ratio_question = is_strict_ratio_question(ctx, current)
     next_index = config_index
     for row_index in range(row_count):
-        raw_probabilities = ctx.matrix_prob[next_index] if next_index < len(ctx.matrix_prob) else -1
+        raw_probabilities = config.matrix_prob[next_index] if next_index < len(config.matrix_prob) else -1
         next_index += 1
         strict_reference: Optional[List[float]] = None
         row_probabilities: Any = -1
@@ -336,7 +349,7 @@ def _answer_qq_matrix(
         selected_index = get_tendency_index(
             option_count,
             row_probabilities,
-            dimension=ctx.question_dimension_map.get(current),
+            dimension=config.question_dimension_map.get(current),
             psycho_plan=psycho_plan,
             question_index=current,
             row_index=row_index,
@@ -362,6 +375,7 @@ def _answer_qq_multiple(
     config_index: int,
     ctx: ExecutionState,
 ) -> None:
+    config = ctx.config
     current = int(question.num or 0)
     option_texts = list(question.option_texts or [])
     option_count = max(1, len(option_texts) or int(question.options or 0))
@@ -379,7 +393,11 @@ def _answer_qq_multiple(
     def _apply(selected_indices: Sequence[int]) -> List[int]:
         applied = []
         question_id = str(question.provider_question_id or "")
-        fill_entries = ctx.multiple_option_fill_texts[config_index] if config_index < len(ctx.multiple_option_fill_texts) else None
+        fill_entries = (
+            config.multiple_option_fill_texts[config_index]
+            if config_index < len(config.multiple_option_fill_texts)
+            else None
+        )
         for option_idx in selected_indices:
             if _click_choice_input(driver, question_id, "checkbox", option_idx):
                 fill_value = resolve_option_fill_text_from_config(
@@ -400,7 +418,11 @@ def _answer_qq_multiple(
                 applied.append(option_idx)
         return applied
 
-    selection_probabilities = ctx.multiple_prob[config_index] if config_index < len(ctx.multiple_prob) else [50.0] * option_count
+    selection_probabilities = (
+        config.multiple_prob[config_index]
+        if config_index < len(config.multiple_prob)
+        else [50.0] * option_count
+    )
     if selection_probabilities == -1 or (
         isinstance(selection_probabilities, list)
         and len(selection_probabilities) == 1
@@ -527,6 +549,7 @@ def _answer_qq_matrix_star(
     逻辑与普通矩阵题相同，但用 _click_star_cell 代替 _click_matrix_cell，
     因为星级组件基于 TDesign t-rate，不含 input[type="radio"]。
     """
+    config = ctx.config
     current = int(question.num or 0)
     question_id = str(question.provider_question_id or "")
     row_count = max(1, int(question.rows or 1))
@@ -535,7 +558,7 @@ def _answer_qq_matrix_star(
     strict_ratio_question = is_strict_ratio_question(ctx, current)
     next_index = config_index
     for row_index in range(row_count):
-        raw_probabilities = ctx.matrix_prob[next_index] if next_index < len(ctx.matrix_prob) else -1
+        raw_probabilities = config.matrix_prob[next_index] if next_index < len(config.matrix_prob) else -1
         next_index += 1
         strict_reference: Optional[List[float]] = None
         row_probabilities: Any = -1
@@ -573,7 +596,7 @@ def _answer_qq_matrix_star(
         selected_index = get_tendency_index(
             option_count,
             row_probabilities,
-            dimension=ctx.question_dimension_map.get(current),
+            dimension=config.question_dimension_map.get(current),
             psycho_plan=psycho_plan,
             question_index=current,
             row_index=row_index,

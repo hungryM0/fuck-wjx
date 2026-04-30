@@ -139,22 +139,13 @@ class ExecutionState:
     _browser_semaphore_lock: threading.Lock = field(default_factory=threading.Lock)
     _browser_semaphore_max_instances: int = 0
 
-    def __getattr__(self, name: str) -> Any:
-        """只读透传静态配置，避免旧的内部消费者到处改一轮。"""
-        config = object.__getattribute__(self, "config")
-        if hasattr(config, name):
-            return getattr(config, name)
-        raise AttributeError(name)
-
     def __setattr__(self, name: str, value: Any) -> None:
-        """旧路径写入配置字段时，继续落到 ExecutionConfig，避免在运行态对象上制造同名脏属性。"""
+        """阻止把静态配置字段误写到运行态对象本身。"""
         if name in _EXECUTION_STATE_FIELD_NAMES:
             object.__setattr__(self, name, value)
             return
-        config = self.__dict__.get("config")
-        if name in _EXECUTION_CONFIG_FIELD_NAMES and isinstance(config, ExecutionConfig):
-            setattr(config, name, value)
-            return
+        if name in _EXECUTION_CONFIG_FIELD_NAMES:
+            raise AttributeError(f"ExecutionState 不允许直接设置配置字段 '{name}'，请改用 state.config.{name}")
         object.__setattr__(self, name, value)
 
     def get_browser_semaphore(self, max_instances: int) -> threading.Semaphore:

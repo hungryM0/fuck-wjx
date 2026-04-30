@@ -12,7 +12,7 @@ from qfluentwidgets import MessageBox, PushButton
 from software.network.proxy.session import get_session_snapshot
 from software.app.config import app_settings, get_bool_from_qsettings
 from software.app.runtime_paths import get_runtime_directory
-from software.io.config import RuntimeConfig
+from software.io.config import RuntimeConfig, build_runtime_config_snapshot
 from software.logging.log_utils import LOG_BUFFER_HANDLER, log_suppressed_exception
 
 class MainWindowLifecycleMixin:
@@ -35,7 +35,7 @@ class MainWindowLifecycleMixin:
         strategy_page: Any
         controller: Any
 
-        def close(self) -> None: ...
+        def close(self) -> bool: ...
         def _stop_update_check_worker(self) -> None: ...
         def _cancel_startup_update_check(self) -> None: ...
 
@@ -105,8 +105,11 @@ class MainWindowLifecycleMixin:
             logging.warning("保存日志失败: %s", exc)
 
     def _collect_current_config_snapshot(self):
-        cfg = self.dashboard._build_config()
-        cfg.question_entries = list(self.question_page.get_entries())
+        cfg = build_runtime_config_snapshot(
+            self.dashboard._build_config(),
+            question_entries=self.question_page.get_entries(),
+            questions_info=self.question_page.questions_info,
+        )
         self.controller.config = cfg
         return cfg
 

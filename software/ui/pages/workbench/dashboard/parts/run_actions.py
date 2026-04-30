@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
-from software.io.config import RuntimeConfig
+from software.io.config import RuntimeConfig, build_runtime_config_snapshot
 from software.providers.common import detect_survey_provider
 
 _QQ_LOGIN_REQUIRED_MESSAGE = "作答该问卷需要登录，请自行在后台开放访问权限"
@@ -47,10 +47,11 @@ class DashboardRunActionsMixin:
                 self._toast("正在重新开始，请稍候...", "info", 1200)
             return
 
-        cfg = self._build_config()
-        from software.io.config import deserialize_question_entry, serialize_question_entry
-        cfg.question_entries = [deserialize_question_entry(serialize_question_entry(entry)) for entry in self.question_page.get_entries()]
-        cfg.questions_info = list(self.question_page.questions_info or [])
+        cfg = build_runtime_config_snapshot(
+            self._build_config(),
+            question_entries=self.question_page.get_entries(),
+            questions_info=self.question_page.questions_info,
+        )
         if not cfg.question_entries:
             log_action(
                 "RUN",

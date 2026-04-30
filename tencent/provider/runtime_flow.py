@@ -134,8 +134,9 @@ def qq_is_completion_page(driver: BrowserDriver) -> bool:
 
 def _group_questions_by_page(ctx: ExecutionState) -> List[List[SurveyQuestionMeta]]:
     grouped: Dict[int, List[SurveyQuestionMeta]] = {}
-    for question_num in sorted(ctx.questions_metadata.keys()):
-        item = ctx.questions_metadata.get(question_num)
+    metadata = ctx.config.questions_metadata
+    for question_num in sorted(metadata.keys()):
+        item = metadata.get(question_num)
         if not item or bool(item.is_description):
             continue
         page_number = max(1, int(item.page or 1))

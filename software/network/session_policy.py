@@ -20,7 +20,7 @@ def _record_bad_proxy_and_maybe_pause(
 
 
 def _required_proxy_ttl_seconds(ctx: ExecutionState) -> int:
-    return int(get_proxy_required_ttl_seconds(getattr(ctx, "answer_duration_range_seconds", (0, 0))))
+    return int(get_proxy_required_ttl_seconds(getattr(ctx.config, "answer_duration_range_seconds", (0, 0))))
 
 
 def _purge_unusable_proxy_pool_locked(ctx: ExecutionState) -> None:
@@ -28,7 +28,7 @@ def _purge_unusable_proxy_pool_locked(ctx: ExecutionState) -> None:
     kept = []
     seen = set()
     removed = 0
-    for item in list(ctx.proxy_ip_pool or []):
+    for item in list(ctx.config.proxy_ip_pool or []):
         lease = coerce_proxy_lease(item)
         if lease is None:
             removed += 1
@@ -47,13 +47,13 @@ def _purge_unusable_proxy_pool_locked(ctx: ExecutionState) -> None:
         kept.append(lease)
     if removed:
         logging.info("代理池已清理无效/重复代理 %s 个", removed)
-    ctx.proxy_ip_pool = kept
+    ctx.config.proxy_ip_pool = kept
 
 
 def _pop_available_proxy_lease_locked(ctx: ExecutionState) -> Optional[ProxyLease]:
     _purge_unusable_proxy_pool_locked(ctx)
-    while ctx.proxy_ip_pool:
-        lease = coerce_proxy_lease(ctx.proxy_ip_pool.pop(0))
+    while ctx.config.proxy_ip_pool:
+        lease = coerce_proxy_lease(ctx.config.proxy_ip_pool.pop(0))
         if lease is None:
             continue
         if not proxy_lease_has_sufficient_ttl(lease, required_ttl_seconds=_required_proxy_ttl_seconds(ctx)):
@@ -80,14 +80,14 @@ def _mark_proxy_in_use(ctx: ExecutionState, thread_name: str, lease: Optional[Pr
 def _resolve_proxy_request_num_locked(ctx: ExecutionState) -> int:
     waiting_count = max(1, int(ctx.proxy_waiting_threads or 0))
     active_count = len(ctx.proxy_in_use_by_thread)
-    remaining_to_start = max(0, int(ctx.target_num or 0) - int(ctx.cur_num or 0) - active_count)
+    remaining_to_start = max(0, int(ctx.config.target_num or 0) - int(ctx.cur_num or 0) - active_count)
     if remaining_to_start <= 0:
         return 0
     return max(1, min(waiting_count, remaining_to_start, 80))
 
 
 def _select_proxy_for_session(ctx: ExecutionState, thread_name: str = "") -> Optional[str]:
-    if not ctx.random_proxy_ip_enabled:
+    if not ctx.config.random_proxy_ip_enabled:
         return None
     selected: Optional[ProxyLease] = None
     with ctx.lock:
@@ -127,7 +127,7 @@ def _select_proxy_for_session(ctx: ExecutionState, thread_name: str = "") -> Opt
             selected: Optional[ProxyLease] = None
             with ctx.lock:
                 _purge_unusable_proxy_pool_locked(ctx)
-                _pool_leases = [coerce_proxy_lease(item) for item in ctx.proxy_ip_pool]
+                _pool_leases = [coerce_proxy_lease(item) for item in ctx.config.proxy_ip_pool]
                 existing = {lease.address for lease in _pool_leases if lease is not None}
                 required_ttl = _required_proxy_ttl_seconds(ctx)
                 for item in fetched:
@@ -142,7 +142,7 @@ def _select_proxy_for_session(ctx: ExecutionState, thread_name: str = "") -> Opt
                         continue
                     if not lease.poolable or lease.address in existing:
                         continue
-                    ctx.proxy_ip_pool.append(lease)
+                    ctx.config.proxy_ip_pool.append(lease)
                     existing.add(lease.address)
             return _mark_proxy_in_use(ctx, thread_name, selected)
     finally:
@@ -150,9 +150,9 @@ def _select_proxy_for_session(ctx: ExecutionState, thread_name: str = "") -> Opt
 
 
 def _select_user_agent_for_session(ctx: ExecutionState) -> Tuple[Optional[str], Optional[str]]:
-    if not ctx.random_user_agent_enabled:
+    if not ctx.config.random_user_agent_enabled:
         return None, None
-    return _select_user_agent_from_ratios(ctx.user_agent_ratios)
+    return _select_user_agent_from_ratios(ctx.config.user_agent_ratios)
 
 
 def _discard_unresponsive_proxy(ctx: ExecutionState, proxy_address: str) -> None:
@@ -162,7 +162,7 @@ def _discard_unresponsive_proxy(ctx: ExecutionState, proxy_address: str) -> None
         removed = False
         normalized = str(proxy_address or "").strip()
         retained = []
-        for item in list(ctx.proxy_ip_pool or []):
+        for item in list(ctx.config.proxy_ip_pool or []):
             lease = coerce_proxy_lease(item)
             if lease is None:
                 continue
@@ -170,7 +170,7 @@ def _discard_unresponsive_proxy(ctx: ExecutionState, proxy_address: str) -> None
                 removed = True
                 continue
             retained.append(lease)
-        ctx.proxy_ip_pool = retained
+        ctx.config.proxy_ip_pool = retained
         if removed:
             logging.info(f"已移除无响应代理：{mask_proxy_for_log(proxy_address)}")
 

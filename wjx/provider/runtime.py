@@ -59,21 +59,28 @@ def _fallback_unknown_question(
     question_div,
     indices: Dict[str, int],
 ) -> None:
+    config = ctx.config
     handled = False
     if question_div is not None:
         checkbox_count, radio_count = _count_choice_inputs_driver(question_div)
         if checkbox_count or radio_count:
             if checkbox_count >= radio_count:
-                _multiple_impl(driver, question_num, indices["multiple"], ctx.multiple_prob, ctx.multiple_option_fill_texts)
+                _multiple_impl(
+                    driver,
+                    question_num,
+                    indices["multiple"],
+                    config.multiple_prob,
+                    config.multiple_option_fill_texts,
+                )
                 indices["multiple"] += 1
             else:
                 _single_impl(
                     driver,
                     question_num,
                     indices["single"],
-                    ctx.single_prob,
-                    ctx.single_option_fill_texts,
-                    ctx.single_attached_option_selects,
+                    config.single_prob,
+                    config.single_option_fill_texts,
+                    config.single_attached_option_selects,
                     task_ctx=ctx,
                 )
                 indices["single"] += 1
@@ -104,14 +111,14 @@ def _fallback_unknown_question(
             driver,
             question_num,
             indices["text"],
-            ctx.texts,
-            ctx.texts_prob,
-            ctx.text_entry_types,
-            ctx.text_ai_flags,
-            ctx.text_titles,
-            ctx.multi_text_blank_modes,
-            ctx.multi_text_blank_ai_flags,
-            ctx.multi_text_blank_int_ranges,
+            config.texts,
+            config.texts_prob,
+            config.text_entry_types,
+            config.text_ai_flags,
+            config.text_titles,
+            config.multi_text_blank_modes,
+            config.multi_text_blank_ai_flags,
+            config.multi_text_blank_int_ranges,
             task_ctx=ctx,
         )
         if reverse_fill_answer is None:
@@ -145,6 +152,7 @@ def brush(
     indices = _build_initial_indices()
     current_question_number = 0
     active_stop = stop_signal or ctx.stop_event
+    runtime_config = ctx.config
 
     def _abort_requested() -> bool:
         return bool(active_stop and active_stop.is_set())
@@ -210,7 +218,7 @@ def brush(
                     logging.info("跳过第%d题（未显示，type=%s）", current_question_number, question_type)
                 continue
 
-            config_entry = ctx.question_config_index_map.get(current_question_number)
+            config_entry = runtime_config.question_config_index_map.get(current_question_number)
             dispatch_result = _dispatcher.fill(
                 driver=driver,
                 question_type=question_type,
@@ -246,12 +254,12 @@ def brush(
                 time.sleep(buffer_delay)
         is_last_page = (page_index == total_pages - 1)
         if is_last_page:
-            if has_configured_answer_duration(ctx.answer_duration_range_seconds):
+            if has_configured_answer_duration(runtime_config.answer_duration_range_seconds):
                 try:
                     ctx.update_thread_status(thread_name, "等待时长中", running=True)
                 except Exception:
                     logging.info("更新线程状态失败：等待时长中", exc_info=True)
-            if simulate_answer_duration_delay(active_stop, ctx.answer_duration_range_seconds):
+            if simulate_answer_duration_delay(active_stop, runtime_config.answer_duration_range_seconds):
                 _update_abort_status(ctx, thread_name)
                 return False
             if _abort_requested():

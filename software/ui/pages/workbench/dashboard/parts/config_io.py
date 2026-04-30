@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from PySide6.QtWidgets import QFileDialog, QWidget
 
 from software.app.runtime_paths import get_runtime_directory
-from software.io.config import build_default_config_filename
+from software.io.config import build_default_config_filename, build_runtime_config_snapshot
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
 
@@ -109,11 +109,11 @@ class DashboardConfigIOMixin:
         )
         self._toast("已载入配置", "success")
     def _on_save_config(self):
-        cfg = self._build_config()
-        # 序列化过滤 UI 组件
-        from software.io.config import deserialize_question_entry, serialize_question_entry
-        cfg.question_entries = [deserialize_question_entry(serialize_question_entry(entry)) for entry in self.question_page.get_entries()]
-        cfg.questions_info = list(self.question_page.questions_info or [])
+        cfg = build_runtime_config_snapshot(
+            self._build_config(),
+            question_entries=self.question_page.get_entries(),
+            questions_info=self.question_page.questions_info,
+        )
         self.controller.config = cfg
         configs_dir = os.path.join(get_runtime_directory(), "configs")
         os.makedirs(configs_dir, exist_ok=True)

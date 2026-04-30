@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from software.app.browser_probe import BrowserProbeResult, run_browser_probe_subprocess
 from software.app.config import DEFAULT_HTTP_HEADERS
-from software.core.psychometrics.psychometric import normalize_target_alpha
 from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
 from software.integrations.ai.client import AI_MODE_FREE, get_ai_settings
 from software.io.config import RuntimeConfig
 import software.network.http as http_client
+from .runtime_preparation import PreparedExecutionArtifacts
 
 from .runtime_constants import (
     BROWSER_PROBE_TIMEOUT_SECONDS,
@@ -85,7 +85,7 @@ class RunControllerInitializationMixin:
         _initializing: bool
         _status_timer: Any
         _execution_state: Optional[ExecutionState]
-        _pending_execution_config: Optional[ExecutionConfig]
+        _prepared_execution_artifacts: Optional[PreparedExecutionArtifacts]
         _init_stage_text: str
         _init_steps: List[Dict[str, str]]
         _init_completed_steps: set[str]
@@ -114,73 +114,15 @@ class RunControllerInitializationMixin:
         def _emit_status(self) -> None: ...
         def _dispatch_to_ui_async(self, callback: Any) -> None: ...
 
-    def _prepare_engine_state(self, config: RuntimeConfig, proxy_pool: List[ProxyLease]) -> tuple[ExecutionConfig, ExecutionState]:
-        """构建本次任务的 ExecutionConfig 与 ExecutionState。"""
-        fail_threshold = 5
-        config_title = str(getattr(config, "survey_title", "") or "")
-        fallback_title = str(getattr(self, "survey_title", "") or "")
-        survey_title = config_title or fallback_title
-        try:
-            psycho_target_alpha = normalize_target_alpha(getattr(config, "psycho_target_alpha", None))
-        except Exception:
-            psycho_target_alpha = normalize_target_alpha(None)
-
-        execution_config = ExecutionConfig(
-            url=config.url,
-            survey_title=survey_title,
-            survey_provider=str(getattr(config, "survey_provider", "wjx") or "wjx"),
-            target_num=config.target,
-            num_threads=max(1, int(config.threads or 1)),
-            headless_mode=getattr(config, "headless_mode", False),
-            browser_preference=list(getattr(config, "browser_preference", []) or []),
-            fail_threshold=fail_threshold,
-            submit_interval_range_seconds=(int(config.submit_interval[0]), int(config.submit_interval[1])),
-            answer_duration_range_seconds=(int(config.answer_duration[0]), int(config.answer_duration[1])),
-            timed_mode_enabled=config.timed_mode_enabled,
-            timed_mode_refresh_interval=config.timed_mode_interval,
-            random_proxy_ip_enabled=config.random_ip_enabled,
-            proxy_ip_pool=list(proxy_pool) if config.random_ip_enabled else [],
-            random_user_agent_enabled=config.random_ua_enabled,
-            user_agent_ratios=dict(getattr(config, "random_ua_ratios", {"wechat": 33, "mobile": 33, "pc": 34})),
-            answer_rules=copy.deepcopy(getattr(config, "answer_rules", []) or []),
-            psycho_target_alpha=psycho_target_alpha,
-            stop_on_fail_enabled=config.fail_stop_enabled,
-            pause_on_aliyun_captcha=bool(getattr(config, "pause_on_aliyun_captcha", True)),
-        )
+    def _prepare_engine_state(self, proxy_pool: List[ProxyLease]) -> tuple[ExecutionConfig, ExecutionState]:
+        """从已准备好的模板构建本次任务的 ExecutionConfig 与 ExecutionState。"""
+        prepared = getattr(self, "_prepared_execution_artifacts", None)
+        if prepared is None:
+            raise RuntimeError("运行准备产物缺失，无法启动任务")
+        execution_config = copy.deepcopy(prepared.execution_config_template)
+        execution_config.proxy_ip_pool = list(proxy_pool) if execution_config.random_proxy_ip_enabled else []
         execution_state = ExecutionState(config=execution_config, stop_event=self.stop_event)
         return execution_config, execution_state
-
-    def _apply_pending_execution_config(self, config: ExecutionConfig, *, consume: bool) -> None:
-        pending = self._pending_execution_config
-        if pending is None:
-            return
-        config.single_prob = copy.deepcopy(pending.single_prob)
-        config.droplist_prob = copy.deepcopy(pending.droplist_prob)
-        config.multiple_prob = copy.deepcopy(pending.multiple_prob)
-        config.matrix_prob = copy.deepcopy(pending.matrix_prob)
-        config.scale_prob = copy.deepcopy(pending.scale_prob)
-        config.slider_targets = copy.deepcopy(pending.slider_targets)
-        config.texts = copy.deepcopy(pending.texts)
-        config.texts_prob = copy.deepcopy(pending.texts_prob)
-        config.text_entry_types = copy.deepcopy(pending.text_entry_types)
-        config.text_ai_flags = copy.deepcopy(pending.text_ai_flags)
-        config.text_titles = copy.deepcopy(pending.text_titles)
-        config.multi_text_blank_modes = copy.deepcopy(pending.multi_text_blank_modes)
-        config.multi_text_blank_ai_flags = copy.deepcopy(pending.multi_text_blank_ai_flags)
-        config.multi_text_blank_int_ranges = copy.deepcopy(getattr(pending, "multi_text_blank_int_ranges", []))
-        config.single_option_fill_texts = copy.deepcopy(pending.single_option_fill_texts)
-        config.single_attached_option_selects = copy.deepcopy(pending.single_attached_option_selects)
-        config.droplist_option_fill_texts = copy.deepcopy(pending.droplist_option_fill_texts)
-        config.multiple_option_fill_texts = copy.deepcopy(pending.multiple_option_fill_texts)
-        config.question_config_index_map = copy.deepcopy(pending.question_config_index_map)
-        config.question_dimension_map = copy.deepcopy(pending.question_dimension_map)
-        config.question_strict_ratio_map = copy.deepcopy(getattr(pending, "question_strict_ratio_map", {}))
-        config.question_psycho_bias_map = copy.deepcopy(pending.question_psycho_bias_map)
-        config.questions_metadata = copy.deepcopy(pending.questions_metadata)
-        config.reverse_fill_spec = copy.deepcopy(getattr(pending, "reverse_fill_spec", None))
-        config.survey_provider = str(getattr(pending, "survey_provider", getattr(config, "survey_provider", "wjx")) or "wjx")
-        if consume:
-            self._pending_execution_config = None
 
     def _should_use_initialization_gate(self, config: RuntimeConfig) -> bool:
         headless_mode = bool(getattr(config, "headless_mode", False))
@@ -460,6 +402,7 @@ class RunControllerInitializationMixin:
         self.running = False
         self.worker_threads = []
         self._execution_state = None
+        self._prepared_execution_artifacts = None
         if was_running:
             self.runStateChanged.emit(False)
         self.statusUpdated.emit(str(status_text or "已停止"), 0, 0)

@@ -9,13 +9,14 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal, Slot
 
 from software.core.questions.config import QuestionEntry
-from software.core.task import ExecutionConfig, ExecutionState
+from software.core.task import ExecutionState
 from software.providers.contracts import SurveyQuestionMeta
 from software.ui.controller.run_controller_parts import (
     RunControllerParsingMixin,
     RunControllerPersistenceMixin,
     RunControllerRuntimeMixin,
 )
+from software.ui.controller.run_controller_parts.runtime_preparation import PreparedExecutionArtifacts
 from software.core.engine.cleanup import CleanupRunner
 from software.io.config import RuntimeConfig
 from software.system import SystemSleepBlocker
@@ -268,7 +269,7 @@ class RunController(
         self._init_completed_steps: Set[str] = set()
         self._init_current_step_key = ""
         self._init_gate_stop_event: Optional[threading.Event] = None
-        self._pending_execution_config: Optional[ExecutionConfig] = None
+        self._prepared_execution_artifacts: Optional[PreparedExecutionArtifacts] = None
         self._runtime_ui_state: Dict[str, Any] = {}
         self._ui_callback_queue: "queue.Queue[Callable[[], Any]]" = queue.Queue()
         self._random_ip_toggle_lock = threading.Lock()

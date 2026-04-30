@@ -11,9 +11,11 @@ __all__ = [
     "SurveyDefinition",
     "SurveyQuestionMeta",
     "build_survey_definition",
+    "clone_survey_question_metas",
     "ensure_survey_question_meta",
     "ensure_survey_question_metas",
     "normalize_survey_questions",
+    "serialize_survey_question_metas",
     "survey_question_meta_to_dict",
 ]
 
@@ -120,11 +122,18 @@ def _normalize_dict_list(raw: Any) -> List[Dict[str, Any]]:
         return []
     items: List[Dict[str, Any]] = []
     for item in raw:
-        if isinstance(item, SurveyQuestionMeta):
-            items.append(item.to_dict())
-        elif isinstance(item, Mapping):
-            items.append(dict(item))
+        normalized = _survey_question_input_to_dict(item)
+        if normalized is not None:
+            items.append(normalized)
     return items
+
+
+def _survey_question_input_to_dict(question: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(question, SurveyQuestionMeta):
+        return survey_question_meta_to_dict(question)
+    if isinstance(question, Mapping):
+        return dict(question)
+    return None
 
 
 def survey_question_meta_to_dict(question: SurveyQuestionMeta) -> Dict[str, Any]:
@@ -176,7 +185,7 @@ def survey_question_meta_to_dict(question: SurveyQuestionMeta) -> Dict[str, Any]
 
 
 def _normalize_question(question: SurveyQuestionInput, provider: str, index: int) -> SurveyQuestionMeta:
-    normalized = dict(survey_question_meta_to_dict(question) if isinstance(question, SurveyQuestionMeta) else dict(question or {}))
+    normalized = dict(_survey_question_input_to_dict(question) or {})
     page_number = _as_int(normalized.get("page"), 1, minimum=1)
     question_number = _as_int(normalized.get("num"), index, minimum=1)
     option_count = _as_int(normalized.get("options"), len(_normalize_text_list(normalized.get("option_texts"))), minimum=0)
@@ -276,6 +285,24 @@ def ensure_survey_question_metas(
             continue
         normalized.append(_normalize_question(question, normalized_provider, index))
     return normalized
+
+
+def serialize_survey_question_metas(questions: Iterable[SurveyQuestionInput]) -> List[Dict[str, Any]]:
+    serialized: List[Dict[str, Any]] = []
+    for question in questions or []:
+        normalized = _survey_question_input_to_dict(question)
+        if normalized is not None:
+            serialized.append(normalized)
+    return serialized
+
+
+def clone_survey_question_metas(
+    questions: Iterable[SurveyQuestionInput],
+    *,
+    default_provider: str = SURVEY_PROVIDER_WJX,
+) -> List[SurveyQuestionMeta]:
+    serialized = serialize_survey_question_metas(questions)
+    return ensure_survey_question_metas(serialized, default_provider=default_provider)
 
 
 def normalize_survey_questions(provider: str, questions: Iterable[SurveyQuestionInput]) -> List[SurveyQuestionMeta]:

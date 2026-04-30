@@ -19,6 +19,10 @@
 > [!WARNING]
 > **该项目仅供 Playwright 的学习与测试使用。** 请确保拥有目标测试问卷的授权再使用，**严禁污染他人问卷数据！**
 
+> [!NOTE]
+> 我们正计划用 Go 重写该项目，以便部署在无图形化界面的服务器环境中。
+> 感兴趣的开发者可以查看 [hungryM0/SurveyController-Go](https://github.com/hungryM0/SurveyController-go) 仓库，欢迎参与贡献！
+
 <img width="689" height="626" alt="gui" src="/assets/gui.png" />
 
 ---
