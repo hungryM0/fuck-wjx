@@ -218,7 +218,16 @@ class WizardCardsMixin:
             self._make_badge("必答" if bool(info_entry.required) else "非必答", "#8a3ffc", "#c7a8ff", parent)
         )
 
-        if self._media_items_for(idx, "title") or self._media_items_for(idx, "option") or self._media_items_for(idx, "row"):
+        media_items = list(info_entry.question_media or [])
+        has_option_media = any(
+            isinstance(item, dict) and str(item.get("scope") or "").strip().lower() == "option"
+            for item in media_items
+        )
+        has_row_media = any(
+            isinstance(item, dict) and str(item.get("scope") or "").strip().lower() == "row"
+            for item in media_items
+        )
+        if self._media_items_for(idx, "title") or has_option_media or has_row_media:
             badges.append(self._make_badge("图片题", "#0f766e", "#4fd1c5", parent))
         if bool(info_entry.has_display_condition):
             badges.append(self._make_badge("条件显示", "#166534", "#4ade80", parent))

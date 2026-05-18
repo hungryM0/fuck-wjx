@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import time
 
+from qfluentwidgets import BodyLabel, InfoBadge, PushButton
 from PySide6.QtWidgets import QTreeWidgetItem
 
+from software.app.config import DEFAULT_FILL_TEXT
 from software.core.questions.config import QuestionEntry
 from software.providers.contracts import (
     LOGIC_PARSE_STATUS_COMPLETE,
@@ -283,3 +285,113 @@ def test_question_media_thumbnail_can_be_deleted_before_worker_finishes(qtbot, m
 
     widget.deleteLater()
     qtbot.wait(350)
+
+
+def test_question_media_thumbnail_blocks_private_address_fetch(monkeypatch, qtbot) -> None:
+    calls: list[str] = []
+
+    def _fake_get(url, **kwargs):
+        calls.append(url)
+        raise AssertionError("private address should not be fetched")
+
+    from software.ui.pages.workbench.question_editor import question_media_preview as preview_module
+
+    monkeypatch.setattr(preview_module.http_client, "get", _fake_get)
+    widget = QuestionMediaThumbnail({"source_url": "http://127.0.0.1/a.png", "label": "题干图"})
+    qtbot.addWidget(widget)
+    widget.show()
+    qtbot.wait(100)
+
+    assert calls == []
+
+
+def test_question_wizard_dialog_multi_text_ignores_empty_answer_group(qtbot) -> None:
+    entries = [
+        QuestionEntry(
+            question_type="multi_text",
+            probabilities=[1],
+            texts=["甲||乙"],
+            rows=1,
+            option_count=1,
+            distribution_mode="random",
+            custom_weights=None,
+            question_num=1,
+        )
+    ]
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="多项填空测试",
+            page=1,
+            text_inputs=2,
+            is_multi_text=True,
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        )
+    ]
+    dlg = QuestionWizardDialog(entries, info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: bool(dlg.text_edit_map))
+    row_edits = dlg.text_edit_map[0][0]
+    for edit in row_edits:
+        edit.setText("")
+
+    assert dlg.get_text_results()[0] == [DEFAULT_FILL_TEXT]
+
+
+def test_question_wizard_dialog_shows_media_badge_for_option_image(qtbot) -> None:
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="图片选项题",
+            page=1,
+            option_texts=["A"],
+            question_media=[
+                {
+                    "kind": "image",
+                    "scope": "option",
+                    "index": 0,
+                    "source_url": "https://example.com/a.png",
+                    "label": "选项A",
+                }
+            ],
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        )
+    ]
+    dlg = QuestionWizardDialog(_build_entries()[:1], info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: bool(dlg._entry_card_widgets))
+    card = dlg._entry_card_widgets[0]
+    badges = [widget.text() for widget in card.findChildren(InfoBadge)]
+    assert "图片题" in badges
+
+
+def test_question_wizard_dialog_delete_answer_row_renumbers(qtbot) -> None:
+    entry = QuestionEntry(
+        question_type="text",
+        probabilities=[1],
+        texts=["甲", "乙"],
+        rows=1,
+        option_count=1,
+        distribution_mode="random",
+        custom_weights=None,
+        question_num=1,
+    )
+    info = [SurveyQuestionMeta(num=1, title="普通填空测试", page=1, logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE)]
+    dlg = QuestionWizardDialog([entry], info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: bool(dlg.text_edit_map))
+    container = dlg.text_container_map[0]
+    buttons = [btn for btn in container.findChildren(PushButton) if btn.text() == "×"]
+    assert len(buttons) == 2
+
+    buttons[0].click()
+    qtbot.wait(50)
+
+    labels = [label.text() for label in container.findChildren(BodyLabel) if label.text().endswith(".")]
+    assert labels[0] == "1."

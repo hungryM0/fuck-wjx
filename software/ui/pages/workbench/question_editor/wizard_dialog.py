@@ -649,6 +649,8 @@ class QuestionWizardDialog(
                 matrix_edits = cast(List[List[LineEdit]], edits)
                 for row_edits in matrix_edits:
                     row_values = [edit.text().strip() for edit in row_edits]
+                    if not any(row_values):
+                        continue
                     merged = MULTI_TEXT_DELIMITER.join(row_values)
                     if merged:
                         texts.append(merged)

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
+from itertools import count
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QRunnable, QThreadPool, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CardWidget, ImageLabel
@@ -13,26 +17,131 @@ import software.network.http as http_client
 
 from .utils import _apply_label_color
 
-_ACTIVE_MEDIA_THREADS: set[QThread] = set()
+_MEDIA_THREAD_POOL = QThreadPool.globalInstance()
+_MEDIA_MAX_BYTES = 5 * 1024 * 1024
+_MEDIA_REQUEST_COUNTER = count(1)
+_ACTIVE_MEDIA_WORKERS: set["_MediaLoaderWorker"] = set()
+_MEDIA_QUIT_BOUND = False
+_MEDIA_SHUTTING_DOWN = False
 
 
-class _MediaLoaderWorker(QObject):
-    finished = Signal(str, bytes)
+def _is_public_http_url(url: str) -> bool:
+    text = str(url or "").strip()
+    if not text:
+        return False
+    try:
+        parsed = urlsplit(text)
+    except Exception:
+        return False
+    scheme = str(parsed.scheme or "").strip().lower()
+    if scheme not in {"http", "https"}:
+        return False
+    hostname = str(parsed.hostname or "").strip()
+    if not hostname:
+        return False
+    try:
+        ip = ipaddress.ip_address(hostname)
+        return ip.is_global
+    except ValueError:
+        pass
+    try:
+        for family, _type, _proto, _canonname, sockaddr in socket.getaddrinfo(hostname, None):
+            if family not in (socket.AF_INET, socket.AF_INET6):
+                continue
+            raw_ip = sockaddr[0]
+            try:
+                if not ipaddress.ip_address(raw_ip).is_global:
+                    return False
+            except ValueError:
+                return False
+    except Exception:
+        return False
+    return True
 
-    def __init__(self, url: str) -> None:
+
+class _MediaLoaderDispatcher(QObject):
+    finished = Signal(int, str, bytes)
+
+
+_MEDIA_DISPATCHER = _MediaLoaderDispatcher()
+
+
+def _mark_media_shutdown() -> None:
+    global _MEDIA_SHUTTING_DOWN
+    _MEDIA_SHUTTING_DOWN = True
+
+
+def _bind_media_shutdown_guard() -> None:
+    global _MEDIA_QUIT_BOUND
+    if _MEDIA_QUIT_BOUND:
+        return
+    app = QCoreApplication.instance()
+    if app is None:
+        return
+    app.aboutToQuit.connect(_mark_media_shutdown)
+    _MEDIA_QUIT_BOUND = True
+
+
+class _MediaLoaderWorker(QRunnable):
+    def __init__(self, request_id: int, url: str) -> None:
         super().__init__()
+        self._request_id = int(request_id)
         self._url = str(url or "").strip()
+        self.setAutoDelete(True)
 
     def run(self) -> None:
         data = b""
-        if self._url:
+        try:
+            if self._url and _is_public_http_url(self._url):
+                try:
+                    response = http_client.get(
+                        self._url,
+                        timeout=8,
+                        proxies={},
+                        allow_redirects=False,
+                        stream=True,
+                    )
+                    try:
+                        response.raise_for_status()
+                        content_length = response.headers.get("content-length")
+                        if content_length:
+                            try:
+                                if int(content_length) > _MEDIA_MAX_BYTES:
+                                    data = b""
+                                else:
+                                    data = self._read_response_bytes(response)
+                            except Exception:
+                                data = self._read_response_bytes(response)
+                        else:
+                            data = self._read_response_bytes(response)
+                    finally:
+                        try:
+                            response.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    data = b""
+            if _MEDIA_SHUTTING_DOWN:
+                return
             try:
-                response = http_client.get(self._url, timeout=8, proxies={})
-                response.raise_for_status()
-                data = bytes(response.content or b"")
-            except Exception:
-                data = b""
-        self.finished.emit(self._url, data)
+                _MEDIA_DISPATCHER.finished.emit(self._request_id, self._url, data)
+            except RuntimeError:
+                return
+        finally:
+            _ACTIVE_MEDIA_WORKERS.discard(self)
+
+    @staticmethod
+    def _read_response_bytes(response: Any) -> bytes:
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in response.iter_content(65536):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > _MEDIA_MAX_BYTES:
+                return b""
+            chunks.append(bytes(chunk))
+        return b"".join(chunks) if chunks else b""
 
 
 class QuestionMediaThumbnail(QWidget):
@@ -45,10 +154,10 @@ class QuestionMediaThumbnail(QWidget):
     ) -> None:
         super().__init__(parent)
         self._media_item = dict(media_item or {})
-        self._thread: Optional[QThread] = None
         self._worker: Optional[_MediaLoaderWorker] = None
         self._fixed_size = max(40, int(fixed_size))
         self._destroyed = False
+        self._request_id = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -71,6 +180,8 @@ class QuestionMediaThumbnail(QWidget):
         layout.addWidget(self.text_label, 0, Qt.AlignmentFlag.AlignLeft)
 
         self._set_placeholder()
+        _bind_media_shutdown_guard()
+        _MEDIA_DISPATCHER.finished.connect(self._on_loaded)
         self._load_async()
         self.destroyed.connect(self._mark_destroyed)
 
@@ -87,26 +198,18 @@ class QuestionMediaThumbnail(QWidget):
         source_url = str(self._media_item.get("source_url") or "").strip()
         if not source_url:
             return
-        self._thread = QThread()
-        self._worker = _MediaLoaderWorker(source_url)
-        _ACTIVE_MEDIA_THREADS.add(self._thread)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._on_loaded)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.finished.connect(lambda thread=self._thread: _ACTIVE_MEDIA_THREADS.discard(thread))
-        self._thread.finished.connect(self._clear_loader_refs)
-        self._thread.start()
+        self._request_id = next(_MEDIA_REQUEST_COUNTER)
+        self._worker = _MediaLoaderWorker(self._request_id, source_url)
+        _ACTIVE_MEDIA_WORKERS.add(self._worker)
+        _MEDIA_THREAD_POOL.start(self._worker)
 
-    def _clear_loader_refs(self) -> None:
-        self._thread = None
+    def _clear_loader_refs(self, *_args) -> None:
         self._worker = None
 
-    def _on_loaded(self, _url: str, payload: bytes) -> None:
-        if self._destroyed:
+    def _on_loaded(self, request_id: int, _url: str, payload: bytes) -> None:
+        if self._destroyed or int(request_id) != self._request_id:
             return
+        self._clear_loader_refs()
         if not payload:
             return
         image = QImage()

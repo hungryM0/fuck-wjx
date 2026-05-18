@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
@@ -103,6 +104,16 @@ class WizardSectionsTextMixin:
         texts = list(entry.texts or [DEFAULT_FILL_TEXT])
         edits: List[LineEdit] = []
 
+        def renumber_single_text_rows() -> None:
+            for row_index in range(text_rows_layout.count()):
+                row_item = text_rows_layout.itemAt(row_index)
+                row_widget = row_item.widget() if row_item is not None else None
+                if row_widget is None:
+                    continue
+                labels = row_widget.findChildren(BodyLabel)
+                if labels:
+                    labels[0].setText(f"{row_index + 1}.")
+
         def make_add_row_func(container_layout, edit_list, parent_card):
             def add_row(initial_text: str = ""):
                 row_widget = QWidget(parent_card)
@@ -128,6 +139,7 @@ class WizardSectionsTextMixin:
                     if len(edit_list) > 1:
                         edit_list.remove(edit)
                         row_widget.deleteLater()
+                        QTimer.singleShot(0, renumber_single_text_rows)
 
                 del_btn.clicked.connect(remove_row)
 
@@ -326,6 +338,16 @@ class WizardSectionsTextMixin:
 
         texts = list(entry.texts or [DEFAULT_FILL_TEXT])
 
+        def renumber_multi_text_rows() -> None:
+            for row_index in range(rows_layout.count()):
+                row_item = rows_layout.itemAt(row_index)
+                row_widget = row_item.widget() if row_item is not None else None
+                if row_widget is None:
+                    continue
+                labels = row_widget.findChildren(BodyLabel)
+                if labels:
+                    labels[0].setText(f"{row_index + 1}.")
+
         def make_add_row_func(container_layout, row_edit_list, parent_card, num_blanks):
             def add_row(initial_values: Optional[List[str]] = None):
                 values: List[str] = (
@@ -365,6 +387,7 @@ class WizardSectionsTextMixin:
                     if len(row_edit_list) > 1:
                         row_edit_list.remove(edits_in_row)
                         row_widget.deleteLater()
+                        QTimer.singleShot(0, renumber_multi_text_rows)
 
                 del_btn.clicked.connect(remove_row)
 
