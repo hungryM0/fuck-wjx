@@ -9,7 +9,7 @@ from PySide6.QtCore import (
     QTimer,
     Qt,
 )
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSizePolicy, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
@@ -109,14 +109,15 @@ class WizardSectionsMixin(
 
         per_row_scroll = ScrollArea(card)
         per_row_scroll.setWidgetResizable(True)
-        per_row_scroll.setMinimumHeight(180)
-        per_row_scroll.setMaximumHeight(320)
+        per_row_scroll.setMinimumHeight(120)
+        per_row_scroll.setMaximumHeight(280)
         per_row_scroll.enableTransparentBackground()
         per_row_view = QWidget(card)
+        per_row_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         per_row_scroll.setWidget(per_row_view)
         per_row_layout = QVBoxLayout(per_row_view)
         per_row_layout.setContentsMargins(0, 0, 0, 0)
-        per_row_layout.setSpacing(10)
+        per_row_layout.setSpacing(4)
         card_layout.addWidget(per_row_scroll)
 
         def build_slider_rows(
@@ -127,9 +128,14 @@ class WizardSectionsMixin(
             sliders: List[NoWheelSlider] = []
             for col_idx in range(columns):
                 opt_widget = QWidget(parent_widget)
-                opt_layout = QHBoxLayout(opt_widget)
-                opt_layout.setContentsMargins(0, 2, 0, 2)
-                opt_layout.setSpacing(12)
+                opt_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+                opt_layout = QVBoxLayout(opt_widget)
+                opt_layout.setContentsMargins(0, 0, 0, 2)
+                opt_layout.setSpacing(2)
+
+                header_row = QHBoxLayout()
+                header_row.setContentsMargins(0, 0, 0, 0)
+                header_row.setSpacing(8)
 
                 opt_text = option_texts[col_idx] if col_idx < len(option_texts) else f"列 {col_idx + 1}"
                 option_widget = self._build_media_text_widget(
@@ -138,10 +144,10 @@ class WizardSectionsMixin(
                     scope="option",
                     media_index=col_idx,
                     text=opt_text,
-                    text_width=160,
+                    text_width=140,
                     font_style="font-size: 13px;",
                 )
-                opt_layout.addWidget(option_widget)
+                header_row.addWidget(option_widget, 0)
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, parent_widget)
                 slider.setRange(0, 100)
@@ -149,15 +155,25 @@ class WizardSectionsMixin(
                     slider.setValue(int(values[col_idx]))
                 except Exception:
                     slider.setValue(1)
-                slider.setMinimumWidth(200)
-                opt_layout.addWidget(slider, 1)
+
+                header_row.addStretch(1)
+
+                control_row = QHBoxLayout()
+                control_row.setContentsMargins(18, 0, 0, 0)
+                control_row.setSpacing(8)
 
                 value_input = LineEdit(parent_widget)
-                value_input.setFixedWidth(60)
+                value_input.setFixedWidth(52)
                 value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 value_input.setText(str(slider.value()))
                 _bind_slider_input(slider, value_input)
-                opt_layout.addWidget(value_input)
+
+                slider.setMinimumWidth(80)
+                slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                opt_layout.addLayout(header_row)
+                control_row.addWidget(slider, 1)
+                control_row.addWidget(value_input)
+                opt_layout.addLayout(control_row)
 
                 target_layout.addWidget(opt_widget)
                 sliders.append(slider)
@@ -171,9 +187,10 @@ class WizardSectionsMixin(
         )
         for row_idx in range(rows):
             row_card = CardWidget(per_row_view)
+            row_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
             row_card_layout = QVBoxLayout(row_card)
-            row_card_layout.setContentsMargins(12, 8, 12, 8)
-            row_card_layout.setSpacing(6)
+            row_card_layout.setContentsMargins(10, 6, 10, 4)
+            row_card_layout.setSpacing(3)
             row_label_text = row_texts[row_idx] if row_idx < len(row_texts) else ""
             if row_label_text:
                 row_label = BodyLabel(
@@ -197,11 +214,10 @@ class WizardSectionsMixin(
                 for value, text in BIAS_PRESET_CHOICES:
                     seg.addItem(routeKey=value, text=text)
                 if isinstance(saved_bias, list) and row_idx < len(saved_bias):
-                    seg.setCurrentItem(saved_bias[row_idx] or "custom")
+                    current_bias = saved_bias[row_idx] or "custom"
                 else:
-                    seg.setCurrentItem(
-                        (saved_bias if isinstance(saved_bias, str) else None) or "custom"
-                    )
+                    current_bias = (saved_bias if isinstance(saved_bias, str) else None) or "custom"
+                seg.setCurrentItem(current_bias)
                 preset_row.addWidget(seg)
                 preset_row.addStretch(1)
                 row_card_layout.addLayout(preset_row)

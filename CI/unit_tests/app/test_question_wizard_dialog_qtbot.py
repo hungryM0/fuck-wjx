@@ -67,7 +67,9 @@ def test_question_wizard_dialog_shows_logic_view_and_switches_question(qtbot) ->
     dlg.show()
 
     qtbot.waitUntil(lambda: dlg._tree_widget.topLevelItemCount() > 0)
-    assert dlg._view_pivot.isVisible() is True
+    assert dlg._content_splitter is not None
+    assert dlg._content_splitter.count() == 2
+    assert dlg._content_splitter.handleWidth() >= 6
     assert dlg._current_view_mode == "logic"
 
     page_item = dlg._tree_widget.topLevelItem(0)
@@ -107,5 +109,4 @@ def test_question_wizard_dialog_hides_logic_view_when_unknown(qtbot) -> None:
     dlg.show()
 
     qtbot.waitUntil(lambda: dlg._tree_widget.topLevelItemCount() > 0)
-    assert dlg._view_pivot.isVisible() is False
     assert dlg._current_view_mode == "sequential"

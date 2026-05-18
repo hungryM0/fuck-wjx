@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
 from PySide6.QtCore import QRegularExpression, Qt
 from PySide6.QtGui import QRegularExpressionValidator
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSizePolicy, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, LineEdit, isDarkTheme
 
 from software.core.questions.config import QuestionEntry
@@ -155,7 +155,9 @@ class WizardSectionsCommonMixin:
 
         label = BodyLabel(text, container)
         label.setWordWrap(True)
-        label.setFixedWidth(text_width)
+        label.setMinimumWidth(min(96, text_width))
+        label.setMaximumWidth(text_width)
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         label.setStyleSheet(font_style)
         layout.addWidget(label, 1)

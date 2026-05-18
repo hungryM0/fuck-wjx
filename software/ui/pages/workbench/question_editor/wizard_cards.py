@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSizePolicy, QFrame, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
@@ -228,30 +228,6 @@ class WizardCardsMixin:
             badges.append(self._make_badge("跳题", "#b45309", "#fbbf24", parent))
         return badges
 
-    def _build_fact_row(
-        self,
-        parent: QWidget,
-        label_text: str,
-        value_text: str,
-    ) -> QWidget:
-        row = QWidget(parent)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        label = BodyLabel(label_text, row)
-        label.setFixedWidth(68)
-        label.setStyleSheet("font-size: 12px; font-weight: 600;")
-        _apply_label_color(label, "#666666", "#bfbfbf")
-        layout.addWidget(label)
-
-        value = BodyLabel(value_text or "无", row)
-        value.setWordWrap(True)
-        value.setStyleSheet("font-size: 12px;")
-        _apply_label_color(value, "#444444", "#e0e0e0")
-        layout.addWidget(value, 1)
-        return row
-
     def _show_validation_error(
         self, message: str, idx: int, focus_widget: Optional[QWidget] = None
     ) -> None:
@@ -436,15 +412,16 @@ class WizardCardsMixin:
         row_texts = [self._display_text_for_row(idx, i, str(text or "")) for i, text in enumerate(list(info_entry.get("row_texts") or []))]
 
         card = CardWidget(parent)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 18, 20, 18)
-        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(6)
 
         header_badges = self._build_header_badges(idx, entry, info_entry, card)
 
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.setSpacing(12)
+        title_row.setSpacing(10)
         title = SubtitleLabel(f"第{qnum or idx + 1}题", card)
         title.setStyleSheet("font-size: 16px; font-weight: 600;")
         title_row.addWidget(title)
@@ -466,20 +443,14 @@ class WizardCardsMixin:
         if title_text:
             desc = BodyLabel(title_text, card)
             desc.setWordWrap(True)
+            desc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
             desc.setStyleSheet("font-size: 13px;")
             _apply_label_color(desc, "#444444", "#e0e0e0")
             card_layout.addWidget(desc)
 
         title_media = self._media_items_for(idx, "title")
         if title_media:
-            card_layout.addWidget(QuestionMediaStrip("题干图片", title_media, fixed_size=84, parent=card))
-
-        card_layout.addWidget(
-            self._build_fact_row(card, "出现条件", self._inbound_summary_for(idx))
-        )
-        card_layout.addWidget(
-            self._build_fact_row(card, "影响后续", self._outbound_summary_for(idx))
-        )
+            card_layout.addWidget(QuestionMediaStrip("题干图片", title_media, fixed_size=72, parent=card))
 
         separator = QFrame(card)
         separator.setFrameShape(QFrame.Shape.HLine)
@@ -567,37 +538,53 @@ class WizardCardsMixin:
             sliders: List[NoWheelSlider] = []
             for opt_idx, select_text in enumerate(select_options):
                 row_widget = QWidget(card)
-                row_layout = QHBoxLayout(row_widget)
-                row_layout.setContentsMargins(0, 2, 0, 2)
-                row_layout.setSpacing(12)
+                row_layout = QVBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 4)
+                row_layout.setSpacing(4)
+
+                header_row = QHBoxLayout()
+                header_row.setContentsMargins(0, 0, 0, 0)
+                header_row.setSpacing(8)
 
                 num_label = BodyLabel(f"{opt_idx + 1}.", card)
                 num_label.setFixedWidth(24)
                 num_label.setStyleSheet("font-size: 12px;")
                 _apply_label_color(num_label, "#888888", "#a6a6a6")
-                row_layout.addWidget(num_label)
+                header_row.addWidget(num_label)
 
                 text_label = BodyLabel(select_text, card)
                 text_label.setWordWrap(True)
-                text_label.setFixedWidth(160)
+                text_label.setMinimumWidth(96)
+                text_label.setMaximumWidth(140)
+                text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
                 text_label.setStyleSheet("font-size: 13px;")
-                row_layout.addWidget(text_label)
+                header_row.addWidget(text_label, 0)
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
                 slider.setRange(0, 100)
                 slider.setValue(int(min(100, max(0, round(weights[opt_idx])))))
-                slider.setMinimumWidth(200)
-                row_layout.addWidget(slider, 1)
+
+                header_row.addStretch(1)
+
+                control_row = QHBoxLayout()
+                control_row.setContentsMargins(18, 0, 0, 0)
+                control_row.setSpacing(8)
 
                 value_input = LineEdit(card)
-                value_input.setFixedWidth(60)
+                value_input.setFixedWidth(52)
                 value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 value_input.setText(str(slider.value()))
                 from .utils import _bind_slider_input
 
                 _bind_slider_input(slider, value_input)
-                row_layout.addWidget(value_input)
+
+                slider.setMinimumWidth(80)
+                slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                row_layout.addLayout(header_row)
+                control_row.addWidget(slider, 1)
+                control_row.addWidget(value_input)
+                row_layout.addLayout(control_row)
 
                 card_layout.addWidget(row_widget)
                 sliders.append(slider)

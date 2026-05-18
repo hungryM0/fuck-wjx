@@ -9,7 +9,7 @@ from PySide6.QtCore import (
     QTimer,
     Qt,
 )
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSizePolicy, QButtonGroup, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
@@ -163,15 +163,20 @@ class WizardSectionsSliderMixin:
 
         for opt_idx in range(options):
             opt_widget = QWidget(card)
-            opt_layout = QHBoxLayout(opt_widget)
-            opt_layout.setContentsMargins(0, 4, 0, 4)
-            opt_layout.setSpacing(12)
+            opt_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+            opt_layout = QVBoxLayout(opt_widget)
+            opt_layout.setContentsMargins(0, 0, 0, 2)
+            opt_layout.setSpacing(2)
+
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(8)
 
             num_label = BodyLabel(f"{opt_idx + 1}.", card)
             num_label.setFixedWidth(24)
             num_label.setStyleSheet("font-size: 12px;")
             _apply_label_color(num_label, "#888888", "#a6a6a6")
-            opt_layout.addWidget(num_label)
+            header_row.addWidget(num_label)
 
             opt_text = option_texts[opt_idx] if opt_idx < len(option_texts) else "选项"
             option_widget = self._build_media_text_widget(
@@ -180,10 +185,10 @@ class WizardSectionsSliderMixin:
                 scope="option",
                 media_index=opt_idx,
                 text=opt_text,
-                text_width=160,
+                text_width=140,
                 font_style="font-size: 13px;",
             )
-            opt_layout.addWidget(option_widget)
+            header_row.addWidget(option_widget, 0)
 
             has_jump = bool(info_entry.get("has_jump"))
             if has_jump:
@@ -203,7 +208,7 @@ class WizardSectionsSliderMixin:
                     _apply_label_color(jump_label, "#d93025", "#ff6b6b")
                     jump_layout.addWidget(jump_label)
                 jump_layout.addStretch(1)
-                opt_layout.addWidget(jump_container)
+                header_row.addWidget(jump_container)
 
             slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
             if entry.question_type == "slider":
@@ -218,15 +223,18 @@ class WizardSectionsSliderMixin:
                     )
                 )
             )
-            slider.setMinimumWidth(200)
-            opt_layout.addWidget(slider, 1)
+            header_row.addStretch(1)
+
+            control_row = QHBoxLayout()
+            control_row.setContentsMargins(18, 0, 0, 0)
+            control_row.setSpacing(8)
 
             value_input = LineEdit(card)
-            value_input.setFixedWidth(60)
+            value_input.setFixedWidth(52)
             value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
             value_input.setText(str(slider.value()))
             _bind_slider_input(slider, value_input)
-            opt_layout.addWidget(value_input)
+            percent_label = None
             if is_multiple:
                 percent_label = BodyLabel("%", card)
                 percent_label.setFixedWidth(12)
@@ -234,7 +242,15 @@ class WizardSectionsSliderMixin:
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 )
                 _apply_label_color(percent_label, "#666666", "#bfbfbf")
-                opt_layout.addWidget(percent_label)
+
+            slider.setMinimumWidth(80)
+            slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            opt_layout.addLayout(header_row)
+            control_row.addWidget(slider, 1)
+            control_row.addWidget(value_input)
+            if percent_label is not None:
+                control_row.addWidget(percent_label)
+            opt_layout.addLayout(control_row)
 
             card_layout.addWidget(opt_widget)
             sliders.append(slider)
@@ -250,8 +266,8 @@ class WizardSectionsSliderMixin:
 
                 fill_widget = QWidget(card)
                 fill_layout = QHBoxLayout(fill_widget)
-                fill_layout.setContentsMargins(36, 0, 0, 4)
-                fill_layout.setSpacing(12)
+                fill_layout.setContentsMargins(32, 0, 0, 2)
+                fill_layout.setSpacing(10)
 
                 fill_label = BodyLabel("选中此项时填写：", card)
                 fill_label.setFixedWidth(160)
@@ -280,7 +296,7 @@ class WizardSectionsSliderMixin:
 
                 fill_mode_widget = QWidget(card)
                 fill_mode_layout = QVBoxLayout(fill_mode_widget)
-                fill_mode_layout.setContentsMargins(36, 0, 0, 8)
+                fill_mode_layout.setContentsMargins(32, 0, 0, 6)
                 fill_mode_layout.setSpacing(6)
 
                 mode_header_row = QHBoxLayout()

@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
     QHBoxLayout,
+    QSizePolicy,
+    QSplitter,
     QStackedWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -18,7 +20,6 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     LineEdit,
-    Pivot,
     PrimaryPushButton,
     PushButton,
     RadioButton,
@@ -60,6 +61,9 @@ _VIEW_LOGIC = "logic"
 _VIEW_SEQUENTIAL = "sequential"
 _TREE_INDEX_ROLE = int(Qt.ItemDataRole.UserRole) + 101
 _TREE_RELATION_TARGET_ROLE = _TREE_INDEX_ROLE + 1
+_LEFT_PANEL_MIN_WIDTH = 240
+_LEFT_PANEL_MAX_WIDTH = 520
+_RIGHT_PANEL_MIN_WIDTH = 520
 
 
 class QuestionWizardDialog(
@@ -128,15 +132,16 @@ class QuestionWizardDialog(
 
         self._search_edit: Optional[SearchLineEdit] = None
         self._search_status_label: Optional[BodyLabel] = None
-        self._view_pivot: Optional[Pivot] = None
         self._tree_widget: Optional[TreeWidget] = None
         self._detail_scroll: Optional[ScrollArea] = None
         self._detail_host: Optional[QWidget] = None
         self._detail_layout: Optional[QVBoxLayout] = None
         self._detail_stack: Optional[QStackedWidget] = None
         self._empty_page: Optional[QWidget] = None
+        self._content_splitter: Optional[QSplitter] = None
         self._prev_button: Optional[PushButton] = None
         self._next_button: Optional[PushButton] = None
+        self._splitter_guarding = False
 
         self._build_ui()
         self._populate_tree()
@@ -147,8 +152,8 @@ class QuestionWizardDialog(
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
@@ -165,17 +170,6 @@ class QuestionWizardDialog(
 
         top_row.addStretch(1)
 
-        pivot = Pivot(self)
-        pivot.addItem(_VIEW_LOGIC, "逻辑视图")
-        pivot.addItem(_VIEW_SEQUENTIAL, "顺序视图")
-        if self._logic_tree_state.has_unknown_logic:
-            pivot.setVisible(False)
-        else:
-            pivot.setCurrentItem(self._current_view_mode)
-            pivot.currentItemChanged.connect(self._on_view_mode_changed)
-        self._view_pivot = pivot
-        top_row.addWidget(pivot, 0, Qt.AlignmentFlag.AlignRight)
-
         layout.addLayout(top_row)
 
         status_label = BodyLabel("", self)
@@ -184,14 +178,19 @@ class QuestionWizardDialog(
         self._search_status_label = status_label
         layout.addWidget(status_label)
 
-        content_row = QHBoxLayout()
-        content_row.setContentsMargins(0, 0, 0, 0)
-        content_row.setSpacing(16)
-        layout.addLayout(content_row, 1)
+        splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(8)
+        splitter.setStyleSheet(
+            "QSplitter::handle { background: transparent; }"
+            "QSplitter::handle:hover { background: rgba(128, 128, 128, 0.18); }"
+        )
+        self._content_splitter = splitter
+        layout.addWidget(splitter, 1)
 
         left_card = CardWidget(self)
         left_layout = QVBoxLayout(left_card)
-        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(8)
         tree = TreeWidget(left_card)
         tree.setHeaderHidden(True)
@@ -199,29 +198,37 @@ class QuestionWizardDialog(
         tree.itemActivated.connect(self._on_tree_item_clicked)
         self._tree_widget = tree
         left_layout.addWidget(tree, 1)
-        content_row.addWidget(left_card, 0)
-        left_card.setFixedWidth(320)
+        left_card.setMinimumWidth(_LEFT_PANEL_MIN_WIDTH)
+        left_card.setMaximumWidth(_LEFT_PANEL_MAX_WIDTH)
+        splitter.addWidget(left_card)
 
         right_card = CardWidget(self)
         right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(12, 12, 12, 12)
+        right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.setSpacing(0)
         detail_scroll = ScrollArea(right_card)
         detail_scroll.setWidgetResizable(True)
+        detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         detail_scroll.enableTransparentBackground()
         detail_host = QWidget(right_card)
         detail_layout = QVBoxLayout(detail_host)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(0)
         detail_stack = QStackedWidget(detail_host)
-        detail_layout.addWidget(detail_stack, 1)
+        detail_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        detail_layout.addWidget(detail_stack, 0, Qt.AlignmentFlag.AlignTop)
         detail_scroll.setWidget(detail_host)
         self._detail_scroll = detail_scroll
         self._detail_host = detail_host
         self._detail_layout = detail_layout
         self._detail_stack = detail_stack
         right_layout.addWidget(detail_scroll, 1)
-        content_row.addWidget(right_card, 1)
+        right_card.setMinimumWidth(_RIGHT_PANEL_MIN_WIDTH)
+        splitter.addWidget(right_card)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([320, 820])
+        splitter.splitterMoved.connect(self._clamp_splitter_sizes)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
@@ -243,6 +250,30 @@ class QuestionWizardDialog(
         layout.addLayout(btn_row)
 
         self._set_search_status("输入关键词后回车跳转")
+
+    def _clamp_splitter_sizes(self, *_args) -> None:
+        splitter = self._content_splitter
+        if splitter is None or self._splitter_guarding:
+            return
+        sizes = splitter.sizes()
+        if len(sizes) < 2:
+            return
+        total_width = sum(sizes)
+        if total_width <= 0:
+            return
+        max_left = max(
+            _LEFT_PANEL_MIN_WIDTH,
+            min(_LEFT_PANEL_MAX_WIDTH, total_width - _RIGHT_PANEL_MIN_WIDTH),
+        )
+        left_width = max(_LEFT_PANEL_MIN_WIDTH, min(sizes[0], max_left))
+        right_width = max(_RIGHT_PANEL_MIN_WIDTH, total_width - left_width)
+        if [left_width, right_width] == sizes[:2]:
+            return
+        self._splitter_guarding = True
+        try:
+            splitter.setSizes([left_width, right_width])
+        finally:
+            self._splitter_guarding = False
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -471,18 +502,6 @@ class QuestionWizardDialog(
         current_pos = self._visible_indices.index(self._current_question_idx)
         if current_pos < len(self._visible_indices) - 1:
             self._select_question(self._visible_indices[current_pos + 1])
-
-    def _on_view_mode_changed(self, route_key: str) -> None:
-        normalized = str(route_key or "").strip()
-        if normalized not in {_VIEW_LOGIC, _VIEW_SEQUENTIAL}:
-            return
-        self._current_view_mode = normalized
-        self._populate_tree()
-        if self._visible_indices:
-            target = self._current_question_idx
-            if target not in self._visible_indices:
-                target = self._visible_indices[0]
-            self._select_question(target)
 
     def _searchable_text(self, idx: int) -> str:
         return str(self._logic_tree_state.search_text.get(idx) or "")
@@ -721,10 +740,18 @@ class QuestionWizardDialog(
         result: Dict[int, Any] = {}
         for idx, seg in self.bias_preset_map.items():
             if isinstance(seg, list):
-                result[idx] = [str(s.currentRouteKey() or "custom") for s in seg]
+                result[idx] = [str(self._current_bias_value(s)) for s in seg]
             else:
-                result[idx] = str(seg.currentRouteKey() or "custom")
+                result[idx] = str(self._current_bias_value(seg))
         return result
+
+    @staticmethod
+    def _current_bias_value(widget: Any) -> str:
+        if hasattr(widget, "currentData"):
+            return str(widget.currentData() or "custom")
+        if hasattr(widget, "currentRouteKey"):
+            return str(widget.currentRouteKey() or "custom")
+        return "custom"
 
     def get_dimensions(self) -> Dict[int, Optional[str]]:
         result: Dict[int, Optional[str]] = {}
