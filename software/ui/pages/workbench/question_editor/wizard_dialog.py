@@ -64,6 +64,9 @@ _TREE_RELATION_TARGET_ROLE = _TREE_INDEX_ROLE + 1
 _LEFT_PANEL_MIN_WIDTH = 240
 _LEFT_PANEL_MAX_WIDTH = 520
 _RIGHT_PANEL_MIN_WIDTH = 420
+_RIGHT_CONTENT_MIN_WIDTH = 320
+_RIGHT_CONTENT_SAFE_MARGIN = 28
+_WIDGET_MAX_SIZE = 16777215
 
 
 class QuestionWizardDialog(
@@ -139,6 +142,7 @@ class QuestionWizardDialog(
         self._detail_stack: Optional[QStackedWidget] = None
         self._empty_page: Optional[QWidget] = None
         self._content_splitter: Optional[QSplitter] = None
+        self._entry_card_widgets: Dict[int, QWidget] = {}
         self._prev_button: Optional[PushButton] = None
         self._next_button: Optional[PushButton] = None
         self._splitter_guarding = False
@@ -215,7 +219,7 @@ class QuestionWizardDialog(
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(0)
         detail_stack = QStackedWidget(detail_host)
-        detail_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        detail_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         detail_layout.addWidget(detail_stack, 0, Qt.AlignmentFlag.AlignTop)
         detail_scroll.setWidget(detail_host)
         self._detail_scroll = detail_scroll
@@ -274,16 +278,49 @@ class QuestionWizardDialog(
             splitter.setSizes([left_width, right_width])
         finally:
             self._splitter_guarding = False
+        QTimer.singleShot(0, self._sync_detail_content_width)
+
+    def _sync_detail_content_width(self) -> None:
+        detail_scroll = self._detail_scroll
+        detail_host = self._detail_host
+        detail_stack = self._detail_stack
+        if detail_scroll is None or detail_host is None or detail_stack is None:
+            return
+
+        viewport = detail_scroll.viewport()
+        viewport_width = viewport.width() if viewport is not None else detail_scroll.width()
+        if viewport_width <= 0:
+            return
+        content_width = max(
+            _RIGHT_CONTENT_MIN_WIDTH,
+            viewport_width - _RIGHT_CONTENT_SAFE_MARGIN,
+        )
+
+        detail_host.setMinimumWidth(0)
+        detail_host.setMaximumWidth(_WIDGET_MAX_SIZE)
+        detail_stack.setMinimumWidth(0)
+        detail_stack.setMaximumWidth(_WIDGET_MAX_SIZE)
+        for page in self._question_cards.values():
+            page.setMinimumWidth(0)
+            page.setMaximumWidth(_WIDGET_MAX_SIZE)
+        for card in self._entry_card_widgets.values():
+            card.setMinimumWidth(0)
+            card.setMaximumWidth(content_width)
+        if self._empty_page is not None:
+            self._empty_page.setMinimumWidth(0)
+            self._empty_page.setMaximumWidth(content_width)
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         QTimer.singleShot(0, self._clamp_splitter_sizes)
+        QTimer.singleShot(0, self._sync_detail_content_width)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._bind_screen_change_signal()
         QTimer.singleShot(0, self._fit_into_available_geometry)
         QTimer.singleShot(0, self._clamp_splitter_sizes)
+        QTimer.singleShot(0, self._sync_detail_content_width)
 
     def _bind_screen_change_signal(self) -> None:
         if self._screen_change_bound:
@@ -435,6 +472,7 @@ class QuestionWizardDialog(
         page = self._question_cards.get(self._current_question_idx)
         if page is None:
             page = QWidget(self._detail_stack)
+            page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
             page_layout = QVBoxLayout(page)
             page_layout.setContentsMargins(0, 0, 0, 0)
             page_layout.setSpacing(0)
@@ -444,11 +482,14 @@ class QuestionWizardDialog(
                 self.entries[self._current_question_idx],
                 page,
             )
+            self._entry_card_widgets[self._current_question_idx] = card
             page_layout.addWidget(card, 0, Qt.AlignmentFlag.AlignTop)
             page_layout.addStretch(1)
             self._question_cards[self._current_question_idx] = page
             self._detail_stack.addWidget(page)
         self._detail_stack.setCurrentWidget(page)
+        self._sync_detail_content_width()
+        QTimer.singleShot(0, self._sync_detail_content_width)
         if self._detail_scroll is not None:
             self._detail_scroll.verticalScrollBar().setValue(0)
 

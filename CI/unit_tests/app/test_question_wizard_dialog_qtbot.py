@@ -110,3 +110,114 @@ def test_question_wizard_dialog_hides_logic_view_when_unknown(qtbot) -> None:
 
     qtbot.waitUntil(lambda: dlg._tree_widget.topLevelItemCount() > 0)
     assert dlg._current_view_mode == "sequential"
+
+
+def test_question_wizard_dialog_detail_keeps_visible_content_width(qtbot) -> None:
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="第一题",
+            page=1,
+            option_texts=["A", "B"],
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        ),
+        SurveyQuestionMeta(
+            num=2,
+            title="第二题",
+            page=1,
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        ),
+    ]
+    dlg = QuestionWizardDialog(_build_entries(), info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: bool(dlg._entry_card_widgets))
+    assert dlg._detail_stack is not None
+    assert dlg._detail_scroll is not None
+    assert dlg._detail_stack.currentWidget() is dlg._question_cards[0]
+
+    dlg._sync_detail_content_width()
+    card = dlg._entry_card_widgets[0]
+    assert card.maximumWidth() <= dlg._detail_scroll.viewport().width()
+    assert card.maximumWidth() >= 320
+
+    dlg._select_question(1)
+    qtbot.waitUntil(lambda: 1 in dlg._entry_card_widgets)
+    assert dlg._detail_stack.currentWidget() is dlg._question_cards[1]
+
+
+def test_question_wizard_dialog_multi_text_stays_inside_detail_width(qtbot) -> None:
+    entries = [
+        QuestionEntry(
+            question_type="multi_text",
+            probabilities=[1],
+            texts=["无|||填空2|||填空3"],
+            rows=1,
+            option_count=1,
+            distribution_mode="random",
+            custom_weights=None,
+            question_num=1,
+        )
+    ]
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="多项填空测试",
+            page=1,
+            text_inputs=3,
+            is_multi_text=True,
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        )
+    ]
+    dlg = QuestionWizardDialog(entries, info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: bool(dlg._entry_card_widgets))
+    assert dlg._detail_scroll is not None
+
+    dlg._sync_detail_content_width()
+    card = dlg._entry_card_widgets[0]
+    qtbot.waitUntil(
+        lambda: card.width() <= dlg._detail_scroll.viewport().width(),
+        timeout=2000,
+    )
+    assert card.maximumWidth() <= dlg._detail_scroll.viewport().width()
+
+
+def test_question_wizard_dialog_text_stays_inside_detail_width(qtbot) -> None:
+    entries = [
+        QuestionEntry(
+            question_type="text",
+            probabilities=[1],
+            texts=["默认答案"],
+            rows=1,
+            option_count=1,
+            distribution_mode="random",
+            custom_weights=None,
+            question_num=1,
+        )
+    ]
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="普通填空测试",
+            page=1,
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        )
+    ]
+    dlg = QuestionWizardDialog(entries, info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: bool(dlg._entry_card_widgets))
+    assert dlg._detail_scroll is not None
+
+    dlg._sync_detail_content_width()
+    card = dlg._entry_card_widgets[0]
+    qtbot.waitUntil(
+        lambda: card.width() <= dlg._detail_scroll.viewport().width(),
+        timeout=2000,
+    )
+    assert card.maximumWidth() <= dlg._detail_scroll.viewport().width()

@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
@@ -147,9 +147,16 @@ class WizardSectionsTextMixin:
         self.text_add_btn_map[idx] = add_btn
 
         if entry.question_type == "text":
+            random_widget = QWidget(card)
+            random_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+            random_layout = QVBoxLayout(random_widget)
+            random_layout.setContentsMargins(0, 0, 0, 0)
+            random_layout.setSpacing(4)
+
             random_row = QHBoxLayout()
             random_row.setSpacing(8)
             random_hint = BodyLabel("随机处理：", card)
+            random_hint.setFixedWidth(72)
             random_hint.setStyleSheet("font-size: 12px;")
             _apply_label_color(random_hint, "#666666", "#bfbfbf")
             random_row.addWidget(random_hint)
@@ -162,6 +169,8 @@ class WizardSectionsTextMixin:
             random_int_min, random_int_max = self._resolve_text_random_int_range(entry)
             random_min_edit = self._create_integer_range_edit(card, random_int_min, "最小值")
             random_max_edit = self._create_integer_range_edit(card, random_int_max, "最大值")
+            random_min_edit.setFixedWidth(76)
+            random_max_edit.setFixedWidth(76)
             range_separator = BodyLabel("到", card)
             range_separator.setStyleSheet("font-size: 12px;")
             _apply_label_color(range_separator, "#666666", "#bfbfbf")
@@ -169,12 +178,8 @@ class WizardSectionsTextMixin:
             random_row.addWidget(random_name_cb)
             random_row.addWidget(random_mobile_cb)
             random_row.addWidget(random_id_card_cb)
-            random_row.addWidget(random_integer_cb)
-            random_row.addWidget(random_min_edit)
-            random_row.addWidget(range_separator)
-            random_row.addWidget(random_max_edit)
             random_row.addStretch(1)
-            card_layout.addLayout(random_row)
+            random_layout.addLayout(random_row)
 
             random_group = QButtonGroup(card)
             random_group.setExclusive(True)
@@ -240,8 +245,18 @@ class WizardSectionsTextMixin:
             ai_cb.checkedChanged.connect(
                 lambda checked, i=idx: self._on_entry_ai_toggled(i, checked)
             )
-            btn_row.addWidget(ai_cb)
-            btn_row.addWidget(ai_label)
+            random_control_row = QHBoxLayout()
+            random_control_row.setContentsMargins(80, 0, 0, 0)
+            random_control_row.setSpacing(8)
+            random_control_row.addWidget(random_integer_cb)
+            random_control_row.addWidget(random_min_edit)
+            random_control_row.addWidget(range_separator)
+            random_control_row.addWidget(random_max_edit)
+            random_control_row.addWidget(ai_cb)
+            random_control_row.addWidget(ai_label)
+            random_control_row.addStretch(1)
+            random_layout.addLayout(random_control_row)
+            card_layout.addWidget(random_widget)
             self.ai_check_map[idx] = ai_cb
             self.ai_label_map[idx] = ai_label
 
@@ -278,6 +293,7 @@ class WizardSectionsTextMixin:
 
         # 表头
         header_widget = QWidget(card)
+        header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 4, 0, 4)
         header_layout.setSpacing(8)
@@ -300,6 +316,7 @@ class WizardSectionsTextMixin:
 
         # 答案行容器
         rows_container = QWidget(card)
+        rows_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         rows_layout = QVBoxLayout(rows_container)
         rows_layout.setContentsMargins(0, 0, 0, 0)
         rows_layout.setSpacing(4)
@@ -316,6 +333,7 @@ class WizardSectionsTextMixin:
                 )
 
                 row_widget = QWidget(parent_card)
+                row_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
                 row_layout = QHBoxLayout(row_widget)
                 row_layout.setContentsMargins(0, 2, 0, 2)
                 row_layout.setSpacing(8)
@@ -331,6 +349,8 @@ class WizardSectionsTextMixin:
                     edit = LineEdit(parent_card)
                     edit.setText(values[i] if i < len(values) else "")
                     edit.setPlaceholderText(f"填空{i + 1}")
+                    edit.setMinimumWidth(72)
+                    edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                     row_layout.addWidget(edit, 1)
                     edits_in_row.append(edit)
 
@@ -403,13 +423,19 @@ class WizardSectionsTextMixin:
             saved_int_ranges.append([])
 
         for blank_idx in range(blank_count):
-            blank_row = QHBoxLayout()
-            blank_row.setSpacing(8)
+            blank_widget = QWidget(card)
+            blank_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+            blank_layout = QVBoxLayout(blank_widget)
+            blank_layout.setContentsMargins(0, 0, 0, 0)
+            blank_layout.setSpacing(4)
+
+            mode_row = QHBoxLayout()
+            mode_row.setSpacing(8)
             blank_label = BodyLabel(f"填空{blank_idx + 1}:", card)
             blank_label.setFixedWidth(60)
             blank_label.setStyleSheet("font-size: 12px;")
             _apply_label_color(blank_label, "#666666", "#bfbfbf")
-            blank_row.addWidget(blank_label)
+            mode_row.addWidget(blank_label)
 
             radio_group = QButtonGroup(card)
             radio_group.setExclusive(True)
@@ -423,6 +449,8 @@ class WizardSectionsTextMixin:
             range_min, range_max = parsed_range if parsed_range is not None else (None, None)
             range_min_edit = self._create_integer_range_edit(card, range_min, "最小值")
             range_max_edit = self._create_integer_range_edit(card, range_max, "最大值")
+            range_min_edit.setFixedWidth(76)
+            range_max_edit.setFixedWidth(76)
             range_sep_label = BodyLabel("到", card)
             range_sep_label.setStyleSheet("font-size: 12px;")
             _apply_label_color(range_sep_label, "#666666", "#bfbfbf")
@@ -447,14 +475,12 @@ class WizardSectionsTextMixin:
             else:
                 radio_list.setChecked(True)
 
-            blank_row.addWidget(radio_list)
-            blank_row.addWidget(radio_name)
-            blank_row.addWidget(radio_mobile)
-            blank_row.addWidget(radio_id_card)
-            blank_row.addWidget(radio_integer)
-            blank_row.addWidget(range_min_edit)
-            blank_row.addWidget(range_sep_label)
-            blank_row.addWidget(range_max_edit)
+            mode_row.addWidget(radio_list)
+            mode_row.addWidget(radio_name)
+            mode_row.addWidget(radio_mobile)
+            mode_row.addWidget(radio_id_card)
+            mode_row.addStretch(1)
+            blank_layout.addLayout(mode_row)
 
             # 每个填空项的AI复选框
             ai_cb = SwitchButton(card, IndicatorPosition.RIGHT)
@@ -468,12 +494,20 @@ class WizardSectionsTextMixin:
             ai_cb.setChecked(
                 saved_ai_flags[blank_idx] if blank_idx < len(saved_ai_flags) else False
             )
-            blank_row.addWidget(ai_cb)
-            blank_row.addWidget(ai_label)
+            control_row = QHBoxLayout()
+            control_row.setContentsMargins(68, 0, 0, 0)
+            control_row.setSpacing(8)
+            control_row.addWidget(radio_integer)
+            control_row.addWidget(range_min_edit)
+            control_row.addWidget(range_sep_label)
+            control_row.addWidget(range_max_edit)
+            control_row.addWidget(ai_cb)
+            control_row.addWidget(ai_label)
+            control_row.addStretch(1)
+            blank_layout.addLayout(control_row)
             blank_ai_checkboxes.append(ai_cb)
 
-            blank_row.addStretch(1)
-            card_layout.addLayout(blank_row)
+            card_layout.addWidget(blank_widget)
 
             blank_radio_groups.append(radio_group)
             blank_mode_radios.append(
