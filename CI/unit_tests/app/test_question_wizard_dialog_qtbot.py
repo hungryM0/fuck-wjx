@@ -90,6 +90,46 @@ def test_question_wizard_dialog_shows_logic_view_and_switches_question(qtbot) ->
     assert dlg._current_question_idx == 1
 
 
+def test_question_wizard_dialog_tree_uses_compact_question_label_and_type_badge(qtbot) -> None:
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="图片选项题",
+            page=1,
+            option_texts=["A"],
+            required=True,
+            has_jump=True,
+            jump_rules=[{"option_index": 0, "jumpto": 99}],
+            question_media=[
+                {
+                    "kind": "image",
+                    "scope": "option",
+                    "index": 0,
+                    "source_url": "https://example.com/a.png",
+                    "label": "选项A",
+                }
+            ],
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        )
+    ]
+    dlg = QuestionWizardDialog(_build_entries()[:1], info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: dlg._tree_widget.topLevelItemCount() > 0)
+    page_item = dlg._tree_widget.topLevelItem(0)
+    question_item = page_item.child(0)
+    assert question_item.text(0) == ""
+
+    row = dlg._tree_widget.itemWidget(question_item, 0)
+    assert row is not None
+    labels = [label.text() for label in row.findChildren(BodyLabel)]
+    badges = [badge.text() for badge in row.findChildren(InfoBadge)]
+    assert labels[0] == "1."
+    assert badges == ["单选题"]
+    assert question_item.child(0).text(0) == "选中“A” -> 结束"
+
+
 def test_question_wizard_dialog_hides_logic_view_when_unknown(qtbot) -> None:
     info = [
         SurveyQuestionMeta(

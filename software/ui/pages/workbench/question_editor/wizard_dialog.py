@@ -45,6 +45,7 @@ from .utils import (
     build_entry_info_list,
     resolve_display_question_num,
 )
+from .constants import _get_entry_type_label
 from .wizard_cards import WizardCardsMixin
 from .wizard_logic_tree import build_logic_tree_state
 from .wizard_sections import (
@@ -401,6 +402,29 @@ class QuestionWizardDialog(
     def _visible_indices_for_mode(self) -> List[int]:
         return list(range(len(self.entries)))
 
+    def _build_tree_question_widget(self, idx: int, parent: QWidget) -> QWidget:
+        info = self._get_entry_info(idx)
+        entry = self.entries[idx]
+        qnum = resolve_display_question_num(info, idx + 1) or idx + 1
+        title = str(info.title or "").strip() or "未命名题目"
+
+        row = QWidget(parent)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+
+        number_label = BodyLabel(f"{qnum}.", row)
+        number_label.setStyleSheet("font-size: 13px; font-weight: 600;")
+        row_layout.addWidget(number_label, 0, Qt.AlignmentFlag.AlignLeft)
+
+        type_badge = self._make_badge(_get_entry_type_label(entry), "#0f6cbd", "#63b3ff", row)
+        row_layout.addWidget(type_badge, 0, Qt.AlignmentFlag.AlignLeft)
+
+        title_label = BodyLabel(_shorten_text(title, 12), row)
+        title_label.setStyleSheet("font-size: 13px;")
+        row_layout.addWidget(title_label, 1)
+        return row
+
     def _populate_tree(self) -> None:
         if self._tree_widget is None:
             return
@@ -417,12 +441,11 @@ class QuestionWizardDialog(
             self._tree_widget.addTopLevelItem(page_item)
 
             for idx in page_indices:
-                info = self._get_entry_info(idx)
-                qnum = resolve_display_question_num(info, idx + 1) or idx + 1
-                title = str(info.title or "").strip() or "未命名题目"
-                item = QTreeWidgetItem([f"第{qnum}题  {_shorten_text(title, 20)}"])
+                item = QTreeWidgetItem([""])
+                item.setSizeHint(0, QSize(0, 34))
                 item.setData(0, _TREE_INDEX_ROLE, idx)
                 page_item.addChild(item)
+                self._tree_widget.setItemWidget(item, 0, self._build_tree_question_widget(idx, self._tree_widget))
 
                 if self._current_view_mode == _VIEW_LOGIC and not self._logic_tree_state.has_unknown_logic:
                     for relation in self._logic_tree_state.relations.get(idx, []):

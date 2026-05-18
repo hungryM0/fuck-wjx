@@ -148,6 +148,11 @@ class WizardCardsMixin:
         qnum = resolve_display_question_num(info, idx + 1)
         return f"第{qnum or idx + 1}题"
 
+    def _format_compact_question_label(self, idx: int) -> str:
+        info = self._get_entry_info(idx)
+        qnum = resolve_display_question_num(info, idx + 1)
+        return f"{qnum or idx + 1}."
+
     def _media_items_for(
         self, idx: int, scope: str, index: int | None = None
     ) -> List[Dict[str, Any]]:
@@ -432,23 +437,13 @@ class WizardCardsMixin:
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(10)
-        title = SubtitleLabel(f"第{qnum or idx + 1}题", card)
+        title = SubtitleLabel(f"{qnum or idx + 1}.", card)
         title.setStyleSheet("font-size: 16px; font-weight: 600;")
         title_row.addWidget(title)
+        for badge in header_badges:
+            title_row.addWidget(badge, 0, Qt.AlignmentFlag.AlignLeft)
         title_row.addStretch(1)
-        for badge in header_badges[:2]:
-            title_row.addWidget(badge, 0, Qt.AlignmentFlag.AlignRight)
         card_layout.addLayout(title_row)
-
-        extra_badges = header_badges[2:]
-        if extra_badges:
-            badge_row = QHBoxLayout()
-            badge_row.setContentsMargins(0, 0, 0, 0)
-            badge_row.setSpacing(8)
-            for badge in extra_badges:
-                badge_row.addWidget(badge, 0, Qt.AlignmentFlag.AlignLeft)
-            badge_row.addStretch(1)
-            card_layout.addLayout(badge_row)
 
         if title_text:
             desc = BodyLabel(title_text, card)
