@@ -292,6 +292,7 @@ class RunControllerExecutionMixin:
         self._init_current_step_key = ""
         self._init_gate_stop_event = None
         self._startup_service_warnings = []
+        self.runStateChanged.emit(True)
         self._start_startup_status_check(config)
 
         self._start_with_initialization_gate(config, [])

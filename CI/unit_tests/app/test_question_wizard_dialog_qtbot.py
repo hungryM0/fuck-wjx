@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from PySide6.QtWidgets import QTreeWidgetItem
 
 from software.core.questions.config import QuestionEntry
@@ -10,6 +12,9 @@ from software.providers.contracts import (
 )
 from software.ui.pages.workbench.question_editor.wizard_dialog import (
     QuestionWizardDialog,
+)
+from software.ui.pages.workbench.question_editor.question_media_preview import (
+    QuestionMediaThumbnail,
 )
 
 
@@ -221,3 +226,60 @@ def test_question_wizard_dialog_text_stays_inside_detail_width(qtbot) -> None:
         timeout=2000,
     )
     assert card.maximumWidth() <= dlg._detail_scroll.viewport().width()
+
+
+def test_question_wizard_dialog_accept_shows_validation_error_without_navigation_crash(qtbot) -> None:
+    entries = [
+        QuestionEntry(
+            question_type="text",
+            probabilities=[1],
+            texts=["默认答案"],
+            rows=1,
+            option_count=1,
+            distribution_mode="random",
+            custom_weights=None,
+            question_num=1,
+        )
+    ]
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="随机整数测试",
+            page=1,
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        )
+    ]
+    dlg = QuestionWizardDialog(entries, info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.text_random_mode_map[0] = "integer"
+    dlg.show()
+
+    dlg.accept()
+
+    qtbot.waitUntil(lambda: dlg._validation_error_dialog is not None)
+    assert dlg._validation_error_dialog is not None
+    assert dlg._current_question_idx == 0
+
+
+def test_question_media_thumbnail_can_be_deleted_before_worker_finishes(qtbot, monkeypatch) -> None:
+    class _Resp:
+        content = b""
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def _slow_get(*_args, **_kwargs):
+        time.sleep(0.2)
+        return _Resp()
+
+    from software.ui.pages.workbench.question_editor import question_media_preview as preview_module
+
+    monkeypatch.setattr(preview_module.http_client, "get", _slow_get)
+    widget = QuestionMediaThumbnail(
+        {"source_url": "https://example.com/a.png", "label": "题干图"}
+    )
+    qtbot.addWidget(widget)
+    widget.show()
+
+    widget.deleteLater()
+    qtbot.wait(350)

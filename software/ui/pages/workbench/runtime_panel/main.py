@@ -87,7 +87,7 @@ class RuntimePage(ScrollArea):
             submit_interval=self._card_value_as_range(self.interval_card),
             answer_duration=self._card_value_as_range(self.answer_card),
         )
-        self.on_run_state_changed(bool(getattr(self.controller, "running", False)))
+        self.on_run_state_changed(self._thread_edit_locked())
 
     def _bind_events(self):
         self.target_card.spinBox.valueChanged.connect(
@@ -297,8 +297,15 @@ class RuntimePage(ScrollArea):
 
         return clamped
 
+    def _thread_edit_locked(self) -> bool:
+        return bool(
+            getattr(self.controller, "running", False)
+            or getattr(self.controller, "_starting", False)
+            or getattr(self.controller, "is_initializing", lambda: False)()
+        )
+
     def on_run_state_changed(self, running: bool) -> None:
-        self.thread_card.slider.setEnabled(not bool(running))
+        self.thread_card.slider.setEnabled(not bool(running or self._thread_edit_locked()))
 
     def _show_headless_limit_tip(self):
         parent = self.window() or self.view

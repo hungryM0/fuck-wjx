@@ -13,6 +13,8 @@ import software.network.http as http_client
 
 from .utils import _apply_label_color
 
+_ACTIVE_MEDIA_THREADS: set[QThread] = set()
+
 
 class _MediaLoaderWorker(QObject):
     finished = Signal(str, bytes)
@@ -46,6 +48,7 @@ class QuestionMediaThumbnail(QWidget):
         self._thread: Optional[QThread] = None
         self._worker: Optional[_MediaLoaderWorker] = None
         self._fixed_size = max(40, int(fixed_size))
+        self._destroyed = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -69,6 +72,10 @@ class QuestionMediaThumbnail(QWidget):
 
         self._set_placeholder()
         self._load_async()
+        self.destroyed.connect(self._mark_destroyed)
+
+    def _mark_destroyed(self) -> None:
+        self._destroyed = True
 
     def _set_placeholder(self) -> None:
         self.image_label.setText("图片")
@@ -80,14 +87,16 @@ class QuestionMediaThumbnail(QWidget):
         source_url = str(self._media_item.get("source_url") or "").strip()
         if not source_url:
             return
-        self._thread = QThread(self)
+        self._thread = QThread()
         self._worker = _MediaLoaderWorker(source_url)
+        _ACTIVE_MEDIA_THREADS.add(self._thread)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_loaded)
         self._worker.finished.connect(self._thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.finished.connect(lambda thread=self._thread: _ACTIVE_MEDIA_THREADS.discard(thread))
         self._thread.finished.connect(self._clear_loader_refs)
         self._thread.start()
 
@@ -96,6 +105,8 @@ class QuestionMediaThumbnail(QWidget):
         self._worker = None
 
     def _on_loaded(self, _url: str, payload: bytes) -> None:
+        if self._destroyed:
+            return
         if not payload:
             return
         image = QImage()

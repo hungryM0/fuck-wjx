@@ -456,6 +456,10 @@ class QuestionWizardDialog(
         if self._next_button is not None:
             self._next_button.setEnabled(False)
 
+    def _navigate_to_question(self, question_idx: int, animate: bool = False) -> None:
+        _ = animate
+        self._select_question(question_idx)
+
     def _select_question(self, idx: int) -> None:
         if idx not in self._visible_indices:
             return

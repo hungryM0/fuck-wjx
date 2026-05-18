@@ -1,7 +1,7 @@
 """带当前数值显示的滑动条。"""
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QWidget
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, Slider
 
 
@@ -67,3 +67,11 @@ class ValueSlider(QWidget):
 
     def blockSignals(self, block: bool) -> bool:  # type: ignore[override]
         return super().blockSignals(block)
+
+    def setEnabled(self, enabled: bool) -> None:  # type: ignore[override]
+        super().setEnabled(bool(enabled))
+        effect = self.graphicsEffect()
+        if effect is None:
+            effect = QGraphicsOpacityEffect(self)
+            self.setGraphicsEffect(effect)
+        effect.setOpacity(1.0 if enabled else 0.4)  # type: ignore[union-attr]

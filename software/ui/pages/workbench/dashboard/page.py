@@ -570,13 +570,21 @@ class DashboardPage(
 
     def _sync_start_button_state(self, running: Optional[bool] = None):
         if running is None:
-            running = bool(getattr(self.controller, "running", False))
+            running = bool(
+                getattr(self.controller, "running", False)
+                or getattr(self.controller, "_starting", False)
+                or getattr(self.controller, "is_initializing", lambda: False)()
+            )
         can_start = (not running) and self._has_question_entries()
         self.start_btn.setEnabled(bool(can_start))
 
     def _sync_thread_slider_enabled(self, running: Optional[bool] = None) -> None:
         if running is None:
-            running = bool(getattr(self.controller, "running", False))
+            running = bool(
+                getattr(self.controller, "running", False)
+                or getattr(self.controller, "_starting", False)
+                or getattr(self.controller, "is_initializing", lambda: False)()
+            )
         self.thread_slider.setEnabled(not bool(running))
 
     def _on_question_entries_changed(self, _count: int):
