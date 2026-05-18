@@ -94,11 +94,6 @@ class WizardSectionsTextMixin:
             self._build_multi_text_matrix_input(idx, entry, card, card_layout, blank_count)
             return
 
-        hint = BodyLabel("答案列表（随机选择一个填入）：", card)
-        hint.setStyleSheet("font-size: 12px;")
-        _apply_label_color(hint, "#666666", "#bfbfbf")
-        card_layout.addWidget(hint)
-
         text_rows_container = QWidget(card)
         text_rows_layout = QVBoxLayout(text_rows_container)
         text_rows_layout.setContentsMargins(0, 0, 0, 0)
@@ -281,12 +276,6 @@ class WizardSectionsTextMixin:
         """为多项填空题构建矩阵式输入界面"""
         from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
 
-        # 提示标签
-        hint = BodyLabel(f"答案列表（随机选择一组填入，共 {blank_count} 个填空）：", card)
-        hint.setStyleSheet("font-size: 12px;")
-        _apply_label_color(hint, "#666666", "#bfbfbf")
-        card_layout.addWidget(hint)
-
         # 表头
         header_widget = QWidget(card)
         header_layout = QHBoxLayout(header_widget)
@@ -383,11 +372,10 @@ class WizardSectionsTextMixin:
         self.text_container_map[idx] = rows_container
         self.text_add_btn_map[idx] = add_btn
 
-        # 填空项配置区域
-        config_hint = BodyLabel("填空项配置：", card)
-        config_hint.setStyleSheet("font-size: 12px; margin-top: 8px;")
-        _apply_label_color(config_hint, "#666666", "#bfbfbf")
-        card_layout.addWidget(config_hint)
+        section_label = BodyLabel("填空项", card)
+        section_label.setStyleSheet("font-size: 12px; font-weight: 600; margin-top: 8px;")
+        _apply_label_color(section_label, "#666666", "#bfbfbf")
+        card_layout.addWidget(section_label)
 
         # 存储每个填空项的单选按钮组和AI复选框
         blank_radio_groups: List[QButtonGroup] = []

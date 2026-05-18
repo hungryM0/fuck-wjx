@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from software.app.config import DEFAULT_FILL_TEXT
 from software.network.browser.parse_pool import acquire_parse_browser_session
 from software.providers.common import SURVEY_PROVIDER_CREDAMO
+from software.providers.contracts import LOGIC_PARSE_STATUS_UNKNOWN
 
 _QUESTION_NUMBER_RE = re.compile(r"^\s*(?:Q|题目?)\s*(\d+)\b", re.IGNORECASE)
 _TYPE_ONLY_TITLE_RE = re.compile(r"^\s*\[[^\]]+\]\s*$")
@@ -645,6 +646,14 @@ def _normalize_question(raw: Dict[str, Any], fallback_num: int) -> Dict[str, Any
         "provider_question_id": str(raw.get("question_id") or question_num),
         "provider_page_id": str(raw.get("page") or 1),
         "provider_type": str(raw.get("provider_type") or question_kind or type_code).strip(),
+        "has_jump": False,
+        "jump_rules": [],
+        "has_display_condition": False,
+        "display_conditions": [],
+        "has_dependent_display_logic": False,
+        "controls_display_targets": [],
+        "logic_parse_status": LOGIC_PARSE_STATUS_UNKNOWN,
+        "question_media": list(raw.get("question_media") or []),
         "required": bool(raw.get("required")),
         "text_inputs": text_inputs,
         "text_input_labels": [],
@@ -837,6 +846,45 @@ async def _extract_questions_from_current_page(page: Any, *, page_number: int) -
     const choiceTexts = uniqueTexts(Array.from(root.querySelectorAll('.choice-text')).map((node) => node.innerText || node.textContent || ''));
     const dropdownTexts = uniqueTexts(Array.from(root.querySelectorAll('.el-select-dropdown__item, option')).map((node) => node.innerText || node.textContent || ''));
     const scaleTexts = uniqueTexts(Array.from(root.querySelectorAll('.scale .nps-item, .el-rate__item')).map((node) => node.innerText || node.textContent || ''));
+    const normalizeUrl = (value) => {
+      const text = clean(value);
+      if (!text) return '';
+      if (text.startsWith('//')) return `https:${text}`;
+      return text;
+    };
+    const mediaSeen = new Set();
+    const questionMedia = [];
+    const pushMedia = (scope, indexValue, label, img) => {
+      if (!img) return;
+      const sourceUrl = normalizeUrl(img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-original'));
+      if (!sourceUrl) return;
+      const key = `${scope}|${String(indexValue)}|${sourceUrl}`;
+      if (mediaSeen.has(key)) return;
+      mediaSeen.add(key);
+      questionMedia.push({
+        kind: 'image',
+        scope,
+        index: indexValue,
+        source_url: sourceUrl,
+        label: clean(label),
+      });
+    };
+    Array.from((questionTitleRoot || root).querySelectorAll('img')).forEach((img) => {
+      pushMedia('title', null, '题干图', img);
+    });
+    Array.from(root.querySelectorAll('.choice-item, .single-choice li, .multi-choice li, .option-item, li')).forEach((item, optionIndex) => {
+      const label = clean(item.innerText || item.textContent || '') || `选项 ${optionIndex + 1}`;
+      Array.from(item.querySelectorAll('img')).forEach((img) => {
+        pushMedia('option', optionIndex, label, img);
+      });
+    });
+    Array.from(root.querySelectorAll('tbody tr, .matrix-row, .el-table__row')).forEach((row, rowIndex) => {
+      const labelNode = row.querySelector('th, td:first-child, .matrix-row-title, .row-title, .statement, .label');
+      const rowLabel = clean((labelNode && (labelNode.innerText || labelNode.textContent)) || '') || `第 ${rowIndex + 1} 行`;
+      Array.from(row.querySelectorAll('img')).forEach((img) => {
+        pushMedia('row', rowIndex, rowLabel, img);
+      });
+    });
     let optionTexts = [];
     if (kind === 'dropdown' && dropdownTexts.length) optionTexts = dropdownTexts;
     else if (kind === 'matrix' && detectedMatrixColumns.length) optionTexts = detectedMatrixColumns;
@@ -875,6 +923,7 @@ async def _extract_questions_from_current_page(page: Any, *, page_number: int) -
       required: /必答|必须|required/i.test(bodyText),
       provider_type: kind || Array.from(new Set(inputTypes)).join(','),
       question_kind: kind,
+      question_media: questionMedia,
     });
   });
   return data;

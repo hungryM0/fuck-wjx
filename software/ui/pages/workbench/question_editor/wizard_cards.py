@@ -1,14 +1,15 @@
 """题目配置向导卡片与校验。"""
 
 import copy
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
 from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
+    InfoBadge,
     LineEdit,
     MessageBox,
     SubtitleLabel,
@@ -23,13 +24,8 @@ from software.providers.contracts import (
 from software.ui.widgets.no_wheel import NoWheelSlider
 
 from .constants import _get_entry_type_label
-from .utils import (
-    _apply_label_color,
-    _bind_slider_input,
-    _configure_wrapped_text_label,
-    _shorten_text,
-    resolve_display_question_num,
-)
+from .question_media_preview import QuestionMediaStrip
+from .utils import _apply_label_color, _shorten_text, resolve_display_question_num
 
 
 class WizardCardsMixin:
@@ -46,8 +42,9 @@ class WizardCardsMixin:
         attached_select_slider_map: Dict[int, List[Dict[str, Any]]]
         bias_preset_map: Dict[int, Any]
         _entry_snapshots: List[QuestionEntry]
+        _logic_tree_state: Any
 
-        def _navigate_to_question(self, question_idx: int, animate: bool) -> None: ...
+        def _navigate_to_question(self, question_idx: int, animate: bool = False) -> None: ...
         def get_multi_text_blank_modes(self) -> Dict[int, List[str]]: ...
         def _refresh_ratio_preview_label(
             self,
@@ -74,6 +71,7 @@ class WizardCardsMixin:
         ) -> None: ...
         def _build_order_section(
             self,
+            idx: int,
             card: CardWidget,
             card_layout: QVBoxLayout,
             option_texts: List[str],
@@ -85,9 +83,6 @@ class WizardCardsMixin:
             card: CardWidget,
             card_layout: QVBoxLayout,
             option_texts: List[str],
-        ) -> None: ...
-        def _register_question_card_interaction_targets(
-            self, card: CardWidget, idx: int
         ) -> None: ...
 
     def _resolve_matrix_weights(
@@ -153,132 +148,114 @@ class WizardCardsMixin:
         qnum = resolve_display_question_num(info, idx + 1)
         return f"第{qnum or idx + 1}题"
 
-    def _find_info_by_question_num(self, question_num: int) -> SurveyQuestionMeta:
-        for info in self.info:
-            if not isinstance(info, SurveyQuestionMeta):
-                continue
-            try:
-                current_num = int(info.num or 0)
-            except Exception:
-                current_num = 0
-            if current_num == question_num:
-                return info
-        return ensure_survey_question_meta({}, index=question_num)
-
-    @staticmethod
-    def _format_question_num_list(question_nums: List[int]) -> str:
-        normalized: List[int] = []
-        seen = set()
-        for raw in question_nums:
-            try:
-                value = int(raw)
-            except Exception:
-                continue
-            if value <= 0 or value in seen:
-                continue
-            seen.add(value)
-            normalized.append(value)
-        if not normalized:
-            return "后续题目"
-        normalized.sort()
-        labels = [f"第{num}题" for num in normalized]
-        if len(labels) <= 4:
-            return "、".join(labels)
-        return f"{'、'.join(labels[:4])} 等{len(labels)}题"
-
-    def _format_condition_option_text(
-        self, source_info: SurveyQuestionMeta, option_indices: Sequence[Any]
-    ) -> str:
-        option_texts = list(source_info.get("option_texts") or [])
-        normalized_labels: List[str] = []
-        seen = set()
-        for raw in option_indices:
-            try:
-                option_index = int(raw)
-            except Exception:
-                continue
-            if option_index < 0 or option_index in seen:
-                continue
-            seen.add(option_index)
-            if option_index < len(option_texts):
-                option_text = str(option_texts[option_index] or "").strip()
-                if option_text:
-                    normalized_labels.append(f"“{_shorten_text(option_text, 18)}”")
-                    continue
-            normalized_labels.append(f"第{option_index + 1}项")
-        if not normalized_labels:
-            return "指定选项"
-        if len(normalized_labels) == 1:
-            return normalized_labels[0]
-        if len(normalized_labels) <= 3:
-            return "、".join(normalized_labels)
-        return f"以下任一项：{'、'.join(normalized_labels[:4])}"
-
-    def _build_display_condition_summary(self, info_entry: SurveyQuestionMeta) -> str:
-        conditions = info_entry.get("display_conditions") or []
-        if not isinstance(conditions, list) or not conditions:
-            return ""
-        segments: List[str] = []
-        for condition in conditions:
-            if not isinstance(condition, dict):
-                continue
-            try:
-                source_question_num = int(condition.get("condition_question_num") or 0)
-            except Exception:
-                source_question_num = 0
-            if source_question_num <= 0:
-                continue
-            source_info = self._find_info_by_question_num(source_question_num)
-            option_text = self._format_condition_option_text(
-                source_info,
-                list(condition.get("condition_option_indices") or []),
-            )
-            segments.append(f"第{source_question_num}题选中{option_text}")
-        if not segments:
-            return "⚠️ 这题不是每份问卷都会出现，只有满足前面题目的条件时才会显示。"
-        return f"⚠️ 这题不是每份问卷都会出现。仅在满足以下条件时显示：{'；'.join(segments)}。"
-
-    def _build_dependent_display_summary(self, info_entry: SurveyQuestionMeta) -> str:
-        targets = info_entry.get("controls_display_targets") or []
-        if not isinstance(targets, list) or not targets:
-            return ""
-        grouped: Dict[Tuple[int, ...], List[int]] = {}
-        for item in targets:
+    def _media_items_for(
+        self, idx: int, scope: str, index: int | None = None
+    ) -> List[Dict[str, Any]]:
+        info = self._get_entry_info(idx)
+        items: List[Dict[str, Any]] = []
+        for item in list(info.question_media or []):
             if not isinstance(item, dict):
                 continue
+            if str(item.get("scope") or "").strip().lower() != scope:
+                continue
+            if scope == "title":
+                items.append(dict(item))
+                continue
+            raw_index = item.get("index")
+            if raw_index is None:
+                continue
             try:
-                target_question_num = int(item.get("target_question_num") or 0)
+                item_index = int(raw_index)
             except Exception:
-                target_question_num = 0
-            if target_question_num <= 0:
                 continue
-            key_parts: List[int] = []
-            seen = set()
-            for raw in list(item.get("condition_option_indices") or []):
-                try:
-                    option_index = int(raw)
-                except Exception:
-                    continue
-                if option_index < 0 or option_index in seen:
-                    continue
-                seen.add(option_index)
-                key_parts.append(option_index)
-            if not key_parts:
-                continue
-            grouped.setdefault(tuple(key_parts), []).append(target_question_num)
-        if not grouped:
-            return "⚠️ 这题会控制后续题是否出现，选项配比会直接影响后续题的触达率。"
-        segments: List[str] = []
-        for option_indices, target_nums in sorted(grouped.items(), key=lambda item: item[0]):
-            option_text = self._format_condition_option_text(info_entry, list(option_indices))
-            target_text = self._format_question_num_list(target_nums)
-            segments.append(f"选中{option_text}时显示{target_text}")
-        return f"⚠️ 这题会控制后续题是否出现：{'；'.join(segments)}。"
+            if item_index == index:
+                items.append(dict(item))
+        return items
+
+    def _display_text_for_option(self, idx: int, option_index: int, raw_text: str) -> str:
+        text = str(raw_text or "").strip()
+        if text:
+            return text
+        if self._media_items_for(idx, "option", option_index):
+            return f"选项 {option_index + 1}"
+        return "选项"
+
+    def _display_text_for_row(self, idx: int, row_index: int, raw_text: str) -> str:
+        text = str(raw_text or "").strip()
+        if text:
+            return text
+        if self._media_items_for(idx, "row", row_index):
+            return f"第 {row_index + 1} 行"
+        return f"第 {row_index + 1} 行"
+
+    def _inbound_summary_for(self, idx: int) -> str:
+        state = getattr(self, "_logic_tree_state", None)
+        if state is None:
+            return "始终显示"
+        return str(state.inbound_summary.get(idx) or "始终显示")
+
+    def _outbound_summary_for(self, idx: int) -> str:
+        state = getattr(self, "_logic_tree_state", None)
+        if state is None:
+            return "无"
+        return str(state.outbound_summary.get(idx) or "无")
+
+    @staticmethod
+    def _make_badge(text: str, light: str, dark: str, parent: QWidget) -> InfoBadge:
+        return InfoBadge.custom(text, QColor(light), QColor(dark), parent=parent)
+
+    def _build_header_badges(
+        self,
+        idx: int,
+        entry: QuestionEntry,
+        info_entry: SurveyQuestionMeta,
+        parent: QWidget,
+    ) -> List[InfoBadge]:
+        badges: List[InfoBadge] = [
+            self._make_badge(_get_entry_type_label(entry), "#0f6cbd", "#63b3ff", parent)
+        ]
+        badges.append(
+            self._make_badge("必答" if bool(info_entry.required) else "非必答", "#8a3ffc", "#c7a8ff", parent)
+        )
+
+        if self._media_items_for(idx, "title") or self._media_items_for(idx, "option") or self._media_items_for(idx, "row"):
+            badges.append(self._make_badge("图片题", "#0f766e", "#4fd1c5", parent))
+        if bool(info_entry.has_display_condition):
+            badges.append(self._make_badge("条件显示", "#166534", "#4ade80", parent))
+        if bool(info_entry.has_dependent_display_logic):
+            badges.append(self._make_badge("控制后续", "#0f766e", "#67e8f9", parent))
+        if bool(info_entry.has_jump):
+            badges.append(self._make_badge("跳题", "#b45309", "#fbbf24", parent))
+        return badges
+
+    def _build_fact_row(
+        self,
+        parent: QWidget,
+        label_text: str,
+        value_text: str,
+    ) -> QWidget:
+        row = QWidget(parent)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        label = BodyLabel(label_text, row)
+        label.setFixedWidth(68)
+        label.setStyleSheet("font-size: 12px; font-weight: 600;")
+        _apply_label_color(label, "#666666", "#bfbfbf")
+        layout.addWidget(label)
+
+        value = BodyLabel(value_text or "无", row)
+        value.setWordWrap(True)
+        value.setStyleSheet("font-size: 12px;")
+        _apply_label_color(value, "#444444", "#e0e0e0")
+        layout.addWidget(value, 1)
+        return row
 
     def _show_validation_error(
         self, message: str, idx: int, focus_widget: Optional[QWidget] = None
     ) -> None:
-        self._navigate_to_question(idx, animate=True)
+        self._navigate_to_question(idx, animate=False)
         box = MessageBox("保存失败", message, self)
         box.yesButton.setText("知道了")
         box.cancelButton.hide()
@@ -334,8 +311,7 @@ class WizardCardsMixin:
                 if try_parse_random_int_range(raw_range) is None:
                     question_label = self._format_question_label(idx)
                     self._show_validation_error(
-                        f"{question_label}的填空{blank_idx + 1}"
-                        "随机整数范围未填写完整，请输入最小值和最大值。",
+                        f"{question_label}的填空{blank_idx + 1}随机整数范围未填写完整，请输入最小值和最大值。",
                         idx,
                         min_edit or max_edit,
                     )
@@ -358,8 +334,7 @@ class WizardCardsMixin:
                 if try_parse_random_int_range(raw_range) is None:
                     question_label = self._format_question_label(idx)
                     self._show_validation_error(
-                        f"{question_label}的第{option_idx + 1}个附加填空"
-                        "随机整数范围未填写完整，请输入最小值和最大值。",
+                        f"{question_label}的第{option_idx + 1}个附加填空随机整数范围未填写完整，请输入最小值和最大值。",
                         idx,
                         min_edit or max_edit,
                     )
@@ -410,8 +385,7 @@ class WizardCardsMixin:
                 question_label = self._format_question_label(idx)
                 option_label = _shorten_text(option_text, 28)
                 self._show_validation_error(
-                    f"{question_label}里“{option_label}”对应的嵌入式"
-                    "下拉配比不能全为0，请至少保留一个大于0的值。",
+                    f"{question_label}里“{option_label}”对应的嵌入式下拉配比不能全为0，请至少保留一个大于0的值。",
                     idx,
                     sliders[0],
                 )
@@ -452,161 +426,77 @@ class WizardCardsMixin:
         self,
         idx: int,
         entry: QuestionEntry,
-        container: QWidget,
-        inner: QVBoxLayout,
+        parent: QWidget,
     ) -> CardWidget:
         """构建单个题目的配置卡片。"""
-        # 获取题目信息
         info_entry = self._get_entry_info(idx)
-        qnum = ""
-        title_text = ""
-        option_texts: List[str] = []
-        row_texts: List[str] = []
-        multi_min_limit: Optional[int] = None
-        multi_max_limit: Optional[int] = None
         qnum = str(resolve_display_question_num(info_entry, idx + 1) or "")
-        title_text = str(info_entry.get("title") or "")
-        opt_raw = info_entry.get("option_texts")
-        if isinstance(opt_raw, list):
-            option_texts = [str(x) for x in opt_raw]
-        row_raw = info_entry.get("row_texts")
-        if isinstance(row_raw, list):
-            row_texts = [str(x) for x in row_raw]
-        # 获取多选题的选择数量限制
-        if entry.question_type == "multiple":
-            multi_min_limit = info_entry.get("multi_min_limit")
-            multi_max_limit = info_entry.get("multi_max_limit")
+        title_text = str(info_entry.get("title") or "").strip()
+        option_texts = [self._display_text_for_option(idx, i, str(text or "")) for i, text in enumerate(list(info_entry.get("option_texts") or []))]
+        row_texts = [self._display_text_for_row(idx, i, str(text or "")) for i, text in enumerate(list(info_entry.get("row_texts") or []))]
 
-        # 题目卡片
-        card = CardWidget(container)
+        card = CardWidget(parent)
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 16, 20, 16)
-        card_layout.setSpacing(12)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setSpacing(14)
 
-        # 题目标题行
-        header = QHBoxLayout()
-        header.setSpacing(12)
+        header_badges = self._build_header_badges(idx, entry, info_entry, card)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(12)
         title = SubtitleLabel(f"第{qnum or idx + 1}题", card)
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        header.addWidget(title)
-        type_label = BodyLabel(f"[{_get_entry_type_label(entry)}]", card)
-        type_label.setStyleSheet("color: #0078d4; font-size: 12px;")
-        header.addWidget(type_label)
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        for badge in header_badges[:2]:
+            title_row.addWidget(badge, 0, Qt.AlignmentFlag.AlignRight)
+        card_layout.addLayout(title_row)
 
-        # 跳题逻辑警告徽标
-        has_jump = bool(info_entry.get("has_jump"))
-        if has_jump:
-            jump_badge = BodyLabel("[含跳题逻辑]", card)
-            jump_badge.setStyleSheet("font-size: 12px; font-weight: 500;")
-            _apply_label_color(jump_badge, "#d97706", "#e5a00d")
-            header.addWidget(jump_badge)
-        has_dependent_display_logic = bool(info_entry.get("has_dependent_display_logic"))
-        if has_dependent_display_logic:
-            control_badge = BodyLabel("[控制后续显示]", card)
-            control_badge.setStyleSheet("font-size: 12px; font-weight: 500;")
-            _apply_label_color(control_badge, "#0f766e", "#34d399")
-            header.addWidget(control_badge)
-        has_display_condition = bool(info_entry.get("has_display_condition"))
-        if has_display_condition:
-            condition_badge = BodyLabel("[条件显示题]", card)
-            condition_badge.setStyleSheet("font-size: 12px; font-weight: 500;")
-            _apply_label_color(condition_badge, "#166534", "#4ade80")
-            header.addWidget(condition_badge)
+        extra_badges = header_badges[2:]
+        if extra_badges:
+            badge_row = QHBoxLayout()
+            badge_row.setContentsMargins(0, 0, 0, 0)
+            badge_row.setSpacing(8)
+            for badge in extra_badges:
+                badge_row.addWidget(badge, 0, Qt.AlignmentFlag.AlignLeft)
+            badge_row.addStretch(1)
+            card_layout.addLayout(badge_row)
 
-        header.addStretch(1)
-        if entry.question_type == "slider":
-            slider_note = BodyLabel("目标值会自动做小幅随机抖动，避免每份都填同一个数", card)
-            slider_note.setStyleSheet("font-size: 12px;")
-            slider_note.setWordWrap(False)
-            slider_note.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            _apply_label_color(slider_note, "#777777", "#bfbfbf")
-            header.addWidget(slider_note)
-        if entry.question_type == "multiple":
-            # 构建多选题提示文本
-            multi_note_text = "每个选项被选中的概率相互独立，不要求总和100%"
-            if multi_min_limit is not None or multi_max_limit is not None:
-                limit_parts = []
-                if multi_min_limit is not None and multi_max_limit is not None:
-                    if multi_min_limit == multi_max_limit:
-                        limit_parts.append(f"必须选择 {multi_min_limit} 项")
-                    else:
-                        limit_parts.append(f"最少 {multi_min_limit} 项，最多 {multi_max_limit} 项")
-                elif multi_min_limit is not None:
-                    limit_parts.append(f"最少选择 {multi_min_limit} 项")
-                elif multi_max_limit is not None:
-                    limit_parts.append(f"最多选择 {multi_max_limit} 项")
-                if limit_parts:
-                    multi_note_text += f"  |  {limit_parts[0]}"
-            multi_note = BodyLabel(multi_note_text, card)
-            multi_note.setStyleSheet("font-size: 12px;")
-            multi_note.setWordWrap(False)
-            multi_note.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            _apply_label_color(multi_note, "#777777", "#bfbfbf")
-            header.addWidget(multi_note)
-        card_layout.addLayout(header)
-
-        # 题目描述
         if title_text:
-            display_text = title_text
-            # 多项填空题：在题目内容中标注填空项位置
-            text_inputs = info_entry.get("text_inputs", 0)
-            is_multi_text = info_entry.get("is_multi_text", False)
-            if (is_multi_text or text_inputs > 1) and text_inputs > 0:
-                # 将题目文本按空格分隔，为每个部分添加编号
-                parts = title_text.split()
-                if len(parts) >= text_inputs:
-                    display_text = " ".join(
-                        [f"{parts[i]}____(填空{i + 1})" for i in range(text_inputs)]
-                    )
-            desc = BodyLabel(_shorten_text(display_text, 120), card)
+            desc = BodyLabel(title_text, card)
             desc.setWordWrap(True)
-            desc.setStyleSheet("font-size: 12px; margin-bottom: 4px;")
-            _apply_label_color(desc, "#555555", "#c8c8c8")
+            desc.setStyleSheet("font-size: 13px;")
+            _apply_label_color(desc, "#444444", "#e0e0e0")
             card_layout.addWidget(desc)
 
-        # 跳题逻辑风险提示
-        if has_jump:
-            jump_warn = BodyLabel(
-                "⚠️ 此题包含跳题逻辑。若给跳题选项分配较高概率，"
-                "可能导致大量样本提前结束或跳过后续题目，请谨慎设定配比。",
-                card,
-            )
-            jump_warn.setWordWrap(True)
-            jump_warn.setStyleSheet("font-size: 12px; padding: 4px 0;")
-            _apply_label_color(jump_warn, "#b45309", "#e5a00d")
-            card_layout.addWidget(jump_warn)
+        title_media = self._media_items_for(idx, "title")
+        if title_media:
+            card_layout.addWidget(QuestionMediaStrip("题干图片", title_media, fixed_size=84, parent=card))
 
-        if has_dependent_display_logic:
-            display_control_warn = BodyLabel(
-                self._build_dependent_display_summary(info_entry), card
-            )
-            display_control_warn.setWordWrap(True)
-            display_control_warn.setStyleSheet("font-size: 12px; padding: 4px 0;")
-            _apply_label_color(display_control_warn, "#0f766e", "#86efac")
-            card_layout.addWidget(display_control_warn)
+        card_layout.addWidget(
+            self._build_fact_row(card, "出现条件", self._inbound_summary_for(idx))
+        )
+        card_layout.addWidget(
+            self._build_fact_row(card, "影响后续", self._outbound_summary_for(idx))
+        )
 
-        if has_display_condition:
-            display_condition_warn = BodyLabel(
-                self._build_display_condition_summary(info_entry), card
-            )
-            display_condition_warn.setWordWrap(True)
-            display_condition_warn.setStyleSheet("font-size: 12px; padding: 4px 0;")
-            _apply_label_color(display_condition_warn, "#166534", "#86efac")
-            card_layout.addWidget(display_condition_warn)
+        separator = QFrame(card)
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet("color: rgba(128, 128, 128, 0.18);")
+        card_layout.addWidget(separator)
 
-        # 根据题型构建不同的配置区域
         if entry.question_type in ("text", "multi_text"):
             self._build_text_section(idx, entry, card, card_layout)
         elif entry.question_type == "matrix":
             self._build_matrix_section(idx, entry, card, card_layout, option_texts, row_texts)
         elif entry.question_type == "order":
-            self._build_order_section(card, card_layout, option_texts)
+            self._build_order_section(idx, card, card_layout, option_texts)
         else:
             self._build_slider_section(idx, entry, card, card_layout, option_texts)
-        self._build_attached_select_section(idx, entry, card, card_layout)
-        self._register_question_card_interaction_targets(card, idx)
 
-        inner.addWidget(card)
+        self._build_attached_select_section(idx, entry, card, card_layout)
         return card
 
     def _build_attached_select_section(
@@ -625,23 +515,14 @@ class WizardCardsMixin:
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Plain)
         separator.setStyleSheet(
-            "color: rgba(255, 255, 255, 0.16); margin-top: 6px; margin-bottom: 6px;"
+            "color: rgba(255, 255, 255, 0.16); margin-top: 4px; margin-bottom: 4px;"
         )
         card_layout.addWidget(separator)
 
-        section_title = BodyLabel("嵌入式下拉配比：", card)
-        section_title.setStyleSheet("font-size: 12px; font-weight: 600; margin-top: 4px;")
+        section_title = BodyLabel("嵌入式下拉", card)
+        section_title.setStyleSheet("font-size: 12px; font-weight: 600;")
         _apply_label_color(section_title, "#444444", "#e0e0e0")
         card_layout.addWidget(section_title)
-
-        section_hint = BodyLabel(
-            "只有命中对应单选项时，下面这些嵌入式下拉权重才会生效；底部会自动换算成目标占比。",
-            card,
-        )
-        section_hint.setWordWrap(True)
-        section_hint.setStyleSheet("font-size: 12px;")
-        _apply_label_color(section_hint, "#666666", "#bfbfbf")
-        card_layout.addWidget(section_hint)
 
         for item in raw_configs:
             if not isinstance(item, dict):
@@ -677,9 +558,9 @@ class WizardCardsMixin:
             if not any(weight > 0 for weight in weights):
                 weights = [1.0] * len(select_options)
 
-            item_title = BodyLabel(f"当选择“{_shorten_text(option_text, 40)}”时：", card)
+            item_title = BodyLabel(f"命中“{_shorten_text(option_text, 40)}”", card)
             item_title.setWordWrap(True)
-            item_title.setStyleSheet("font-size: 12px; margin-top: 6px;")
+            item_title.setStyleSheet("font-size: 12px; margin-top: 4px;")
             _apply_label_color(item_title, "#0f6cbd", "#63b3ff")
             card_layout.addWidget(item_title)
 
@@ -697,7 +578,9 @@ class WizardCardsMixin:
                 row_layout.addWidget(num_label)
 
                 text_label = BodyLabel(select_text, card)
-                _configure_wrapped_text_label(text_label, 160)
+                text_label.setWordWrap(True)
+                text_label.setFixedWidth(160)
+                text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
                 text_label.setStyleSheet("font-size: 13px;")
                 row_layout.addWidget(text_label)
 
@@ -711,6 +594,8 @@ class WizardCardsMixin:
                 value_input.setFixedWidth(60)
                 value_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 value_input.setText(str(slider.value()))
+                from .utils import _bind_slider_input
+
                 _bind_slider_input(slider, value_input)
                 row_layout.addWidget(value_input)
 
@@ -719,7 +604,7 @@ class WizardCardsMixin:
 
             ratio_preview_label = BodyLabel("", card)
             ratio_preview_label.setWordWrap(True)
-            ratio_preview_label.setStyleSheet("font-size: 12px; margin-bottom: 2px;")
+            ratio_preview_label.setStyleSheet("font-size: 12px;")
             _apply_label_color(ratio_preview_label, "#666666", "#bfbfbf")
             card_layout.addWidget(ratio_preview_label)
 
@@ -733,7 +618,7 @@ class WizardCardsMixin:
                     _label,
                     _sliders,
                     _options,
-                    "嵌入式下拉目标占比：",
+                    "下拉占比：",
                 )
 
             for slider in sliders:

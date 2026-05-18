@@ -129,6 +129,7 @@ class CredamoParserTests:
         assert question['provider_type'] == 'dropdown'
         assert question['provider_page_id'] == '2'
         assert question['options'] == 3
+        assert question['logic_parse_status'] == 'unknown'
 
     def test_normalize_question_detects_matrix_scale(self) -> None:
         question = parser._normalize_question({'question_num': 'Q11', 'title': 'Q11', 'question_kind': 'matrix', 'provider_type': 'matrix', 'option_texts': ['选项 1', '选项 2', '选项 3', '选项 4', '选项 5'], 'row_texts': ['陈述 1', '陈述 2', '陈述 3', '陈述 4', '陈述 5', '陈述 6', '陈述 7'], 'text_inputs': 0, 'page': 1, 'question_id': 'question-5'}, fallback_num=11)
@@ -152,10 +153,11 @@ class CredamoParserTests:
 
             async def evaluate(self, script: str):
                 self.script = script
-                return [{'question_id': 'question-3', 'question_num': 'Q8', 'title': 'Q8 生成基于专业与目标的大学四年成长路径', 'title_full_text': 'Q8 生成基于专业与目标的大学四年成长路径', 'title_text': '生成基于专业与目标的大学四年成长路径', 'tip_text': '', 'body_text': 'Q8 生成基于专业与目标的大学四年成长路径 非常满意 比较满意 满意 比较不满意 非常不满意 如果提供此服务，您觉得 如果不提供此服务，您觉得', 'option_texts': ['选项 1', '选项 2', '选项 3', '选项 4', '选项 5'], 'matrix_column_texts': ['非常满意', '比较满意', '满意', '比较不满意', '非常不满意'], 'row_texts': ['如果提供此服务，您觉得', '如果不提供此服务，您觉得'], 'input_types': ['radio'], 'text_inputs': 0, 'required': True, 'provider_type': 'matrix', 'question_kind': 'matrix'}]
+                return [{'question_id': 'question-3', 'question_num': 'Q8', 'title': 'Q8 生成基于专业与目标的大学四年成长路径', 'title_full_text': 'Q8 生成基于专业与目标的大学四年成长路径', 'title_text': '生成基于专业与目标的大学四年成长路径', 'tip_text': '', 'body_text': 'Q8 生成基于专业与目标的大学四年成长路径 非常满意 比较满意 满意 比较不满意 非常不满意 如果提供此服务，您觉得 如果不提供此服务，您觉得', 'option_texts': ['选项 1', '选项 2', '选项 3', '选项 4', '选项 5'], 'matrix_column_texts': ['非常满意', '比较满意', '满意', '比较不满意', '非常不满意'], 'row_texts': ['如果提供此服务，您觉得', '如果不提供此服务，您觉得'], 'input_types': ['radio'], 'text_inputs': 0, 'required': True, 'provider_type': 'matrix', 'question_kind': 'matrix', 'question_media': [{'kind': 'image', 'scope': 'title', 'index': None, 'source_url': 'https://example.com/q8.png', 'label': '题干图'}]}]
         questions = await parser._extract_questions_from_current_page(_EvalPage(), page_number=1)
         assert len(questions) == 1
         assert questions[0]['option_texts'] == ['非常满意', '比较满意', '满意', '比较不满意', '非常不满意']
+        assert questions[0]['question_media'] == [{'kind': 'image', 'scope': 'title', 'index': None, 'source_url': 'https://example.com/q8.png', 'label': '题干图'}]
 
     def test_normalize_question_detects_force_select_instruction(self) -> None:
         question = parser._normalize_question({'question_num': 'Q7', 'title': 'Q7 本题检测是否认真作答，请选 非常不满意', 'title_text': '本题检测是否认真作答，请选 非常不满意', 'question_kind': 'single', 'provider_type': 'single', 'option_texts': ['非常不满意', '不满意', '满意', '非常满意'], 'text_inputs': 0, 'page': 1, 'question_id': 'question-7'}, fallback_num=7)

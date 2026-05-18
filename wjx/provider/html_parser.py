@@ -1,6 +1,11 @@
 """问卷星 HTML 解析模块 - 从 HTML 解析问卷结构。"""
 from typing import Any, Dict, List, Optional
 
+from software.providers.contracts import (
+    LOGIC_PARSE_STATUS_COMPLETE,
+    LOGIC_PARSE_STATUS_NONE,
+)
+
 from software.core.questions.utils import _should_treat_question_as_text_like
 
 try:
@@ -40,6 +45,118 @@ from .html_parser_rules import (
 )
 
 __all__ = ["_normalize_html_text", "extract_survey_title_from_html", "parse_survey_questions_from_html"]
+
+
+def _normalize_media_source_url(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if text.startswith("//"):
+        return f"https:{text}"
+    return text
+
+
+def _append_media_item(
+    media: List[Dict[str, Any]],
+    *,
+    scope: str,
+    index: Optional[int],
+    source_url: Any,
+    label: str,
+) -> None:
+    normalized_url = _normalize_media_source_url(source_url)
+    if not normalized_url:
+        return
+    item = {
+        "kind": "image",
+        "scope": scope,
+        "index": index,
+        "source_url": normalized_url,
+        "label": str(label or "").strip(),
+    }
+    if item not in media:
+        media.append(item)
+
+
+def _collect_question_media(question_div, row_texts: List[str], option_texts: List[str]) -> List[Dict[str, Any]]:
+    if question_div is None:
+        return []
+    media: List[Dict[str, Any]] = []
+
+    title_nodes: List[Any] = []
+    for selector in (".topichtml", ".field-label"):
+        try:
+            title_nodes.extend(list(question_div.select(selector) or []))
+        except Exception:
+            continue
+    for node in title_nodes:
+        try:
+            images = node.select("img")
+        except Exception:
+            images = []
+        for image in images:
+            _append_media_item(
+                media,
+                scope="title",
+                index=None,
+                source_url=image.get("src") or image.get("data-src") or image.get("data-original"),
+                label="题干图",
+            )
+
+    option_nodes: List[Any] = []
+    for selector in (".ui-controlgroup > div", "ul > li"):
+        try:
+            option_nodes = list(question_div.select(selector) or [])
+        except Exception:
+            option_nodes = []
+        if option_nodes:
+            break
+    for option_index, node in enumerate(option_nodes):
+        option_label = (
+            str(option_texts[option_index] or "").strip()
+            if option_index < len(option_texts)
+            else f"选项 {option_index + 1}"
+        )
+        try:
+            images = node.select("img")
+        except Exception:
+            images = []
+        for image in images:
+            _append_media_item(
+                media,
+                scope="option",
+                index=option_index,
+                source_url=image.get("src") or image.get("data-src") or image.get("data-original"),
+                label=option_label or f"选项 {option_index + 1}",
+            )
+
+    row_nodes: List[Any] = []
+    for selector in ("tr[rowindex]", "tr.rowtitletr", "tr[id^='drv']"):
+        try:
+            row_nodes = list(question_div.select(selector) or [])
+        except Exception:
+            row_nodes = []
+        if row_nodes:
+            break
+    for row_index, node in enumerate(row_nodes):
+        row_label = (
+            str(row_texts[row_index] or "").strip()
+            if row_index < len(row_texts)
+            else f"第 {row_index + 1} 行"
+        )
+        try:
+            images = node.select("img")
+        except Exception:
+            images = []
+        for image in images:
+            _append_media_item(
+                media,
+                scope="row",
+                index=row_index,
+                source_url=image.get("src") or image.get("data-src") or image.get("data-original"),
+                label=row_label or f"第 {row_index + 1} 行",
+            )
+    return media
 
 
 def _question_div_is_initially_hidden(question_div) -> bool:
@@ -218,6 +335,8 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "jump_rules": jump_rules,
                 "has_display_condition": has_display_condition,
                 "display_conditions": display_conditions,
+                "logic_parse_status": LOGIC_PARSE_STATUS_NONE,
+                "question_media": _collect_question_media(question_div, row_texts, option_texts),
                 "slider_min": slider_min,
                 "slider_max": slider_max,
                 "slider_step": slider_step,
@@ -226,4 +345,13 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 "required": is_required,
             })
     _attach_display_condition_metadata(questions_info)
+    for question in questions_info:
+        has_logic = (
+            bool(question.get("has_jump"))
+            or bool(question.get("has_display_condition"))
+            or bool(question.get("has_dependent_display_logic"))
+        )
+        question["logic_parse_status"] = (
+            LOGIC_PARSE_STATUS_COMPLETE if has_logic else LOGIC_PARSE_STATUS_NONE
+        )
     return questions_info

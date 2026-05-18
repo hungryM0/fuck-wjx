@@ -27,7 +27,7 @@ from software.providers.contracts import SurveyDefinition, build_survey_definiti
 import software.network.http as http_client
 
 
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 _CACHE_DIR_NAME = "survey_cache"
 _SURVEY_PARSE_CACHE_TTL_SECONDS = 5 * 60
 _FALLBACK_TTL_SECONDS = _SURVEY_PARSE_CACHE_TTL_SECONDS

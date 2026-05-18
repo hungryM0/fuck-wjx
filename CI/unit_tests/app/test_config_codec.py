@@ -28,13 +28,15 @@ class ConfigCodecTests:
         assert upgraded['reverse_fill_threads'] == 6
 
     def test_runtime_config_roundtrip_keeps_questions_info_provider_metadata(self) -> None:
-        config = RuntimeConfig(survey_provider='qq', questions_info=[SurveyQuestionMeta(num=3, title='联系方式', type_code='1', provider='qq', provider_question_id='question-3', provider_page_id='page-2', provider_type='text', option_texts=['姓名', '电话'], required=True)])
+        config = RuntimeConfig(survey_provider='qq', questions_info=[SurveyQuestionMeta(num=3, title='联系方式', type_code='1', provider='qq', provider_question_id='question-3', provider_page_id='page-2', provider_type='text', option_texts=['姓名', '电话'], required=True, logic_parse_status='unknown', question_media=[{'kind': 'image', 'scope': 'title', 'index': None, 'source_url': 'https://example.com/q3.png', 'label': '题干图'}])])
         payload = serialize_runtime_config(config)
         restored = deserialize_runtime_config(payload)
         assert payload['questions_info'][0]['provider_question_id'] == 'question-3'
         assert payload['questions_info'][0]['provider_page_id'] == 'page-2'
         assert payload['questions_info'][0]['provider_type'] == 'text'
         assert payload['questions_info'][0]['required']
+        assert payload['questions_info'][0]['logic_parse_status'] == 'unknown'
+        assert payload['questions_info'][0]['question_media'][0]['source_url'] == 'https://example.com/q3.png'
         assert len(restored.questions_info or []) == 1
         restored_info = restored.questions_info[0]
         assert restored_info.provider == 'qq'
@@ -42,6 +44,8 @@ class ConfigCodecTests:
         assert restored_info.provider_page_id == 'page-2'
         assert restored_info.provider_type == 'text'
         assert restored_info.required
+        assert restored_info.logic_parse_status == 'unknown'
+        assert restored_info.question_media[0]['label'] == '题干图'
 
     def test_build_runtime_config_snapshot_returns_detached_copies(self) -> None:
         config = RuntimeConfig(survey_provider='wjx', answer_rules=[{'question_num': 1, 'equals': [0]}], dimension_groups=['情绪维度'], question_entries=[QuestionEntry(question_type='single', probabilities=[60.0, 40.0], texts=['A', 'B'], option_count=2, question_num=1)], questions_info=[SurveyQuestionMeta(num=1, title='单选题', type_code='3', option_texts=['A', 'B'], provider_question_id='q1')])

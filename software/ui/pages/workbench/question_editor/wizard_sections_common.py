@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
 from PySide6.QtCore import QRegularExpression, Qt
 from PySide6.QtGui import QRegularExpressionValidator
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, LineEdit, isDarkTheme
 
 from software.core.questions.config import QuestionEntry
@@ -14,9 +14,11 @@ from software.core.questions.utils import (
     parse_random_int_token,
     try_parse_random_int_range,
 )
+from software.providers.contracts import SurveyQuestionMeta
 from software.ui.helpers.ai_fill import ensure_ai_ready
 from software.ui.widgets.no_wheel import NoWheelSlider
 
+from .question_media_preview import QuestionMediaThumbnail
 from .utils import _shorten_text
 
 _TEXT_RANDOM_NONE = "none"
@@ -59,6 +61,9 @@ class WizardSectionsCommonMixin:
         text_random_integer_check_map: Dict[int, Any]
         text_random_int_min_edit_map: Dict[int, LineEdit]
         text_random_int_max_edit_map: Dict[int, LineEdit]
+
+        def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
+        def _media_items_for(self, idx: int, scope: str, index: int | None = None) -> List[Dict[str, Any]]: ...
 
     @staticmethod
     def _compute_ratio_percentages(values: List[Any]) -> List[float]:
@@ -121,6 +126,40 @@ class WizardSectionsCommonMixin:
     ) -> None:
         percentages = self._compute_ratio_percentages([slider.value() for slider in sliders])
         label.setText(self._build_ratio_preview_text(option_names, percentages, prefix))
+
+    def _build_media_text_widget(
+        self,
+        parent: QWidget,
+        *,
+        idx: int,
+        scope: str,
+        media_index: int | None,
+        text: str,
+        text_width: int,
+        font_style: str,
+    ) -> QWidget:
+        container = QWidget(parent)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        media_items = self._media_items_for(idx, scope, media_index)
+        if media_items:
+            media_column = QVBoxLayout()
+            media_column.setContentsMargins(0, 0, 0, 0)
+            media_column.setSpacing(6)
+            for item in media_items:
+                media_column.addWidget(QuestionMediaThumbnail(item, fixed_size=48, parent=container))
+            media_column.addStretch(1)
+            layout.addLayout(media_column)
+
+        label = BodyLabel(text, container)
+        label.setWordWrap(True)
+        label.setFixedWidth(text_width)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        label.setStyleSheet(font_style)
+        layout.addWidget(label, 1)
+        return container
 
     @staticmethod
     def _create_integer_range_edit(

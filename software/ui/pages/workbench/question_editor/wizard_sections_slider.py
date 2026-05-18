@@ -30,11 +30,7 @@ from .psycho_config import (
     PSYCHO_SUPPORTED_TYPES,
     build_bias_weights,
 )
-from .utils import (
-    _apply_label_color,
-    _bind_slider_input,
-    _configure_wrapped_text_label,
-)
+from .utils import _apply_label_color, _bind_slider_input
 from .wizard_sections_common import (
     _TEXT_RANDOM_ID_CARD,
     _TEXT_RANDOM_INTEGER,
@@ -80,6 +76,17 @@ class WizardSectionsSliderMixin:
             option_names: List[str],
             prefix: str,
         ) -> None: ...
+        def _build_media_text_widget(
+            self,
+            parent: QWidget,
+            *,
+            idx: int,
+            scope: str,
+            media_index: int | None,
+            text: str,
+            text_width: int,
+            font_style: str,
+        ) -> QWidget: ...
 
     def _build_slider_section(
         self,
@@ -93,13 +100,6 @@ class WizardSectionsSliderMixin:
         slider_min, slider_max = (0, 100)
         if entry.question_type == "slider":
             slider_min, slider_max = self._resolve_slider_bounds(idx, entry)
-        if entry.question_type == "slider":
-            slider_hint = BodyLabel("滑块题：此处数值代表填写时的目标值（不是概率）", card)
-            slider_hint.setWordWrap(True)
-            slider_hint.setStyleSheet("font-size: 12px;")
-            _apply_label_color(slider_hint, "#666666", "#bfbfbf")
-            card_layout.addWidget(slider_hint)
-
         options = max(1, int(entry.option_count or 1))
 
         # 倾向预设选择器（仅支持的题型）
@@ -174,10 +174,16 @@ class WizardSectionsSliderMixin:
             opt_layout.addWidget(num_label)
 
             opt_text = option_texts[opt_idx] if opt_idx < len(option_texts) else "选项"
-            text_label = BodyLabel(opt_text, card)
-            _configure_wrapped_text_label(text_label, 160)
-            text_label.setStyleSheet("font-size: 13px;")
-            opt_layout.addWidget(text_label)
+            option_widget = self._build_media_text_widget(
+                card,
+                idx=idx,
+                scope="option",
+                media_index=opt_idx,
+                text=opt_text,
+                text_width=160,
+                font_style="font-size: 13px;",
+            )
+            opt_layout.addWidget(option_widget)
 
             has_jump = bool(info_entry.get("has_jump"))
             if has_jump:

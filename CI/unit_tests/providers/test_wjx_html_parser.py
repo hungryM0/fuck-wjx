@@ -16,12 +16,12 @@ class WjxHtmlParserTests:
                 <div topic="1" id="div1" type="3">
                   <div class="topichtml">1. 本题检测，请选择 非常满意</div>
                   <div class="ui-controlgroup">
-                    <div><span class="label">一般</span></div>
+                    <div><span class="label">一般</span><img src="https://example.com/opt-a.png" /></div>
                     <div><span class="label">非常满意</span></div>
                   </div>
                 </div>
                 <div topic="2" id="div2" type="4" relation="1,2">
-                  <div class="topichtml">2. 请选择你常用的功能 [至少选1项，最多选2项]</div>
+                  <div class="topichtml">2. 请选择你常用的功能 [至少选1项，最多选2项]<img src="https://example.com/title-q2.png" /></div>
                   <div class="ui-controlgroup">
                     <div><span class="label">功能A</span></div>
                     <div><span class="label">功能B</span></div>
@@ -49,6 +49,16 @@ class WjxHtmlParserTests:
         assert first["forced_option_index"] == 1
         assert first["forced_option_text"] == "非常满意"
         assert first["page"] == 1
+        assert first["logic_parse_status"] == "complete"
+        assert first["question_media"] == [
+            {
+                "kind": "image",
+                "scope": "option",
+                "index": 0,
+                "source_url": "https://example.com/opt-a.png",
+                "label": "一般",
+            }
+        ]
 
         second = questions[1]
         assert second["num"] == 2
@@ -65,6 +75,16 @@ class WjxHtmlParserTests:
                 "condition_mode": "selected",
                 "condition_option_indices": [1],
                 "raw_relation": "1,2",
+            }
+        ]
+        assert second["logic_parse_status"] == "complete"
+        assert second["question_media"] == [
+            {
+                "kind": "image",
+                "scope": "title",
+                "index": None,
+                "source_url": "https://example.com/title-q2.png",
+                "label": "题干图",
             }
         ]
 

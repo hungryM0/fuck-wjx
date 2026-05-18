@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import software.network.http as http_client
 from software.app.config import DEFAULT_HTTP_HEADERS, _HTML_SPACE_RE
 from software.providers.common import SURVEY_PROVIDER_QQ
+from software.providers.contracts import LOGIC_PARSE_STATUS_UNKNOWN
 from software.network.browser.parse_pool import acquire_parse_browser_session
 
 QQ_SUPPORTED_PROVIDER_TYPES = {
@@ -53,6 +54,83 @@ _QQ_LOGIN_REQUIRED_TOKENS = (
     "需登录",
     "需要登录",
 )
+
+
+def _normalize_media_url(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if text.startswith("//"):
+        return f"https:{text}"
+    return text
+
+
+def _collect_image_urls(value: Any, *, depth: int = 0) -> List[str]:
+    if depth > 5 or value is None:
+        return []
+    if isinstance(value, dict):
+        collected: List[str] = []
+        for key, item in value.items():
+            key_text = str(key or "").strip().lower()
+            if key_text in {"img", "image", "image_url", "img_url", "pic", "pic_url", "url", "src"}:
+                normalized = _normalize_media_url(item)
+                if normalized:
+                    collected.append(normalized)
+            collected.extend(_collect_image_urls(item, depth=depth + 1))
+        return collected
+    if isinstance(value, (list, tuple, set)):
+        collected: List[str] = []
+        for item in value:
+            collected.extend(_collect_image_urls(item, depth=depth + 1))
+        return collected
+    normalized = _normalize_media_url(value)
+    if not normalized:
+        return []
+    lowered = normalized.lower()
+    if any(token in lowered for token in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")):
+        return [normalized]
+    return []
+
+
+def _build_question_media_from_payload(question: Dict[str, Any], provider_type: str) -> List[Dict[str, Any]]:
+    media: List[Dict[str, Any]] = []
+    seen: set[tuple[str, int | None, str]] = set()
+
+    def add(scope: str, index: int | None, label: str, raw_urls: List[str]) -> None:
+        for raw_url in raw_urls:
+            normalized_url = _normalize_media_url(raw_url)
+            if not normalized_url:
+                continue
+            key = (scope, index, normalized_url)
+            if key in seen:
+                continue
+            seen.add(key)
+            media.append(
+                {
+                    "kind": "image",
+                    "scope": scope,
+                    "index": index,
+                    "source_url": normalized_url,
+                    "label": str(label or "").strip(),
+                }
+            )
+
+    add("title", None, "题干图", _collect_image_urls(question.get("title")) + _collect_image_urls(question.get("description")))
+
+    raw_options = question.get("options")
+    if isinstance(raw_options, list):
+        option_texts = _build_option_texts(question, provider_type)
+        for option_index, option in enumerate(raw_options):
+            option_label = option_texts[option_index] if option_index < len(option_texts) else f"选项 {option_index + 1}"
+            add("option", option_index, option_label or f"选项 {option_index + 1}", _collect_image_urls(option))
+
+    raw_rows = question.get("sub_titles")
+    if isinstance(raw_rows, list):
+        row_texts = _build_row_texts(question)
+        for row_index, row in enumerate(raw_rows):
+            row_label = row_texts[row_index] if row_index < len(row_texts) else f"第 {row_index + 1} 行"
+            add("row", row_index, row_label or f"第 {row_index + 1} 行", _collect_image_urls(row))
+    return media
 
 
 def _normalize_html_text(value: Any) -> str:
@@ -390,6 +468,12 @@ def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str,
             "is_text_like": is_text_like,
             "has_jump": False,
             "jump_rules": [],
+            "has_display_condition": False,
+            "display_conditions": [],
+            "has_dependent_display_logic": False,
+            "controls_display_targets": [],
+            "logic_parse_status": LOGIC_PARSE_STATUS_UNKNOWN,
+            "question_media": _build_question_media_from_payload(question, provider_type),
             "slider_min": None,
             "slider_max": None,
             "slider_step": None,
@@ -405,6 +489,113 @@ def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str,
             "required": bool(question.get("required", False)),
         })
     return normalized
+
+
+async def _extract_qq_media_via_browser(page: Any) -> Dict[str, List[Dict[str, Any]]]:
+    script = r"""
+() => {
+  const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const normalizeUrl = (value) => {
+    const text = clean(value);
+    if (!text) return '';
+    if (text.startsWith('//')) return `https:${text}`;
+    return text;
+  };
+  const uniquePush = (items, media) => {
+    if (!media || !media.source_url) return;
+    const key = `${media.scope}|${String(media.index)}|${media.source_url}`;
+    if (items.__seen.has(key)) return;
+    items.__seen.add(key);
+    items.list.push(media);
+  };
+  const result = {};
+  const roots = Array.from(document.querySelectorAll('main [data-question-id], .question-list [data-question-id], .question-item, .question'));
+  roots.forEach((root, index) => {
+    const questionId = clean(root.getAttribute('data-question-id') || root.getAttribute('data-id') || root.id || String(index + 1));
+    const holder = { list: [], __seen: new Set() };
+    const titleNode = root.querySelector('.question-title, .title, .topic-title');
+    Array.from((titleNode || root).querySelectorAll('img')).forEach((img) => {
+      uniquePush(holder, {
+        kind: 'image',
+        scope: 'title',
+        index: null,
+        source_url: normalizeUrl(img.getAttribute('src') || img.getAttribute('data-src')),
+        label: '题干图',
+      });
+    });
+    Array.from(root.querySelectorAll('.choice-item, .option-item, li')).forEach((item, optionIndex) => {
+      const label = clean(item.innerText || item.textContent || '') || `选项 ${optionIndex + 1}`;
+      Array.from(item.querySelectorAll('img')).forEach((img) => {
+        uniquePush(holder, {
+          kind: 'image',
+          scope: 'option',
+          index: optionIndex,
+          source_url: normalizeUrl(img.getAttribute('src') || img.getAttribute('data-src')),
+          label,
+        });
+      });
+    });
+    Array.from(root.querySelectorAll('tbody tr, .matrix-row')).forEach((row, rowIndex) => {
+      const labelNode = row.querySelector('th, td, .label, .row-title');
+      const label = clean((labelNode && (labelNode.innerText || labelNode.textContent)) || '') || `第 ${rowIndex + 1} 行`;
+      Array.from(row.querySelectorAll('img')).forEach((img) => {
+        uniquePush(holder, {
+          kind: 'image',
+          scope: 'row',
+          index: rowIndex,
+          source_url: normalizeUrl(img.getAttribute('src') || img.getAttribute('data-src')),
+          label,
+        });
+      });
+    });
+    result[questionId] = holder.list;
+  });
+  return result;
+}
+"""
+    payload = await page.evaluate(script) or {}
+    if not isinstance(payload, dict):
+        return {}
+    normalized: Dict[str, List[Dict[str, Any]]] = {}
+    for key, value in payload.items():
+        question_id = str(key or "").strip()
+        if not question_id or not isinstance(value, list):
+            continue
+        normalized[question_id] = [item for item in value if isinstance(item, dict)]
+    return normalized
+
+
+def _merge_browser_media(
+    info: List[Dict[str, Any]],
+    browser_media: Dict[str, List[Dict[str, Any]]],
+) -> None:
+    if not browser_media:
+        return
+    for item in info:
+        question_id = str(item.get("provider_question_id") or "").strip()
+        if not question_id:
+            continue
+        existing = list(item.get("question_media") or [])
+        seen = {
+            (
+                str(media.get("scope") or ""),
+                media.get("index"),
+                str(media.get("source_url") or ""),
+            )
+            for media in existing
+            if isinstance(media, dict)
+        }
+        for media in browser_media.get(question_id, []):
+            key = (
+                str(media.get("scope") or ""),
+                media.get("index"),
+                str(media.get("source_url") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            existing.append(media)
+        item["question_media"] = existing
 
 
 async def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
@@ -491,6 +682,11 @@ async def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
                 raise RuntimeError("腾讯问卷题目接口未返回可解析的题目数据")
             title = _normalize_qq_title(meta_data.get("title") or payload.get("title") or await driver.title() or "")
             info = _standardize_qq_questions(questions_payload)
+            try:
+                browser_media = await _extract_qq_media_via_browser(page)
+            except Exception:
+                browser_media = {}
+            _merge_browser_media(info, browser_media)
             if not info:
                 raise RuntimeError("腾讯问卷解析结果为空，请确认链接有效且公开可访问")
             return info, title

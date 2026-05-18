@@ -1,6 +1,10 @@
 from __future__ import annotations
 from software.core.questions.meta_helpers import count_positive_weights, find_all_zero_attached_selects, find_all_zero_matrix_rows, infer_question_entry_type, normalize_attached_option_selects, normalize_fillable_option_indices
-from software.providers.contracts import SurveyQuestionMeta, build_survey_definition
+from software.providers.contracts import (
+    LOGIC_PARSE_STATUS_COMPLETE,
+    SurveyQuestionMeta,
+    build_survey_definition,
+)
 
 class QuestionMetaHelperTests:
 
@@ -35,3 +39,35 @@ class QuestionMetaHelperTests:
         assert question.controls_display_targets == [{'target_question_num': 2, 'condition_option_indices': [0]}]
         assert question.get('has_dependent_display_logic')
         assert question.get('controls_display_targets') == [{'target_question_num': 2, 'condition_option_indices': [0]}]
+
+    def test_build_survey_definition_preserves_logic_status_and_media(self) -> None:
+        definition = build_survey_definition(
+            'wjx',
+            '图题问卷',
+            [{
+                'num': 1,
+                'title': '题目一',
+                'type_code': '3',
+                'logic_parse_status': LOGIC_PARSE_STATUS_COMPLETE,
+                'question_media': [
+                    {
+                        'kind': 'image',
+                        'scope': 'title',
+                        'index': None,
+                        'source_url': 'https://example.com/title.png',
+                        'label': '题干图',
+                    }
+                ],
+            }],
+        )
+        question = definition.questions[0]
+        assert question.logic_parse_status == LOGIC_PARSE_STATUS_COMPLETE
+        assert question.question_media == [
+            {
+                'kind': 'image',
+                'scope': 'title',
+                'index': None,
+                'source_url': 'https://example.com/title.png',
+                'label': '题干图',
+            }
+        ]

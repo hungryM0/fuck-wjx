@@ -41,12 +41,7 @@ from .wizard_sections_common import (
 )
 from .wizard_sections_slider import WizardSectionsSliderMixin
 from .wizard_sections_text import WizardSectionsTextMixin
-from .utils import (
-    _apply_label_color,
-    _bind_slider_input,
-    _configure_wrapped_text_label,
-    _shorten_text,
-)
+from .utils import _apply_label_color, _bind_slider_input, _shorten_text
 
 
 class WizardSectionsMixin(
@@ -80,6 +75,9 @@ class WizardSectionsMixin(
     option_fill_state_map: Dict[int, Any]
 
     def _get_entry_info(self, idx: int) -> SurveyQuestionMeta: ...
+    def _media_items_for(
+        self, idx: int, scope: str, index: int | None = None
+    ) -> List[Dict[str, Any]]: ...
     def _resolve_matrix_weights(
         self, entry: QuestionEntry, rows: int, columns: int
     ) -> List[List[float]]: ...
@@ -104,11 +102,6 @@ class WizardSectionsMixin(
         columns = max(1, int(entry.option_count or len(option_texts) or 1))
         if len(row_texts) < rows:
             row_texts += [""] * (rows - len(row_texts))
-
-        hint = BodyLabel("矩阵量表：每一行都需要单独设置配比", card)
-        hint.setStyleSheet("font-size: 12px;")
-        _apply_label_color(hint, "#666666", "#bfbfbf")
-        card_layout.addWidget(hint)
 
         is_psycho = entry.question_type in PSYCHO_SUPPORTED_TYPES
         saved_bias = getattr(entry, "psycho_bias", None)
@@ -138,13 +131,17 @@ class WizardSectionsMixin(
                 opt_layout.setContentsMargins(0, 2, 0, 2)
                 opt_layout.setSpacing(12)
 
-                opt_text = (
-                    option_texts[col_idx] if col_idx < len(option_texts) else f"列 {col_idx + 1}"
+                opt_text = option_texts[col_idx] if col_idx < len(option_texts) else f"列 {col_idx + 1}"
+                option_widget = self._build_media_text_widget(
+                    parent_widget,
+                    idx=idx,
+                    scope="option",
+                    media_index=col_idx,
+                    text=opt_text,
+                    text_width=160,
+                    font_style="font-size: 13px;",
                 )
-                text_label = BodyLabel(opt_text, parent_widget)
-                _configure_wrapped_text_label(text_label, 160)
-                text_label.setStyleSheet("font-size: 13px;")
-                opt_layout.addWidget(text_label)
+                opt_layout.addWidget(option_widget)
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, parent_widget)
                 slider.setRange(0, 100)
@@ -283,31 +280,28 @@ class WizardSectionsMixin(
 
     def _build_order_section(
         self,
+        idx: int,
         card: CardWidget,
         card_layout: QVBoxLayout,
         option_texts: List[str],
     ) -> None:
         self._has_content = True
-        hint = BodyLabel(
-            "排序题无需设置配比，执行时会随机排序；如题干要求仅排序前 N 项，将自动识别。",
-            card,
-        )
-        hint.setWordWrap(True)
-        hint.setStyleSheet("font-size: 12px;")
-        _apply_label_color(hint, "#666666", "#bfbfbf")
-        card_layout.addWidget(hint)
-
         if option_texts:
             list_container = QWidget(card)
             list_layout = QVBoxLayout(list_container)
             list_layout.setContentsMargins(0, 6, 0, 0)
             list_layout.setSpacing(4)
             for opt_idx, opt_text in enumerate(option_texts, 1):
-                item = BodyLabel(f"{opt_idx}. {opt_text}", card)
-                item.setWordWrap(True)
-                item.setStyleSheet("font-size: 12px;")
-                _apply_label_color(item, "#666666", "#c8c8c8")
-                list_layout.addWidget(item)
+                row_widget = self._build_media_text_widget(
+                    card,
+                    idx=idx,
+                    scope="option",
+                    media_index=opt_idx - 1,
+                    text=f"{opt_idx}. {opt_text}",
+                    text_width=420,
+                    font_style="font-size: 12px;",
+                )
+                list_layout.addWidget(row_widget)
             card_layout.addWidget(list_container)
 
 

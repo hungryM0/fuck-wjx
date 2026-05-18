@@ -8,6 +8,9 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 from software.providers.common import SURVEY_PROVIDER_WJX, normalize_survey_provider
 
 __all__ = [
+    "LOGIC_PARSE_STATUS_COMPLETE",
+    "LOGIC_PARSE_STATUS_NONE",
+    "LOGIC_PARSE_STATUS_UNKNOWN",
     "SurveyDefinition",
     "SurveyQuestionMeta",
     "build_survey_definition",
@@ -18,6 +21,15 @@ __all__ = [
     "serialize_survey_question_metas",
     "survey_question_meta_to_dict",
 ]
+
+LOGIC_PARSE_STATUS_COMPLETE = "complete"
+LOGIC_PARSE_STATUS_NONE = "none"
+LOGIC_PARSE_STATUS_UNKNOWN = "unknown"
+_VALID_LOGIC_PARSE_STATUSES = {
+    LOGIC_PARSE_STATUS_COMPLETE,
+    LOGIC_PARSE_STATUS_NONE,
+    LOGIC_PARSE_STATUS_UNKNOWN,
+}
 
 
 @dataclass
@@ -53,6 +65,8 @@ class SurveyQuestionMeta:
     display_conditions: List[Dict[str, Any]] = field(default_factory=list)
     has_dependent_display_logic: bool = False
     controls_display_targets: List[Dict[str, Any]] = field(default_factory=list)
+    logic_parse_status: str = LOGIC_PARSE_STATUS_UNKNOWN
+    question_media: List[Dict[str, Any]] = field(default_factory=list)
     slider_min: Any = None
     slider_max: Any = None
     slider_step: Any = None
@@ -129,6 +143,54 @@ def _normalize_dict_list(raw: Any) -> List[Dict[str, Any]]:
     return items
 
 
+def _normalize_logic_parse_status(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value in _VALID_LOGIC_PARSE_STATUSES:
+        return value
+    return LOGIC_PARSE_STATUS_UNKNOWN
+
+
+def _normalize_question_media_list(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    items: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        kind = str(item.get("kind") or "").strip().lower()
+        if kind != "image":
+            continue
+        scope = str(item.get("scope") or "").strip().lower()
+        if scope not in {"title", "option", "row"}:
+            continue
+        source_url = str(item.get("source_url") or "").strip()
+        if not source_url:
+            continue
+        index = item.get("index")
+        if scope == "title":
+            normalized_index = None
+        else:
+            if index is None:
+                continue
+            try:
+                normalized_index = int(index)
+            except Exception:
+                continue
+            if normalized_index < 0:
+                continue
+        label = str(item.get("label") or "").strip()
+        items.append(
+            {
+                "kind": "image",
+                "scope": scope,
+                "index": normalized_index,
+                "source_url": source_url,
+                "label": label,
+            }
+        )
+    return items
+
+
 def _survey_question_input_to_dict(question: Any) -> Optional[Dict[str, Any]]:
     if isinstance(question, SurveyQuestionMeta):
         return survey_question_meta_to_dict(question)
@@ -170,6 +232,8 @@ def survey_question_meta_to_dict(question: SurveyQuestionMeta) -> Dict[str, Any]
         "display_conditions": _normalize_dict_list(question.display_conditions),
         "has_dependent_display_logic": bool(question.has_dependent_display_logic),
         "controls_display_targets": _normalize_dict_list(question.controls_display_targets),
+        "logic_parse_status": _normalize_logic_parse_status(question.logic_parse_status),
+        "question_media": _normalize_question_media_list(question.question_media),
         "slider_min": question.slider_min,
         "slider_max": question.slider_max,
         "slider_step": question.slider_step,
@@ -263,6 +327,8 @@ def _normalize_question(question: SurveyQuestionInput, provider: str, index: int
         display_conditions=_normalize_dict_list(normalized.get("display_conditions")),
         has_dependent_display_logic=bool(normalized.get("has_dependent_display_logic")),
         controls_display_targets=_normalize_dict_list(normalized.get("controls_display_targets")),
+        logic_parse_status=_normalize_logic_parse_status(normalized.get("logic_parse_status")),
+        question_media=_normalize_question_media_list(normalized.get("question_media")),
         slider_min=normalized.get("slider_min"),
         slider_max=normalized.get("slider_max"),
         slider_step=normalized.get("slider_step"),

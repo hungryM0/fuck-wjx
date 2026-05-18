@@ -1,15 +1,16 @@
-"""配置向导弹窗：用滑块快速设置权重/概率，编辑填空题答案。"""
+"""配置向导弹窗。"""
 
 import copy
 from typing import Any, Dict, List, Optional, Tuple, cast
 
-from PySide6.QtCore import QPropertyAnimation, QTimer, Qt, QSize
+from PySide6.QtCore import QTimer, Qt, QSize
 from PySide6.QtGui import QGuiApplication, QShowEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
     QHBoxLayout,
-    QListWidget,
+    QStackedWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -17,13 +18,14 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     LineEdit,
+    Pivot,
     PrimaryPushButton,
     PushButton,
     RadioButton,
     ScrollArea,
     SearchLineEdit,
-    SegmentedWidget,
     SwitchButton,
+    TreeWidget,
 )
 
 from software.app.config import DEFAULT_FILL_TEXT
@@ -36,15 +38,14 @@ from software.core.questions.utils import (
 from software.providers.contracts import SurveyQuestionMeta
 from software.ui.widgets.no_wheel import NoWheelSlider
 
-from .psycho_config import BIAS_PRESET_CHOICES
-from .utils import _apply_label_color, _shorten_text, build_entry_info_list
-from .wizard_cards import WizardCardsMixin
-from .wizard_navigation import (
-    FloatingPagerShell,
-    StableVerticalPipsPager,
-    WizardNavigationMixin,
+from .utils import (
+    _apply_label_color,
+    _shorten_text,
+    build_entry_info_list,
+    resolve_display_question_num,
 )
-from .wizard_search import WizardSearchMixin
+from .wizard_cards import WizardCardsMixin
+from .wizard_logic_tree import build_logic_tree_state
 from .wizard_sections import (
     WizardSectionsMixin,
     _TEXT_RANDOM_ID_CARD_TOKEN,
@@ -55,18 +56,21 @@ from .wizard_sections import (
 
 TextEditsValue = List[LineEdit] | List[List[LineEdit]]
 
+_VIEW_LOGIC = "logic"
+_VIEW_SEQUENTIAL = "sequential"
+_TREE_INDEX_ROLE = int(Qt.ItemDataRole.UserRole) + 101
+_TREE_RELATION_TARGET_ROLE = _TREE_INDEX_ROLE + 1
+
 
 class QuestionWizardDialog(
-    WizardSearchMixin,
-    WizardNavigationMixin,
     WizardCardsMixin,
     WizardSectionsMixin,
     QDialog,
 ):
-    """配置向导：用滑块快速设置权重/概率，编辑填空题答案。"""
+    """配置向导：左侧导航，右侧单题工作区。"""
 
-    _PREFERRED_DIALOG_SIZE = QSize(1060, 820)
-    _MIN_DIALOG_SIZE = QSize(760, 560)
+    _PREFERRED_DIALOG_SIZE = QSize(1180, 840)
+    _MIN_DIALOG_SIZE = QSize(900, 620)
 
     def __init__(
         self,
@@ -76,9 +80,6 @@ class QuestionWizardDialog(
         parent=None,
         reliability_mode_enabled: bool = True,
     ):
-        self._search_edit: Optional[SearchLineEdit] = None
-        self._search_status_label: Optional[BodyLabel] = None
-        self._search_popup: Optional[QListWidget] = None
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         window_title = "配置向导"
@@ -86,11 +87,13 @@ class QuestionWizardDialog(
             window_title = f"{window_title} - {_shorten_text(survey_title, 36)}"
         self.setWindowTitle(window_title)
         self.resize(self._PREFERRED_DIALOG_SIZE)
+
         self.entries = entries
         raw_info = list(info or [])
-        # 右侧配置卡片必须和可配置题目一一对应。
         self.info = build_entry_info_list(self.entries, raw_info)
+        self._logic_tree_state = build_logic_tree_state(self.info)
         self.reliability_mode_enabled = reliability_mode_enabled
+
         self.slider_map: Dict[int, List[NoWheelSlider]] = {}
         self.matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]] = {}
         self.text_edit_map: Dict[int, TextEditsValue] = {}
@@ -112,153 +115,136 @@ class QuestionWizardDialog(
         self.attached_select_slider_map: Dict[int, List[Dict[str, Any]]] = {}
         self.option_fill_edit_map: Dict[int, Dict[int, LineEdit]] = {}
         self.option_fill_state_map: Dict[int, Dict[int, Dict[str, Any]]] = {}
-        self._question_search_cache: Dict[int, str] = {}
-        self._search_match_indices: List[int] = []
-        self._last_search_keyword = ""
-        self._last_search_match_cursor = -1
         self._entry_snapshots: List[QuestionEntry] = [copy.deepcopy(entry) for entry in entries]
-        self._has_content = False
-        self._current_question_idx = 0
-        self._question_cards: List[CardWidget] = []
-        self._scroll_area: Optional[ScrollArea] = None
-        self._content_container: Optional[QWidget] = None
-        self._content_layout: Optional[QVBoxLayout] = None
-        self._navigation_host: Optional[QWidget] = None
-        self._question_shell: Optional[FloatingPagerShell] = None
-        self._question_pager: Optional[StableVerticalPipsPager] = None
-        self._navigation_item_count = 0
-        self._navigation_lane_width = 26
-        self._scroll_animation: Optional[QPropertyAnimation] = None
-        self._is_animating_scroll = False
+        self._question_cards: Dict[int, CardWidget] = {}
+        self._visible_indices: List[int] = list(range(len(self.entries)))
+        self._search_match_indices: List[int] = []
+        self._current_question_idx = self._visible_indices[0] if self._visible_indices else 0
+        self._current_view_mode = (
+            _VIEW_SEQUENTIAL if self._logic_tree_state.has_unknown_logic else _VIEW_LOGIC
+        )
         self._screen_change_bound = False
+        self._validation_error_dialog = None
 
+        self._search_edit: Optional[SearchLineEdit] = None
+        self._search_status_label: Optional[BodyLabel] = None
+        self._view_pivot: Optional[Pivot] = None
+        self._tree_widget: Optional[TreeWidget] = None
+        self._detail_scroll: Optional[ScrollArea] = None
+        self._detail_host: Optional[QWidget] = None
+        self._detail_layout: Optional[QVBoxLayout] = None
+        self._detail_stack: Optional[QStackedWidget] = None
+        self._empty_page: Optional[QWidget] = None
+        self._prev_button: Optional[PushButton] = None
+        self._next_button: Optional[PushButton] = None
+
+        self._build_ui()
+        self._populate_tree()
+        if self._visible_indices:
+            self._select_question(self._visible_indices[0])
+        else:
+            self._show_empty_state()
+
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
 
-        intro = BodyLabel("配置各题目的选项权重/概率或填空答案", self)
-        intro.setStyleSheet("font-size: 13px;")
-        _apply_label_color(intro, "#666666", "#bfbfbf")
-        layout.addWidget(intro)
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(12)
 
-        right_panel = QWidget(self)
-        self._navigation_host = right_panel
-        layout.addWidget(right_panel, 1)
-
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(16)
-
-        search_row = QHBoxLayout()
-        search_row.setContentsMargins(0, 0, 0, 0)
-        search_row.setSpacing(0)
-        search_edit = SearchLineEdit(right_panel)
-        search_edit.setPlaceholderText("搜索题干 / 选项内容")
-        search_edit.setFixedWidth(440)
-        self._configure_search_popup(search_edit)
-        search_edit.returnPressed.connect(self._handle_search_return_pressed)
-        search_edit.searchSignal.connect(self._handle_question_search)
-        search_edit.clearSignal.connect(self._clear_question_search)
+        search_edit = SearchLineEdit(self)
+        search_edit.setPlaceholderText("搜索题号、题干、选项、逻辑摘要")
+        search_edit.setFixedWidth(360)
+        search_edit.searchSignal.connect(self._handle_search)
         search_edit.textChanged.connect(self._on_search_text_changed)
-        search_row.addStretch(1)
-        search_row.addWidget(search_edit, 0, Qt.AlignmentFlag.AlignCenter)
-        search_row.addStretch(1)
-        right_layout.addLayout(search_row)
+        search_edit.returnPressed.connect(self._handle_search_return_pressed)
         self._search_edit = search_edit
+        top_row.addWidget(search_edit)
 
-        scroll = ScrollArea(right_panel)
-        scroll.setWidgetResizable(True)
-        scroll.enableTransparentBackground()
-        scroll.setViewportMargins(self._navigation_lane_width, 0, 0, 0)
-        self._scroll_area = scroll
-        container = QWidget(right_panel)
-        scroll.setWidget(container)
-        self._content_container = container
-        inner = QVBoxLayout(container)
-        inner.setContentsMargins(4, 4, 12, 4)
-        inner.setSpacing(20)
-        self._content_layout = inner
-        right_layout.addWidget(scroll, 1)
+        top_row.addStretch(1)
 
-        # 批量倾向预设（在滚动区内最顶部）
-        master_row = QHBoxLayout()
-        master_row.setSpacing(8)
-        master_lbl = BodyLabel("批量倾向预设：", container)
-        master_lbl.setStyleSheet("font-size: 13px;")
-        _apply_label_color(master_lbl, "#444444", "#e0e0e0")
-        master_row.addWidget(master_lbl)
-        _master_seg = SegmentedWidget(container)
-        for _v, _t in BIAS_PRESET_CHOICES:
-            _master_seg.addItem(routeKey=_v, text=_t)
-        _master_seg.setCurrentItem("custom")
-        master_row.addWidget(_master_seg)
-        master_row.addStretch(1)
-        inner.addLayout(master_row)
+        pivot = Pivot(self)
+        pivot.addItem(_VIEW_LOGIC, "逻辑视图")
+        pivot.addItem(_VIEW_SEQUENTIAL, "顺序视图")
+        if self._logic_tree_state.has_unknown_logic:
+            pivot.setVisible(False)
+        else:
+            pivot.setCurrentItem(self._current_view_mode)
+            pivot.currentItemChanged.connect(self._on_view_mode_changed)
+        self._view_pivot = pivot
+        top_row.addWidget(pivot, 0, Qt.AlignmentFlag.AlignRight)
 
-        for idx, entry in enumerate(self.entries):
-            self._question_cards.append(self._build_entry_card(idx, entry, container, inner))
+        layout.addLayout(top_row)
 
-        self._master_applying = False
+        status_label = BodyLabel("", self)
+        status_label.setStyleSheet("font-size: 12px;")
+        _apply_label_color(status_label, "#666666", "#bfbfbf")
+        self._search_status_label = status_label
+        layout.addWidget(status_label)
 
-        def _on_master_preset(route_key: str):
-            if route_key == "custom":
-                return
-            self._master_applying = True
-            for seg in self.bias_preset_map.values():
-                if isinstance(seg, list):
-                    for s in seg:
-                        s.setCurrentItem(route_key)
-                else:
-                    seg.setCurrentItem(route_key)
-            self._master_applying = False
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(16)
+        layout.addLayout(content_row, 1)
 
-        _master_seg.currentItemChanged.connect(_on_master_preset)
+        left_card = CardWidget(self)
+        left_layout = QVBoxLayout(left_card)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(8)
+        tree = TreeWidget(left_card)
+        tree.setHeaderHidden(True)
+        tree.itemClicked.connect(self._on_tree_item_clicked)
+        tree.itemActivated.connect(self._on_tree_item_clicked)
+        self._tree_widget = tree
+        left_layout.addWidget(tree, 1)
+        content_row.addWidget(left_card, 0)
+        left_card.setFixedWidth(320)
 
-        def _reset_master(_=None):
-            if self._master_applying:
-                return
-            if _master_seg.currentRouteKey() != "custom":
-                _master_seg.setCurrentItem("custom")
+        right_card = CardWidget(self)
+        right_layout = QVBoxLayout(right_card)
+        right_layout.setContentsMargins(12, 12, 12, 12)
+        right_layout.setSpacing(0)
+        detail_scroll = ScrollArea(right_card)
+        detail_scroll.setWidgetResizable(True)
+        detail_scroll.enableTransparentBackground()
+        detail_host = QWidget(right_card)
+        detail_layout = QVBoxLayout(detail_host)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(0)
+        detail_stack = QStackedWidget(detail_host)
+        detail_layout.addWidget(detail_stack, 1)
+        detail_scroll.setWidget(detail_host)
+        self._detail_scroll = detail_scroll
+        self._detail_host = detail_host
+        self._detail_layout = detail_layout
+        self._detail_stack = detail_stack
+        right_layout.addWidget(detail_scroll, 1)
+        content_row.addWidget(right_card, 1)
 
-        for seg in self.bias_preset_map.values():
-            if isinstance(seg, list):
-                for s in seg:
-                    s.currentItemChanged.connect(_reset_master)
-            else:
-                seg.currentItemChanged.connect(_reset_master)
-
-        if not self._has_content:
-            empty_label = BodyLabel("当前无题目需要配置", container)
-            empty_label.setStyleSheet("color: #888; font-size: 14px; padding: 40px;")
-            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            inner.addWidget(empty_label)
-
-        inner.addStretch(1)
-        self._question_shell = self._build_navigation_shell(right_panel)
-        self._question_pager = self._question_shell.pager
-        self._configure_navigation_pager(len(self._question_cards))
-        self._refresh_navigation_state(len(self._question_cards))
-        self._navigate_to_question(0, animate=False)
-        scroll.verticalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
-        QTimer.singleShot(0, self._update_navigation_pager_geometry)
-
-        # 底部按钮
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
         btn_row.addStretch(1)
-        cancel_btn = PushButton("取消", right_panel)
-        cancel_btn.setFixedWidth(80)
-        ok_btn = PrimaryPushButton("保存", right_panel)
-        ok_btn.setFixedWidth(80)
+        prev_btn = PushButton("上一题", self)
+        next_btn = PushButton("下一题", self)
+        cancel_btn = PushButton("取消", self)
+        ok_btn = PrimaryPushButton("保存", self)
+        prev_btn.clicked.connect(self._go_prev)
+        next_btn.clicked.connect(self._go_next)
+        cancel_btn.clicked.connect(self.reject)
+        ok_btn.clicked.connect(self.accept)
+        self._prev_button = prev_btn
+        self._next_button = next_btn
+        btn_row.addWidget(prev_btn)
+        btn_row.addWidget(next_btn)
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(ok_btn)
-        right_layout.addLayout(btn_row)
+        layout.addLayout(btn_row)
 
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn.clicked.connect(self.reject)
+        self._set_search_status("输入关键词后回车跳转")
 
     def showEvent(self, event: QShowEvent) -> None:
-        """首次显示时按当前屏幕可用区域收口，避免高缩放下越过任务栏。"""
         super().showEvent(event)
         self._bind_screen_change_signal()
         QTimer.singleShot(0, self._fit_into_available_geometry)
@@ -290,7 +276,6 @@ class QuestionWizardDialog(
         return self.screen() or QGuiApplication.primaryScreen()
 
     def _fit_into_available_geometry(self) -> None:
-        """按屏幕可用区域限制弹窗尺寸，并在当前屏幕中居中。"""
         screen = self._resolve_target_screen()
         if screen is None:
             return
@@ -301,14 +286,8 @@ class QuestionWizardDialog(
 
         frame_margin_width = 32
         frame_margin_height = 40
-        max_width = max(
-            self._MIN_DIALOG_SIZE.width(),
-            available.width() - frame_margin_width,
-        )
-        max_height = max(
-            self._MIN_DIALOG_SIZE.height(),
-            available.height() - frame_margin_height,
-        )
+        max_width = max(self._MIN_DIALOG_SIZE.width(), available.width() - frame_margin_width)
+        max_height = max(self._MIN_DIALOG_SIZE.height(), available.height() - frame_margin_height)
 
         target_width = min(self._PREFERRED_DIALOG_SIZE.width(), max_width)
         target_height = min(self._PREFERRED_DIALOG_SIZE.height(), max_height)
@@ -321,7 +300,6 @@ class QuestionWizardDialog(
 
         resized_width = min(max(self.width(), self.minimumWidth()), max_width)
         resized_height = min(max(self.height(), self.minimumHeight()), max_height)
-
         if resized_width != self.width() or resized_height != self.height():
             self.resize(resized_width, resized_height)
 
@@ -329,21 +307,244 @@ class QuestionWizardDialog(
         frame.moveCenter(available.center())
         top_left = frame.topLeft()
         top_left.setX(
-            max(
-                available.left(),
-                min(top_left.x(), available.right() - frame.width() + 1),
-            )
+            max(available.left(), min(top_left.x(), available.right() - frame.width() + 1))
         )
         top_left.setY(
-            max(
-                available.top(),
-                min(top_left.y(), available.bottom() - frame.height() + 1),
-            )
+            max(available.top(), min(top_left.y(), available.bottom() - frame.height() + 1))
         )
         self.move(top_left)
 
+    def _set_search_status(
+        self,
+        text: str,
+        light: str = "#666666",
+        dark: str = "#bfbfbf",
+    ) -> None:
+        if self._search_status_label is None:
+            return
+        self._search_status_label.setText(text)
+        _apply_label_color(self._search_status_label, light, dark)
+
+    def _visible_indices_for_mode(self) -> List[int]:
+        return list(range(len(self.entries)))
+
+    def _populate_tree(self) -> None:
+        if self._tree_widget is None:
+            return
+        self._tree_widget.clear()
+        self._visible_indices = self._visible_indices_for_mode()
+
+        page_map = self._logic_tree_state.page_map
+        for page_num in sorted(page_map):
+            page_indices = [idx for idx in page_map[page_num] if idx in self._visible_indices]
+            if not page_indices:
+                continue
+            page_item = QTreeWidgetItem([f"第 {page_num} 页"])
+            page_item.setFlags(page_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self._tree_widget.addTopLevelItem(page_item)
+
+            for idx in page_indices:
+                info = self._get_entry_info(idx)
+                qnum = resolve_display_question_num(info, idx + 1) or idx + 1
+                title = str(info.title or "").strip() or "未命名题目"
+                item = QTreeWidgetItem([f"第{qnum}题  {_shorten_text(title, 20)}"])
+                item.setData(0, _TREE_INDEX_ROLE, idx)
+                page_item.addChild(item)
+
+                if self._current_view_mode == _VIEW_LOGIC and not self._logic_tree_state.has_unknown_logic:
+                    for relation in self._logic_tree_state.relations.get(idx, []):
+                        relation_item = QTreeWidgetItem([relation.label])
+                        relation_item.setData(0, _TREE_INDEX_ROLE, idx)
+                        relation_item.setData(
+                            0,
+                            _TREE_RELATION_TARGET_ROLE,
+                            relation.target_index if relation.selectable else None,
+                        )
+                        item.addChild(relation_item)
+            page_item.setExpanded(True)
+
+    def _show_empty_state(self) -> None:
+        if self._detail_stack is None:
+            return
+        if self._empty_page is None:
+            page = QWidget(self._detail_stack)
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            empty = BodyLabel("当前无题目需要配置", page)
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setStyleSheet("font-size: 14px; padding: 40px;")
+            _apply_label_color(empty, "#888888", "#bfbfbf")
+            page_layout.addWidget(empty)
+            self._detail_stack.addWidget(page)
+            self._empty_page = page
+        self._detail_stack.setCurrentWidget(self._empty_page)
+        if self._prev_button is not None:
+            self._prev_button.setEnabled(False)
+        if self._next_button is not None:
+            self._next_button.setEnabled(False)
+
+    def _select_question(self, idx: int) -> None:
+        if idx not in self._visible_indices:
+            return
+        self._current_question_idx = idx
+        self._render_current_question()
+        self._sync_tree_selection()
+        self._update_nav_buttons()
+
+    def _render_current_question(self) -> None:
+        if self._detail_stack is None:
+            return
+        if not (0 <= self._current_question_idx < len(self.entries)):
+            return
+        card = self._question_cards.get(self._current_question_idx)
+        if card is None:
+            card = self._build_entry_card(
+                self._current_question_idx,
+                self.entries[self._current_question_idx],
+                self._detail_stack,
+            )
+            self._question_cards[self._current_question_idx] = card
+            self._detail_stack.addWidget(card)
+        self._detail_stack.setCurrentWidget(card)
+        if self._detail_scroll is not None:
+            self._detail_scroll.verticalScrollBar().setValue(0)
+
+    def _sync_tree_selection(self) -> None:
+        if self._tree_widget is None:
+            return
+        iterator = self._iter_tree_items()
+        for item in iterator:
+            item_idx = item.data(0, _TREE_INDEX_ROLE)
+            if item_idx == self._current_question_idx:
+                self._tree_widget.setCurrentItem(item)
+                return
+
+    def _iter_tree_items(self) -> List[QTreeWidgetItem]:
+        if self._tree_widget is None:
+            return []
+        items: List[QTreeWidgetItem] = []
+        for i in range(self._tree_widget.topLevelItemCount()):
+            top_item = self._tree_widget.topLevelItem(i)
+            if top_item is None:
+                continue
+            items.extend(self._collect_tree_children(top_item))
+        return items
+
+    def _collect_tree_children(self, item: QTreeWidgetItem) -> List[QTreeWidgetItem]:
+        items = [item]
+        for i in range(item.childCount()):
+            child = item.child(i)
+            if child is not None:
+                items.extend(self._collect_tree_children(child))
+        return items
+
+    def _on_tree_item_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        target_idx = item.data(0, _TREE_RELATION_TARGET_ROLE)
+        if isinstance(target_idx, int) and target_idx in self._visible_indices:
+            self._select_question(target_idx)
+            return
+        question_idx = item.data(0, _TREE_INDEX_ROLE)
+        if isinstance(question_idx, int):
+            self._select_question(question_idx)
+
+    def _update_nav_buttons(self) -> None:
+        if self._prev_button is None or self._next_button is None:
+            return
+        if not self._visible_indices:
+            self._prev_button.setEnabled(False)
+            self._next_button.setEnabled(False)
+            return
+        current_pos = self._visible_indices.index(self._current_question_idx)
+        self._prev_button.setEnabled(current_pos > 0)
+        self._next_button.setEnabled(current_pos < len(self._visible_indices) - 1)
+
+    def _go_prev(self) -> None:
+        if self._current_question_idx not in self._visible_indices:
+            return
+        current_pos = self._visible_indices.index(self._current_question_idx)
+        if current_pos > 0:
+            self._select_question(self._visible_indices[current_pos - 1])
+
+    def _go_next(self) -> None:
+        if self._current_question_idx not in self._visible_indices:
+            return
+        current_pos = self._visible_indices.index(self._current_question_idx)
+        if current_pos < len(self._visible_indices) - 1:
+            self._select_question(self._visible_indices[current_pos + 1])
+
+    def _on_view_mode_changed(self, route_key: str) -> None:
+        normalized = str(route_key or "").strip()
+        if normalized not in {_VIEW_LOGIC, _VIEW_SEQUENTIAL}:
+            return
+        self._current_view_mode = normalized
+        self._populate_tree()
+        if self._visible_indices:
+            target = self._current_question_idx
+            if target not in self._visible_indices:
+                target = self._visible_indices[0]
+            self._select_question(target)
+
+    def _searchable_text(self, idx: int) -> str:
+        return str(self._logic_tree_state.search_text.get(idx) or "")
+
+    @staticmethod
+    def _normalize_search_text(text: str) -> str:
+        return " ".join(str(text or "").strip().lower().split())
+
+    def _match_indices(self, keyword: str) -> List[int]:
+        normalized = self._normalize_search_text(keyword)
+        if not normalized:
+            return []
+        return [
+            idx
+            for idx in self._visible_indices
+            if normalized in self._normalize_search_text(self._searchable_text(idx))
+        ]
+
+    def _on_search_text_changed(self, text: str) -> None:
+        raw_text = str(text or "").strip()
+        if not raw_text:
+            self._search_match_indices = []
+            self._set_search_status("输入关键词后回车跳转")
+            return
+        matches = self._match_indices(raw_text)
+        self._search_match_indices = matches
+        if matches:
+            self._set_search_status(f"匹配 {len(matches)} 题，回车定位下一项")
+        else:
+            self._set_search_status(f"未找到“{raw_text}”", "#c42b1c", "#ff99a4")
+
+    def _handle_search_return_pressed(self) -> None:
+        if self._search_edit is None:
+            return
+        self._handle_search(self._search_edit.text())
+
+    def _handle_search(self, keyword: str) -> None:
+        raw_text = str(keyword or "").strip()
+        if not raw_text:
+            self._search_match_indices = []
+            self._set_search_status("输入关键词后回车跳转")
+            return
+        matches = self._match_indices(raw_text)
+        self._search_match_indices = matches
+        if not matches:
+            self._set_search_status(f"未找到“{raw_text}”", "#c42b1c", "#ff99a4")
+            return
+        if self._current_question_idx in matches:
+            current_pos = matches.index(self._current_question_idx)
+            target_idx = matches[(current_pos + 1) % len(matches)]
+        else:
+            target_idx = matches[0]
+        self._select_question(target_idx)
+        self._set_search_status(
+            f"匹配 {len(matches)} 题，当前定位到{self._format_question_label(target_idx)}"
+        )
+
+    def reject(self) -> None:
+        self._restore_entries()
+        super().reject()
+
     def get_results(self) -> Dict[int, Any]:
-        """获取滑块权重/概率结果"""
         result: Dict[int, Any] = {}
         for idx, sliders in self.slider_map.items():
             weights = [max(0, s.value()) for s in sliders]
@@ -363,13 +564,11 @@ class QuestionWizardDialog(
         return result
 
     def get_text_results(self) -> Dict[int, List[str]]:
-        """获取填空题答案结果"""
         from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
 
         result: Dict[int, List[str]] = {}
         for idx, edits in self.text_edit_map.items():
             if edits and isinstance(edits[0], list):
-                # 多项填空题：二维列表
                 texts = []
                 matrix_edits = cast(List[List[LineEdit]], edits)
                 for row_edits in matrix_edits:
@@ -378,7 +577,6 @@ class QuestionWizardDialog(
                     if merged:
                         texts.append(merged)
             else:
-                # 普通填空题：一维列表
                 flat_edits = cast(List[LineEdit], edits)
                 texts = [e.text().strip() for e in flat_edits if e.text().strip()]
             if not texts:
@@ -387,7 +585,6 @@ class QuestionWizardDialog(
         return result
 
     def get_option_fill_results(self) -> Dict[int, List[Optional[str]]]:
-        """获取选择题中“其他请填空”等附加输入框的配置结果。"""
         result: Dict[int, List[Optional[str]]] = {}
         for idx, state_map in self.option_fill_state_map.items():
             if not state_map:
@@ -419,19 +616,17 @@ class QuestionWizardDialog(
                         )
                     else:
                         edit = state.get("edit")
-                        raw_text = edit.text().strip() if edit is not None else ""
-                        text = raw_text or None
+                        raw_value = edit.text().strip() if edit is not None else ""
+                        text = raw_value or None
                 if 0 <= option_index < normalized_count:
                     values[option_index] = text
             result[idx] = values
         return result
 
     def get_text_random_modes(self) -> Dict[int, str]:
-        """获取填空题随机值模式（none/name/mobile/integer）"""
         return dict(self.text_random_mode_map)
 
     def get_text_random_int_ranges(self) -> Dict[int, List[int]]:
-        """获取填空题随机整数范围。"""
         result: Dict[int, List[int]] = {}
         for idx, min_edit in self.text_random_int_min_edit_map.items():
             max_edit = self.text_random_int_max_edit_map.get(idx)
@@ -443,7 +638,6 @@ class QuestionWizardDialog(
         return result
 
     def get_multi_text_blank_modes(self) -> Dict[int, List[str]]:
-        """获取多项填空题每个填空项的随机模式"""
         from .wizard_sections import (
             _TEXT_RANDOM_ID_CARD,
             _TEXT_RANDOM_INTEGER,
@@ -473,12 +667,8 @@ class QuestionWizardDialog(
         return result
 
     def get_multi_text_blank_int_ranges(self) -> Dict[int, List[List[int]]]:
-        """获取多项填空题每个填空项的随机整数范围。"""
         result: Dict[int, List[List[int]]] = {}
-        for (
-            idx,
-            edit_pairs,
-        ) in self.multi_text_blank_integer_range_edits.items():
+        for idx, edit_pairs in self.multi_text_blank_integer_range_edits.items():
             ranges: List[List[int]] = []
             for min_edit, max_edit in edit_pairs:
                 ranges.append(
@@ -488,7 +678,6 @@ class QuestionWizardDialog(
         return result
 
     def get_multi_text_blank_ai_flags(self) -> Dict[int, List[bool]]:
-        """获取多项填空题每个填空项的AI标志"""
         result: Dict[int, List[bool]] = {}
         if not hasattr(self, "multi_text_blank_ai_checkboxes"):
             return result
@@ -497,7 +686,6 @@ class QuestionWizardDialog(
         return result
 
     def get_ai_flags(self) -> Dict[int, bool]:
-        """获取填空题是否启用 AI"""
         result: Dict[int, bool] = {}
         for idx, cb in self.ai_check_map.items():
             random_mode = self.text_random_mode_map.get(idx, _TEXT_RANDOM_NONE)
@@ -530,7 +718,6 @@ class QuestionWizardDialog(
         return result
 
     def get_bias_presets(self) -> Dict[int, Any]:
-        """获取每个题目的倾向预设值（矩阵题返回列表）"""
         result: Dict[int, Any] = {}
         for idx, seg in self.bias_preset_map.items():
             if isinstance(seg, list):
@@ -540,7 +727,6 @@ class QuestionWizardDialog(
         return result
 
     def get_dimensions(self) -> Dict[int, Optional[str]]:
-        """获取题目的当前维度配置。"""
         result: Dict[int, Optional[str]] = {}
         for idx, entry in enumerate(self.entries):
             try:

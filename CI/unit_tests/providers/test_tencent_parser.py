@@ -167,7 +167,7 @@ class TencentParserTests:
             "title": "  题目1  ",
             "description": " 描述 ",
             "options": [
-                {"text": "正常选项"},
+                {"text": "正常选项", "image_url": "https://example.com/option-a.png"},
                 {"text": "其他 {fillblank-1}", "extra": {"fillblank": True}},
             ],
             "sub_titles": [{"text": " 行1 "}, {"text": "行2"}],
@@ -204,6 +204,9 @@ class TencentParserTests:
         assert first["multi_min_limit"] == 1
         assert first["multi_max_limit"] == 3
         assert first["page"] == 1
+        assert first["logic_parse_status"] == "unknown"
+        assert first["question_media"][0]["scope"] == "option"
+        assert first["question_media"][0]["source_url"] == "https://example.com/option-a.png"
 
         second = normalized[1]
         assert second["is_rating"]
@@ -213,6 +216,48 @@ class TencentParserTests:
         third = normalized[2]
         assert third["unsupported"]
         assert "暂不支持腾讯题型" in third["unsupported_reason"]
+
+    @pytest.mark.asyncio
+    async def test_browser_media_merges_into_http_result(self, patch_attrs) -> None:
+        browser_payload = {
+            "ok": True,
+            "payload": {
+                "code": "OK",
+                "data": {
+                    "questions": [
+                        {"id": "q1", "type": "radio", "title": "题目1", "options": [{"text": "选项A"}], "page_id": "p1", "page": 1}
+                    ]
+                },
+            },
+            "metaPayload": {"code": "OK", "data": {"title": "浏览器标题 - 腾讯问卷"}},
+            "title": "",
+            "pageUrl": "https://wj.qq.com/s2/123/hash/",
+            "status": 200,
+        }
+        page = _FakeQQPage(payload=browser_payload, wait_selector_error=RuntimeError("wait failed"))
+        page.evaluate = AsyncMock(side_effect=[browser_payload, {"q1": [{"kind": "image", "scope": "title", "index": None, "source_url": "https://example.com/q1.png", "label": "题干图"}]}])
+        driver = _FakeQQDriver(page, title="备用浏览器标题")
+
+        @asynccontextmanager
+        async def fake_pool():
+            yield driver
+
+        patch_attrs(
+            (qq_parser, "_fetch_qq_survey_via_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("http failed"))),
+            (qq_parser, "acquire_parse_browser_session", fake_pool),
+        )
+
+        info, _title = await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
+
+        assert info[0]["question_media"] == [
+            {
+                "kind": "image",
+                "scope": "title",
+                "index": None,
+                "source_url": "https://example.com/q1.png",
+                "label": "题干图",
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_parse_qq_survey_rejects_login_url_and_supports_browser_fallback(self, patch_attrs) -> None:
