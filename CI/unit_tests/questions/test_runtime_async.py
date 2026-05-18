@@ -104,3 +104,13 @@ class RuntimeAsyncQuestionTests:
                 driver=driver,
                 question_number=6,
             )
+
+    def test_resolve_runtime_text_values_keeps_short_probabilities_aligned(self, monkeypatch) -> None:
+        monkeypatch.setattr(runtime_async, "weighted_index", lambda probabilities: probabilities.index(max(probabilities)))
+        values = runtime_async.resolve_runtime_text_values_from_config(
+            ["甲||乙", "丙||丁"],
+            [1.0],
+            blank_count=2,
+            entry_type="multi_text",
+        )
+        assert values == ["甲", "乙"]

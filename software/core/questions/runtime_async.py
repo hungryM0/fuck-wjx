@@ -145,10 +145,13 @@ def resolve_runtime_text_values_from_config(
     if not candidates:
         candidates = [DEFAULT_FILL_TEXT]
     weights = list(probabilities or [])
-    if len(weights) != len(candidates):
-        weights = [1.0] * len(candidates)
+    if len(weights) < len(candidates):
+        weights.extend([0.0] * (len(candidates) - len(weights)))
+    elif len(weights) > len(candidates):
+        weights = weights[:len(candidates)]
     try:
-        normalized = normalize_probabilities([float(value) for value in weights])
+        numeric_weights = [float(value) for value in weights]
+        normalized = normalize_probabilities(numeric_weights)
     except Exception:
         normalized = normalize_probabilities([1.0] * len(candidates))
 
