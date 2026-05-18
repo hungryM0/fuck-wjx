@@ -311,6 +311,13 @@ class UiHelperAndParsingTests:
         assert bar in manager.infoBars[parent]
         assert bar.property("slideAni") is not None
 
+        second_bar = _FakeBar(parent)
+        manager.add(second_bar)
+        second_drop_ani = second_bar.property("dropAni")
+        assert second_drop_ani is not None
+        assert second_drop_ani.start_value == ("pos", None)
+        assert second_drop_ani.end_value == ("pos", None)
+
         manager._updateDropAni(parent)
         assert manager.slideAnis
 

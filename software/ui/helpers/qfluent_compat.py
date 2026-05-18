@@ -137,6 +137,9 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
             try:
                 drop_ani = QPropertyAnimation(info_bar, QByteArray(b"pos"))
                 drop_ani.setDuration(200)
+                target_pos = self._pos(info_bar)
+                drop_ani.setStartValue(target_pos)
+                drop_ani.setEndValue(target_pos)
                 self.aniGroups[parent].addAnimation(drop_ani)
                 self.dropAnis.append(drop_ani)
                 info_bar.setProperty("dropAni", drop_ani)
