@@ -8,6 +8,7 @@ from PySide6.QtCore import (
     QAbstractAnimation,
     QByteArray,
     QEvent,
+    QPoint,
     QParallelAnimationGroup,
     QPropertyAnimation,
     Qt,
@@ -71,18 +72,6 @@ def install_qfluentwidgets_animation_guards() -> None:
 
 def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
     """为 InfoBar 管理器补充已销毁对象保护，避免双重关闭时崩溃。"""
-    manager_classes = {
-        info_bar_manager_cls,
-        *getattr(info_bar_manager_cls, "managers", {}).values(),
-    }
-    pending_classes = [
-        manager_cls
-        for manager_cls in manager_classes
-        if not getattr(manager_cls, "_surveycontroller_remove_guard_installed", False)
-    ]
-    if not pending_classes:
-        return
-
     def _is_alive(obj) -> bool:
         if obj is None:
             return False
@@ -101,6 +90,20 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
         if len(alive) != len(current):
             current[:] = alive
         return alive
+
+    _install_top_position_guard(info_bar_manager_cls, _prune_invalid_bars)
+
+    manager_classes = {
+        info_bar_manager_cls,
+        *getattr(info_bar_manager_cls, "managers", {}).values(),
+    }
+    pending_classes = [
+        manager_cls
+        for manager_cls in manager_classes
+        if not getattr(manager_cls, "_surveycontroller_remove_guard_installed", False)
+    ]
+    if not pending_classes:
+        return
 
     def _get_signal_callback_store(self) -> dict[int, tuple[Any, Any]]:
         store = getattr(self, "_surveycontroller_signal_callbacks", None)
@@ -261,6 +264,56 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
         manager_cls.remove = _safe_remove
         manager_cls.eventFilter = _safe_event_filter
         setattr(manager_cls, "_surveycontroller_remove_guard_installed", True)
+
+
+def _install_top_position_guard(info_bar_manager_cls, prune_invalid_bars) -> None:
+    """修正 TOP InfoBar 偶发按左上角初始尺寸定位的问题。"""
+    try:
+        from qfluentwidgets import InfoBarPosition
+
+        top_manager_cls = getattr(info_bar_manager_cls, "managers", {}).get(
+            InfoBarPosition.TOP
+        )
+    except Exception:
+        top_manager_cls = None
+
+    if top_manager_cls is None or getattr(
+        top_manager_cls,
+        "_surveycontroller_top_position_guard_installed",
+        False,
+    ):
+        return
+
+    def _safe_top_pos(self, info_bar, parentSize=None):
+        parent = info_bar.parent()
+        if parent is None:
+            return QPoint(0, self.margin)
+
+        parent_size = parentSize or parent.size()
+        try:
+            info_bar.adjustSize()
+        except RuntimeError:
+            pass
+
+        x = max(0, (parent_size.width() - info_bar.width()) // 2)
+        y = self.margin
+        bars = prune_invalid_bars(self, parent)
+        if info_bar in bars:
+            for bar in bars[: bars.index(info_bar)]:
+                y += bar.height() + self.spacing
+        return QPoint(x, y)
+
+    def _safe_top_slide_start_pos(self, info_bar):
+        pos = self._pos(info_bar)
+        return QPoint(pos.x(), pos.y() - 16)
+
+    top_manager_cls._pos = _safe_top_pos
+    top_manager_cls._slideStartPos = _safe_top_slide_start_pos
+    setattr(
+        top_manager_cls,
+        "_surveycontroller_top_position_guard_installed",
+        True,
+    )
 
 
 def set_indeterminate_progress_ring_active(ring: Any, active: bool) -> None:

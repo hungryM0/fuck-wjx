@@ -64,6 +64,11 @@ from software.ui.pages.workbench.shared.survey_entry_card import (
     SurveyEntryCard,
 )
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
+from software.ui.helpers.message_bar import (
+    replace_message_bar,
+    reposition_message_bar,
+    show_message_bar,
+)
 from software.ui.dialogs.quota_redeem import load_shop_icon
 from software.ui.widgets.config_drawer import ConfigDrawer
 from software.ui.widgets.clickable_card import ClickableElevatedCardWidget
@@ -606,73 +611,43 @@ class DashboardPage(
         show_progress: bool = False,
     ):
         """显示消息提示"""
-        # 如果之前有进度消息条正在显示，先关闭它
-        if self._progress_infobar:
-            try:
-                self._progress_infobar.close()
-            except Exception as exc:
-                log_suppressed_exception(
-                    "_toast: self._progress_infobar.close()",
-                    exc,
-                    level=logging.WARNING,
-                )
-            self._progress_infobar = None
+        try:
+            replace_message_bar(self._progress_infobar)
+        except Exception as exc:
+            log_suppressed_exception(
+                "_toast: replace_message_bar(self._progress_infobar)",
+                exc,
+                level=logging.WARNING,
+            )
+        self._progress_infobar = None
 
         parent = self.window() or self
         kind = level.lower()
+        position = InfoBarPosition.TOP
 
-        # 如果需要显示进度条，创建带进度条的InfoBar
         if show_progress:
-            # 创建InfoBar实例
-            if kind == "success":
-                infobar = InfoBar.success(
-                    "",
-                    text,
-                    parent=parent,
-                    position=InfoBarPosition.TOP,
-                    duration=duration,
-                )
-            elif kind == "warning":
-                infobar = InfoBar.warning(
-                    "",
-                    text,
-                    parent=parent,
-                    position=InfoBarPosition.TOP,
-                    duration=duration,
-                )
-            elif kind == "error":
-                infobar = InfoBar.error(
-                    "",
-                    text,
-                    parent=parent,
-                    position=InfoBarPosition.TOP,
-                    duration=duration,
-                )
-            else:
-                infobar = InfoBar.info(
-                    "",
-                    text,
-                    parent=parent,
-                    position=InfoBarPosition.TOP,
-                    duration=duration,
-                )
-
-            # 添加转圈的加载动画
+            infobar = show_message_bar(
+                parent=parent,
+                message=text,
+                level=kind,
+                position=position,
+                duration=duration,
+            )
             spinner = IndeterminateProgressRing()
-            spinner.setFixedSize(20, 20)  # 设置spinner大小
-            spinner.setStrokeWidth(3)  # 设置环的粗细
+            spinner.setFixedSize(20, 20)
+            spinner.setStrokeWidth(3)
             infobar.addWidget(spinner)
-
-            # 保存引用以便后续关闭
+            reposition_message_bar(infobar)
             self._progress_infobar = infobar
             return infobar
+
         # 普通InfoBar（不带进度条）
         if kind == "success":
             InfoBar.success(
                 "",
                 text,
                 parent=parent,
-                position=InfoBarPosition.TOP,
+                position=position,
                 duration=duration,
             )
         elif kind == "warning":
@@ -680,7 +655,7 @@ class DashboardPage(
                 "",
                 text,
                 parent=parent,
-                position=InfoBarPosition.TOP,
+                position=position,
                 duration=duration,
             )
         elif kind == "error":
@@ -688,7 +663,7 @@ class DashboardPage(
                 "",
                 text,
                 parent=parent,
-                position=InfoBarPosition.TOP,
+                position=position,
                 duration=duration,
             )
         else:
@@ -696,7 +671,7 @@ class DashboardPage(
                 "",
                 text,
                 parent=parent,
-                position=InfoBarPosition.TOP,
+                position=position,
                 duration=duration,
             )
         return None

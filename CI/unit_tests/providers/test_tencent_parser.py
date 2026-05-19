@@ -217,6 +217,115 @@ class TencentParserTests:
         assert third["unsupported"]
         assert "暂不支持腾讯题型" in third["unsupported_reason"]
 
+    def test_build_question_media_from_payload_normalizes_protocol_relative_urls_and_deduplicates(self) -> None:
+        media = qq_parser._build_question_media_from_payload(
+            {
+                "title": {"image_url": "//cdn.example.com/title.png", "nested": {"src": "//cdn.example.com/title.png"}},
+                "description": {"img": "//cdn.example.com/title.png"},
+                "options": [
+                    {"text": " 选项A ", "image_url": "//cdn.example.com/option-a.png", "extra": {"src": "//cdn.example.com/option-a.png"}},
+                    {"text": "选项B", "pic_url": "https://example.com/option-b.jpg"},
+                ],
+                "sub_titles": [
+                    {"text": " 行1 ", "image": "//cdn.example.com/row-1.png", "nested": {"src": "//cdn.example.com/row-1.png"}}
+                ],
+            },
+            "radio",
+        )
+
+        assert media == [
+            {
+                "kind": "image",
+                "scope": "title",
+                "index": None,
+                "source_url": "https://cdn.example.com/title.png",
+                "label": "题干图",
+            },
+            {
+                "kind": "image",
+                "scope": "option",
+                "index": 0,
+                "source_url": "https://cdn.example.com/option-a.png",
+                "label": "选项A",
+            },
+            {
+                "kind": "image",
+                "scope": "option",
+                "index": 1,
+                "source_url": "https://example.com/option-b.jpg",
+                "label": "选项B",
+            },
+            {
+                "kind": "image",
+                "scope": "row",
+                "index": 0,
+                "source_url": "https://cdn.example.com/row-1.png",
+                "label": "行1",
+            },
+        ]
+
+    def test_merge_browser_media_skips_duplicates_and_keeps_existing_order(self) -> None:
+        info = [
+            {
+                "provider_question_id": "q1",
+                "question_media": [
+                    {
+                        "kind": "image",
+                        "scope": "title",
+                        "index": None,
+                        "source_url": "https://example.com/title.png",
+                        "label": "题干图",
+                    }
+                ],
+            }
+        ]
+
+        qq_parser._merge_browser_media(
+            info,
+            {
+                "q1": [
+                    {
+                        "kind": "image",
+                        "scope": "title",
+                        "index": None,
+                        "source_url": "https://example.com/title.png",
+                        "label": "重复题干图",
+                    },
+                    {
+                        "kind": "image",
+                        "scope": "option",
+                        "index": 0,
+                        "source_url": "https://example.com/option-a.png",
+                        "label": "选项A",
+                    },
+                    {
+                        "kind": "image",
+                        "scope": "option",
+                        "index": 0,
+                        "source_url": "https://example.com/option-a.png",
+                        "label": "重复选项图",
+                    },
+                ]
+            },
+        )
+
+        assert info[0]["question_media"] == [
+            {
+                "kind": "image",
+                "scope": "title",
+                "index": None,
+                "source_url": "https://example.com/title.png",
+                "label": "题干图",
+            },
+            {
+                "kind": "image",
+                "scope": "option",
+                "index": 0,
+                "source_url": "https://example.com/option-a.png",
+                "label": "选项A",
+            },
+        ]
+
     @pytest.mark.asyncio
     async def test_browser_media_merges_into_http_result(self, patch_attrs) -> None:
         browser_payload = {
@@ -260,6 +369,30 @@ class TencentParserTests:
         ]
 
     @pytest.mark.asyncio
+    async def test_parse_qq_survey_returns_http_result_without_browser_fallback(self, patch_attrs) -> None:
+        browser_used = {"value": False}
+
+        @asynccontextmanager
+        async def fake_pool():
+            browser_used["value"] = True
+            yield _FakeQQDriver(_FakeQQPage())
+
+        patch_attrs(
+            (
+                qq_parser,
+                "_fetch_qq_survey_via_http",
+                AsyncMock(return_value=([{"num": 1, "title": "HTTP 题目", "type_code": "3"}], "HTTP 标题")),
+            ),
+            (qq_parser, "acquire_parse_browser_session", fake_pool),
+        )
+
+        info, title = await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
+
+        assert info == [{"num": 1, "title": "HTTP 题目", "type_code": "3"}]
+        assert title == "HTTP 标题"
+        assert not browser_used["value"]
+
+    @pytest.mark.asyncio
     async def test_parse_qq_survey_rejects_login_url_and_supports_browser_fallback(self, patch_attrs) -> None:
         with pytest.raises(RuntimeError, match="需要登录"):
             await qq_parser.parse_qq_survey("https://wj.qq.com/r/login.html")
@@ -296,6 +429,25 @@ class TencentParserTests:
         assert driver.get_calls == ["https://wj.qq.com/s2/123/hash/"]
         assert info[0]["title"] == "题目1"
         assert title == "浏览器标题"
+
+    @pytest.mark.asyncio
+    async def test_parse_qq_survey_skips_browser_fallback_for_login_required_http_error(self, patch_attrs) -> None:
+        browser_used = {"value": False}
+
+        @asynccontextmanager
+        async def fake_pool():
+            browser_used["value"] = True
+            yield _FakeQQDriver(_FakeQQPage())
+
+        patch_attrs(
+            (qq_parser, "_fetch_qq_survey_via_http", AsyncMock(side_effect=RuntimeError("need login"))),
+            (qq_parser, "acquire_parse_browser_session", fake_pool),
+        )
+
+        with pytest.raises(RuntimeError, match="需要登录"):
+            await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
+
+        assert not browser_used["value"]
 
     @pytest.mark.asyncio
     async def test_parse_qq_survey_browser_fallback_rejects_missing_page_and_bad_status(self, patch_attrs) -> None:

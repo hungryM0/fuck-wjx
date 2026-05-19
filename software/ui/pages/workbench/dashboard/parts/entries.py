@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QTableWidgetItem, QTableWidget
@@ -53,6 +53,10 @@ def _set_table_text(
 
 _TEXT_RANDOM_ID_CARD_TOKEN = "__RANDOM_ID_CARD__"
 
+WizardResultGetter = Callable[[QuestionWizardDialog], Dict[int, Any]]
+WizardEntryApplier = Callable[[QuestionEntry, Any], None]
+WizardApplyRule = tuple[WizardResultGetter, WizardEntryApplier]
+
 
 def _pretty_text_answer(value: Any) -> str:
     text = str(value or "").strip()
@@ -66,6 +70,109 @@ def _pretty_text_answer(value: Any) -> str:
     if text == _TEXT_RANDOM_ID_CARD_TOKEN:
         return "随机身份证号"
     return text
+
+
+def _normalize_wizard_weights(raw: Any) -> Any:
+    if isinstance(raw, list) and any(isinstance(item, (list, tuple)) for item in raw):
+        cleaned: List[List[float]] = []
+        for row in raw:
+            if not isinstance(row, (list, tuple)):
+                continue
+            cleaned.append([float(max(0, value)) for value in row])
+        return cleaned
+    if isinstance(raw, list):
+        return [float(max(0, value)) for value in raw]
+    return raw
+
+
+def _apply_result_updates(
+    entries: List[QuestionEntry],
+    updates: Dict[int, Any],
+    applier: WizardEntryApplier,
+) -> None:
+    for idx, value in updates.items():
+        if 0 <= idx < len(entries):
+            applier(entries[idx], value)
+
+
+def _apply_distribution_result(entry: QuestionEntry, raw_weights: Any) -> None:
+    normalized = _normalize_wizard_weights(raw_weights)
+    entry.custom_weights = normalized
+    entry.probabilities = normalized
+    entry.distribution_mode = "custom"
+
+
+def _apply_text_result(entry: QuestionEntry, texts: Any) -> None:
+    entry.texts = texts
+
+
+def _apply_option_fill_result(entry: QuestionEntry, option_fill_texts: Any) -> None:
+    if entry.question_type not in ("single", "multiple", "dropdown"):
+        return
+    entry.option_fill_texts = (
+        option_fill_texts if any(text for text in option_fill_texts if text) else None
+    )
+
+
+def _apply_text_random_mode_result(entry: QuestionEntry, random_mode: Any) -> None:
+    entry.text_random_mode = str(random_mode or "none") if entry.question_type == "text" else "none"
+
+
+def _apply_text_random_int_range_result(entry: QuestionEntry, int_range: Any) -> None:
+    entry.text_random_int_range = int_range if entry.question_type == "text" else []
+
+
+def _apply_ai_flag_result(entry: QuestionEntry, enabled: Any) -> None:
+    entry.ai_enabled = bool(enabled) if entry.question_type in ("text", "multi_text") else False
+
+
+def _apply_attached_select_result(entry: QuestionEntry, attached_configs: Any) -> None:
+    entry.attached_option_selects = attached_configs
+
+
+def _apply_multi_text_blank_modes_result(entry: QuestionEntry, modes: Any) -> None:
+    entry.multi_text_blank_modes = modes
+
+
+def _apply_multi_text_blank_int_ranges_result(entry: QuestionEntry, int_ranges: Any) -> None:
+    entry.multi_text_blank_int_ranges = int_ranges
+
+
+def _apply_multi_text_blank_ai_flags_result(entry: QuestionEntry, flags: Any) -> None:
+    entry.multi_text_blank_ai_flags = flags
+
+
+def _apply_dimension_result(entry: QuestionEntry, dimension: Any) -> None:
+    entry.dimension = dimension
+
+
+def _apply_bias_preset_result(entry: QuestionEntry, bias: Any) -> None:
+    entry.psycho_bias = bias
+
+
+_WIZARD_DISTRIBUTION_RULES: Sequence[WizardApplyRule] = (
+    (QuestionWizardDialog.get_results, _apply_distribution_result),
+)
+
+_WIZARD_TEXT_RULES: Sequence[WizardApplyRule] = (
+    (QuestionWizardDialog.get_text_results, _apply_text_result),
+    (QuestionWizardDialog.get_option_fill_results, _apply_option_fill_result),
+    (QuestionWizardDialog.get_text_random_modes, _apply_text_random_mode_result),
+    (QuestionWizardDialog.get_text_random_int_ranges, _apply_text_random_int_range_result),
+    (QuestionWizardDialog.get_ai_flags, _apply_ai_flag_result),
+    (QuestionWizardDialog.get_attached_select_results, _apply_attached_select_result),
+    (QuestionWizardDialog.get_multi_text_blank_modes, _apply_multi_text_blank_modes_result),
+    (
+        QuestionWizardDialog.get_multi_text_blank_int_ranges,
+        _apply_multi_text_blank_int_ranges_result,
+    ),
+    (QuestionWizardDialog.get_multi_text_blank_ai_flags, _apply_multi_text_blank_ai_flags_result),
+)
+
+_WIZARD_META_RULES: Sequence[WizardApplyRule] = (
+    (QuestionWizardDialog.get_dimensions, _apply_dimension_result),
+    (QuestionWizardDialog.get_bias_presets, _apply_bias_preset_result),
+)
 
 
 def question_summary(entry: QuestionEntry) -> str:
@@ -220,84 +327,9 @@ class DashboardEntriesMixin:
     def _apply_wizard_results(
         self, entries: List[QuestionEntry], dlg: QuestionWizardDialog
     ) -> None:
-        def _normalize_weights(raw: Any) -> Any:
-            if isinstance(raw, list) and any(isinstance(item, (list, tuple)) for item in raw):
-                cleaned: List[List[float]] = []
-                for row in raw:
-                    if not isinstance(row, (list, tuple)):
-                        continue
-                    cleaned.append([float(max(0, v)) for v in row])
-                return cleaned
-            if isinstance(raw, list):
-                return [float(max(0, v)) for v in raw]
-            return raw
-
-        updates = dlg.get_results()
-        for idx, weights in updates.items():
-            if 0 <= idx < len(entries):
-                entry = entries[idx]
-                normalized = _normalize_weights(weights)
-                entry.custom_weights = normalized
-                entry.probabilities = normalized
-                entry.distribution_mode = "custom"
-        text_updates = dlg.get_text_results()
-        for idx, texts in text_updates.items():
-            if 0 <= idx < len(entries):
-                entries[idx].texts = texts
-        option_fill_updates = dlg.get_option_fill_results()
-        for idx, option_fill_texts in option_fill_updates.items():
-            if 0 <= idx < len(entries):
-                entry = entries[idx]
-                if entry.question_type in ("single", "multiple", "dropdown"):
-                    entry.option_fill_texts = (
-                        option_fill_texts
-                        if any(text for text in option_fill_texts if text)
-                        else None
-                    )
-        random_mode_updates = dlg.get_text_random_modes()
-        for idx, random_mode in random_mode_updates.items():
-            if 0 <= idx < len(entries):
-                entry = entries[idx]
-                entry.text_random_mode = (
-                    str(random_mode or "none") if entry.question_type == "text" else "none"
-                )
-        text_random_int_range_updates = dlg.get_text_random_int_ranges()
-        for idx, int_range in text_random_int_range_updates.items():
-            if 0 <= idx < len(entries):
-                entry = entries[idx]
-                entry.text_random_int_range = int_range if entry.question_type == "text" else []
-        ai_updates = dlg.get_ai_flags()
-        for idx, enabled in ai_updates.items():
-            if 0 <= idx < len(entries):
-                entry = entries[idx]
-                entry.ai_enabled = (
-                    bool(enabled) if entry.question_type in ("text", "multi_text") else False
-                )
-        attached_select_updates = dlg.get_attached_select_results()
-        for idx, attached_configs in attached_select_updates.items():
-            if 0 <= idx < len(entries):
-                entries[idx].attached_option_selects = attached_configs
-        multi_text_blank_modes_updates = dlg.get_multi_text_blank_modes()
-        for idx, modes in multi_text_blank_modes_updates.items():
-            if 0 <= idx < len(entries):
-                entries[idx].multi_text_blank_modes = modes
-        multi_text_blank_int_range_updates = dlg.get_multi_text_blank_int_ranges()
-        for idx, int_ranges in multi_text_blank_int_range_updates.items():
-            if 0 <= idx < len(entries):
-                entries[idx].multi_text_blank_int_ranges = int_ranges
-        multi_text_blank_ai_updates = dlg.get_multi_text_blank_ai_flags()
-        for idx, flags in multi_text_blank_ai_updates.items():
-            if 0 <= idx < len(entries):
-                entries[idx].multi_text_blank_ai_flags = flags
-        dimension_updates = dlg.get_dimensions()
-        for idx, dimension in dimension_updates.items():
-            if 0 <= idx < len(entries):
-                entries[idx].dimension = dimension
-        # 存储倾向预设
-        bias_presets = dlg.get_bias_presets()
-        for idx, bias in bias_presets.items():
-            if 0 <= idx < len(entries):
-                entries[idx].psycho_bias = bias
+        for rules in (_WIZARD_DISTRIBUTION_RULES, _WIZARD_TEXT_RULES, _WIZARD_META_RULES):
+            for getter, applier in rules:
+                _apply_result_updates(entries, getter(dlg), applier)
 
     def run_question_wizard(
         self,

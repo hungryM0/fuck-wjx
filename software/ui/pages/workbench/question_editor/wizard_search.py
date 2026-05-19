@@ -439,7 +439,9 @@ class WizardSearchMixin:
             content_height += max(44, popup.sizeHintForRow(row))
         popup_height = min(320, content_height + popup.frameWidth() * 2 + 4)
         popup.resize(popup_width, max(52, popup_height))
-        popup.move(self._search_edit.mapToGlobal(QPoint(0, self._search_edit.height() + 4)))
+        search_pos = self._search_edit.mapToGlobal(QPoint(0, self._search_edit.height() + 4))
+        offset_x = max(0, (self._search_edit.width() - popup_width) // 2)
+        popup.move(search_pos.x() - offset_x, search_pos.y())
         popup.show()
         popup.raise_()
 
@@ -511,7 +513,7 @@ class WizardSearchMixin:
             shown_count = min(len(matches), 30)
             suffix = "，回车可直接跳到当前选中项" if shown_count > 0 else ""
             overflow = f"（下拉仅显示前 {shown_count} 条）" if len(matches) > shown_count else ""
-            status_text = f"匹配 {len(matches)} 题{overflow}，点下拉结果或回车跳转{suffix}"
+            status_text = f"匹配 {len(matches)} 题{overflow}，点下拉结果跳转{suffix}"
             self._set_search_status(
                 status_text,
                 "#666666",

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PySide6.QtCore import QTimer
 from qfluentwidgets import InfoBar, InfoBarPosition
+from qfluentwidgets.components.widgets.info_bar import InfoBarManager
 
 
 def show_message_bar(
@@ -24,13 +26,15 @@ def show_message_bar(
         "error": InfoBar.error,
         "info": InfoBar.info,
     }.get(kind, InfoBar.info)
-    return factory(
+    bar = factory(
         str(title or ""),
         str(message or ""),
         parent=parent,
         position=position,
         duration=duration,
     )
+    reposition_message_bar(bar)
+    return bar
 
 
 def replace_message_bar(current: Optional[InfoBar]) -> None:
@@ -38,3 +42,22 @@ def replace_message_bar(current: Optional[InfoBar]) -> None:
     if current is None:
         return
     current.close()
+
+
+def reposition_message_bar(bar: Optional[InfoBar]) -> None:
+    """让 QFluentWidgets 原生管理器在布局稳定后重新计算位置。"""
+    if bar is None:
+        return
+
+    def _reposition() -> None:
+        try:
+            parent = bar.parent()
+            if parent is None or bar.position == InfoBarPosition.NONE:
+                return
+            bar.adjustSize()
+            manager = InfoBarManager.make(bar.position)
+            bar.move(manager._pos(bar))
+        except Exception:
+            return
+
+    QTimer.singleShot(0, _reposition)

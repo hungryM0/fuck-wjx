@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import software.network.http as http_client
+from software.app.config import DEFAULT_HTTP_HEADERS
 from software.network.browser import (
     describe_playwright_startup_error,
     is_playwright_startup_environment_error,
@@ -18,12 +18,17 @@ from software.providers.errors import (
     SurveyPausedError,
     SurveyStoppedError,
 )
+from software.providers.parse_flow import (
+    build_http_browser_failure_message,
+    exception_has_winerror as _exception_has_winerror_common,
+    parse_with_http_browser_fallback,
+    walk_exception_chain as _walk_exception_chain_common,
+)
 from wjx.provider.html_parser import (
     _normalize_html_text,
     extract_survey_title_from_html,
     parse_survey_questions_from_html,
 )
-from software.app.config import DEFAULT_HTTP_HEADERS
 
 PAUSED_SURVEY_ERROR_MESSAGE = "问卷已暂停，需要前往问卷星后台重新发布"
 STOPPED_SURVEY_ERROR_MESSAGE = "问卷已停止，无法作答"
@@ -36,44 +41,20 @@ _NOT_OPEN_TIME_RE = re.compile(
 
 
 def _walk_exception_chain(exc: BaseException):
-    seen: set[int] = set()
-    current: Optional[BaseException] = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        yield current
-        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+    return _walk_exception_chain_common(exc)
 
 
 def _exception_has_winerror_10013(exc: BaseException) -> bool:
-    for current in _walk_exception_chain(exc):
-        if getattr(current, "winerror", None) == 10013:
-            return True
-    return False
+    return _exception_has_winerror_common(exc, winerror=10013)
 
 
 def _build_parser_failure_message(http_exc: Optional[BaseException], browser_exc: Optional[BaseException]) -> str:
-    if http_exc is not None and _exception_has_winerror_10013(http_exc):
-        if browser_exc is not None and is_playwright_startup_environment_error(browser_exc):
-            return (
-                "本机环境拦截了网络/本地套接字访问（WinError 10013），"
-                "程序既拿不到问卷网页，也拉不起 Playwright 浏览器。"
-                "请先检查防火墙、安全软件、系统代理或公司管控策略。"
-            )
-        return (
-            "本机环境拦截了网络套接字访问（WinError 10013），"
-            "程序还没拿到问卷网页就被系统、防火墙或安全软件卡死了。"
-        )
-    if browser_exc is not None and is_playwright_startup_environment_error(browser_exc):
-        return describe_playwright_startup_error(browser_exc)
-    if http_exc is not None:
-        text = str(http_exc).strip()
-        if text:
-            return f"无法获取问卷网页：{text}"
-    if browser_exc is not None:
-        text = str(browser_exc).strip()
-        if text:
-            return f"无法启动解析浏览器：{text}"
-    return "无法打开问卷链接，请确认链接有效且网络正常"
+    return build_http_browser_failure_message(
+        http_exc=http_exc,
+        browser_exc=browser_exc,
+        browser_environment_error_checker=is_playwright_startup_environment_error,
+        browser_environment_error_formatter=describe_playwright_startup_error,
+    )
 
 
 def is_paused_survey_page(html: str) -> bool:
@@ -175,7 +156,24 @@ def build_not_open_survey_message(html: str) -> Optional[str]:
     return NOT_OPEN_SURVEY_ERROR_MESSAGE
 
 
-async def _load_rendered_wjx_parse_result(url: str) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+def _raise_wjx_page_state_errors(html: str) -> None:
+    if is_paused_survey_page(html):
+        raise SurveyPausedError(PAUSED_SURVEY_ERROR_MESSAGE)
+    if is_stopped_survey_page(html):
+        raise SurveyStoppedError(STOPPED_SURVEY_ERROR_MESSAGE)
+    if is_enterprise_unavailable_survey_page(html):
+        raise SurveyEnterpriseUnavailableError(ENTERPRISE_UNAVAILABLE_SURVEY_ERROR_MESSAGE)
+    not_open_message = build_not_open_survey_message(html)
+    if not_open_message:
+        raise SurveyNotOpenError(not_open_message)
+
+
+def _parse_wjx_html(html: str) -> Tuple[List[Dict[str, Any]], str]:
+    _raise_wjx_page_state_errors(html)
+    return parse_survey_questions_from_html(html), extract_survey_title_from_html(html) or ""
+
+
+async def _load_rendered_wjx_parse_result(url: str) -> Tuple[List[Dict[str, Any]], str]:
     async with acquire_parse_browser_session() as driver:
         await driver.get(url, timeout=20000, wait_until="domcontentloaded")
         page = await driver.page()
@@ -195,72 +193,31 @@ async def _load_rendered_wjx_parse_result(url: str) -> Tuple[Optional[List[Dict[
                 except Exception:
                     pass
         page_source = await driver.page_source()
-        if is_paused_survey_page(page_source):
-            raise SurveyPausedError(PAUSED_SURVEY_ERROR_MESSAGE)
-        if is_stopped_survey_page(page_source):
-            raise SurveyStoppedError(STOPPED_SURVEY_ERROR_MESSAGE)
-        if is_enterprise_unavailable_survey_page(page_source):
-            raise SurveyEnterpriseUnavailableError(ENTERPRISE_UNAVAILABLE_SURVEY_ERROR_MESSAGE)
-        not_open_message = build_not_open_survey_message(page_source)
-        if not_open_message:
-            raise SurveyNotOpenError(not_open_message)
-        return parse_survey_questions_from_html(page_source), extract_survey_title_from_html(page_source) or ""
+        return _parse_wjx_html(page_source)
 
 
 async def parse_wjx_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
-    info: Optional[List[Dict[str, Any]]] = None
-    title = ""
-    http_exc: Optional[BaseException] = None
-    browser_exc: Optional[BaseException] = None
-
-    try:
+    async def _load_http_parse_result() -> Tuple[List[Dict[str, Any]], str]:
         resp = await http_client.aget(url, timeout=12, headers=DEFAULT_HTTP_HEADERS, proxies={})
         resp.raise_for_status()
-        html = resp.text
-        if is_paused_survey_page(html):
-            raise SurveyPausedError(PAUSED_SURVEY_ERROR_MESSAGE)
-        if is_stopped_survey_page(html):
-            raise SurveyStoppedError(STOPPED_SURVEY_ERROR_MESSAGE)
-        if is_enterprise_unavailable_survey_page(html):
-            raise SurveyEnterpriseUnavailableError(ENTERPRISE_UNAVAILABLE_SURVEY_ERROR_MESSAGE)
-        not_open_message = build_not_open_survey_message(html)
-        if not_open_message:
-            raise SurveyNotOpenError(not_open_message)
-        info = parse_survey_questions_from_html(html)
-        title = extract_survey_title_from_html(html) or title
-    except SurveyPausedError:
-        raise
-    except SurveyStoppedError:
-        raise
-    except SurveyEnterpriseUnavailableError:
-        raise
-    except SurveyNotOpenError:
-        raise
-    except Exception as exc:
-        http_exc = exc
-        logging.exception("使用 httpx 获取问卷失败，url=%r", url)
-        info = None
+        return _parse_wjx_html(resp.text)
 
-    if info is None:
-        try:
-            info, rendered_title = await _load_rendered_wjx_parse_result(url)
-            title = rendered_title or title
-        except SurveyPausedError:
-            raise
-        except SurveyStoppedError:
-            raise
-        except SurveyEnterpriseUnavailableError:
-            raise
-        except SurveyNotOpenError:
-            raise
-        except Exception as exc:
-            browser_exc = exc
-            logging.exception("使用 Playwright 获取问卷失败，url=%r", url)
-            info = None
-
-    if not info:
-        raise RuntimeError(_build_parser_failure_message(http_exc, browser_exc))
-
+    info, title = await parse_with_http_browser_fallback(
+        url=url,
+        http_loader=_load_http_parse_result,
+        browser_loader=lambda: _load_rendered_wjx_parse_result(url),
+        failure_message_builder=_build_parser_failure_message,
+        http_log_message="使用 httpx 获取问卷失败，url=%r",
+        browser_log_message="使用 Playwright 获取问卷失败，url=%r",
+        reraised_exceptions=(
+            SurveyPausedError,
+            SurveyStoppedError,
+            SurveyEnterpriseUnavailableError,
+            SurveyNotOpenError,
+        ),
+        should_fallback=lambda result: result is None or result[0] is None,
+        is_invalid_result=lambda result: result is None or not result[0],
+    )
     normalized_title = _normalize_html_text(title) if title else ""
     return info, normalized_title
 

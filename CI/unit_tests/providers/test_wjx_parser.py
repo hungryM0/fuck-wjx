@@ -216,6 +216,27 @@ class WjxParserTests:
         assert aget.await_args.kwargs.get("proxies") == {}
 
     @pytest.mark.asyncio
+    async def test_parse_wjx_survey_does_not_fall_back_to_browser_when_http_parse_result_is_empty(self, patch_attrs) -> None:
+        browser_used = {"value": False}
+
+        @asynccontextmanager
+        async def fake_pool():
+            browser_used["value"] = True
+            yield _FakeBrowserDriver("<html><body>browser-ok</body></html>")
+
+        patch_attrs(
+            (wjx_parser.http_client, "aget", AsyncMock(return_value=_FakeHttpResponse("<html><body>http-empty</body></html>"))),
+            (wjx_parser, "parse_survey_questions_from_html", lambda _html: []),
+            (wjx_parser, "extract_survey_title_from_html", lambda _html: "HTTP 标题"),
+            (wjx_parser, "acquire_parse_browser_session", fake_pool),
+        )
+
+        with pytest.raises(RuntimeError, match="无法打开问卷链接"):
+            await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
+
+        assert not browser_used["value"]
+
+    @pytest.mark.asyncio
     async def test_parse_wjx_survey_keeps_http_fast_path_even_when_static_page_has_hidden_questions(self, patch_attrs) -> None:
         static_html = """
         <html><body>
@@ -245,6 +266,25 @@ class WjxParserTests:
 
         assert info == [{"num": 23, "display_num": 22, "title": "Q23", "type_code": "2"}]
         assert title == "标题"
+        assert not browser_used["value"]
+
+    @pytest.mark.asyncio
+    async def test_parse_wjx_survey_skips_browser_fallback_for_paused_gate_page(self, patch_attrs) -> None:
+        browser_used = {"value": False}
+
+        @asynccontextmanager
+        async def fake_pool():
+            browser_used["value"] = True
+            yield _FakeBrowserDriver("<html></html>")
+
+        patch_attrs(
+            (wjx_parser.http_client, "aget", AsyncMock(return_value=_FakeHttpResponse("<html><body>问卷已暂停，不能填写</body></html>"))),
+            (wjx_parser, "acquire_parse_browser_session", fake_pool),
+        )
+
+        with pytest.raises(wjx_parser.SurveyPausedError, match="问卷已暂停"):
+            await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
+
         assert not browser_used["value"]
 
     @pytest.mark.asyncio

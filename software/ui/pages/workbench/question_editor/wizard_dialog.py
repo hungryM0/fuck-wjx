@@ -1,12 +1,11 @@
 """配置向导弹窗。"""
 
 import copy
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QTimer, Qt, QSize
 from PySide6.QtGui import QGuiApplication, QShowEvent
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QDialog,
     QHBoxLayout,
     QSizePolicy,
@@ -19,25 +18,15 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
-    LineEdit,
     PrimaryPushButton,
     PushButton,
-    RadioButton,
     ScrollArea,
     SearchLineEdit,
-    SwitchButton,
     TreeWidget,
 )
 
-from software.app.config import DEFAULT_FILL_TEXT
 from software.core.questions.config import QuestionEntry
-from software.core.questions.utils import (
-    OPTION_FILL_AI_TOKEN,
-    build_random_int_token,
-    serialize_random_int_range,
-)
 from software.providers.contracts import SurveyQuestionMeta
-from software.ui.widgets.no_wheel import NoWheelSlider
 
 from .utils import (
     _apply_label_color,
@@ -48,16 +37,10 @@ from .utils import (
 from .constants import _get_entry_type_label
 from .wizard_cards import WizardCardsMixin
 from .wizard_logic_tree import build_logic_tree_state
+from . import wizard_result_builder
 from .wizard_search import WizardSearchMixin
-from .wizard_sections import (
-    WizardSectionsMixin,
-    _TEXT_RANDOM_ID_CARD_TOKEN,
-    _TEXT_RANDOM_MOBILE_TOKEN,
-    _TEXT_RANDOM_NAME_TOKEN,
-    _TEXT_RANDOM_NONE,
-)
-
-TextEditsValue = List[LineEdit] | List[List[LineEdit]]
+from .wizard_sections import WizardSectionsMixin
+from .wizard_state import WizardRuntimeState, bind_runtime_state
 
 _VIEW_LOGIC = "logic"
 _VIEW_SEQUENTIAL = "sequential"
@@ -104,27 +87,7 @@ class QuestionWizardDialog(
         self._logic_tree_state = build_logic_tree_state(self.info)
         self.reliability_mode_enabled = reliability_mode_enabled
 
-        self.slider_map: Dict[int, List[NoWheelSlider]] = {}
-        self.matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]] = {}
-        self.text_edit_map: Dict[int, TextEditsValue] = {}
-        self.ai_check_map: Dict[int, SwitchButton] = {}
-        self.ai_label_map: Dict[int, BodyLabel] = {}
-        self.text_container_map: Dict[int, QWidget] = {}
-        self.text_add_btn_map: Dict[int, PushButton] = {}
-        self.text_random_mode_map: Dict[int, str] = {}
-        self.text_random_list_radio_map: Dict[int, RadioButton] = {}
-        self.text_random_name_check_map: Dict[int, RadioButton] = {}
-        self.text_random_mobile_check_map: Dict[int, RadioButton] = {}
-        self.text_random_id_card_check_map: Dict[int, RadioButton] = {}
-        self.text_random_integer_check_map: Dict[int, RadioButton] = {}
-        self.text_random_int_min_edit_map: Dict[int, LineEdit] = {}
-        self.text_random_int_max_edit_map: Dict[int, LineEdit] = {}
-        self.text_random_group_map: Dict[int, QButtonGroup] = {}
-        self.multi_text_blank_integer_range_edits: Dict[int, List[Tuple[LineEdit, LineEdit]]] = {}
-        self.bias_preset_map: Dict[int, Any] = {}
-        self.attached_select_slider_map: Dict[int, List[Dict[str, Any]]] = {}
-        self.option_fill_edit_map: Dict[int, Dict[int, LineEdit]] = {}
-        self.option_fill_state_map: Dict[int, Dict[int, Dict[str, Any]]] = {}
+        bind_runtime_state(self, WizardRuntimeState())
         self._entry_snapshots: List[QuestionEntry] = [copy.deepcopy(entry) for entry in entries]
         self._question_cards: Dict[int, QWidget] = {}
         self._visible_indices: List[int] = list(range(len(self.entries)))
@@ -170,6 +133,7 @@ class QuestionWizardDialog(
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(12)
 
+        top_row.addStretch(1)
         search_edit = SearchLineEdit(self)
         search_edit.setPlaceholderText("搜索题号、题干、选项、逻辑摘要")
         search_edit.setFixedWidth(360)
@@ -179,7 +143,6 @@ class QuestionWizardDialog(
         self._search_edit = search_edit
         self._configure_search_popup(search_edit)
         top_row.addWidget(search_edit)
-
         top_row.addStretch(1)
 
         layout.addLayout(top_row)
@@ -608,203 +571,37 @@ class QuestionWizardDialog(
         super().reject()
 
     def get_results(self) -> Dict[int, Any]:
-        result: Dict[int, Any] = {}
-        for idx, sliders in self.slider_map.items():
-            weights = [max(0, s.value()) for s in sliders]
-            if weights and not any(weight > 0 for weight in weights):
-                raise ValueError(f"{self._format_question_label(idx)}的选项配比不能全为0。")
-            result[idx] = weights
-
-        for idx, row_sliders in self.matrix_row_slider_map.items():
-            row_weights: List[List[int]] = []
-            for row_idx, row in enumerate(row_sliders):
-                weights = [max(0, s.value()) for s in row]
-                if weights and not any(weight > 0 for weight in weights):
-                    question_label = self._format_question_label(idx)
-                    raise ValueError(f"{question_label}的第{row_idx + 1}行配比不能全为0。")
-                row_weights.append(weights)
-            result[idx] = row_weights
-        return result
+        return wizard_result_builder.get_results(self)
 
     def get_text_results(self) -> Dict[int, List[str]]:
-        from software.core.questions.text_shared import MULTI_TEXT_DELIMITER
-
-        result: Dict[int, List[str]] = {}
-        for idx, edits in self.text_edit_map.items():
-            if edits and isinstance(edits[0], list):
-                texts = []
-                matrix_edits = cast(List[List[LineEdit]], edits)
-                for row_edits in matrix_edits:
-                    row_values = [edit.text().strip() for edit in row_edits]
-                    if not any(row_values):
-                        continue
-                    merged = MULTI_TEXT_DELIMITER.join(row_values)
-                    if merged:
-                        texts.append(merged)
-            else:
-                flat_edits = cast(List[LineEdit], edits)
-                texts = [e.text().strip() for e in flat_edits if e.text().strip()]
-            if not texts:
-                texts = [DEFAULT_FILL_TEXT]
-            result[idx] = texts
-        return result
+        return wizard_result_builder.get_text_results(self)
 
     def get_option_fill_results(self) -> Dict[int, List[Optional[str]]]:
-        result: Dict[int, List[Optional[str]]] = {}
-        for idx, state_map in self.option_fill_state_map.items():
-            if not state_map:
-                continue
-            info = self._get_entry_info(idx)
-            option_count = int(info.get("options") or 0)
-            max_index = max(state_map.keys()) if state_map else -1
-            normalized_count = max(option_count, max_index + 1, 0)
-            values: List[Optional[str]] = [None] * normalized_count
-            for option_index, state in state_map.items():
-                ai_cb = state.get("ai_cb")
-                if ai_cb is not None and ai_cb.isChecked():
-                    text: Optional[str] = OPTION_FILL_AI_TOKEN
-                else:
-                    group = state.get("group")
-                    checked_id = group.checkedId() if group is not None else 0
-                    if checked_id == 1:
-                        text = _TEXT_RANDOM_NAME_TOKEN
-                    elif checked_id == 2:
-                        text = _TEXT_RANDOM_MOBILE_TOKEN
-                    elif checked_id == 3:
-                        text = _TEXT_RANDOM_ID_CARD_TOKEN
-                    elif checked_id == 4:
-                        min_edit = state.get("min_edit")
-                        max_edit = state.get("max_edit")
-                        text = build_random_int_token(
-                            min_edit.text().strip() if min_edit is not None else "",
-                            max_edit.text().strip() if max_edit is not None else "",
-                        )
-                    else:
-                        edit = state.get("edit")
-                        raw_value = edit.text().strip() if edit is not None else ""
-                        text = raw_value or None
-                if 0 <= option_index < normalized_count:
-                    values[option_index] = text
-            result[idx] = values
-        return result
+        return wizard_result_builder.get_option_fill_results(self)
 
     def get_text_random_modes(self) -> Dict[int, str]:
-        return dict(self.text_random_mode_map)
+        return wizard_result_builder.get_text_random_modes(self)
 
     def get_text_random_int_ranges(self) -> Dict[int, List[int]]:
-        result: Dict[int, List[int]] = {}
-        for idx, min_edit in self.text_random_int_min_edit_map.items():
-            max_edit = self.text_random_int_max_edit_map.get(idx)
-            raw_range = [
-                min_edit.text().strip(),
-                max_edit.text().strip() if max_edit else "",
-            ]
-            result[idx] = serialize_random_int_range(raw_range)
-        return result
+        return wizard_result_builder.get_text_random_int_ranges(self)
 
     def get_multi_text_blank_modes(self) -> Dict[int, List[str]]:
-        from .wizard_sections import (
-            _TEXT_RANDOM_ID_CARD,
-            _TEXT_RANDOM_INTEGER,
-            _TEXT_RANDOM_MOBILE,
-            _TEXT_RANDOM_NAME,
-            _TEXT_RANDOM_NONE,
-        )
-
-        result: Dict[int, List[str]] = {}
-        if not hasattr(self, "multi_text_blank_radio_groups"):
-            return result
-        for idx, groups in self.multi_text_blank_radio_groups.items():
-            modes: List[str] = []
-            for group in groups:
-                checked_id = group.checkedId()
-                if checked_id == 1:
-                    modes.append(_TEXT_RANDOM_NAME)
-                elif checked_id == 2:
-                    modes.append(_TEXT_RANDOM_MOBILE)
-                elif checked_id == 3:
-                    modes.append(_TEXT_RANDOM_ID_CARD)
-                elif checked_id == 4:
-                    modes.append(_TEXT_RANDOM_INTEGER)
-                else:
-                    modes.append(_TEXT_RANDOM_NONE)
-            result[idx] = modes
-        return result
+        return wizard_result_builder.get_multi_text_blank_modes(self)
 
     def get_multi_text_blank_int_ranges(self) -> Dict[int, List[List[int]]]:
-        result: Dict[int, List[List[int]]] = {}
-        for idx, edit_pairs in self.multi_text_blank_integer_range_edits.items():
-            ranges: List[List[int]] = []
-            for min_edit, max_edit in edit_pairs:
-                ranges.append(
-                    serialize_random_int_range([min_edit.text().strip(), max_edit.text().strip()])
-                )
-            result[idx] = ranges
-        return result
+        return wizard_result_builder.get_multi_text_blank_int_ranges(self)
 
     def get_multi_text_blank_ai_flags(self) -> Dict[int, List[bool]]:
-        result: Dict[int, List[bool]] = {}
-        if not hasattr(self, "multi_text_blank_ai_checkboxes"):
-            return result
-        for idx, checkboxes in self.multi_text_blank_ai_checkboxes.items():
-            result[idx] = [cb.isChecked() for cb in checkboxes]
-        return result
+        return wizard_result_builder.get_multi_text_blank_ai_flags(self)
 
     def get_ai_flags(self) -> Dict[int, bool]:
-        result: Dict[int, bool] = {}
-        for idx, cb in self.ai_check_map.items():
-            random_mode = self.text_random_mode_map.get(idx, _TEXT_RANDOM_NONE)
-            result[idx] = False if random_mode != _TEXT_RANDOM_NONE else cb.isChecked()
-        return result
+        return wizard_result_builder.get_ai_flags(self)
 
     def get_attached_select_results(self) -> Dict[int, List[Dict[str, Any]]]:
-        result: Dict[int, List[Dict[str, Any]]] = {}
-        for idx, config_items in self.attached_select_slider_map.items():
-            serialized_items: List[Dict[str, Any]] = []
-            for item in config_items:
-                sliders = item.get("sliders") or []
-                weights = [max(0, slider.value()) for slider in sliders]
-                if weights and not any(weight > 0 for weight in weights):
-                    option_text = str(item.get("option_text") or "").strip()
-                    if not option_text:
-                        option_text = f"第{int(item.get('option_index', 0)) + 1}项"
-                    raise ValueError(
-                        f"{self._format_question_label(idx)}里“{option_text}”对应的嵌入式下拉配比不能全为0。"
-                    )
-                serialized_items.append(
-                    {
-                        "option_index": int(item.get("option_index", 0)),
-                        "option_text": str(item.get("option_text") or "").strip(),
-                        "select_options": list(item.get("select_options") or []),
-                        "weights": weights,
-                    }
-                )
-            result[idx] = serialized_items
-        return result
+        return wizard_result_builder.get_attached_select_results(self)
 
     def get_bias_presets(self) -> Dict[int, Any]:
-        result: Dict[int, Any] = {}
-        for idx, seg in self.bias_preset_map.items():
-            if isinstance(seg, list):
-                result[idx] = [str(self._current_bias_value(s)) for s in seg]
-            else:
-                result[idx] = str(self._current_bias_value(seg))
-        return result
-
-    @staticmethod
-    def _current_bias_value(widget: Any) -> str:
-        if hasattr(widget, "currentData"):
-            return str(widget.currentData() or "custom")
-        if hasattr(widget, "currentRouteKey"):
-            return str(widget.currentRouteKey() or "custom")
-        return "custom"
+        return wizard_result_builder.get_bias_presets(self)
 
     def get_dimensions(self) -> Dict[int, Optional[str]]:
-        result: Dict[int, Optional[str]] = {}
-        for idx, entry in enumerate(self.entries):
-            try:
-                raw = str(getattr(entry, "dimension", "") or "").strip()
-            except Exception:
-                raw = ""
-            result[idx] = raw or None
-        return result
+        return wizard_result_builder.get_dimensions(self)

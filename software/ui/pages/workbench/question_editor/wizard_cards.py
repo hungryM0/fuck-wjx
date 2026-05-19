@@ -17,7 +17,6 @@ from qfluentwidgets import (
 )
 
 from software.core.questions.config import QuestionEntry
-from software.core.questions.utils import try_parse_random_int_range
 from software.providers.contracts import (
     SurveyQuestionMeta,
     ensure_survey_question_meta,
@@ -27,6 +26,11 @@ from software.ui.widgets.no_wheel import NoWheelSlider
 from .constants import _get_entry_type_label
 from .question_media_preview import QuestionMediaStrip
 from .utils import _apply_label_color, _shorten_text, resolve_display_question_num
+from .wizard_validation import (
+    validate_before_accept,
+    validate_non_zero_weights,
+    validate_random_integer_inputs,
+)
 
 
 class WizardCardsMixin:
@@ -270,124 +274,13 @@ class WizardCardsMixin:
             QTimer.singleShot(0, widget.setFocus)
 
     def _validate_random_integer_inputs(self) -> bool:
-        for idx, mode in self.text_random_mode_map.items():
-            if str(mode or "").strip().lower() != "integer":
-                continue
-            min_edit = self.text_random_int_min_edit_map.get(idx)
-            max_edit = self.text_random_int_max_edit_map.get(idx)
-            raw_range = [
-                min_edit.text().strip() if min_edit is not None else "",
-                max_edit.text().strip() if max_edit is not None else "",
-            ]
-            if try_parse_random_int_range(raw_range) is None:
-                question_label = self._format_question_label(idx)
-                self._show_validation_error(
-                    f"{question_label}的随机整数范围未填写完整，请输入最小值和最大值。",
-                    idx,
-                    min_edit or max_edit,
-                )
-                return False
-
-        for idx, modes in self.get_multi_text_blank_modes().items():
-            range_edits = self.multi_text_blank_integer_range_edits.get(idx, [])
-            for blank_idx, mode in enumerate(modes):
-                if str(mode or "").strip().lower() != "integer":
-                    continue
-                min_edit = range_edits[blank_idx][0] if blank_idx < len(range_edits) else None
-                max_edit = range_edits[blank_idx][1] if blank_idx < len(range_edits) else None
-                raw_range = [
-                    min_edit.text().strip() if min_edit is not None else "",
-                    max_edit.text().strip() if max_edit is not None else "",
-                ]
-                if try_parse_random_int_range(raw_range) is None:
-                    question_label = self._format_question_label(idx)
-                    self._show_validation_error(
-                        f"{question_label}的填空{blank_idx + 1}随机整数范围未填写完整，请输入最小值和最大值。",
-                        idx,
-                        min_edit or max_edit,
-                    )
-                    return False
-
-        for idx, option_states in self.option_fill_state_map.items():
-            for option_idx, state in option_states.items():
-                ai_cb = state.get("ai_cb")
-                if ai_cb is not None and ai_cb.isChecked():
-                    continue
-                group = state.get("group")
-                if group is None or group.checkedId() != 4:
-                    continue
-                min_edit = state.get("min_edit")
-                max_edit = state.get("max_edit")
-                raw_range = [
-                    min_edit.text().strip() if min_edit is not None else "",
-                    max_edit.text().strip() if max_edit is not None else "",
-                ]
-                if try_parse_random_int_range(raw_range) is None:
-                    question_label = self._format_question_label(idx)
-                    self._show_validation_error(
-                        f"{question_label}的第{option_idx + 1}个附加填空随机整数范围未填写完整，请输入最小值和最大值。",
-                        idx,
-                        min_edit or max_edit,
-                    )
-                    return False
-        return True
+        return validate_random_integer_inputs(self)
 
     def _validate_non_zero_weights(self) -> bool:
-        for idx, sliders in self.slider_map.items():
-            weights = [max(0, slider.value()) for slider in sliders]
-            if weights and not any(weight > 0 for weight in weights):
-                self._show_validation_error(
-                    f"{self._format_question_label(idx)}的选项配比不能全为0，请至少保留一个大于0的值。",
-                    idx,
-                    sliders[0],
-                )
-                return False
-
-        for idx, row_sliders in self.matrix_row_slider_map.items():
-            info = self._get_entry_info(idx)
-            row_texts = info.get("row_texts")
-            for row_idx, row in enumerate(row_sliders):
-                weights = [max(0, slider.value()) for slider in row]
-                if not weights or any(weight > 0 for weight in weights):
-                    continue
-                row_name = f"第{row_idx + 1}行"
-                if isinstance(row_texts, list) and row_idx < len(row_texts):
-                    row_text = str(row_texts[row_idx] or "").strip()
-                    if row_text:
-                        row_name = f"{row_name}（{_shorten_text(row_text, 24)}）"
-                self._show_validation_error(
-                    f"{self._format_question_label(idx)}的{row_name}配比不能全为0，请至少保留一个大于0的值。",
-                    idx,
-                    row[0],
-                )
-                return False
-
-        for idx, config_items in self.attached_select_slider_map.items():
-            for item in config_items:
-                sliders = item.get("sliders") or []
-                if not sliders:
-                    continue
-                weights = [max(0, slider.value()) for slider in sliders]
-                if any(weight > 0 for weight in weights):
-                    continue
-                option_text = str(item.get("option_text") or "").strip()
-                if not option_text:
-                    option_text = f"第{int(item.get('option_index', 0)) + 1}项"
-                question_label = self._format_question_label(idx)
-                option_label = _shorten_text(option_text, 28)
-                self._show_validation_error(
-                    f"{question_label}里“{option_label}”对应的嵌入式下拉配比不能全为0，请至少保留一个大于0的值。",
-                    idx,
-                    sliders[0],
-                )
-                return False
-
-        return True
+        return validate_non_zero_weights(self)
 
     def accept(self) -> None:
-        if not self._validate_random_integer_inputs():
-            return
-        if not self._validate_non_zero_weights():
+        if not validate_before_accept(self):
             return
         cast(Any, super()).accept()
 
