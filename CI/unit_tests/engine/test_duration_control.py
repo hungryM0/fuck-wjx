@@ -144,3 +144,34 @@ class DurationControlTests:
 
         assert not await duration_control.is_survey_completion_page(driver)
         assert any("document.body && document.body.innerText" in script for script in driver.scripts)
+
+    @pytest.mark.asyncio
+    async def test_completion_page_retries_navigation_transient_error_without_warning(self, patch_attrs) -> None:
+        class _NavigatingDriver(_Driver):
+            def __init__(self) -> None:
+                super().__init__(page_text="感谢您的参与", action_visible=False)
+                self.calls = 0
+
+            async def execute_script(self, script: str):
+                self.calls += 1
+                if "innerText" in script and self.calls == 1:
+                    raise RuntimeError(
+                        "Page.evaluate: Execution context was destroyed, most likely because of a navigation"
+                    )
+                return await super().execute_script(script)
+
+        warnings: list[str] = []
+
+        async def _no_sleep(_stop_signal, _seconds: float) -> bool:
+            return False
+
+        patch_attrs(
+            (duration_control, "sleep_or_stop", _no_sleep),
+            (duration_control, "log_suppressed_exception", lambda context, *_args, **_kwargs: warnings.append(context)),
+        )
+
+        driver = _NavigatingDriver()
+
+        assert await duration_control.is_survey_completion_page(driver)
+        assert driver.calls >= 2
+        assert warnings == []

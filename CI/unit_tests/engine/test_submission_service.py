@@ -118,6 +118,31 @@ class SubmissionServiceTests:
         stop_policy.record_failure.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_finalize_after_submit_uses_conservative_wjx_completion_wait(self, make_mock_event, make_stop_policy_mock) -> None:
+        config = ExecutionConfig(headless_mode=False, survey_provider="wjx")
+        state = ExecutionState(config=config)
+        service = SubmissionService(config, state, make_stop_policy_mock())
+        stop_signal = make_mock_event()
+
+        with (
+            patch("software.core.engine.submission_service._provider_submission_requires_verification", new=AsyncMock(return_value=False)),
+            patch("software.core.engine.submission_service._provider_wait_for_submission_verification", new=AsyncMock(return_value=False)),
+            patch.object(service, "_detect_completion_once", new=AsyncMock(return_value=False)),
+            patch.object(service, "_wait_for_completion_page", new=AsyncMock(return_value=True)) as wait_mock,
+            patch("software.core.engine.submission_service.random.uniform", return_value=0.2),
+        ):
+            outcome = await service.finalize_after_submit(
+                _FakeDriver("https://example.com/form"),
+                stop_signal=stop_signal,
+                gui_instance=None,
+                thread_name="Worker-1",
+            )
+
+        assert outcome.status == "success"
+        wait_mock.assert_awaited_once()
+        assert wait_mock.await_args.args[2] >= 5.0
+
+    @pytest.mark.asyncio
     async def test_finalize_after_submit_reports_submission_verification(self, make_mock_event, make_stop_policy_mock) -> None:
         config = ExecutionConfig(survey_provider="qq")
         state = ExecutionState(config=config)

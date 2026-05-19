@@ -91,11 +91,14 @@ class ProxyPoolTests:
         assert not pool.proxy_lease_has_sufficient_ttl(ProxyLease(address="x", expire_ts=120.0), required_ttl_seconds=30)
 
     def test_proxy_responsive_skips_official_source_and_checks_custom_source(self, patch_attrs) -> None:
+        log_messages: list[str] = []
         patch_attrs(
             (pool, "get_proxy_source", lambda: pool.PROXY_SOURCE_DEFAULT),
             (pool, "is_official_proxy_source", lambda _source: True),
+            (pool.logging, "info", lambda message, *args, **_kwargs: log_messages.append(str(message % args if args else message))),
         )
         assert pool.is_proxy_responsive("1.1.1.1:8000", skip_for_default=True)
+        assert log_messages == []
 
         calls: list[dict[str, object]] = []
 

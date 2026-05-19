@@ -60,15 +60,8 @@ class PageLoaderTests:
         loading = PageLoadProbeResult(PAGE_LOAD_PROBE_PROXY_UNUSABLE, detail="page_still_loading")
         hard_error = PageLoadProbeResult(PAGE_LOAD_PROBE_PROXY_UNUSABLE, detail="proxy_error_page")
 
-        assert page_loader.should_delay_random_proxy_reload(loading)
-        assert not page_loader.should_delay_random_proxy_reload(hard_error)
-        assert page_loader.should_grant_random_proxy_loading_grace(loading, None)
-        assert page_loader.should_grant_random_proxy_loading_grace(loading, RuntimeError("normal timeout"))
-        assert not page_loader.should_grant_random_proxy_loading_grace(
-            loading,
-            RuntimeError("ERR_PROXY_CONNECTION_FAILED"),
-        )
-        assert not page_loader.should_grant_random_proxy_loading_grace(hard_error, None)
+        assert page_loader.should_keep_waiting_random_proxy_page(loading)
+        assert not page_loader.should_keep_waiting_random_proxy_page(hard_error)
 
     @pytest.mark.asyncio
     async def test_load_survey_page_succeeds_first_try_and_retries_normal_failure(self, monkeypatch) -> None:
@@ -137,22 +130,34 @@ class PageLoaderTests:
         assert len(driver.calls) == 1
 
     @pytest.mark.asyncio
-    async def test_random_proxy_fallback_and_final_failure_paths(self) -> None:
+    async def test_random_proxy_navigation_failure_marks_proxy_error_without_reload(self) -> None:
         driver = _AsyncDriver([RuntimeError("commit failed")])
+
+        with pytest.raises(ProxyConnectionError, match="commit failed"):
+            await page_loader.load_survey_page_with_random_proxy(driver, _config())
+
+        assert len(driver.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_random_proxy_slow_page_keeps_waiting_without_reload(self) -> None:
+        driver = _AsyncDriver()
+        probe_calls: list[dict] = []
         results = iter(
             [
-                PageLoadProbeResult(PAGE_LOAD_PROBE_PROXY_UNUSABLE, detail="no_answerable_signal", retryable=True),
-                PageLoadProbeResult(PAGE_LOAD_PROBE_PROXY_UNUSABLE, detail="proxy_error_page", retryable=False),
+                PageLoadProbeResult(PAGE_LOAD_PROBE_PROXY_UNUSABLE, detail="blank_page", retryable=True),
+                PageLoadProbeResult(PAGE_LOAD_PROBE_PROXY_UNUSABLE, detail="page_still_loading", retryable=True),
+                PageLoadProbeResult(PAGE_LOAD_PROBE_ANSWERABLE, detail="ready"),
             ]
         )
 
-        async def _probe(_driver, **_kwargs):
+        async def _probe(_driver, **kwargs):
+            probe_calls.append(kwargs)
             return next(results)
 
-        with pytest.raises(ProxyConnectionError, match="proxy_error_page"):
-            await page_loader.load_survey_page_with_random_proxy(driver, _config(), probe_waiter=_probe)
+        await page_loader.load_survey_page_with_random_proxy(driver, _config(), probe_waiter=_probe)
 
-        assert len(driver.calls) == 2
+        assert len(driver.calls) == 1
+        assert probe_calls[-1]["timeout_ms"] == page_loader.RANDOM_PROXY_SLOW_PROBE_TIMEOUT_MS
 
     @pytest.mark.asyncio
     async def test_load_survey_page_delegates_random_proxy_for_wjx(self) -> None:

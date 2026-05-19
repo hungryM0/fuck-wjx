@@ -31,6 +31,10 @@ from software.providers.registry import (
     wait_for_submission_verification as _provider_wait_for_submission_verification,
 )
 
+_WJX_POST_SUBMIT_MIN_WAIT_SECONDS = 5.0
+_NON_WJX_POST_SUBMIT_MIN_WAIT_SECONDS = 3.0
+_RECOVERY_POST_SUBMIT_MIN_WAIT_SECONDS = 5.0
+
 
 @dataclass(frozen=True)
 class SubmissionOutcome:
@@ -251,7 +255,7 @@ class SubmissionService:
         if self._is_wjx_provider():
             if await self._detect_completion_once(driver):
                 return await self._build_success_outcome(driver, stop_signal, thread_name=thread_name)
-            wait_seconds = max(1.0, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 2.0)
+            wait_seconds = max(_WJX_POST_SUBMIT_MIN_WAIT_SECONDS, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 2.0)
         else:
             verification_outcome = await self._check_submission_verification_after_submit(
                 driver,
@@ -268,7 +272,7 @@ class SubmissionService:
             ):
                 return await self._handle_detected_submission_verification(driver, stop_signal, gui_instance, thread_name=thread_name)
 
-            wait_seconds = max(3.0, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 6.0)
+            wait_seconds = max(_NON_WJX_POST_SUBMIT_MIN_WAIT_SECONDS, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 6.0)
 
         poll_interval = max(0.05, float(POST_SUBMIT_URL_POLL_INTERVAL or 0.1))
         completion_detected = await self._wait_for_completion_page(driver, stop_signal, wait_seconds, poll_interval)
@@ -298,7 +302,7 @@ class SubmissionService:
                 thread_name=thread_name,
             )
             if recovered and not stop_signal.is_set():
-                recovery_wait_seconds = max(2.0, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 4.0)
+                recovery_wait_seconds = max(_RECOVERY_POST_SUBMIT_MIN_WAIT_SECONDS, float(POST_SUBMIT_URL_MAX_WAIT or 0.0) * 4.0)
                 recovery_poll = max(0.05, float(POST_SUBMIT_URL_POLL_INTERVAL or 0.1))
                 completion_detected = await self._wait_for_completion_page(
                     driver,

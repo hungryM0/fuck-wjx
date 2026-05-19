@@ -23,9 +23,7 @@ RANDOM_PROXY_FAST_COMMIT_TIMEOUT_MS = 8000
 RANDOM_PROXY_FAST_PROBE_TIMEOUT_MS = 2500
 RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS = 0.25
 RANDOM_PROXY_FAST_LOADING_GRACE_PROBE_TIMEOUT_MS = 4000
-RANDOM_PROXY_FALLBACK_DOM_TIMEOUT_MS = 6000
-RANDOM_PROXY_FALLBACK_PROBE_TIMEOUT_MS = 1500
-RANDOM_PROXY_LOADING_GRACE_PROBE_TIMEOUT_MS = 4000
+RANDOM_PROXY_SLOW_PROBE_TIMEOUT_MS = 10000
 PAGE_LOAD_RETRY_DELAYS_SECONDS = (0.4, 1.0)
 PAGE_LOAD_PROXY_ERROR_MARKERS = (
     "ERR_TUNNEL_CONNECTION_FAILED",
@@ -78,20 +76,7 @@ def random_proxy_probe_succeeded(status: str) -> bool:
     return status in {PAGE_LOAD_PROBE_ANSWERABLE, PAGE_LOAD_PROBE_BUSINESS_PAGE}
 
 
-def should_grant_random_proxy_loading_grace(probe_result: Any, last_exc: Exception | None) -> bool:
-    if probe_result is None:
-        return False
-    if str(getattr(probe_result, "status", "") or "") != PAGE_LOAD_PROBE_PROXY_UNUSABLE:
-        return False
-    detail = str(getattr(probe_result, "detail", "") or "").strip().lower()
-    if detail not in {"page_still_loading", "no_answerable_signal", "blank_page"}:
-        return False
-    if last_exc is None:
-        return True
-    return not looks_like_proxy_page_load_failure(last_exc)
-
-
-def should_delay_random_proxy_reload(probe_result: Any) -> bool:
+def should_keep_waiting_random_proxy_page(probe_result: Any) -> bool:
     if probe_result is None:
         return False
     if str(getattr(probe_result, "status", "") or "") != PAGE_LOAD_PROBE_PROXY_UNUSABLE:
@@ -108,9 +93,6 @@ async def load_survey_page_with_random_proxy(
     probe_waiter: Callable[..., Any] = wait_for_page_probe,
 ) -> None:
     provider = normalize_survey_provider(getattr(config, "survey_provider", None))
-    first_probe_detail = ""
-    last_exc: Exception | None = None
-
     notify_page_load_phase(phase_updater, "加载问卷")
     logging.info(
         "随机代理首载：快速提交导航 wait_until=commit timeout=%sms",
@@ -134,11 +116,10 @@ async def load_survey_page_with_random_proxy(
             timeout_ms=RANDOM_PROXY_FAST_PROBE_TIMEOUT_MS,
             poll_interval_seconds=RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS,
         )
-        first_probe_detail = str(first_probe.detail or "")
         if random_proxy_probe_succeeded(first_probe.status):
             logging.info("随机代理首载探测成功：status=%s detail=%s", first_probe.status, first_probe.detail or "-")
             return
-        if should_delay_random_proxy_reload(first_probe):
+        if should_keep_waiting_random_proxy_page(first_probe):
             logging.info(
                 "随机代理首载：页面仍在加载，先保持原页追加探测 timeout=%sms interval=%.2fs detail=%s",
                 RANDOM_PROXY_FAST_LOADING_GRACE_PROBE_TIMEOUT_MS,
@@ -155,82 +136,46 @@ async def load_survey_page_with_random_proxy(
                 logging.info("随机代理首载宽限探测成功：status=%s detail=%s", grace_probe.status, grace_probe.detail or "-")
                 return
             first_probe = grace_probe
-            first_probe_detail = str(first_probe.detail or first_probe_detail or "")
-        logging.warning(
-            "随机代理首载探测未命中可答题页面：status=%s detail=%s，转入短重载补救",
-            first_probe.status,
+        if random_proxy_probe_succeeded(first_probe.status):
+            logging.info("随机代理首载宽限探测成功：status=%s detail=%s", first_probe.status, first_probe.detail or "-")
+            return
+        if not should_keep_waiting_random_proxy_page(first_probe):
+            failure_detail = str(first_probe.detail or "页面长时间没有可答题信号")
+            logging.warning(
+                "随机代理页面探测失败，判定当前代理不可用：detail=%s",
+                failure_detail,
+            )
+            raise ProxyConnectionError(failure_detail)
+        logging.info(
+            "随机代理首载：继续等待原页面完成加载 timeout=%sms interval=%.2fs detail=%s",
+            RANDOM_PROXY_SLOW_PROBE_TIMEOUT_MS,
+            RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS,
             first_probe.detail or "-",
         )
-    except Exception as exc:
-        last_exc = exc
+        final_probe = await probe_waiter(
+            driver,
+            provider=provider,
+            timeout_ms=RANDOM_PROXY_SLOW_PROBE_TIMEOUT_MS,
+            poll_interval_seconds=RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS,
+        )
+        if random_proxy_probe_succeeded(final_probe.status):
+            logging.info("随机代理慢加载探测成功：status=%s detail=%s", final_probe.status, final_probe.detail or "-")
+            return
+        failure_detail = str(final_probe.detail or first_probe.detail or "页面长时间没有可答题信号")
         logging.warning(
-            "快速提交导航失败：wait_until=commit timeout=%sms error=%s，转入短重载补救",
+            "随机代理页面探测失败，判定当前代理不可用：detail=%s",
+            failure_detail,
+        )
+        raise ProxyConnectionError(failure_detail)
+    except Exception as exc:
+        if isinstance(exc, ProxyConnectionError):
+            raise
+        logging.warning(
+            "快速提交导航失败：wait_until=commit timeout=%sms error=%s",
             RANDOM_PROXY_FAST_COMMIT_TIMEOUT_MS,
             exception_summary(exc),
         )
-
-    notify_page_load_phase(phase_updater, "加载问卷")
-    logging.info(
-        "随机代理首载：短重载补救 wait_until=domcontentloaded timeout=%sms",
-        RANDOM_PROXY_FALLBACK_DOM_TIMEOUT_MS,
-    )
-    try:
-        await driver.get(
-            config.url,
-            timeout=RANDOM_PROXY_FALLBACK_DOM_TIMEOUT_MS,
-            wait_until="domcontentloaded",
-        )
-    except Exception as exc:
-        last_exc = exc
-        logging.warning(
-            "短重载补救失败：wait_until=domcontentloaded timeout=%sms error=%s",
-            RANDOM_PROXY_FALLBACK_DOM_TIMEOUT_MS,
-            exception_summary(exc),
-        )
-
-    notify_page_load_phase(phase_updater, "探测页面")
-    logging.info(
-        "随机代理首载：补救后再次探测 timeout=%sms interval=%.2fs",
-        RANDOM_PROXY_FALLBACK_PROBE_TIMEOUT_MS,
-        RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS,
-    )
-    second_probe = await probe_waiter(
-        driver,
-        provider=provider,
-        timeout_ms=RANDOM_PROXY_FALLBACK_PROBE_TIMEOUT_MS,
-        poll_interval_seconds=RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS,
-    )
-    if random_proxy_probe_succeeded(second_probe.status):
-        logging.info("随机代理补救后探测成功：status=%s detail=%s", second_probe.status, second_probe.detail or "-")
-        return
-    if should_grant_random_proxy_loading_grace(second_probe, last_exc):
-        logging.info(
-            "随机代理首载：页面仍在加载，追加宽限探测 timeout=%sms interval=%.2fs detail=%s",
-            RANDOM_PROXY_LOADING_GRACE_PROBE_TIMEOUT_MS,
-            RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS,
-            getattr(second_probe, "detail", "") or "-",
-        )
-        third_probe = await probe_waiter(
-            driver,
-            provider=provider,
-            timeout_ms=RANDOM_PROXY_LOADING_GRACE_PROBE_TIMEOUT_MS,
-            poll_interval_seconds=RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS,
-        )
-        if random_proxy_probe_succeeded(third_probe.status):
-            logging.info("随机代理宽限探测成功：status=%s detail=%s", third_probe.status, third_probe.detail or "-")
-            return
-        second_probe = third_probe
-
-    failure_detail = str(second_probe.detail or first_probe_detail or "")
-    if not failure_detail and last_exc is not None:
-        failure_detail = exception_summary(last_exc)
-    if not failure_detail:
-        failure_detail = "页面长时间没有可答题信号"
-    logging.warning(
-        "随机代理页面探测失败，判定当前代理不可用：detail=%s",
-        failure_detail,
-    )
-    raise ProxyConnectionError(failure_detail)
+        raise ProxyConnectionError(exception_summary(exc)) from exc
 
 
 async def load_survey_page(
@@ -285,8 +230,7 @@ __all__ = [
     "RANDOM_PROXY_FAST_COMMIT_TIMEOUT_MS",
     "RANDOM_PROXY_FAST_PROBE_TIMEOUT_MS",
     "RANDOM_PROXY_FAST_PROBE_INTERVAL_SECONDS",
-    "RANDOM_PROXY_FALLBACK_DOM_TIMEOUT_MS",
-    "RANDOM_PROXY_FALLBACK_PROBE_TIMEOUT_MS",
+    "RANDOM_PROXY_SLOW_PROBE_TIMEOUT_MS",
     "PAGE_LOAD_RETRY_DELAYS_SECONDS",
     "PAGE_LOAD_PROXY_ERROR_MARKERS",
     "build_page_load_attempts",

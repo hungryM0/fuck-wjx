@@ -20,6 +20,17 @@ _COMPLETION_MARKERS = (
     "感谢您的宝贵时间",
     "问卷已结束",
 )
+_NAVIGATION_TRANSIENT_ERRORS = (
+    "execution context was destroyed",
+    "most likely because of a navigation",
+)
+
+
+def _is_navigation_transient_error(exc: BaseException) -> bool:
+    """页面跳转时 Playwright 可能短暂无法读取 DOM。"""
+
+    message = str(exc or "").lower()
+    return any(pattern in message for pattern in _NAVIGATION_TRANSIENT_ERRORS)
 
 
 def has_configured_answer_duration(answer_duration_range_seconds: Tuple[int, int] = (0, 0)) -> bool:
@@ -143,52 +154,64 @@ async def is_survey_completion_page(driver: Any, provider: Optional[str] = None)
     except Exception as exc:
         log_suppressed_exception("is_survey_completion_page: divdsc = None", exc, level=logging.WARNING)
     if not detected:
-        try:
-            page_text = await driver.execute_script(
-                "return (document.body && document.body.innerText) || '';"
-            ) or ""
-            has_marker = any(marker in page_text for marker in _COMPLETION_MARKERS)
-            if has_marker:
-                action_visible = bool(
-                    await driver.execute_script(
-                        r"""
-                        return (() => {
-                            const selectors = [
-                                '#submit_button',
-                                '#divSubmit',
-                                '#ctlNext',
-                                '#divNext',
-                                '#btnNext',
-                                '#SM_BTN_1',
-                                '#SubmitBtnGroup .submitbtn',
-                                '.btn-next',
-                                '.btn-submit',
-                                '.page-control button',
-                                'button[type="submit"]',
-                                'a.button.mainBgColor'
-                            ];
-                            const visible = (el) => {
-                                if (!el) return false;
-                                const style = window.getComputedStyle(el);
-                                if (!style) return false;
-                                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-                                const rect = el.getBoundingClientRect();
-                                return rect.width > 0 && rect.height > 0;
-                            };
-                            for (const sel of selectors) {
-                                const nodes = document.querySelectorAll(sel);
-                                for (const node of nodes) {
-                                    if (visible(node)) return true;
+        for attempt in range(2):
+            try:
+                page_text = await driver.execute_script(
+                    "return (document.body && document.body.innerText) || '';"
+                ) or ""
+                has_marker = any(marker in page_text for marker in _COMPLETION_MARKERS)
+                if has_marker:
+                    action_visible = bool(
+                        await driver.execute_script(
+                            r"""
+                            return (() => {
+                                const selectors = [
+                                    '#submit_button',
+                                    '#divSubmit',
+                                    '#ctlNext',
+                                    '#divNext',
+                                    '#btnNext',
+                                    '#SM_BTN_1',
+                                    '#SubmitBtnGroup .submitbtn',
+                                    '.btn-next',
+                                    '.btn-submit',
+                                    '.page-control button',
+                                    'button[type="submit"]',
+                                    'a.button.mainBgColor'
+                                ];
+                                const visible = (el) => {
+                                    if (!el) return false;
+                                    const style = window.getComputedStyle(el);
+                                    if (!style) return false;
+                                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                                    const rect = el.getBoundingClientRect();
+                                    return rect.width > 0 && rect.height > 0;
+                                };
+                                for (const sel of selectors) {
+                                    const nodes = document.querySelectorAll(sel);
+                                    for (const node of nodes) {
+                                        if (visible(node)) return true;
+                                    }
                                 }
-                            }
-                            return false;
-                        })();
-                        """
+                                return false;
+                            })();
+                            """
+                        )
                     )
-                )
-                detected = not action_visible
-        except Exception as exc:
-            log_suppressed_exception("is_survey_completion_page: page_text", exc, level=logging.WARNING)
+                    detected = not action_visible
+                break
+            except Exception as exc:
+                if _is_navigation_transient_error(exc):
+                    if attempt == 0:
+                        await sleep_or_stop(None, 0.2)
+                        continue
+                    logging.debug(
+                        "[Suppressed] is_survey_completion_page: page_text during navigation: %s",
+                        exc,
+                    )
+                    break
+                log_suppressed_exception("is_survey_completion_page: page_text", exc, level=logging.WARNING)
+                break
     return bool(detected)
 
 

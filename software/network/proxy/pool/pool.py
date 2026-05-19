@@ -211,7 +211,6 @@ def _build_default_proxy_leases_from_batch(payload: dict, *, source: str = PROXY
 def _proxy_is_responsive(proxy_address: str, skip_for_default: bool = True) -> bool:
     masked_proxy = _mask_proxy_for_log(proxy_address)
     if skip_for_default and is_official_proxy_source(get_proxy_source()):
-        logging.info(f"官方代理源，跳过健康检查: {masked_proxy}")
         return True
     proxy_address = _normalize_proxy_address(proxy_address) or ""
     if not proxy_address:
@@ -234,7 +233,6 @@ def _proxy_is_responsive(proxy_address: str, skip_for_default: bool = True) -> b
 async def _proxy_is_responsive_async(proxy_address: str, skip_for_default: bool = True) -> bool:
     masked_proxy = _mask_proxy_for_log(proxy_address)
     if skip_for_default and is_official_proxy_source(get_proxy_source()):
-        logging.info(f"官方代理源，跳过健康检查: {masked_proxy}")
         return True
     proxy_address = _normalize_proxy_address(proxy_address) or ""
     if not proxy_address:
