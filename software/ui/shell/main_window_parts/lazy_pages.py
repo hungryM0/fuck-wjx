@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import webbrowser
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtGui import QColor
@@ -173,17 +174,6 @@ class MainWindowLazyPagesMixin:
                 self.stackedWidget.addWidget(self._about_page)
         return self._about_page
 
-    def _get_changelog_page(self):
-        """懒加载更新日志页面（列表+详情已整合为单一页面）"""
-        if self._changelog_page is None:
-            from software.ui.pages.more.changelog import ChangelogPage
-
-            self._changelog_page = ChangelogPage(self)
-            self._changelog_page.setObjectName("changelog")
-            if self.stackedWidget.indexOf(self._changelog_page) == -1:
-                self.stackedWidget.addWidget(self._changelog_page)
-        return self._changelog_page
-
     def _get_ip_usage_page(self):
         """懒加载 IP 使用记录页面"""
         if self._ip_usage_page is None:
@@ -221,9 +211,7 @@ class MainWindowLazyPagesMixin:
 
         # 更新日志
         changelog_action = Action(FluentIcon.HISTORY, "更新日志")
-        changelog_action.triggered.connect(
-            lambda: self._switch_to_more_page(self._get_changelog_page())
-        )
+        changelog_action.triggered.connect(self._open_changelog_releases)
         menu.addAction(changelog_action)
 
         # IP 使用记录
@@ -263,3 +251,8 @@ class MainWindowLazyPagesMixin:
             self.navigationInterface.setCurrentItem("about_menu")
         except Exception:
             logging.info("同步更多侧边栏高亮失败", exc_info=True)
+
+    def _open_changelog_releases(self) -> None:
+        from software.app.version import GITHUB_RELEASES_PAGE_URL
+
+        webbrowser.open(GITHUB_RELEASES_PAGE_URL)
