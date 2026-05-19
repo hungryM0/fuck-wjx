@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable, Optional, cast
 
-from PySide6.QtCore import QEvent, QObject, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import (
     QKeyEvent,
     QKeySequence,
@@ -33,14 +33,9 @@ from software.logging.log_utils import (
     export_full_log_to_file,
     log_suppressed_exception,
 )
-from software.ui.helpers.contact_api import (
-    get_session_snapshot,
-    post as http_post,
-)
+from software.ui.helpers.contact_api import get_session_snapshot, post
 from software.ui.helpers.image_attachments import ImageAttachmentManager
-from software.ui.helpers.qfluent_compat import (
-    set_indeterminate_progress_ring_active,
-)
+from software.ui.helpers.qfluent_compat import set_indeterminate_progress_ring_active
 
 from .attachments import (
     build_bug_report_auto_files_payload,
@@ -62,9 +57,8 @@ from .rules import (
 )
 from .send_workflow import (
     QuotaRequestValidationInputs,
-    compute_send_timeout_fallback_ms,
-    validate_email,
     validate_quota_request,
+    validate_email,
 )
 from .status_polling import StatusPollingMixin
 from .ui_behavior import (
@@ -84,6 +78,38 @@ from .constants import (
     MAX_REQUEST_QUOTA,
     REQUEST_MESSAGE_TYPE,
 )
+from .lifecycle import (
+    close_all_infobars,
+    find_controller_host,
+    has_pending_async_work,
+    refresh_random_ip_user_id_hint,
+    set_send_loading,
+    set_status_loading,
+    set_verify_loading,
+    show_pending_async_warning,
+    start_status_polling,
+    stop_activity_indicators,
+    stop_status_polling,
+)
+from .send_actions import (
+    clear_email_selection,
+    compute_send_timeout_fallback_ms_for_form,
+    emit_send_finished_if_current,
+    finish_stuck_send_if_needed,
+    focus_send_button,
+    on_send_clicked,
+    on_send_finished,
+)
+from .verify_code_flow import (
+    on_cooldown_tick,
+    on_send_verify_clicked,
+    on_verify_code_finished,
+    set_verify_code_sending,
+    start_cooldown,
+    stop_cooldown,
+)
+
+http_post = post
 
 
 class ContactForm(StatusPollingMixin, QWidget):
@@ -151,6 +177,7 @@ class ContactForm(StatusPollingMixin, QWidget):
     _SEND_CONNECT_TIMEOUT_SECONDS = 10
     _SEND_READ_TIMEOUT_SECONDS = 10
     _SEND_READ_TIMEOUT_WITH_FILES_SECONDS = 20
+    http_post = staticmethod(post)
 
     def __init__(
         self,
@@ -290,87 +317,99 @@ class ContactForm(StatusPollingMixin, QWidget):
             pass
 
     def _close_all_infobars(self):
-        """关闭所有子 InfoBar 组件，避免线程泄漏"""
-        try:
-            from qfluentwidgets import InfoBar
+        close_all_infobars(self)
 
-            # 遍历所有子组件，找到 InfoBar 并关闭
-            for child in self.findChildren(InfoBar):
-                try:
-                    child.close()
-                    child.deleteLater()
-                except Exception:
-                    pass
-        except Exception as exc:
-            log_suppressed_exception("_close_all_infobars", exc, level=logging.WARNING)
-        finally:
-            self.amount_rule_hint.hide()
+    @staticmethod
+    def _info_bar():
+        return InfoBar
 
-    def has_pending_async_work(self) -> bool:
-        return bool(self._send_in_progress or self._verify_code_sending)
+    @staticmethod
+    def _message_box():
+        return MessageBox
 
-    def show_pending_async_warning(self) -> None:
-        if self._send_in_progress:
-            message = "正在发送反馈，请等待完成后再关闭"
-        elif self._verify_code_sending:
-            message = "正在发送验证码，请等待完成后再关闭"
-        else:
-            return
-        InfoBar.warning(
-            "",
-            message,
-            parent=self,
-            position=InfoBarPosition.TOP,
-            duration=2500,
+    @staticmethod
+    def _set_progress_ring_active(widget: QWidget, active: bool) -> None:
+        set_indeterminate_progress_ring_active(widget, active)
+
+    @staticmethod
+    def _get_session_snapshot() -> dict[str, Any]:
+        return get_session_snapshot()
+
+    @staticmethod
+    def _contact_api_url() -> str:
+        return CONTACT_API_URL
+
+    @staticmethod
+    def _email_verify_endpoint() -> str:
+        return EMAIL_VERIFY_ENDPOINT
+
+    @staticmethod
+    def _contact_http_post(*args, **kwargs):
+        return ContactForm.http_post(*args, **kwargs)
+
+    @staticmethod
+    def _app_version() -> str:
+        return __VERSION__
+
+    @staticmethod
+    def _build_contact_message(**kwargs) -> str:
+        return build_contact_message(**kwargs)
+
+    @staticmethod
+    def _build_contact_request_fields(**kwargs):
+        return build_contact_request_fields(**kwargs)
+
+    @staticmethod
+    def _validate_quota_request(
+        *,
+        email: str,
+        amount_text: str,
+        quantity_text: str,
+        verify_code: str,
+        payment_method: str,
+        donated: bool,
+        verify_code_requested: bool,
+        verify_code_requested_email: str,
+    ):
+        return validate_quota_request(
+            QuotaRequestValidationInputs(
+                email=email,
+                amount_text=amount_text,
+                quantity_text=quantity_text,
+                verify_code=verify_code,
+                payment_method=payment_method,
+                donated=donated,
+                verify_code_requested=verify_code_requested,
+                verify_code_requested_email=verify_code_requested_email,
+            )
         )
 
+    def has_pending_async_work(self) -> bool:
+        return has_pending_async_work(self)
+
+    def show_pending_async_warning(self) -> None:
+        show_pending_async_warning(self)
+
     def _set_status_loading(self, loading: bool) -> None:
-        set_indeterminate_progress_ring_active(self.status_spinner, loading)
+        set_status_loading(self, loading)
 
     def _set_send_loading(self, loading: bool) -> None:
-        set_indeterminate_progress_ring_active(self.send_spinner, loading)
+        set_send_loading(self, loading)
 
     def _set_verify_loading(self, loading: bool) -> None:
-        set_indeterminate_progress_ring_active(self.verify_send_spinner, loading)
+        set_verify_loading(self, loading)
 
     def _stop_activity_indicators(self) -> None:
-        self._set_status_loading(False)
-        self._set_send_loading(False)
-        self._set_verify_loading(False)
+        stop_activity_indicators(self)
 
     def refresh_random_ip_user_id_hint(self) -> None:
-        """刷新消息框下方的随机IP账号提示。"""
-        try:
-            snapshot = get_session_snapshot()
-        except Exception as exc:
-            log_suppressed_exception("refresh_random_ip_user_id_hint", exc, level=logging.WARNING)
-            snapshot = {}
-        user_id = int(snapshot.get("user_id") or 0)
-        self._random_ip_user_id = user_id
-        if user_id > 0:
-            self.random_ip_user_id_label.setText(f"随机IP用户ID：{user_id}")
-            self.random_ip_user_id_label.show()
-        else:
-            self.random_ip_user_id_label.hide()
-        self._sync_donation_check_state()
-        self._update_send_button_state()
+        refresh_random_ip_user_id_hint(self)
 
     def start_status_polling(self):
-        if self._polling_started:
-            return
-        self._polling_started = True
-        self._set_status_loading(True)
-        self.status_icon.hide()
-        self.online_label.setText("作者当前在线状态：查询中...")
-        self.online_label.setStyleSheet("color:#BA8303;")
-        self._start_status_polling()
+        start_status_polling(self)
 
     def stop_status_polling(self):
-        if not self._polling_started:
-            return
-        self._polling_started = False
-        self._stop_status_polling()
-        self._set_status_loading(False)
+        stop_status_polling(self)
 
     def _on_type_changed(self):
         on_type_changed(self)
@@ -692,228 +731,7 @@ class ContactForm(StatusPollingMixin, QWidget):
         return validate_email(email)
 
     def _on_send_clicked(self):
-        self._cleanup_pending_temp_files()
-        email = (self.email_edit.text() or "").strip()
-        self._current_has_email = bool(email)
-
-        timer_context = cast(QWidget, self)
-        QTimer.singleShot(10, timer_context, self._clear_email_selection)
-        QTimer.singleShot(10, timer_context, self._focus_send_button)
-
-        mtype = self.type_combo.currentText() or "报错反馈"
-        issue_title = (self.issue_title_edit.text() or "").strip()
-
-        request_amount_text = ""
-        request_quota_text = ""
-        request_urgency_text = ""
-        request_payment_method = ""
-        if mtype == REQUEST_MESSAGE_TYPE:
-            self._normalize_amount_if_needed()
-            self._normalize_quantity_if_needed()
-            amount_text = (self.amount_edit.currentText() or "").strip()
-            quantity_text = (self.quantity_edit.text() or "").strip()
-            verify_code = (self.verify_code_edit.text() or "").strip()
-            request_payment_method = self._selected_payment_method()
-            request_amount_text = amount_text
-            request_urgency_text = (self.urgency_combo.currentText() or "").strip()
-            quota_validation = validate_quota_request(
-                QuotaRequestValidationInputs(
-                    email=email,
-                    amount_text=amount_text,
-                    quantity_text=quantity_text,
-                    verify_code=verify_code,
-                    payment_method=request_payment_method,
-                    donated=self.donated_cb.isChecked(),
-                    verify_code_requested=self._verify_code_requested,
-                    verify_code_requested_email=self._verify_code_requested_email,
-                )
-            )
-            request_quota_text = quota_validation.normalized_quota_text
-            if quota_validation.error_message:
-                if quota_validation.amount_rule_blocked:
-                    self._show_amount_rule_infobar()
-                if quota_validation.error_message in {
-                    "请选择你刚刚使用的支付方式",
-                    "请先勾选“我已完成支付”后再发送申请",
-                }:
-                    self._update_send_button_state()
-                InfoBar.warning(
-                    "",
-                    quota_validation.error_message,
-                    parent=self,
-                    position=InfoBarPosition.TOP,
-                    duration=2200,
-                )
-                return
-
-        message = (self.message_edit.toPlainText() or "").strip()
-        if not message and mtype != REQUEST_MESSAGE_TYPE:
-            InfoBar.warning(
-                "",
-                "请输入消息内容",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2000,
-            )
-            return
-
-        if mtype == REQUEST_MESSAGE_TYPE and not email:
-            InfoBar.warning(
-                "",
-                "额度申请必须填写邮箱地址",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2000,
-            )
-            return
-
-        if email and not self._validate_email(email):
-            InfoBar.warning(
-                "",
-                "邮箱格式不正确",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2000,
-            )
-            return
-
-        self.refresh_random_ip_user_id_hint()
-        if mtype == REQUEST_MESSAGE_TYPE and self._random_ip_user_id <= 0:
-            InfoBar.warning(
-                "",
-                "暂时还不能申请额度。请先小测试一两份，确认能正常提交成功后，再来申请额度。",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=3500,
-            )
-            return
-
-        if mtype == REQUEST_MESSAGE_TYPE:
-            confirm_email_box = MessageBox(
-                "确认邮箱地址",
-                f"当前输入的邮箱地址是：{email}\n\n请确认邮箱地址正确无误。开发者会在2小时内发放额度并通过邮件通知",
-                self.window() or self,
-            )
-            confirm_email_box.yesButton.setText("确认发送")
-            confirm_email_box.cancelButton.setText("返回检查")
-            if not confirm_email_box.exec():
-                return
-
-        if mtype != REQUEST_MESSAGE_TYPE and not email:
-            confirm_box = MessageBox(
-                "未填写邮箱",
-                "当前未输入邮箱地址，开发者可能无法联系你回复处理进度。是否继续发送？",
-                self.window() or self,
-            )
-            confirm_box.yesButton.setText("继续发送")
-            confirm_box.cancelButton.setText("返回填写")
-            if not confirm_box.exec():
-                return
-
-        full_message = build_contact_message(
-            version_str=__VERSION__,
-            message_type=mtype,
-            issue_title=issue_title,
-            email=email,
-            donated=self.donated_cb.isChecked(),
-            random_ip_user_id=self._random_ip_user_id,
-            message=message,
-            request_payment_method=request_payment_method,
-            request_amount_text=request_amount_text,
-            request_quota_text=request_quota_text,
-            request_urgency_text=request_urgency_text,
-        )
-
-        if not CONTACT_API_URL:
-            InfoBar.error(
-                "",
-                "联系API未配置",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=3000,
-            )
-            return
-
-        manual_files_payload = (
-            [] if mtype == REQUEST_MESSAGE_TYPE else self._attachments.files_payload()
-        )
-        auto_files_payload: list[tuple[str, tuple[str, bytes, str]]] = []
-        if self._is_bug_report_type(mtype):
-            try:
-                auto_files_payload, _ = self._build_bug_report_auto_files_payload()
-            except Exception as exc:
-                self._cleanup_pending_temp_files()
-                InfoBar.error(
-                    "",
-                    f"自动导出附件失败：{exc}",
-                    parent=self,
-                    position=InfoBarPosition.TOP,
-                    duration=3500,
-                )
-                return
-        payload = {
-            "message": full_message,
-            "timestamp": datetime.now().isoformat(),
-        }
-        files_payload = self._renumber_files_payload(manual_files_payload + auto_files_payload)
-
-        self.send_btn.setFocus()
-        self.send_btn.setEnabled(False)
-        self.send_btn.setText("发送中...")
-        self._send_in_progress = True
-        self._set_send_loading(True)
-        self._update_send_button_state()
-        self._current_message_type = mtype
-        with self._send_state_lock:
-            self._send_generation += 1
-            send_generation = self._send_generation
-        def _send():
-            try:
-                multipart_fields = build_contact_request_fields(
-                    message=payload["message"],
-                    message_type=mtype,
-                    issue_title=issue_title,
-                    timestamp=payload["timestamp"],
-                    random_ip_user_id=self._random_ip_user_id,
-                    files_payload=files_payload,
-                )
-                read_timeout_seconds = (
-                    self._SEND_READ_TIMEOUT_WITH_FILES_SECONDS
-                    if files_payload
-                    else self._SEND_READ_TIMEOUT_SECONDS
-                )
-                resp = http_post(
-                    CONTACT_API_URL,
-                    files=multipart_fields,
-                    timeout=(self._SEND_CONNECT_TIMEOUT_SECONDS, read_timeout_seconds),
-                )
-                if resp.status_code == 200:
-                    self._emit_send_finished_if_current(send_generation, True, "")
-                else:
-                    self._emit_send_finished_if_current(
-                        send_generation,
-                        False,
-                        f"发送失败：{resp.status_code}",
-                    )
-            except Exception as exc:
-                self._emit_send_finished_if_current(
-                    send_generation,
-                    False,
-                    f"发送失败：{exc}",
-                )
-
-        send_timeout_fallback_ms = self._compute_send_timeout_fallback_ms(
-            self._SEND_READ_TIMEOUT_WITH_FILES_SECONDS
-            if files_payload
-            else self._SEND_READ_TIMEOUT_SECONDS
-        )
-        QTimer.singleShot(
-            send_timeout_fallback_ms,
-            cast(QWidget, self),
-            lambda generation=send_generation: self._finish_stuck_send_if_needed(generation),
-        )
-
-        threading.Thread(target=_send, daemon=True).start()
+        on_send_clicked(self)
 
     def _emit_send_finished_if_current(
         self,
@@ -921,238 +739,42 @@ class ContactForm(StatusPollingMixin, QWidget):
         success: bool,
         message: str,
     ) -> None:
-        with self._send_state_lock:
-            if generation != getattr(self, "_send_generation", 0):
-                return
-            if generation == getattr(self, "_send_finished_generation", 0):
-                return
-            if not getattr(self, "_send_in_progress", False):
-                return
-            self._send_finished_generation = generation
-        self._sendFinished.emit(success, message)
+        emit_send_finished_if_current(self, generation, success, message)
 
     def _finish_stuck_send_if_needed(self, generation: int) -> None:
-        self._emit_send_finished_if_current(generation, False, "发送超时，请稍后重试")
+        finish_stuck_send_if_needed(self, generation)
 
     def _compute_send_timeout_fallback_ms(self, read_timeout_seconds: int) -> int:
-        return compute_send_timeout_fallback_ms(
-            connect_timeout_seconds=self._SEND_CONNECT_TIMEOUT_SECONDS,
-            read_timeout_seconds=read_timeout_seconds,
-            grace_ms=self._SEND_TIMEOUT_GRACE_MS,
-        )
+        return compute_send_timeout_fallback_ms_for_form(self, read_timeout_seconds)
 
     def _clear_email_selection(self):
-        try:
-            self.email_edit.setSelection(0, 0)
-        except (RuntimeError, AttributeError) as exc:
-            log_suppressed_exception(
-                "_clear_email_selection: self.email_edit.setSelection(0, 0)",
-                exc,
-                level=logging.WARNING,
-            )
+        clear_email_selection(self)
 
     def _focus_send_button(self):
-        try:
-            self.send_btn.setFocus()
-        except (RuntimeError, AttributeError) as exc:
-            log_suppressed_exception(
-                "_focus_send_button: self.send_btn.setFocus()",
-                exc,
-                level=logging.WARNING,
-            )
+        focus_send_button(self)
 
     @Slot(bool, str)
     def _on_send_finished(self, success: bool, error_msg: str):
-        self._send_in_progress = False
-        self._set_send_loading(False)
-        self.send_btn.setText("发送")
-        self._update_send_button_state()
-        self._cleanup_pending_temp_files()
-
-        if success:
-            current_type = getattr(self, "_current_message_type", "")
-            msg = (
-                "申请已提交，请等待人工处理"
-                if current_type == REQUEST_MESSAGE_TYPE
-                else "消息已发送"
-            )
-            if getattr(self, "_current_has_email", False):
-                msg += "，开发者会优先通过邮箱联系你"
-            InfoBar.success(
-                "",
-                msg,
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2500,
-            )
-            if current_type == REQUEST_MESSAGE_TYPE:
-                self.quotaRequestSucceeded.emit()
-            if self._auto_clear_on_success:
-                self._close_amount_rule_infobar()
-                self.amount_edit.setText("")
-                self.quantity_edit.clear()
-                self.verify_code_edit.clear()
-                self._clear_payment_method_selection()
-                self._verify_code_requested = False
-                self._verify_code_requested_email = ""
-                urgency_default_index = self.urgency_combo.findText("中")
-                if urgency_default_index >= 0:
-                    self.urgency_combo.setCurrentIndex(urgency_default_index)
-                self.message_edit.clear()
-                self.issue_title_edit.clear()
-                self._attachments.clear()
-                self._render_attachments_ui()
-                self._reset_bug_report_auto_attach_defaults()
-            self.sendSucceeded.emit()
-        else:
-            InfoBar.error(
-                "",
-                error_msg,
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=3000,
-            )
+        on_send_finished(self, success, error_msg)
 
     def _find_controller_host(self) -> Optional[QWidget]:
-        widget: Optional[QWidget] = cast(QWidget, self)
-        while widget is not None:
-            if hasattr(widget, "controller"):
-                return widget
-            widget = widget.parentWidget()
-        win = self.window()
-        if isinstance(win, QWidget) and hasattr(win, "controller"):
-            return win
-        return None
+        return find_controller_host(self)
 
     def _set_verify_code_sending(self, sending: bool):
-        self._verify_code_sending = sending
-        self.send_verify_btn.setEnabled(not sending)
-        self.send_verify_btn.setText("发送中..." if sending else "发送验证码")
-        self._set_verify_loading(sending)
+        set_verify_code_sending(self, sending)
 
     def _start_cooldown(self):
-        self._cooldown_remaining = 30
-        self.send_verify_btn.setEnabled(False)
-        self.send_verify_btn.setText(f"重新发送({self._cooldown_remaining}s)")
-        self._cooldown_timer = QTimer(cast(QObject, self))
-        self._cooldown_timer.setInterval(1000)
-        self._cooldown_timer.timeout.connect(self._on_cooldown_tick)
-        self._cooldown_timer.start()
+        start_cooldown(self)
 
     def _on_cooldown_tick(self):
-        self._cooldown_remaining -= 1
-        if self._cooldown_remaining <= 0:
-            if self._cooldown_timer is not None:
-                self._cooldown_timer.stop()
-            self._cooldown_timer = None
-            self.send_verify_btn.setEnabled(True)
-            self.send_verify_btn.setText("发送验证码")
-        else:
-            self.send_verify_btn.setText(f"重新发送({self._cooldown_remaining}s)")
+        on_cooldown_tick(self)
 
     def _stop_cooldown(self):
-        if self._cooldown_timer is not None:
-            self._cooldown_timer.stop()
-            self._cooldown_timer = None
-        self._cooldown_remaining = 0
-        self.send_verify_btn.setEnabled(True)
-        self.send_verify_btn.setText("发送验证码")
+        stop_cooldown(self)
 
     def _on_send_verify_clicked(self):
-        if self._verify_code_sending:
-            return
-
-        email = (self.email_edit.text() or "").strip()
-        if not email:
-            InfoBar.warning(
-                "",
-                "请先填写邮箱地址",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2000,
-            )
-            return
-        if not self._validate_email(email):
-            InfoBar.warning(
-                "",
-                "邮箱格式不正确，请先检查",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2000,
-            )
-            return
-
-        if not EMAIL_VERIFY_ENDPOINT:
-            InfoBar.error(
-                "",
-                "验证码接口未配置",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2500,
-            )
-            return
-
-        self._verify_code_requested = False
-        self._verify_code_requested_email = ""
-        self._set_verify_code_sending(True)
-
-        def _send_verify():
-            try:
-                resp = http_post(
-                    EMAIL_VERIFY_ENDPOINT,
-                    headers={"Content-Type": "application/json"},
-                    json={"email": email},
-                    timeout=10,
-                )
-                try:
-                    data = resp.json()
-                except Exception:
-                    data = None
-
-                if resp.status_code == 200 and isinstance(data, dict) and bool(data.get("ok")):
-                    self._verifyCodeFinished.emit(True, "", email)
-                    return
-
-                if isinstance(data, dict):
-                    error_msg = str(data.get("error") or f"发送失败：{resp.status_code}")
-                else:
-                    error_msg = f"发送失败：{resp.status_code}"
-                self._verifyCodeFinished.emit(False, error_msg, email)
-            except Exception as exc:
-                self._verifyCodeFinished.emit(False, f"发送失败：{exc}", email)
-
-        threading.Thread(target=_send_verify, daemon=True).start()
+        on_send_verify_clicked(self)
 
     @Slot(bool, str, str)
     def _on_verify_code_finished(self, success: bool, error_msg: str, email: str):
-        self._set_verify_code_sending(False)
-
-        if success:
-            self._verify_code_requested = True
-            self._verify_code_requested_email = email
-            InfoBar.success(
-                "",
-                "验证码已发送，请查收并输入验证码",
-                parent=self,
-                position=InfoBarPosition.TOP,
-                duration=2200,
-            )
-            self._start_cooldown()
-            return
-
-        self._verify_code_requested = False
-        self._verify_code_requested_email = ""
-        normalized = (error_msg or "").strip().lower()
-        if normalized == "invalid request":
-            ui_msg = "邮箱参数无效，请检查邮箱后重试"
-        elif normalized == "send mail failed":
-            ui_msg = "邮件发送失败，请稍后重试"
-        else:
-            ui_msg = error_msg or "验证码发送失败，请稍后重试"
-        InfoBar.error(
-            "",
-            ui_msg,
-            parent=self,
-            position=InfoBarPosition.TOP,
-            duration=2500,
-        )
+        on_verify_code_finished(self, success, error_msg, email)

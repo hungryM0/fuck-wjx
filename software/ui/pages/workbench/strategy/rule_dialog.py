@@ -32,6 +32,7 @@ from software.providers.contracts import (
     SurveyQuestionMeta,
     ensure_survey_question_metas,
 )
+from software.ui.pages.workbench.question_editor.ui_helpers import clear_layout
 
 ALLOWED_RULE_TYPE_CODES = {"3", "4", "5", "6"}
 RULE_TYPE_CODE_LABELS = {
@@ -93,27 +94,6 @@ def build_question_label(question: SurveyQuestionMeta) -> str:
     if title:
         return f"第{q_num}题：{title}{suffix}"
     return f"第{q_num}题{suffix}"
-
-
-def clear_layout(layout: QVBoxLayout) -> None:
-    while layout.count():
-        item = layout.takeAt(0)
-        if item is None:
-            continue
-        widget = item.widget()
-        child_layout = item.layout()
-        if widget is not None:
-            widget.hide()
-            widget.deleteLater()
-        if child_layout is not None:
-            while child_layout.count():
-                nested = child_layout.takeAt(0)
-                if nested is None:
-                    continue
-                nested_widget = nested.widget()
-                if nested_widget is not None:
-                    nested_widget.hide()
-                    nested_widget.deleteLater()
 
 
 class ConditionRuleDialog(MessageBoxBase):

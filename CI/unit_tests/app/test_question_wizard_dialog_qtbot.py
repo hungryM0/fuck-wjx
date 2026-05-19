@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from qfluentwidgets import BodyLabel, InfoBadge, PushButton, ScrollArea
-from PySide6.QtWidgets import QTreeWidgetItem
+from PySide6.QtWidgets import QDialog, QTreeWidgetItem
 
 from software.app.config import DEFAULT_FILL_TEXT
 from software.core.questions.config import QuestionEntry
@@ -229,6 +229,28 @@ def test_question_wizard_dialog_detail_keeps_visible_content_width(qtbot) -> Non
     dlg._select_question(1)
     qtbot.waitUntil(lambda: 1 in dlg._entry_card_widgets)
     assert dlg._detail_stack.currentWidget() is dlg._question_cards[1]
+
+
+def test_question_wizard_dialog_keeps_controls_alive_after_accept(qtbot) -> None:
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="第一题",
+            page=1,
+            option_texts=["A", "B"],
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        )
+    ]
+    dlg = QuestionWizardDialog(_build_entries()[:1], info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: bool(dlg.slider_map))
+    dlg.accept()
+    qtbot.wait(50)
+
+    assert dlg.result() == QDialog.DialogCode.Accepted
+    assert dlg.get_results()[0] == [50, 50]
 
 
 def test_question_wizard_dialog_multi_text_stays_inside_detail_width(qtbot) -> None:

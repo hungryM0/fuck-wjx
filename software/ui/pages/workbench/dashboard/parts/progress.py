@@ -20,6 +20,16 @@ from qfluentwidgets import (
 from software.logging.action_logger import bind_logged_action, log_action
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.helpers.qfluent_compat import set_indeterminate_progress_ring_active
+from software.ui.pages.workbench.shared.run_feedback import (
+    get_completion_notified,
+    get_last_pause_reason,
+    get_last_progress,
+    get_show_end_toast_after_cleanup,
+    set_completion_notified,
+    set_last_pause_reason,
+    set_last_progress,
+    set_show_end_toast_after_cleanup,
+)
 
 
 def _set_text_if_changed(widget: Any, text: str) -> None:
@@ -162,7 +172,7 @@ class DashboardProgressMixin:
                 bar.setValue(
                     max(
                         0,
-                        min(100, int(getattr(self, "_last_progress", 0) or 0)),
+                        min(100, get_last_progress(self)),
                     )
                 )
 
@@ -335,7 +345,7 @@ class DashboardProgressMixin:
             self.status_label.setText("正在初始化")
             self._set_main_progress_indeterminate(True)
             self.progress_pct.setText("...")
-            self._last_progress = 0
+            set_last_progress(self, 0)
             return
 
         self._set_main_progress_indeterminate(False)
@@ -354,9 +364,9 @@ class DashboardProgressMixin:
             progress = min(100, int((current / max(target, 1)) * 100))
         self.progress_bar.setValue(progress)
         self.progress_pct.setText(f"{progress}%")
-        self._last_progress = progress
-        if target > 0 and current >= target and not self._completion_notified:
-            self._completion_notified = True
+        set_last_progress(self, progress)
+        if target > 0 and current >= target and not get_completion_notified(self):
+            set_completion_notified(self, True)
             self._toast("全部份数已完成", "success", duration=5000)
             try:
                 self.window().show_task_result_windows_notification("任务完成", "全部份数已完成")
@@ -625,28 +635,28 @@ class DashboardProgressMixin:
                 self.thread_progress_hint.setText("正在准备会话进度...")
                 self._set_main_progress_indeterminate(False)
                 self._set_thread_view(self.THREAD_VIEW_PROGRESS)
-            self._completion_notified = False
+            set_completion_notified(self, False)
             self.start_btn.setText("执行中...")
             self.start_btn.setEnabled(False)
         else:
             self._thread_clear_timer.stop()
-            if self._completion_notified or self._last_progress >= 100:
+            if get_completion_notified(self) or get_last_progress(self) >= 100:
                 self.start_btn.setText("重新开始")
             else:
                 self.start_btn.setText("开始执行")
             self.start_btn.setEnabled(self._has_question_entries())
             self.stop_btn.setEnabled(False)
-            if not self._completion_notified:
-                self._show_end_toast_after_cleanup = True
+            if not get_completion_notified(self):
+                set_show_end_toast_after_cleanup(self, True)
             if self._pending_restart:
                 self._pending_restart = False
                 self._on_start_clicked()
 
     def on_cleanup_finished(self):
-        if self._show_end_toast_after_cleanup:
-            self._show_end_toast_after_cleanup = False
+        if get_show_end_toast_after_cleanup(self):
+            set_show_end_toast_after_cleanup(self, False)
             quota_fail_count = max(0, int(getattr(self, "_last_device_quota_fail_count", 0) or 0))
-            if quota_fail_count > 0 and not self._completion_notified:
+            if quota_fail_count > 0 and not get_completion_notified(self):
                 self._toast(
                     f"任务结束，设备填写次数上限拦截 {quota_fail_count} 次",
                     "warning",
@@ -662,7 +672,7 @@ class DashboardProgressMixin:
                     pass
 
     def on_pause_state_changed(self, paused: bool, reason: str = ""):
-        self._last_pause_reason = str(reason or "")
+        set_last_pause_reason(self, reason)
         if not getattr(self.controller, "running", False):
             self.resume_btn.setEnabled(False)
             self.resume_btn.hide()
@@ -708,7 +718,7 @@ class DashboardProgressMixin:
                 result="blocked",
             )
             return
-        reason = str(self._last_pause_reason or "")
+        reason = get_last_pause_reason(self)
         if "扣费" in reason or ("代理" in reason and "连续" in reason):
             box = MessageBox(
                 "继续执行？",

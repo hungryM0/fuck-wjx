@@ -8,8 +8,6 @@ from typing import Any, Dict, List, Optional, Sequence
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
     QStackedWidget,
@@ -32,6 +30,7 @@ from software.providers.contracts import (
     SurveyQuestionMeta,
     ensure_survey_question_metas,
 )
+from software.ui.pages.workbench.shared.table_helpers import set_table_text
 
 from .dimension_panel import DimensionGroupingPanel
 from .rule_dialog import (
@@ -44,15 +43,6 @@ from .rule_dialog import (
     to_int,
     to_int_list,
 )
-
-
-def _set_table_text(table: QTableWidget, row: int, column: int, text: str) -> None:
-    item = table.item(row, column)
-    if item is None:
-        table.setItem(row, column, QTableWidgetItem(text))
-        return
-    if item.text() != text:
-        item.setText(text)
 
 
 class ConditionRulePanel(QWidget):
@@ -317,37 +307,37 @@ class ConditionRulePanel(QWidget):
                 if target_row_index is not None and target_row_index < 0:
                     target_row_index = None
 
-                _set_table_text(
+                set_table_text(
                     self.table,
                     row,
                     0,
                     self._question_label_by_num(condition_num, condition_row_index),
                 )
-                _set_table_text(
+                set_table_text(
                     self.table,
                     row,
                     1,
                     CONDITION_MODE_LABELS.get(condition_mode, condition_mode),
                 )
-                _set_table_text(
+                set_table_text(
                     self.table,
                     row,
                     2,
                     self._option_label_text(condition_num, condition_options),
                 )
-                _set_table_text(
+                set_table_text(
                     self.table,
                     row,
                     3,
                     self._question_label_by_num(target_num, target_row_index),
                 )
-                _set_table_text(
+                set_table_text(
                     self.table,
                     row,
                     4,
                     ACTION_MODE_LABELS.get(action_mode, action_mode),
                 )
-                _set_table_text(
+                set_table_text(
                     self.table,
                     row,
                     5,

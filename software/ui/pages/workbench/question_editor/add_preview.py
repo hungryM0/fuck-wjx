@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from qfluentwidgets import (
     SubtitleLabel,
     BodyLabel,
@@ -27,6 +27,7 @@ from .constants import (
     SLIDER_TARGET_MIN,
     _get_type_label,
 )
+from .ui_helpers import clear_layout
 from .utils import _apply_label_color, _bind_slider_input
 
 
@@ -46,19 +47,6 @@ class AddPreviewMixin:
         def _resolve_matrix_strategy(self) -> str: ...
         def _resolve_strategy(self) -> str: ...
         def window(self) -> QWidget: ...
-
-    def _clear_layout(self, layout: QLayout) -> None:
-        while layout.count():
-            item = layout.takeAt(0)
-            if item is None:
-                continue
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-                continue
-            child_layout = item.layout()
-            if child_layout is not None:
-                self._clear_layout(child_layout)
 
     def _sync_text_answers_from_edits(self) -> None:
         if not self._text_edits:
@@ -140,7 +128,7 @@ class AddPreviewMixin:
         option_count = self._current_option_count()
         rows = self._current_row_count()
 
-        self._clear_layout(self.preview_layout)
+        clear_layout(self.preview_layout)
         self._text_edits = []
         self.text_area_widget = None
         self.text_add_btn = None

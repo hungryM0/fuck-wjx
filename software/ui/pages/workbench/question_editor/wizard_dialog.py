@@ -74,7 +74,7 @@ class QuestionWizardDialog(
         reliability_mode_enabled: bool = True,
     ):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         window_title = "配置向导"
         if survey_title:
             window_title = f"{window_title} - {_shorten_text(survey_title, 36)}"

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QTableWidgetItem, QTableWidget
+from PySide6.QtWidgets import QDialog
 from qfluentwidgets import MessageBox
 from shiboken6 import isValid
 
@@ -24,31 +23,11 @@ from software.ui.pages.workbench.question_editor.wizard_dialog import (
 from software.ui.pages.workbench.question_editor.psycho_config import (
     PSYCHO_SUPPORTED_TYPES,
 )
+from software.ui.pages.workbench.shared.table_helpers import set_table_text
 from software.ui.pages.workbench.strategy.utils import entry_dimension_label
 
 _TEXT_RANDOM_NAME_TOKEN = "__RANDOM_NAME__"
 _TEXT_RANDOM_MOBILE_TOKEN = "__RANDOM_MOBILE__"
-
-
-def _set_table_text(
-    table: QTableWidget,
-    row: int,
-    column: int,
-    text: str,
-    *,
-    align_center: bool = False,
-) -> None:
-    item = table.item(row, column)
-    if item is None:
-        item = QTableWidgetItem(text)
-        if align_center:
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        table.setItem(row, column, item)
-        return
-    if item.text() != text:
-        item.setText(text)
-    if align_center:
-        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
 
 _TEXT_RANDOM_ID_CARD_TOKEN = "__RANDOM_ID_CARD__"
@@ -428,10 +407,10 @@ class DashboardEntriesMixin:
             for idx, row_signature in enumerate(current_signatures):
                 if idx < len(previous_signatures) and previous_signatures[idx] == row_signature:
                     continue
-                _set_table_text(table, idx, 0, row_signature[0], align_center=True)
-                _set_table_text(table, idx, 1, row_signature[1], align_center=True)
-                _set_table_text(table, idx, 2, row_signature[2], align_center=True)
-                _set_table_text(table, idx, 3, row_signature[3])
+                set_table_text(table, idx, 0, row_signature[0], align_center=True)
+                set_table_text(table, idx, 1, row_signature[1], align_center=True)
+                set_table_text(table, idx, 2, row_signature[2], align_center=True)
+                set_table_text(table, idx, 3, row_signature[3])
         finally:
             table.blockSignals(False)
             table.setSortingEnabled(previous_sorting_enabled)

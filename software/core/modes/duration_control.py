@@ -144,7 +144,9 @@ async def is_survey_completion_page(driver: Any, provider: Optional[str] = None)
         log_suppressed_exception("is_survey_completion_page: divdsc = None", exc, level=logging.WARNING)
     if not detected:
         try:
-            page_text = await driver.execute_script("return document.body.innerText || '';") or ""
+            page_text = await driver.execute_script(
+                "return (document.body && document.body.innerText) || '';"
+            ) or ""
             has_marker = any(marker in page_text for marker in _COMPLETION_MARKERS)
             if has_marker:
                 action_visible = bool(
@@ -186,7 +188,7 @@ async def is_survey_completion_page(driver: Any, provider: Optional[str] = None)
                 )
                 detected = not action_visible
         except Exception as exc:
-            log_suppressed_exception("is_survey_completion_page: page_text = driver.execute_script(\"return document.body.innerText || '';\") or \"\"", exc, level=logging.WARNING)
+            log_suppressed_exception("is_survey_completion_page: page_text", exc, level=logging.WARNING)
     return bool(detected)
 
 

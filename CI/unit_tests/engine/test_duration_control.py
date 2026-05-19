@@ -137,3 +137,10 @@ class DurationControlTests:
         assert await duration_control.is_survey_completion_page(_Driver(page_text="感谢您的参与", action_visible=False))
         assert not await duration_control.is_survey_completion_page(_Driver(page_text="感谢您的参与", action_visible=True))
         assert not await duration_control.is_survey_completion_page(_Driver(page_text="继续填写"))
+
+    @pytest.mark.asyncio
+    async def test_completion_page_body_text_script_tolerates_empty_body(self) -> None:
+        driver = _Driver()
+
+        assert not await duration_control.is_survey_completion_page(driver)
+        assert any("document.body && document.body.innerText" in script for script in driver.scripts)

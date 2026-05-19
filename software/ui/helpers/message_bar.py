@@ -7,6 +7,7 @@ from typing import Optional
 from PySide6.QtCore import QTimer
 from qfluentwidgets import InfoBar, InfoBarPosition
 from qfluentwidgets.components.widgets.info_bar import InfoBarManager
+from shiboken6 import isValid
 
 
 def show_message_bar(
@@ -41,6 +42,8 @@ def replace_message_bar(current: Optional[InfoBar]) -> None:
     """关闭旧消息条，避免重复堆叠。"""
     if current is None:
         return
+    if not isValid(current):
+        return
     current.close()
 
 
@@ -51,6 +54,8 @@ def reposition_message_bar(bar: Optional[InfoBar]) -> None:
 
     def _reposition() -> None:
         try:
+            if not isValid(bar):
+                return
             parent = bar.parent()
             if parent is None or bar.position == InfoBarPosition.NONE:
                 return
