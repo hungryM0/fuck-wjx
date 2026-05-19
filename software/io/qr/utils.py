@@ -26,7 +26,7 @@ def decode_qrcode(image_source: object) -> Optional[str]:
 
     参数:
         image_source: 图片文件路径(str) 或 zxing-cpp 支持的图像对象
-            （如 numpy 数组、PIL Image、QImage）
+            （如 QImage）
 
     返回:
         str: 解码出的数据；如果解码失败返回 None

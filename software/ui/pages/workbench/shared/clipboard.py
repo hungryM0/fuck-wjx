@@ -2,19 +2,60 @@
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 from typing import TYPE_CHECKING, Optional
 
-from PIL import Image
-from PySide6.QtCore import QEvent, QMimeData, QTimer
+from PySide6.QtCore import QByteArray, QEvent, QMimeData, QTimer
 from PySide6.QtGui import QClipboard, QDragEnterEvent, QDropEvent, QImage
 from PySide6.QtWidgets import QFileDialog, QWidget
 
 from software.app.user_paths import get_user_local_data_root
 from software.io.qr.utils import decode_qrcode
 from software.logging.log_utils import log_suppressed_exception
+
+
+def _decode_windows_dib(raw_data: bytes) -> Optional[QImage]:
+    if len(raw_data) < 4:
+        return None
+
+    header_size = int.from_bytes(raw_data[:4], "little", signed=False)
+    if header_size < 12 or len(raw_data) < header_size:
+        return None
+
+    bit_count_offset = 10 if header_size == 12 else 14
+    if len(raw_data) < bit_count_offset + 2:
+        return None
+    bit_count = int.from_bytes(raw_data[bit_count_offset:bit_count_offset + 2], "little", signed=False)
+
+    compression = 0
+    colors_used = 0
+    if header_size >= 40:
+        if len(raw_data) >= 20:
+            compression = int.from_bytes(raw_data[16:20], "little", signed=False)
+        if len(raw_data) >= 36:
+            colors_used = int.from_bytes(raw_data[32:36], "little", signed=False)
+
+    palette_size = 0
+    if bit_count <= 8:
+        color_count = colors_used or (1 << bit_count)
+        palette_entry_size = 3 if header_size == 12 else 4
+        palette_size = color_count * palette_entry_size
+    elif compression == 3 and header_size == 40:
+        palette_size = 12
+    elif compression == 6 and header_size == 40:
+        palette_size = 16
+
+    pixel_offset = 14 + header_size + palette_size
+    file_size = 14 + len(raw_data)
+    bmp_header = (
+        b"BM"
+        + file_size.to_bytes(4, "little")
+        + b"\x00\x00\x00\x00"
+        + pixel_offset.to_bytes(4, "little")
+    )
+    image = QImage.fromData(QByteArray(bmp_header + raw_data))
+    return image if not image.isNull() else None
 
 
 class SurveyClipboardMixin:
@@ -185,9 +226,9 @@ class SurveyClipboardMixin:
         try:
             raw = mime_data.data('application/x-qt-windows-mime;value="DeviceIndependentBitmap"')
             if not raw.isEmpty():
-                dib_image = Image.open(io.BytesIO(raw.data()))
-                dib_image.load()
-                return dib_image
+                dib_image = _decode_windows_dib(bytes(raw.data()))
+                if dib_image is not None:
+                    return dib_image
         except Exception as exc:
             log_suppressed_exception(
                 "_extract_image_from_clipboard: DeviceIndependentBitmap",

@@ -185,6 +185,8 @@ try {
         "--python-flag=no_docstrings"
         "--noinclude-pytest-mode=nofollow"
         "--noinclude-setuptools-mode=nofollow"
+        "--noinclude-custom-mode=numpy:nofollow"
+        "--playwright-include-browser=none"
         "--include-qt-plugins=platforms,styles,imageformats,networkinformation,tls"
         "--nofollow-import-to=qfluentwidgets.multimedia"
         "--nofollow-import-to=PySide6.QtMultimedia"

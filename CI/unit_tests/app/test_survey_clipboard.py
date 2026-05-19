@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QByteArray, QEvent, QMimeData, QPoint, QPointF, QUrl, Qt
+from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QMimeData, QPoint, QPointF, QUrl, Qt
 from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QImage, QKeyEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -35,6 +35,14 @@ def _image() -> QImage:
     return image
 
 
+def _bmp_dib_bytes(image: QImage) -> QByteArray:
+    data = QByteArray()
+    buffer = QBuffer(data)
+    assert buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    assert image.save(buffer, "BMP")
+    return QByteArray(bytes(data)[14:])
+
+
 def test_clipboard_extracts_qimage_encoded_bytes_and_clipboard_fallback(qtbot, tmp_path) -> None:
     host = _ClipboardHost()
     qtbot.addWidget(host)
@@ -50,6 +58,10 @@ def test_clipboard_extracts_qimage_encoded_bytes_and_clipboard_fallback(qtbot, t
     encoded_mime = QMimeData()
     encoded_mime.setData("image/png", bytes_array)
     assert isinstance(host._extract_image_from_clipboard(encoded_mime), QImage)
+
+    dib_mime = QMimeData()
+    dib_mime.setData('application/x-qt-windows-mime;value="DeviceIndependentBitmap"', _bmp_dib_bytes(image))
+    assert isinstance(host._extract_image_from_clipboard(dib_mime), QImage)
 
     empty_mime = QMimeData()
     QApplication.clipboard().setImage(image)

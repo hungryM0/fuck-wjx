@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import software.app.frozen_runtime as frozen_runtime
@@ -22,33 +21,27 @@ class FrozenRuntimeTests:
             "D:/App/lib/PySide6",
             "D:/App/lib/PySide6/Qt/libexec",
             "D:/App/lib/shiboken6",
-            "D:/App/lib/numpy.libs",
             "D:/App/lib/PySide6/plugins",
         }
 
         def _isdir(path: str) -> bool:
             return path.replace("\\", "/") in existing
 
-        fake_ctypes = SimpleNamespace(WinDLL=lambda path: loaded_dlls.append(path.replace("\\", "/")))
-
         with (
             patch.object(frozen_runtime.sys, "frozen", True, create=True),
             patch.object(frozen_runtime.sys, "executable", "D:/App/lib/SurveyController.exe", create=True),
             patch.object(frozen_runtime.os.path, "isdir", side_effect=_isdir),
             patch.object(frozen_runtime.os, "add_dll_directory", side_effect=lambda path: added_dirs.append(path.replace("\\", "/")), create=True),
-            patch.object(frozen_runtime.glob, "glob", return_value=["D:/App/lib/numpy.libs/libscipy_openblas.dll"]),
-            patch.dict("sys.modules", {"ctypes": fake_ctypes}),
         ):
             frozen_runtime.prepare_frozen_runtime()
 
         assert frozen_runtime.os.environ["PATH"].replace("\\", "/").startswith(
-            "D:/App/lib/PySide6;D:/App/lib/PySide6/Qt/libexec;D:/App/lib/shiboken6;D:/App/lib/numpy.libs;"
+            "D:/App/lib/PySide6;D:/App/lib/PySide6/Qt/libexec;D:/App/lib/shiboken6;"
         )
         assert frozen_runtime.os.environ["QT_PLUGIN_PATH"].replace("\\", "/") == "D:/App/lib/PySide6/plugins"
         assert added_dirs == [
             "D:/App/lib/PySide6",
             "D:/App/lib/PySide6/Qt/libexec",
             "D:/App/lib/shiboken6",
-            "D:/App/lib/numpy.libs",
         ]
-        assert loaded_dlls == ["D:/App/lib/numpy.libs/libscipy_openblas.dll"]
+        assert loaded_dlls == []
