@@ -24,7 +24,14 @@ from software.core.questions.config import QuestionEntry
 from software.app.config import DEFAULT_FILL_TEXT
 from software.ui.helpers.qfluent_compat import resolve_mask_dialog_parent
 
-from .constants import TYPE_CHOICES, STRATEGY_CHOICES
+from .constants import (
+    ANSWER_WEIGHT_MAX,
+    ANSWER_WEIGHT_MIN,
+    SLIDER_TARGET_MAX,
+    SLIDER_TARGET_MIN,
+    TYPE_CHOICES,
+    STRATEGY_CHOICES,
+)
 from .utils import _apply_label_color
 from .add_preview import AddPreviewMixin
 
@@ -348,10 +355,18 @@ class QuestionAddDialog(AddPreviewMixin, MessageBoxBase):
         self._ensure_slider_values(count, default_weight)
         custom_weights = None
         if strategy == "custom":
-            custom_weights = [float(max(0, min(100, v))) for v in self._slider_values[:count]]
             if q_type == "slider":
+                custom_weights = [
+                    float(max(SLIDER_TARGET_MIN, min(SLIDER_TARGET_MAX, v)))
+                    for v in self._slider_values[:count]
+                ]
                 custom_weights = [custom_weights[0] if custom_weights else 50.0]
                 option_count = 1
+            else:
+                custom_weights = [
+                    float(max(ANSWER_WEIGHT_MIN, min(ANSWER_WEIGHT_MAX, v)))
+                    for v in self._slider_values[:count]
+                ]
 
         probabilities = -1 if strategy == "random" else (custom_weights or [1.0] * count)
         return QuestionEntry(

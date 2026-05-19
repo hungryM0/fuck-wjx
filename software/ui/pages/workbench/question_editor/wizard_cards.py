@@ -23,7 +23,7 @@ from software.providers.contracts import (
 )
 from software.ui.widgets.no_wheel import NoWheelSlider
 
-from .constants import _get_entry_type_label
+from .constants import ANSWER_WEIGHT_MAX, ANSWER_WEIGHT_MIN, SLIDER_TARGET_MAX, _get_entry_type_label
 from .question_media_preview import QuestionMediaStrip
 from .utils import _apply_label_color, _shorten_text, resolve_display_question_num
 from .wizard_validation import (
@@ -291,14 +291,15 @@ class WizardCardsMixin:
         question_info = self._get_entry_info(idx)
         min_val = self._to_float(question_info.get("slider_min"), min_val)
         raw_max = question_info.get("slider_max")
-        max_val = self._to_float(raw_max, 100.0 if raw_max is None else max_val)
+        max_val = self._to_float(raw_max, float(SLIDER_TARGET_MAX) if raw_max is None else max_val)
+        max_val = min(max_val, float(SLIDER_TARGET_MAX))
 
         if max_val <= min_val:
-            max_val = min_val + 100.0
+            max_val = min_val + 1.0
 
         if isinstance(entry.custom_weights, (list, tuple)) and entry.custom_weights:
             current = self._to_float(entry.custom_weights[0], min_val)
-            max_val = max(max_val, current)
+            max_val = max(max_val, min(current, float(SLIDER_TARGET_MAX)))
 
         min_int = int(round(min_val))
         max_int = int(round(max_val))
@@ -455,8 +456,15 @@ class WizardCardsMixin:
                 header_row.addWidget(text_label, 0)
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
-                slider.setRange(0, 100)
-                slider.setValue(int(min(100, max(0, round(weights[opt_idx])))))
+                slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
+                slider.setValue(
+                    int(
+                        min(
+                            ANSWER_WEIGHT_MAX,
+                            max(ANSWER_WEIGHT_MIN, round(weights[opt_idx])),
+                        )
+                    )
+                )
 
                 header_row.addStretch(1)
 

@@ -20,7 +20,13 @@ from software.ui.helpers.ai_fill import ensure_ai_ready
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.logging.log_utils import log_suppressed_exception
 
-from .constants import _get_type_label
+from .constants import (
+    ANSWER_WEIGHT_MAX,
+    ANSWER_WEIGHT_MIN,
+    SLIDER_TARGET_MAX,
+    SLIDER_TARGET_MIN,
+    _get_type_label,
+)
 from .utils import _apply_label_color, _bind_slider_input
 
 
@@ -266,7 +272,7 @@ class AddPreviewMixin:
                     opt_layout.addWidget(text_label)
 
                     slider = NoWheelSlider(Qt.Orientation.Horizontal, row_card)
-                    slider.setRange(0, 100)
+                    slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
                     slider.setValue(int(self._matrix_weights[row_idx][col_idx]))
                     slider.setMinimumWidth(200)
                     opt_layout.addWidget(slider, 1)
@@ -327,9 +333,9 @@ class AddPreviewMixin:
         is_slider = q_type == "slider"
         strategy = self._resolve_strategy()
         if is_slider and strategy == "random":
-            hint_text = "滑块题：当前为完全随机，每次会在 0-100 范围内随机填写"
+            hint_text = f"滑块题：当前为完全随机，每次会在 {SLIDER_TARGET_MIN}-{SLIDER_TARGET_MAX} 范围内随机填写"
         elif is_slider:
-            hint_text = "滑块题：此处数值代表填写时的目标值，会做小幅抖动避免每份相同（默认 0-100）"
+            hint_text = f"滑块题：此处数值代表填写时的目标值，会做小幅抖动避免每份相同（默认 {SLIDER_TARGET_MIN}-{SLIDER_TARGET_MAX}）"
         elif is_multiple:
             hint_text = "每个滑块的值对应的是选项的命中概率（%）"
         elif strategy == "random":
@@ -370,7 +376,10 @@ class AddPreviewMixin:
             opt_layout.addWidget(text_label)
 
             slider = NoWheelSlider(Qt.Orientation.Horizontal, opt_widget)
-            slider.setRange(0, 100)
+            if is_slider:
+                slider.setRange(SLIDER_TARGET_MIN, SLIDER_TARGET_MAX)
+            else:
+                slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
             slider.setValue(
                 int(
                     min(

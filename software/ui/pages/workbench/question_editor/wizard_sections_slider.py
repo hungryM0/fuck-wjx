@@ -30,6 +30,7 @@ from .psycho_config import (
     PSYCHO_SUPPORTED_TYPES,
     build_bias_weights,
 )
+from .constants import ANSWER_WEIGHT_MAX, ANSWER_WEIGHT_MIN
 from .utils import _apply_label_color, _bind_slider_input
 from .wizard_sections_common import (
     _TEXT_RANDOM_ID_CARD,
@@ -215,7 +216,7 @@ class WizardSectionsSliderMixin:
             if entry.question_type == "slider":
                 slider.setRange(slider_min, slider_max)
             else:
-                slider.setRange(0, 100)
+                slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
             slider.setValue(
                 int(
                     min(

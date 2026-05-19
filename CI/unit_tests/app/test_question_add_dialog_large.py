@@ -84,8 +84,18 @@ class QuestionAddDialogLargeTests:
         entry = dialog._build_entry()
         assert entry.question_type == "multiple"
         assert entry.distribution_mode == "custom"
-        assert entry.custom_weights == [5.0, 55.0, 100.0]
-        assert entry.probabilities == [5.0, 55.0, 100.0]
+        assert entry.custom_weights == [5.0, 50.0, 50.0]
+        assert entry.probabilities == [5.0, 50.0, 50.0]
+
+    def test_custom_slider_target_keeps_100_cap(self) -> None:
+        dialog = QuestionAddDialog([])
+        dialog.type_combo.setCurrentIndex(7)
+        dialog.strategy_combo.setCurrentIndex(1)
+        dialog._slider_values = [188.0]
+        entry = dialog._build_entry()
+        assert entry.question_type == "slider"
+        assert entry.custom_weights == [100.0]
+        assert entry.probabilities == [100.0]
 
     def test_order_entry_ignores_strategy_weights(self) -> None:
         dialog = QuestionAddDialog([])

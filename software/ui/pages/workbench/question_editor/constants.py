@@ -30,6 +30,11 @@ TYPE_LABEL_MAP.update(
     }
 )
 
+SLIDER_TARGET_MIN = 0
+SLIDER_TARGET_MAX = 100
+ANSWER_WEIGHT_MIN = 0
+ANSWER_WEIGHT_MAX = 50
+
 
 def _get_entry_type_label(entry: QuestionEntry) -> str:
     """获取题目类型的中文标签"""

@@ -41,6 +41,7 @@ from .wizard_sections_common import (
 from .wizard_sections_slider import WizardSectionsSliderMixin
 from .wizard_sections_text import WizardSectionsTextMixin
 from .utils import _apply_label_color, _bind_slider_input, _shorten_text
+from .constants import ANSWER_WEIGHT_MAX, ANSWER_WEIGHT_MIN
 
 
 class WizardSectionsMixin(
@@ -145,7 +146,7 @@ class WizardSectionsMixin(
                 header_row.addWidget(option_widget, 0)
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, parent_widget)
-                slider.setRange(0, 100)
+                slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
                 try:
                     slider.setValue(int(values[col_idx]))
                 except Exception:
