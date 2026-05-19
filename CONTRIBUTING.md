@@ -240,12 +240,15 @@ git push
 | Credamo 见数适配 | `credamo/provider/` |
 | 通用执行引擎、任务调度 | `software/core/` |
 | UI 页面、弹窗、组件 | `software/ui/` |
-| 配置读写、Markdown、表格、二维码、报告 | `software/io/` |
+| 配置读写、表格、二维码、报告 | `software/io/` |
 | 浏览器、HTTP、代理配置 | `software/network/` |
 | AI 接入 | `software/integrations/ai/`、`software/core/ai/` |
+| 更新日志入口、更多菜单 | `software/ui/shell/main_window_parts/lazy_pages.py` |
 | 自动更新 | `software/update/` |
 | 单元测试 | `CI/unit_tests/` |
+| live tests | `CI/live_tests/` |
 | CI 检查脚本 | `CI/python_checks/`、`CI/python_ci.py` |
+| Worker | `CI/worker/` |
 
 不要把新功能塞进不相干文件。屎山通常就是这么长出来的。
 
@@ -334,7 +337,7 @@ Fixes #123
 ├── credamo/                 # Credamo 见数平台适配
 ├── Setup/                   # 安装包相关资源
 ├── software/                # 桌面应用主体
-│   ├── app/                 # 启动、路径、配置、版本
+│   ├── app/                 # 启动、路径、配置、版本、迁移
 │   ├── assets/              # 应用内资源
 │   ├── core/                # 核心业务、执行引擎、题目模型
 │   ├── integrations/        # 外部服务接入
