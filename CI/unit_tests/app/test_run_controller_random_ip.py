@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from concurrent.futures import Future
 from types import SimpleNamespace
 
@@ -44,6 +45,9 @@ class _FakeController(RunControllerRandomIPMixin):
         self._random_ip_server_sync_lock = threading.Lock()
         self._random_ip_server_sync_active = False
         self._random_ip_last_server_sync_at = 0.0
+        self._random_ip_background_threads: set[threading.Thread] = set()
+        self._random_ip_background_threads_lock = threading.Lock()
+        self._parent = None
         self.loading_events: list[tuple[bool, str]] = []
         self.refresh_calls: list[object] = []
 
@@ -61,6 +65,17 @@ class _FakeController(RunControllerRandomIPMixin):
     def refresh_random_ip_counter(self, *, adapter=None) -> None:
         self.refresh_calls.append(adapter)
         super().refresh_random_ip_counter(adapter=adapter)
+
+    def parent(self):
+        return self._parent
+
+    def wait_random_ip_tasks(self, timeout: float = 1.0) -> None:
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            if not self.collect_random_ip_background_threads():
+                return
+            time.sleep(0.01)
+        raise AssertionError("随机IP后台任务未按时结束")
 
 
 class RunControllerRandomIPTests:
@@ -155,6 +170,7 @@ class RunControllerRandomIPTests:
         )
         monkeypatch.setattr(random_ip_module, "reset_deduped_log_message", lambda _key: None)
         controller.sync_random_ip_counter_from_server(adapter=controller.adapter)
+        controller.wait_random_ip_tasks()
         assert controller.adapter.counters[-1] == (7.0, 12.0, False)
         assert controller._random_ip_server_sync_active is False
 
@@ -180,6 +196,7 @@ class RunControllerRandomIPTests:
             lambda adapter: adapter.counters.append((9.0, 15.0, False)),
         )
         controller.sync_random_ip_counter_from_server(adapter=controller.adapter, silent=False)
+        controller.wait_random_ip_tasks()
         assert logged[-1][0] == "random_ip_quota_sync_failure"
         assert controller.adapter.messages[-1][0] == "随机IP同步失败"
         assert controller.adapter.counters[-1] == (9.0, 15.0, False)
@@ -279,10 +296,12 @@ class RunControllerRandomIPTests:
         monkeypatch.setattr(random_ip_module, "get_session_snapshot", lambda: {"authenticated": False})
         stop_signal = threading.Event()
         controller.handle_random_ip_submission(stop_signal=stop_signal, adapter=controller.adapter)
+        controller.wait_random_ip_tasks()
         assert stop_signal.is_set()
         assert controller.adapter.enabled is False
 
         controller.adapter.enabled = True
         monkeypatch.setattr(random_ip_module, "get_session_snapshot", lambda: {"authenticated": True})
         controller.handle_random_ip_submission(stop_signal=threading.Event(), adapter=controller.adapter)
+        controller.wait_random_ip_tasks()
         assert controller.adapter.counters

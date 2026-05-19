@@ -143,6 +143,7 @@ class RunControllerExecutionMixin:
 
         def _dispatch_to_ui_async(self, callback: Callable[[], Any]) -> None: ...
         def _enqueue_ui_callback(self, callback: Callable[[], Any]) -> bool: ...
+        def collect_random_ip_background_threads(self) -> List[threading.Thread]: ...
         def _sync_adapter_ui_bridge(self, adapter: Optional[Any] = None) -> None: ...
         def sync_runtime_ui_state_from_config(
             self, config: RuntimeConfig, *, emit: bool = True
@@ -474,6 +475,7 @@ class RunControllerExecutionMixin:
             getattr(self, "_init_gate_thread", None),
             *list(self.worker_threads or []),
             getattr(self, "_monitor_thread", None),
+            *list(getattr(self, "collect_random_ip_background_threads", lambda: [])() or []),
         ]:
             if not isinstance(candidate, threading.Thread):
                 continue

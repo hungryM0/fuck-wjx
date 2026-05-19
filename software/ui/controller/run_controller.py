@@ -109,6 +109,8 @@ class RunController(
         self._random_ip_server_sync_lock = threading.Lock()
         self._random_ip_server_sync_active = False
         self._random_ip_last_server_sync_at = 0.0
+        self._random_ip_background_threads: set[threading.Thread] = set()
+        self._random_ip_background_threads_lock = threading.Lock()
         self._close_shutdown_lock = threading.Lock()
         self._close_shutdown_thread: Optional[threading.Thread] = None
         self._startup_status_check_lock = threading.Lock()

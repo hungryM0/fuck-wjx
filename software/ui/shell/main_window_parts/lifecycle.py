@@ -49,6 +49,18 @@ class MainWindowLifecycleMixin:
 
     def _cleanup_runtime_resources_on_close(self) -> None:
         try:
+            setattr(self, "_is_closing", True)
+        except Exception:
+            pass
+
+        try:
+            dashboard = getattr(self, "dashboard", None)
+            if dashboard is not None:
+                setattr(dashboard, "_is_closing", True)
+        except Exception as exc:
+            log_suppressed_exception("closeEvent: mark dashboard closing", exc)
+
+        try:
             self._random_ip_quota_auto_sync_timer.stop()
         except Exception as exc:
             log_suppressed_exception(

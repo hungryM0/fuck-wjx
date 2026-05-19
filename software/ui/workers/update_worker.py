@@ -12,8 +12,19 @@ class UpdateCheckWorker(QObject):
 
     finished = Signal(bool, dict)
 
+    def _is_interrupted(self) -> bool:
+        thread = self.thread()
+        if thread is None:
+            return False
+        try:
+            return bool(thread.isInterruptionRequested())
+        except Exception:
+            return False
+
     @Slot()
     def run(self) -> None:
+        if self._is_interrupted():
+            return
         try:
             from software.update.updater import UpdateManager
 
@@ -22,6 +33,9 @@ class UpdateCheckWorker(QObject):
                 "has_update": False,
                 "status": "unknown",
             }
+            if self._is_interrupted():
+                logging.info("后台更新检查已取消")
+                return
             has_update = bool(update_info.get("has_update", False))
             status = str(update_info.get("status", "unknown"))
 
@@ -32,5 +46,8 @@ class UpdateCheckWorker(QObject):
 
             self.finished.emit(has_update, update_info)
         except Exception as exc:
+            if self._is_interrupted():
+                logging.info("后台更新检查已取消")
+                return
             logging.warning("检查更新失败: %s", exc)
             self.finished.emit(False, {"has_update": False, "status": "unknown"})

@@ -92,6 +92,7 @@ class DashboardPage(
         self._ip_balance_fetch_interval_sec = 30.0
         self._random_ip_status_fetch_lock = threading.Lock()
         self._random_ip_status_fetching = False
+        self._is_closing = False
         self._clipboard_parse_ticket = 0
         self._init_progress_state()
         self._build_ui()

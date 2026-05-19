@@ -198,9 +198,20 @@ class MainWindowUpdateMixin:
         thread = getattr(self, "_update_check_thread", None)
         if thread is None:
             return
+        worker = getattr(self, "_update_check_worker", None)
         try:
+            if worker is not None:
+                try:
+                    worker.finished.disconnect(self._on_update_checked)
+                except Exception:
+                    pass
+            try:
+                thread.requestInterruption()
+            except Exception:
+                logging.info("请求后台更新检查线程中断失败", exc_info=True)
             thread.quit()
-            thread.wait(1500)
+            if not thread.wait(2500):
+                logging.warning("后台更新检查线程未在关闭时及时退出")
         except Exception:
             logging.info("停止后台更新检查线程失败", exc_info=True)
         finally:

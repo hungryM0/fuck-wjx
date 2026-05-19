@@ -138,6 +138,15 @@ class DashboardRandomIPMixin:
                 self._random_ip_status_fetching = False
 
         try:
+            if bool(getattr(self, "_is_closing", False)):
+                return
+            window = self.window()
+            if window is not None and bool(getattr(window, "_is_closing", False)):
+                return
+        except Exception:
+            return
+
+        try:
             self._randomIpHeartbeatUpdated.emit(payload or {})
         except Exception as exc:
             log_suppressed_exception(

@@ -16,6 +16,10 @@ class _FakeSignal:
     def connect(self, callback) -> None:
         self.callbacks.append(callback)
 
+    def disconnect(self, callback) -> None:
+        if callback in self.callbacks:
+            self.callbacks.remove(callback)
+
     def emit(self, *args) -> None:
         for callback in list(self.callbacks):
             callback(*args)
@@ -235,15 +239,20 @@ class _FakeThread:
         self.quitted = 0
         self.wait_calls: list[int] = []
         self.started_flag = False
+        self.interruption_requested = 0
 
     def start(self) -> None:
         self.started_flag = True
 
+    def requestInterruption(self) -> None:
+        self.interruption_requested += 1
+
     def quit(self) -> None:
         self.quitted += 1
 
-    def wait(self, timeout: int) -> None:
+    def wait(self, timeout: int) -> bool:
         self.wait_calls.append(int(timeout))
+        return True
 
     def deleteLater(self) -> None:
         return
@@ -483,7 +492,9 @@ class MainWindowUpdateLargeTests:
         window._stop_update_check_worker()
         assert window._update_check_thread is None
         assert window._update_check_worker is None
+        assert thread_instances[0].interruption_requested == 1
         assert thread_instances[0].quitted == 1
+        assert thread_instances[0].wait_calls == [2500]
 
     def test_download_toast_progress_and_cancel_flow(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._patch_widget_deps(monkeypatch)

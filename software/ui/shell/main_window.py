@@ -357,7 +357,6 @@ class MainWindow(
     def _start_random_ip_quota_auto_sync(self) -> None:
         try:
             self._random_ip_quota_auto_sync_timer.start()
-            QTimer.singleShot(1500, self._sync_random_ip_quota_silently)
         except Exception:
             logging.info("启动随机IP额度自动同步失败", exc_info=True)
 

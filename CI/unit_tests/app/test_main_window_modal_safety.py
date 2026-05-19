@@ -72,6 +72,7 @@ class _FakeLifecycleWindow(MainWindowLifecycleMixin):
     def __init__(self) -> None:
         self._close_request_pending = False
         self._close_request_confirmed = False
+        self._is_closing = False
         self.close_called = 0
         self.confirm_result = True
         self.cleanup_called = 0
@@ -109,6 +110,7 @@ class _FakeLifecycleWindow(MainWindowLifecycleMixin):
             ),
         )
         self.dashboard = SimpleNamespace(
+            _is_closing=False,
             _build_config=lambda: {"dashboard": True},
             apply_config=lambda cfg: self._record(("dashboard_apply", cfg)),
             update_random_ip_counter=lambda count, limit, custom_api: self._record(
@@ -447,6 +449,8 @@ class MainWindowModalSafetyTests:
     def test_cleanup_runtime_resources_on_close_stops_all_known_resources(self) -> None:
         window = _FakeLifecycleWindow()
         MainWindowLifecycleMixin._cleanup_runtime_resources_on_close(window)
+        assert window._is_closing is True
+        assert window.dashboard._is_closing is True
         assert window.cleanup_events == [
             "quota_timer",
             "shutdown",

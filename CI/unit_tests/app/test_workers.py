@@ -33,6 +33,23 @@ class WorkerTests:
             worker.run()
         assert received == [(False, {'has_update': False, 'status': 'unknown'})]
 
+    def test_update_check_worker_skips_emit_when_thread_interrupted(self) -> None:
+        worker = UpdateCheckWorker()
+        received: list[tuple[bool, dict]] = []
+        worker.finished.connect(lambda has_update, payload: received.append((has_update, payload)))
+        fake_thread = types.SimpleNamespace(isInterruptionRequested=lambda: True)
+        fake_module = types.SimpleNamespace(
+            UpdateManager=types.SimpleNamespace(
+                check_updates=lambda: {'has_update': True, 'status': 'ok', 'version': '1.2.3'}
+            )
+        )
+        with (
+            patch.object(worker, 'thread', return_value=fake_thread),
+            patch.dict('sys.modules', {'software.update.updater': fake_module}),
+        ):
+            worker.run()
+        assert received == []
+
     def test_ai_test_worker_treats_connection_success_prefix_as_success(self) -> None:
         worker = AITestWorker()
         received: list[tuple[bool, str]] = []

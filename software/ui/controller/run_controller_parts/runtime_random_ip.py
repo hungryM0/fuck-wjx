@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import logging
 import threading
 import time
@@ -36,8 +38,67 @@ class RunControllerRandomIPMixin:
     if TYPE_CHECKING:
         adapter: Any
         _async_engine_client: Any
+        _random_ip_background_threads: set[threading.Thread]
+        _random_ip_background_threads_lock: threading.Lock
 
         def notify_random_ip_loading(self, loading: bool, message: str = "") -> None: ...
+        def _dispatch_to_ui_async(self, callback: Any) -> None: ...
+
+    def _track_random_ip_background_thread(self, thread: threading.Thread) -> None:
+        lock = getattr(self, "_random_ip_background_threads_lock", None)
+        threads = getattr(self, "_random_ip_background_threads", None)
+        if lock is None or threads is None:
+            return
+        with lock:
+            threads.add(thread)
+
+    def _untrack_random_ip_background_thread(self, thread: threading.Thread) -> None:
+        lock = getattr(self, "_random_ip_background_threads_lock", None)
+        threads = getattr(self, "_random_ip_background_threads", None)
+        if lock is None or threads is None:
+            return
+        with lock:
+            threads.discard(thread)
+
+    def collect_random_ip_background_threads(self) -> list[threading.Thread]:
+        lock = getattr(self, "_random_ip_background_threads_lock", None)
+        threads = getattr(self, "_random_ip_background_threads", None)
+        if lock is None or threads is None:
+            return []
+        with lock:
+            return list(threads)
+
+    def _random_ip_ui_alive(self) -> bool:
+        parent_getter = getattr(self, "parent", None)
+        if not callable(parent_getter):
+            return True
+        parent = parent_getter()
+        if parent is None:
+            return True
+        return not bool(getattr(parent, "_is_closing", False))
+
+    def _submit_random_ip_background_task(self, task_name: str, target: Any) -> concurrent.futures.Future[Any]:
+        future: concurrent.futures.Future[Any] = concurrent.futures.Future()
+
+        def _runner() -> None:
+            current = threading.current_thread()
+            try:
+                result = target()
+            except Exception as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(result)
+            finally:
+                self._untrack_random_ip_background_thread(current)
+
+        thread = threading.Thread(
+            target=_runner,
+            daemon=True,
+            name=f"RandomIpTask-{task_name}",
+        )
+        self._track_random_ip_background_thread(thread)
+        thread.start()
+        return future
 
     def _resolve_counter_snapshot_values(self, snapshot: Dict[str, Any]) -> tuple[float, float]:
         return (
@@ -53,6 +114,8 @@ class RunControllerRandomIPMixin:
         *,
         level: str = "info",
     ) -> None:
+        if not self._random_ip_ui_alive():
+            return
         if not adapter:
             return
         try:
@@ -68,6 +131,8 @@ class RunControllerRandomIPMixin:
         total: float,
         custom_api: bool,
     ) -> None:
+        if not self._random_ip_ui_alive():
+            return
         if not adapter:
             return
         try:
@@ -76,6 +141,8 @@ class RunControllerRandomIPMixin:
             logging.info("更新随机IP额度显示失败", exc_info=True)
 
     def _set_random_ip_enabled(self, adapter: Optional[Any], enabled: bool) -> None:
+        if not self._random_ip_ui_alive():
+            return
         if not adapter:
             return
         try:
@@ -86,6 +153,8 @@ class RunControllerRandomIPMixin:
     def _set_random_ip_loading(
         self, adapter: Optional[Any], loading: bool, message: str = ""
     ) -> None:
+        if not self._random_ip_ui_alive():
+            return
         try:
             self.notify_random_ip_loading(bool(loading), str(message or ""))
         except Exception:
@@ -158,9 +227,9 @@ class RunControllerRandomIPMixin:
         if not adapter:
             return
         try:
-            self._submit_random_ip_task(
+            self._submit_random_ip_background_task(
                 "refresh_random_ip_counter",
-                lambda: self._refresh_random_ip_counter_async(adapter),
+                lambda: self._refresh_random_ip_counter_now(adapter),
             )
         except Exception:
             logging.info("提交随机IP计数刷新任务失败", exc_info=True)
@@ -236,9 +305,9 @@ class RunControllerRandomIPMixin:
         if not adapter:
             return
         try:
-            self._submit_random_ip_task(
+            self._submit_random_ip_background_task(
                 "sync_random_ip_counter_from_server",
-                lambda: self._sync_random_ip_counter_from_server_task(
+                lambda: self._run_sync_random_ip_counter_from_server_task(
                     adapter=adapter,
                     silent=silent,
                     min_interval_seconds=min_interval_seconds,
@@ -246,6 +315,21 @@ class RunControllerRandomIPMixin:
             )
         except Exception:
             logging.info("提交随机IP额度同步任务失败", exc_info=True)
+
+    def _run_sync_random_ip_counter_from_server_task(
+        self,
+        *,
+        adapter: Optional[Any],
+        silent: bool,
+        min_interval_seconds: float,
+    ) -> None:
+        asyncio.run(
+            self._sync_random_ip_counter_from_server_task(
+                adapter=adapter,
+                silent=silent,
+                min_interval_seconds=min_interval_seconds,
+            )
+        )
 
     async def _try_activate_random_ip_trial_async(
         self,
