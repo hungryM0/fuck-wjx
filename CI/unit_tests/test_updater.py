@@ -181,6 +181,45 @@ class UpdateHelperTests:
         assert result["status"] == "unknown"
         assert result["latest_version"] == "???"
 
+    def test_normalize_release_helpers_and_resolve_notes_cover_html_and_tag_fallback(self) -> None:
+        asset = SimpleNamespace(NotesMarkdown="", NotesHtml="<p>HTML 说明</p>")
+        assert updater._normalize_release_release_notes(asset) == "<p>HTML 说明</p>"
+        assert updater._normalize_release_tag("3.2.0") == "v3.2.0"
+        assert updater._normalize_release_tag("v3.2.0") == "v3.2.0"
+        assert updater._normalize_release_tag("") == ""
+
+        update_info = SimpleNamespace(TargetFullRelease=asset)
+        with patch.object(updater, "_fetch_github_release_by_tag", return_value=None), patch.object(
+            updater,
+            "_fetch_github_release_from_list",
+            return_value={"body": "列表说明"},
+        ):
+            assert updater._resolve_release_notes(update_info, "3.2.0") == "<p>HTML 说明</p>"
+
+        update_info_empty = SimpleNamespace(TargetFullRelease=SimpleNamespace(NotesMarkdown="", NotesHtml=""))
+        with patch.object(updater, "_fetch_github_release_by_tag", return_value={"body": "GitHub 说明"}):
+            assert updater._resolve_release_notes(update_info_empty, "3.2.0") == "GitHub 说明"
+
+    def test_build_remote_version_result_covers_unknown_latest_preview_and_outdated(self) -> None:
+        assert updater._build_remote_version_result("3.1.2", "???", release_notes="说明") == {
+            "has_update": False,
+            "status": "unknown",
+            "current_version": "3.1.2",
+            "latest_version": "???",
+            "release_notes": "说明",
+        }
+        assert updater._build_remote_version_result("3.1.2", "3.1.2", release_notes="说明") == {
+            "has_update": False,
+            "status": "latest",
+            "current_version": "3.1.2",
+            "latest_version": "3.1.2",
+            "release_notes": "说明",
+        }
+        assert updater._build_remote_version_result("3.1.3", "3.1.2")["status"] == "preview"
+        outdated = updater._build_remote_version_result("3.1.2", "3.1.4")
+        assert outdated["status"] == "outdated"
+        assert outdated["manual_release_url"].endswith("/v3.1.4")
+
     def test_get_all_releases_returns_empty_when_request_fails(self) -> None:
         with patch.object(updater.http_client, "get", side_effect=RuntimeError("boom")):
             assert updater.UpdateManager.get_all_releases() == []
@@ -232,3 +271,61 @@ class UpdateHelperTests:
         )
         updater.perform_update(gui)
         gui.downloadFailed.emit.assert_called_once()
+
+    def test_perform_update_reports_progress_completion_and_failure(self) -> None:
+        class _Thread:
+            def __init__(self, *, target, **_kwargs) -> None:
+                self._target = target
+
+            def start(self) -> None:
+                self._target()
+
+        gui = SimpleNamespace(
+            update_info={"version": "3.2.0", "package_size": 400, "_velopack_update": object()},
+            _emit_download_progress=MagicMock(),
+            downloadStarted=SimpleNamespace(emit=MagicMock()),
+            downloadFinished=SimpleNamespace(emit=MagicMock()),
+            downloadFailed=SimpleNamespace(emit=MagicMock()),
+        )
+        reported: list[tuple[int, int, float]] = []
+
+        def _download_success(_payload, *, progress_callback):
+            progress_callback(25, 100, 12.5)
+            progress_callback(75, 100, 9.5)
+            return True
+
+        with patch.object(updater, "Thread", _Thread), patch.object(updater.UpdateManager, "download_update", side_effect=_download_success):
+            updater.perform_update(gui, on_progress=lambda d, t, s: reported.append((d, t, s)))
+
+        gui.downloadStarted.emit.assert_called_once()
+        gui.downloadFinished.emit.assert_called_once_with(gui.update_info)
+        assert reported == [(100, 400, 12.5), (300, 400, 9.5), (100, 100, 0.0)]
+
+        cancelled_gui = SimpleNamespace(
+            update_info={"version": "3.2.0", "_velopack_update": object()},
+            _emit_download_progress=MagicMock(),
+            downloadStarted=SimpleNamespace(emit=MagicMock()),
+            downloadFinished=SimpleNamespace(emit=MagicMock()),
+            downloadFailed=SimpleNamespace(emit=MagicMock()),
+        )
+
+        def _download_cancel(_payload, *, progress_callback):
+            progress_callback(50, 100, 0.0)
+            cancelled_gui._download_cancelled = True
+            return True
+
+        with patch.object(updater, "Thread", _Thread), patch.object(updater.UpdateManager, "download_update", side_effect=_download_cancel):
+            updater.perform_update(cancelled_gui)
+
+        cancelled_gui.downloadFinished.emit.assert_not_called()
+
+        failed_gui = SimpleNamespace(
+            update_info={"version": "3.2.0", "_velopack_update": object()},
+            _emit_download_progress=MagicMock(),
+            downloadStarted=SimpleNamespace(emit=MagicMock()),
+            downloadFinished=SimpleNamespace(emit=MagicMock()),
+            downloadFailed=SimpleNamespace(emit=MagicMock()),
+        )
+        with patch.object(updater, "Thread", _Thread), patch.object(updater.UpdateManager, "download_update", side_effect=RuntimeError("boom")):
+            updater.perform_update(failed_gui)
+        failed_gui.downloadFailed.emit.assert_called_once()

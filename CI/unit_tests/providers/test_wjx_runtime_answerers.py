@@ -48,6 +48,65 @@ def _ctx(**config_overrides):
 
 
 class WjxRuntimeAnswerersTests:
+    def test_valid_forced_choice_index_and_record_answer_action_cover_main_branches(self, monkeypatch) -> None:
+        assert runtime_answerers._valid_forced_choice_index("1", 3) == 1
+        assert runtime_answerers._valid_forced_choice_index(-1, 3) is None
+        assert runtime_answerers._valid_forced_choice_index("x", 3) is None
+
+        recorded: list[tuple[tuple[object, ...], dict[str, object]]] = []
+        pending: list[tuple[object, ...]] = []
+        monkeypatch.setattr(runtime_answerers, "record_answer", lambda *args, **kwargs: recorded.append((args, kwargs)))
+        monkeypatch.setattr(runtime_answerers, "record_pending_distribution_choice", lambda *args, **kwargs: pending.append(args))
+
+        ctx = _ctx()
+        runtime_answerers._record_answer_action(
+            ctx,
+            runtime_answerers.AnswerAction(
+                question_num=6,
+                kind="matrix",
+                matrix_indices=(2, 1),
+                record_type="matrix",
+                pending_distribution_choices=((1, 3, 0),),
+            ),
+        )
+        runtime_answerers._record_answer_action(
+            ctx,
+            runtime_answerers.AnswerAction(
+                question_num=7,
+                kind="text",
+                text_values=("甲", "", "乙"),
+                record_type="text",
+            ),
+        )
+        runtime_answerers._record_answer_action(
+            ctx,
+            runtime_answerers.AnswerAction(
+                question_num=8,
+                kind="slider",
+                slider_value=66.0,
+                record_type="slider",
+            ),
+        )
+        runtime_answerers._record_answer_action(
+            ctx,
+            runtime_answerers.AnswerAction(
+                question_num=9,
+                kind="choice",
+                selected_indices=(1, 2),
+                selected_texts=("B", "C"),
+                record_type="multiple",
+            ),
+        )
+
+        assert pending == [(ctx, 6, 1, 3)]
+        assert recorded == [
+            ((6, "matrix"), {"selected_indices": [2], "row_index": 0}),
+            ((6, "matrix"), {"selected_indices": [1], "row_index": 1}),
+            ((7, "text"), {"text_answer": "甲 | 无 | 乙"}),
+            ((8, "slider"), {"text_answer": "66.0"}),
+            ((9, "multiple"), {"selected_indices": [1, 2], "selected_texts": ["B", "C"]}),
+        ]
+
     @pytest.mark.asyncio
     async def test_answer_wjx_single_covers_normal_and_strict_ratio_paths(self, monkeypatch) -> None:
         ctx = _ctx()
@@ -361,3 +420,121 @@ class WjxRuntimeAnswerersTests:
         )
 
         assert result.failed == (5,)
+
+    @pytest.mark.asyncio
+    async def test_build_answer_action_skips_unavailable_questions_and_dispatches_helpers(self, monkeypatch) -> None:
+        ctx = _ctx(question_config_index_map={1: ("single", 0)})
+        question = _question(1)
+
+        assert await runtime_answerers.build_answer_action(object(), _question(2, has_jump=True), ctx, psycho_plan=None) is None
+        assert await runtime_answerers.build_answer_action(object(), _question(3, has_dependent_display_logic=True), ctx, psycho_plan=None) is None
+        assert await runtime_answerers.build_answer_action(object(), _question(99), ctx, psycho_plan=None) is None
+
+        sentinel = runtime_answerers.AnswerAction(question_num=1, kind="choice", input_type="radio")
+
+        async def _build_single(*_args, **_kwargs):
+            return sentinel
+
+        monkeypatch.setattr(runtime_answerers, "_build_wjx_single_action", _build_single)
+        assert await runtime_answerers.build_answer_action(object(), question, ctx, psycho_plan="plan") is sentinel
+
+    @pytest.mark.asyncio
+    async def test_build_wjx_action_helpers_cover_single_dropdown_text_matrix_multiple_and_slider(self, monkeypatch) -> None:
+        recorded_ai_prompts: list[str] = []
+        monkeypatch.setattr(runtime_answerers, "_resolve_runtime_option_texts", _async_result(["甲", "乙", "丙"]))
+        monkeypatch.setattr(runtime_answerers, "resolve_runtime_option_fill_text_from_config", _async_result("补充"))
+        monkeypatch.setattr(runtime_answerers, "normalize_droplist_probs", lambda weights, count: [0.2, 0.8, 0.0][:count])
+        monkeypatch.setattr(runtime_answerers, "apply_persona_boost", lambda texts, probs: probs)
+        monkeypatch.setattr(runtime_answerers, "apply_single_like_consistency", lambda probs, _current: probs)
+        monkeypatch.setattr(runtime_answerers, "resolve_distribution_probabilities", lambda probs, *_args, **_kwargs: probs)
+        monkeypatch.setattr(runtime_answerers, "enforce_reference_rank_order", lambda probs, _reference: probs)
+        monkeypatch.setattr(runtime_answerers, "weighted_index", lambda _probs: 1)
+        monkeypatch.setattr(runtime_answerers, "get_tendency_index", lambda *_args, **_kwargs: 2)
+        monkeypatch.setattr(runtime_answerers, "is_strict_ratio_question", lambda _ctx, current: current in {1, 4})
+        monkeypatch.setattr(runtime_answerers, "resolve_current_reverse_fill_answer", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(runtime_answerers, "resolve_runtime_text_values_from_config", lambda *_args, **_kwargs: ["甲", "乙"])
+        monkeypatch.setattr(runtime_answerers, "apply_matrix_row_consistency", lambda probs, _current, _row_index: probs)
+        monkeypatch.setattr(runtime_answerers, "get_multiple_rule_constraint", lambda *_args, **_kwargs: ({0}, {3}, None))
+        monkeypatch.setattr(runtime_answerers, "_normalize_selected_indices", lambda values, count: list(dict.fromkeys(v for v in values if 0 <= v < count)))
+        monkeypatch.setattr(runtime_answerers.random, "randint", lambda _start, _end: 1)
+        monkeypatch.setattr(runtime_answerers.random, "sample", lambda population, count: list(population)[:count])
+        monkeypatch.setattr(runtime_answerers, "stochastic_round", lambda _value: 1)
+        monkeypatch.setattr(runtime_answerers, "weighted_sample_without_replacement", lambda candidates, _weights, count: list(candidates)[:count])
+
+        async def _fake_ai(prompt: str, **_kwargs):
+            recorded_ai_prompts.append(prompt)
+            return ["AI答案"]
+
+        monkeypatch.setattr(runtime_answerers, "agenerate_ai_answer", _fake_ai)
+
+        ctx = _ctx(
+            text_ai_flags=[True],
+            texts=[["配置文本"]],
+            texts_prob=[[1.0]],
+            question_dimension_map={2: "D2", 4: "D4"},
+            multiple_prob=[[-1]],
+            slider_targets=["bad"],
+        )
+
+        single_action = await runtime_answerers._build_wjx_single_action(object(), _question(1), 0, ctx)
+        dropdown_action = await runtime_answerers._build_wjx_dropdown_action(object(), _question(2), 0, ctx, psycho_plan="plan")
+        text_action = await runtime_answerers._build_wjx_text_action(object(), _question(3, title="标题", description="说明", text_inputs=2), 0, ctx)
+        matrix_action = await runtime_answerers._build_wjx_matrix_action(_question(4, rows=2, options=3), 0, ctx, psycho_plan="plan")
+        multiple_action = await runtime_answerers._build_wjx_multiple_action(object(), _question(5, options=4, multi_min_limit=2, multi_max_limit=3), 0, ctx)
+        slider_action = await runtime_answerers._build_wjx_slider_action(_question(6), 0, ctx)
+
+        assert single_action == runtime_answerers.AnswerAction(
+            question_num=1,
+            kind="choice",
+            input_type="radio",
+            selected_indices=(1,),
+            option_fill_texts=((1, "补充"),),
+            selected_texts=("乙 / 补充",),
+            record_type="single",
+            pending_distribution_choices=((1, 3, None),),
+        )
+        assert dropdown_action == runtime_answerers.AnswerAction(
+            question_num=2,
+            kind="select",
+            selected_indices=(2,),
+            option_fill_texts=((2, "补充"),),
+            selected_texts=("丙 / 补充",),
+            record_type="dropdown",
+            pending_distribution_choices=((2, 3, None),),
+        )
+        assert text_action == runtime_answerers.AnswerAction(
+            question_num=3,
+            kind="text",
+            text_values=("AI答案", "AI答案"),
+            record_type="text",
+        )
+        assert matrix_action == runtime_answerers.AnswerAction(
+            question_num=4,
+            kind="matrix",
+            matrix_indices=(2, 2),
+            record_type="matrix",
+            pending_distribution_choices=((2, 3, 0), (2, 3, 1)),
+        )
+        assert multiple_action == runtime_answerers.AnswerAction(
+            question_num=5,
+            kind="choice",
+            input_type="checkbox",
+            selected_indices=(0, 1),
+            option_fill_texts=((0, "补充"), (1, "补充")),
+            selected_texts=("甲 / 补充", "乙 / 补充"),
+            record_type="multiple",
+        )
+        assert slider_action == runtime_answerers.AnswerAction(
+            question_num=6,
+            kind="slider",
+            slider_value=50.0,
+            record_type="slider",
+        )
+        assert recorded_ai_prompts == ["标题\n补充说明：说明"]
+
+
+def _async_result(value):
+    async def _runner(*_args, **_kwargs):
+        return value
+
+    return _runner
