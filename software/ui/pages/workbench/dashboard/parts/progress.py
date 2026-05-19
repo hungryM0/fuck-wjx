@@ -260,7 +260,7 @@ class DashboardProgressMixin:
         if hasattr(stack, "setCurrentWidget"):
             if animate:
                 try:
-                    stack.setCurrentWidget(target, isBack=is_back)
+                    stack.setCurrentWidget(target, needPopOut=is_back)
                     return
                 except TypeError:
                     pass

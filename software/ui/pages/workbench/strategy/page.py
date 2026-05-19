@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QVBoxLayout,
     QWidget,
-    QStackedWidget,
 )
 from qfluentwidgets import (
     BodyLabel,
@@ -18,6 +17,7 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     MessageBox,
+    PopUpAniStackedWidget,
     PrimaryPushButton,
     PushButton,
     ScrollArea,
@@ -382,7 +382,7 @@ class QuestionStrategyPage(ScrollArea):
         self.section_separator = HorizontalSeparator(self.view)
         layout.addWidget(self.section_separator)
 
-        self.stack = QStackedWidget(self.view)
+        self.stack = PopUpAniStackedWidget(self.view)
         self.rule_panel = ConditionRulePanel(self.stack)
         self.dimension_panel = DimensionGroupingPanel(self.stack)
         self.stack.addWidget(self.rule_panel)

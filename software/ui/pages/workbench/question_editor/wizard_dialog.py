@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QSizePolicy,
     QSplitter,
-    QStackedWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
+    PopUpAniStackedWidget,
     PrimaryPushButton,
     PushButton,
     ScrollArea,
@@ -109,7 +109,7 @@ class QuestionWizardDialog(
         self._detail_scroll: Optional[ScrollArea] = None
         self._detail_host: Optional[QWidget] = None
         self._detail_layout: Optional[QVBoxLayout] = None
-        self._detail_stack: Optional[QStackedWidget] = None
+        self._detail_stack: Optional[PopUpAniStackedWidget] = None
         self._empty_page: Optional[QWidget] = None
         self._content_splitter: Optional[QSplitter] = None
         self._entry_card_widgets: Dict[int, QWidget] = {}
@@ -189,7 +189,7 @@ class QuestionWizardDialog(
         detail_layout = QVBoxLayout(detail_host)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(0)
-        detail_stack = QStackedWidget(detail_host)
+        detail_stack = PopUpAniStackedWidget(detail_host)
         detail_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         detail_layout.addWidget(detail_stack, 0, Qt.AlignmentFlag.AlignTop)
         detail_scroll.setWidget(detail_host)
