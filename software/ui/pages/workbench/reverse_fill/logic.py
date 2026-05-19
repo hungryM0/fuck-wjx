@@ -15,7 +15,9 @@ from software.core.reverse_fill.schema import (
 
 _STATUS_LABELS = {
     "reverse": "🟢 正常",
+    "reverse_fill": "🟢 正常",
     "fallback": "🟡 需要处理",
+    "fallback_config": "🟡 需要处理",
     "blocked": "🔴 不支持",
 }
 

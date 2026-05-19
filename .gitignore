@@ -24,6 +24,7 @@ CLAUDE.md
 # 运行环境
 __pycache__/
 .pytest_cache/
+.pytest_tmp/
 *.pyc
 %SystemDrive%/
 /configs/

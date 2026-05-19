@@ -190,6 +190,16 @@ class DashboardProgressMixin:
         thread_panel_layout.addStretch(1)
         return self.thread_progress_panel
 
+    def _refresh_thread_progress_layout(self) -> None:
+        container = getattr(self, "thread_progress_rows_container", None)
+        panel = getattr(self, "thread_progress_panel", None)
+        if container is not None:
+            container.adjustSize()
+            container.updateGeometry()
+        if panel is not None:
+            panel.adjustSize()
+            panel.updateGeometry()
+
     def _on_thread_view_changed(self, route_key: str):
         self._set_thread_view(route_key, sync_segment=False, animate=True)
 
@@ -367,6 +377,7 @@ class DashboardProgressMixin:
         self._last_device_quota_fail_count = 0
         self.thread_progress_hint.show()
         self.thread_progress_hint.setText("会话进度会在任务开始后显示")
+        self._refresh_thread_progress_layout()
 
     def _set_thread_step_busy(self, row: Dict[str, Any], busy: bool) -> None:
         step_bar = row.get("step_bar")
@@ -453,6 +464,7 @@ class DashboardProgressMixin:
         self._set_progress_bar_paused(step_bar, self._progress_paused_visual)
         self._set_progress_bar_paused(step_busy_bar, self._progress_paused_visual)
         self._set_progress_bar_paused(cumulative_bar, self._progress_paused_visual)
+        self._refresh_thread_progress_layout()
         return row
 
     def update_thread_progress(self, payload: dict):
@@ -481,6 +493,7 @@ class DashboardProgressMixin:
             if running_now:
                 self.thread_progress_hint.show()
                 self.thread_progress_hint.setText("正在等待会话状态...")
+                self._refresh_thread_progress_layout()
             return
 
         self.thread_progress_hint.hide()
@@ -553,6 +566,7 @@ class DashboardProgressMixin:
             row = self._thread_progress_rows.pop(name, None)
             if row and row.get("widget") is not None:
                 row["widget"].deleteLater()
+        self._refresh_thread_progress_layout()
 
     def on_run_state_changed(self, running: bool):
         self._sync_start_button_state(running=running)

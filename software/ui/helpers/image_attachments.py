@@ -4,8 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from PySide6.QtCore import QBuffer, QIODevice, Qt
-from PySide6.QtGui import QImage, QImageReader, QPixmap
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, Qt
+from PySide6.QtGui import QImage, QImageReader, QImageWriter, QPixmap
 
 
 @dataclass
@@ -56,7 +56,8 @@ class ImageAttachmentManager:
 
         buffer = QBuffer()
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-        saved = image.save(buffer, b"PNG")
+        writer = QImageWriter(buffer, QByteArray(b"PNG"))
+        saved = writer.write(image)
         if not saved:
             return False, "图片保存失败"
         data = bytes(bytearray(buffer.data()))  # type: ignore[arg-type]
