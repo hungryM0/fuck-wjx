@@ -3,6 +3,7 @@
 .claude/
 .codex/
 .playwright-mcp/
+.local-private/
 .ruff_cache/
 .venv/
 /output/
