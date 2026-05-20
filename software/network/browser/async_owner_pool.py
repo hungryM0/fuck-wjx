@@ -47,6 +47,16 @@ _TRACKING_ROUTE_PATTERNS = (
 _RUNTIME_ABORT_ROUTE_PATTERNS = _STATIC_RESOURCE_ROUTE_PATTERNS + _TRACKING_ROUTE_PATTERNS
 
 
+def _normalize_browser_candidates(prefer_browsers: Optional[List[str]]) -> List[str]:
+    candidates: List[str] = []
+    for item in list(prefer_browsers or BROWSER_PREFERENCE):
+        name = str(item or "").strip().lower()
+        if name != "edge" or name in candidates:
+            continue
+        candidates.append(name)
+    return candidates or list(BROWSER_PREFERENCE)
+
+
 @dataclass
 class AsyncBrowserSession:
     driver: PlaywrightAsyncDriver
@@ -77,7 +87,7 @@ class AsyncBrowserOwner:
         max_contexts: int = DEFAULT_HEADED_CONTEXTS_PER_BROWSER,
     ) -> None:
         self.owner_id = max(1, int(owner_id or 1))
-        self._prefer_browsers = list(prefer_browsers or BROWSER_PREFERENCE)
+        self._prefer_browsers = _normalize_browser_candidates(prefer_browsers)
         self._headless = bool(headless)
         self._window_position = window_position
         self._max_contexts = max(1, int(max_contexts or 1))
@@ -138,9 +148,7 @@ class AsyncBrowserOwner:
                 log_suppressed_exception("AsyncBrowserOwner._shutdown_browser playwright.stop", exc, level=logging.WARNING)
 
     async def _launch_browser(self) -> tuple[Any, str, Any, Optional[int]]:
-        candidates = list(self._prefer_browsers or BROWSER_PREFERENCE)
-        if not candidates:
-            candidates = list(BROWSER_PREFERENCE)
+        candidates = _normalize_browser_candidates(self._prefer_browsers)
         last_exc: Optional[Exception] = None
         for browser_name in candidates:
             pw = None
@@ -177,9 +185,9 @@ class AsyncBrowserOwner:
             info = classify_playwright_startup_error(RuntimeError("未知错误"))
         friendly = info.message
         if last_exc is not None:
-            raise BrowserStartupRuntimeError(f"AsyncBrowserOwner 无法启动任何浏览器: {friendly}", info=info) from last_exc
+            raise BrowserStartupRuntimeError(f"AsyncBrowserOwner 无法启动 Microsoft Edge: {friendly}", info=info) from last_exc
         raise BrowserStartupRuntimeError(
-            f"AsyncBrowserOwner 无法启动任何浏览器: {friendly}",
+            f"AsyncBrowserOwner 无法启动 Microsoft Edge: {friendly}",
             info=info,
         )
 

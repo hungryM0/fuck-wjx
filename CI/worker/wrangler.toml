@@ -1,4 +1,0 @@
-name = "bot"
-main = "src/index.ts"
-compatibility_date = "2026-04-15"
-keep_vars = true

@@ -8,7 +8,6 @@ import random
 from typing import Any, Optional, cast
 
 import software.core.modes.timed_mode as timed_mode
-from software.app.config import BROWSER_PREFERENCE
 from software.core.ai.runtime import AIRuntimeError
 from software.core.engine.async_events import AsyncRunContext, ThreadEventProxy
 from software.core.engine.async_scheduler import AsyncScheduler
@@ -496,8 +495,6 @@ class AsyncSlotRunner:
 
     async def run(self) -> None:
         self._update_status("会话启动", running=True)
-        base_browser_preference = list(self.config.browser_preference or BROWSER_PREFERENCE)
-        del base_browser_preference
         while True:
             if await self._should_stop_loop():
                 break

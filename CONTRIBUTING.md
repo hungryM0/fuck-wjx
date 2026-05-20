@@ -248,7 +248,6 @@ git push
 | 单元测试 | `CI/unit_tests/` |
 | live tests | `CI/live_tests/` |
 | CI 检查脚本 | `CI/python_checks/`、`CI/python_ci.py` |
-| Worker | `CI/worker/` |
 
 不要把新功能塞进不相干文件。屎山通常就是这么长出来的。
 
@@ -333,7 +332,7 @@ Fixes #123
 仓库根目录
 ├── .github/                 # GitHub Issue 模板和 Actions
 ├── assets/                  # README、图标等仓库资源
-├── CI/                      # 检查脚本、单测、worker
+├── CI/                      # 检查脚本、单测、live tests
 ├── credamo/                 # Credamo 见数平台适配
 ├── Setup/                   # 安装包相关资源
 ├── software/                # 桌面应用主体

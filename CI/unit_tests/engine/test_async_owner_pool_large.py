@@ -152,23 +152,19 @@ class AsyncBrowserOwnerLargeTests:
         assert len(suppressed) == 2
 
     @pytest.mark.asyncio
-    async def test_launch_browser_falls_back_and_stops_failed_playwright(self, monkeypatch) -> None:
+    async def test_launch_browser_stops_after_edge_failure_without_chrome_fallback(self, monkeypatch) -> None:
         owner = AsyncBrowserOwner(owner_id=2, prefer_browsers=["edge", "chrome"], headless=True, window_position=(10, 20))
         failed_playwright = _FakePlaywright(browser=RuntimeError("launch edge failed"))
-        success_browser = _FakeBrowser()
-        success_playwright = _FakePlaywright(browser=success_browser)
         monkeypatch.setattr(async_owner_pool, "_build_launch_args", lambda **_kwargs: {"headless": True})
         monkeypatch.setattr(async_owner_pool, "_format_exception_chain", lambda exc: f"chain:{exc}")
         monkeypatch.setattr(async_owner_pool, "is_playwright_startup_environment_error", lambda exc: False)
-        _install_fake_async_playwright(monkeypatch, failed_playwright, success_playwright)
+        monkeypatch.setattr(async_owner_pool, "classify_playwright_startup_error", lambda exc: SimpleNamespace(message=f"friendly:{exc}"))
+        _install_fake_async_playwright(monkeypatch, failed_playwright)
 
-        browser, browser_name, playwright, browser_pid = await owner._launch_browser()
+        with pytest.raises(BrowserStartupRuntimeError, match="friendly:launch edge failed"):
+            await owner._launch_browser()
 
-        assert browser is success_browser
-        assert browser_name == "chrome"
-        assert playwright is success_playwright
         assert failed_playwright.stop_calls == 1
-        assert browser_pid == 4321
 
     @pytest.mark.asyncio
     async def test_launch_browser_raises_friendly_error_on_environment_failure(self, monkeypatch) -> None:
@@ -208,17 +204,17 @@ class AsyncBrowserOwnerLargeTests:
         monkeypatch.setattr(
             owner,
             "_launch_browser",
-            lambda: asyncio.sleep(0, result=launch_calls.append("launch") or (launched_browser, "chrome", launched_playwright, 4321)),
+            lambda: asyncio.sleep(0, result=launch_calls.append("launch") or (launched_browser, "edge", launched_playwright, 4321)),
         )
 
         browser, browser_name, playwright, browser_pid = await owner._ensure_browser()
         browser2, browser_name2, playwright2, browser_pid2 = await owner._ensure_browser()
         assert browser is launched_browser
-        assert browser_name == "chrome"
+        assert browser_name == "edge"
         assert playwright is launched_playwright
         assert browser_pid == 4321
         assert browser2 is launched_browser
-        assert browser_name2 == "chrome"
+        assert browser_name2 == "edge"
         assert playwright2 is launched_playwright
         assert browser_pid2 == 4321
         assert launch_calls == ["launch"]

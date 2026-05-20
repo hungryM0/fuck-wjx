@@ -360,7 +360,7 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         return normalized if normalized in _REVERSE_FILL_FORMATS else REVERSE_FILL_FORMAT_AUTO
 
     def _browser_pref_list(value: Any) -> List[str]:
-        allowed = set(BROWSER_PREFERENCE) | {"edge", "chrome"}
+        allowed = set(BROWSER_PREFERENCE)
         prefs: List[str] = []
         raw_list: List[Any] = []
         if isinstance(value, str):

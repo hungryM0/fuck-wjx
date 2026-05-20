@@ -44,6 +44,15 @@ class BrowserOptionsTests:
         assert "--window-position=10,20" in launch_args["args"]
         assert "--no-proxy-server" in launch_args["args"]
 
+    def test_build_launch_args_rejects_chrome_fallback(self) -> None:
+        with pytest.raises(ValueError, match="Microsoft Edge"):
+            browser_options._build_launch_args(
+                browser_name="chrome",
+                headless=True,
+                window_position=None,
+                append_no_proxy=False,
+            )
+
     def test_error_detectors_match_proxy_and_disconnect_messages(self) -> None:
         assert browser_options._is_proxy_tunnel_error(RuntimeError("net::ERR_PROXY_CONNECTION_FAILED"))
         assert browser_options._is_browser_disconnected_error(RuntimeError("Target page, context or browser has been closed"))

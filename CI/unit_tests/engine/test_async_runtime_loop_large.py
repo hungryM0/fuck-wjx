@@ -514,7 +514,7 @@ class AsyncRuntimeLoopLargeTests:
         state.mark_thread_finished = lambda *_args, **_kwargs: None
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         exc = BrowserStartupRuntimeError(
-            "AsyncBrowserOwner 无法启动任何浏览器: driver closed",
+            "AsyncBrowserOwner 无法启动 Microsoft Edge: driver closed",
             info=BrowserStartupErrorInfo("launch_failed", "driver closed", False),
         )
         monkeypatch.setattr(runner, "_open_session", lambda: (_ for _ in ()).throw(exc))

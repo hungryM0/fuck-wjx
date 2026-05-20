@@ -153,8 +153,8 @@ _DEFAULT_STATUS_ENDPOINT = "https://api-wjx.hungrym0.top/api/status"
 _DEFAULT_EMAIL_VERIFY_ENDPOINT = "https://api-wjx.hungrym0.top/api/email"
 
 # ==================== 浏览器配置 ====================
-# 浏览器选择优先级（默认优先 Edge，不存在则回落到 Chrome）
-BROWSER_PREFERENCE = ["edge", "chrome"]
+# 浏览器选择优先级（固定使用系统 Microsoft Edge）
+BROWSER_PREFERENCE = ["edge"]
 # 无头模式窗口尺寸 (宽x高)
 HEADLESS_WINDOW_SIZE = "1920,1080"
 # 并发会话上限

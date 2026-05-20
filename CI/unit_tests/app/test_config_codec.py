@@ -165,7 +165,7 @@ class ConfigCodecTests:
 
         assert cfg.target == 1
         assert cfg.threads == 4
-        assert cfg.browser_preference == ["edge", "chrome"]
+        assert cfg.browser_preference == ["edge"]
         assert cfg.submit_interval == (1, 3)
         assert cfg.answer_duration == (0, 0)
         assert cfg.timed_mode_interval == 3.0

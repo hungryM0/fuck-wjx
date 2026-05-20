@@ -502,7 +502,7 @@ class RuntimePage(ScrollArea):
                 self.thread_card.slider.value(),
             ),
         )
-        cfg.browser_preference = []  # 固定使用默认顺序：Edge → Chrome
+        cfg.browser_preference = []  # 固定使用系统 Microsoft Edge
         cfg.submit_interval = self._card_value_as_range(self.interval_card)
         cfg.answer_duration = self._card_value_as_range(self.answer_card)
         cfg.timed_mode_enabled = self.timed_card.switchButton.isChecked()

@@ -123,12 +123,13 @@ def _build_launch_args(
     window_position: Optional[Tuple[int, int]],
     append_no_proxy: bool,
 ) -> Dict[str, Any]:
+    normalized_browser = str(browser_name or "").strip().lower()
+    if normalized_browser != "edge":
+        raise ValueError("仅支持系统 Microsoft Edge 浏览器")
+
     launch_args: Dict[str, Any] = {"headless": headless, "args": list(_COMMON_BROWSER_SAFE_ARGS)}
-    if browser_name == "edge":
-        launch_args["channel"] = "msedge"
-        launch_args["args"].extend(_EDGE_CLEAN_ARGS)
-    elif browser_name == "chrome":
-        launch_args["channel"] = "chrome"
+    launch_args["channel"] = "msedge"
+    launch_args["args"].extend(_EDGE_CLEAN_ARGS)
 
     if window_position and not headless:
         x, y = window_position
