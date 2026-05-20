@@ -49,6 +49,7 @@ class _FakeContactForm(QWidget):
 class _FakeParent(QWidget):
     def __init__(self) -> None:
         super().__init__()
+        self.resize(1600, 1000)
         self._snapshot = "cfg"
 
     def _collect_current_config_snapshot(self):
@@ -71,6 +72,9 @@ class ContactDialogTests:
         assert form.kwargs["default_type"] == "额度申请"
         assert form.kwargs["lock_message_type"] is True
         assert form.kwargs["config_snapshot_provider"]() == "cfg"
+        assert dialog.widget.width() == 760
+        assert dialog.widget.height() == 620
+        assert dialog.buttonGroup.isHidden()
 
         dialog._schedule_status_polling()
         assert dialog._status_poll_timer.isSingleShot()

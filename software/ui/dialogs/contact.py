@@ -10,6 +10,12 @@ from qfluentwidgets import MessageBoxBase
 from software.ui.helpers.qfluent_compat import resolve_mask_dialog_parent
 from software.ui.widgets.contact_form.widget import ContactForm
 
+_DIALOG_MAX_WIDTH = 760
+_DIALOG_MAX_HEIGHT = 620
+_DIALOG_MIN_WIDTH = 640
+_DIALOG_MIN_HEIGHT = 520
+_DIALOG_PARENT_MARGIN = 64
+
 
 class ContactDialog(MessageBoxBase):
     """联系开发者（Qt 版本）。包装 ContactForm，保留原有对话框入口。"""
@@ -29,11 +35,11 @@ class ContactDialog(MessageBoxBase):
             self.destroyed.connect(self._fallback_parent.deleteLater)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setWindowTitle("联系开发者")
-        self.resize(720, 520)
-        self.widget.setMinimumSize(720, 520)
         self.yesButton.hide()
         self.cancelButton.hide()
-        self.buttonLayout.insertStretch(0, 1)
+        self.buttonGroup.hide()
+        self.buttonGroup.setFixedHeight(0)
+        self._set_center_widget_size(resolved_parent)
         self._status_poll_timer = QTimer(cast(QObject, self))
         self._status_poll_timer.setSingleShot(True)
         self._status_poll_timer.setInterval(700)
@@ -57,6 +63,16 @@ class ContactDialog(MessageBoxBase):
 
         self.form.sendSucceeded.connect(self._on_send_succeeded)
         self.form.cancelRequested.connect(self.reject)
+
+    def _set_center_widget_size(self, parent) -> None:
+        parent_width = max(0, int(parent.width())) if parent is not None else 0
+        parent_height = max(0, int(parent.height())) if parent is not None else 0
+        width = min(_DIALOG_MAX_WIDTH, max(_DIALOG_MIN_WIDTH, parent_width - _DIALOG_PARENT_MARGIN))
+        height = min(
+            _DIALOG_MAX_HEIGHT,
+            max(_DIALOG_MIN_HEIGHT, parent_height - _DIALOG_PARENT_MARGIN),
+        )
+        self.widget.setFixedSize(width, height)
 
     def showEvent(self, e: QShowEvent) -> None:
         super().showEvent(e)

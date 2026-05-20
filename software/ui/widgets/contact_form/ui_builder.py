@@ -4,7 +4,14 @@ from typing import Any
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QDoubleValidator, QIntValidator
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QGridLayout,
+    QHBoxLayout,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 from qfluentwidgets import (
     BodyLabel,
     CheckBox,
@@ -69,8 +76,9 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     form.email_label.setFixedWidth(label_width)
     form.email_edit = PasteOnlyLineEdit(form)
     form.email_edit.setPlaceholderText("name@example.com")
+    form.email_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     email_row.addWidget(form.email_label)
-    email_row.addWidget(form.email_edit)
+    email_row.addWidget(form.email_edit, 1)
 
     form.verify_code_edit = LineEdit(form)
     form.verify_code_edit.setPlaceholderText("6位验证码")
@@ -209,6 +217,7 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     form.message_edit = PasteOnlyPlainTextEdit(form, form._on_context_paste)
     form.message_edit.setPlaceholderText("请详细描述您的问题、需求或留言…")
     form.message_edit.setMinimumHeight(140)
+    form.message_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     form.message_edit.installEventFilter(form)
     form.random_ip_user_id_label = BodyLabel("", form)
     form.random_ip_user_id_label.setWordWrap(True)
@@ -224,21 +233,27 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     attachments_box.setContentsMargins(0, 0, 0, 0)
     attachments_box.setSpacing(6)
 
-    attach_toolbar = QHBoxLayout()
+    attach_toolbar = QGridLayout()
+    attach_toolbar.setContentsMargins(0, 0, 0, 0)
+    attach_toolbar.setHorizontalSpacing(10)
+    attach_toolbar.setVerticalSpacing(6)
     form.attach_title = BodyLabel(
         "图片附件 (最多3张，支持Ctrl+V粘贴，单张≤10MB):",
         form.attachments_section,
     )
+    form.attach_title.setWordWrap(True)
     form.attach_add_btn = PushButton(FluentIcon.ADD, "添加图片", form.attachments_section)
     form.attach_clear_btn = PushButton(
         FluentIcon.DELETE,
         "清空附件",
         form.attachments_section,
     )
-    attach_toolbar.addWidget(form.attach_title)
-    attach_toolbar.addStretch(1)
-    attach_toolbar.addWidget(form.attach_add_btn)
-    attach_toolbar.addWidget(form.attach_clear_btn)
+    form.attach_add_btn.setMinimumWidth(112)
+    form.attach_clear_btn.setMinimumWidth(112)
+    attach_toolbar.addWidget(form.attach_title, 0, 0)
+    attach_toolbar.addWidget(form.attach_add_btn, 0, 1)
+    attach_toolbar.addWidget(form.attach_clear_btn, 0, 2)
+    attach_toolbar.setColumnStretch(0, 1)
     attachments_box.addLayout(attach_toolbar)
 
     form.attach_list_layout = QHBoxLayout()
@@ -266,7 +281,6 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     auto_attach_layout.addWidget(form.auto_attach_title)
     auto_attach_layout.addWidget(form.auto_attach_config_checkbox)
     auto_attach_layout.addWidget(form.auto_attach_log_checkbox)
-    auto_attach_layout.addStretch(1)
     form.auto_attach_section.hide()
 
     form.request_payment_section = QWidget(form)
@@ -335,9 +349,10 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     form.status_icon.hide()
     form.online_label = BodyLabel("作者当前在线状态：查询中...", form)
     form.online_label.setStyleSheet("color:#BA8303;")
+    form.online_label.setWordWrap(True)
     status_row.addWidget(form.status_spinner)
     status_row.addWidget(form.status_icon)
-    status_row.addWidget(form.online_label)
+    status_row.addWidget(form.online_label, 1)
 
     btn_row = QHBoxLayout()
     btn_row.setSpacing(10)
@@ -353,8 +368,7 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     btn_row.addWidget(form.send_spinner)
     btn_row.addWidget(form.send_btn)
 
-    bottom_layout.addLayout(status_row)
-    bottom_layout.addStretch(1)
+    bottom_layout.addLayout(status_row, 1)
     bottom_layout.addLayout(btn_row)
     wrapper.addLayout(bottom_layout)
 
