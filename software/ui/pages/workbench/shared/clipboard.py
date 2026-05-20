@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
-from PySide6.QtCore import QByteArray, QEvent, QMimeData, QTimer
+from PySide6.QtCore import QByteArray, QEvent, QMimeData, QObject, QTimer
 from PySide6.QtGui import QClipboard, QDragEnterEvent, QDropEvent, QImage
 from PySide6.QtWidgets import QFileDialog, QWidget
 
@@ -141,7 +141,7 @@ class SurveyClipboardMixin:
                                         self._process_qrcode_image(file_path)
                                         return True
 
-        return super().eventFilter(watched, event)  # type: ignore[attr-defined]
+        return QObject.eventFilter(cast(QObject, self), cast(QObject, watched), event)
 
     def _on_clipboard_changed(self):
         if not self._is_focus_in_link_entry():

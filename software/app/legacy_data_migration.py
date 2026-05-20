@@ -17,7 +17,7 @@ from software.app.user_paths import (
 )
 
 try:  # pragma: no cover - 非 Windows 环境没有 winreg
-    import winreg  # type: ignore
+    import winreg
 except Exception:  # pragma: no cover
     winreg = None
 

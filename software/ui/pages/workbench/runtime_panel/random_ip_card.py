@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, cast
 
 from PySide6.QtCore import QObject, QThread, Qt, QStringListModel, Signal
-from PySide6.QtWidgets import QCompleter, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCompleter, QGraphicsEffect, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     ComboBox,
@@ -558,7 +558,7 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         self.areaRow.setEnabled(bool(enabled))
         self.proxyCombo.setEnabled(True)
         self.customApiRow.setEnabled(True)
-        self._groupContainer.setGraphicsEffect(None)  # type: ignore[arg-type]
+        self._groupContainer.setGraphicsEffect(cast(QGraphicsEffect, None))
         set_widget_enabled_with_opacity(self.areaRow, bool(enabled))
 
     def setLoading(self, loading: bool, message: str = "") -> None:

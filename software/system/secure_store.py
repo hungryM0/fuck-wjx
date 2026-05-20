@@ -7,7 +7,7 @@ import logging
 import sys
 from ctypes import wintypes
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional, cast
 
 if sys.platform == "win32":
     import winreg
@@ -15,6 +15,10 @@ else:  # pragma: no cover
     winreg = None
 
 _REGISTRY_PATH = r"Software\SurveyController\SecureStore"
+
+
+def _windows_dlls() -> Any:
+    return cast(Any, ctypes).windll
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,8 @@ def _crypt_protect_data(data: bytes) -> bytes:
     in_blob = _DATA_BLOB(len(data), ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_byte)))
     out_blob = _DATA_BLOB()
 
-    result = ctypes.windll.crypt32.CryptProtectData(  # type: ignore[attr-defined]
+    dlls = _windows_dlls()
+    result = dlls.crypt32.CryptProtectData(
         ctypes.byref(in_blob),
         None,
         None,
@@ -53,7 +58,7 @@ def _crypt_protect_data(data: bytes) -> bytes:
     try:
         return ctypes.string_at(out_blob.pbData, out_blob.cbData)
     finally:
-        ctypes.windll.kernel32.LocalFree(out_blob.pbData)  # type: ignore[attr-defined]
+        dlls.kernel32.LocalFree(out_blob.pbData)
 
 
 def _crypt_unprotect_data(data: bytes) -> bytes:
@@ -63,7 +68,8 @@ def _crypt_unprotect_data(data: bytes) -> bytes:
     in_blob = _DATA_BLOB(len(data), ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_byte)))
     out_blob = _DATA_BLOB()
 
-    result = ctypes.windll.crypt32.CryptUnprotectData(  # type: ignore[attr-defined]
+    dlls = _windows_dlls()
+    result = dlls.crypt32.CryptUnprotectData(
         ctypes.byref(in_blob),
         None,
         None,
@@ -77,7 +83,7 @@ def _crypt_unprotect_data(data: bytes) -> bytes:
     try:
         return ctypes.string_at(out_blob.pbData, out_blob.cbData)
     finally:
-        ctypes.windll.kernel32.LocalFree(out_blob.pbData)  # type: ignore[attr-defined]
+        dlls.kernel32.LocalFree(out_blob.pbData)
 
 
 def set_secret(key: str, value: Optional[str]) -> None:

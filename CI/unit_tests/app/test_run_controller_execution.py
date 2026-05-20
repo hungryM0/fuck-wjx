@@ -1,5 +1,4 @@
 from __future__ import annotations
-# pyright: reportAttributeAccessIssue=false, reportIncompatibleMethodOverride=false, reportArgumentType=false, reportOptionalMemberAccess=false, reportOptionalCall=false
 
 import threading
 from concurrent.futures import Future

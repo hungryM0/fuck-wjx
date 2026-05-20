@@ -65,13 +65,13 @@ class ValueSlider(QWidget):
     def value(self) -> int:
         return int(self.slider.value())
 
-    def blockSignals(self, block: bool) -> bool:  # type: ignore[override]
+    def blockSignals(self, block: bool) -> bool:
         return super().blockSignals(block)
 
-    def setEnabled(self, enabled: bool) -> None:  # type: ignore[override]
+    def setEnabled(self, enabled: bool) -> None:
         super().setEnabled(bool(enabled))
         effect = self.graphicsEffect()
-        if effect is None:
+        if not isinstance(effect, QGraphicsOpacityEffect):
             effect = QGraphicsOpacityEffect(self)
             self.setGraphicsEffect(effect)
-        effect.setOpacity(1.0 if enabled else 0.4)  # type: ignore[union-attr]
+        effect.setOpacity(1.0 if enabled else 0.4)

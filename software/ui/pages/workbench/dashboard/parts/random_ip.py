@@ -422,7 +422,7 @@ class DashboardRandomIPMixin:
         win = self.window()
         if hasattr(win, "_open_contact_dialog"):
             try:
-                return win._open_contact_dialog(default_type, lock_message_type)  # type: ignore[union-attr]
+                return cast(Any, win)._open_contact_dialog(default_type, lock_message_type)
             except Exception as exc:
                 log_suppressed_exception(
                     "_open_contact_dialog passthrough",
@@ -436,7 +436,7 @@ class DashboardRandomIPMixin:
         win = self.window()
         if hasattr(win, "_open_quota_redeem_dialog"):
             try:
-                return win._open_quota_redeem_dialog()  # type: ignore[union-attr]
+                return cast(Any, win)._open_quota_redeem_dialog()
             except Exception as exc:
                 log_suppressed_exception(
                     "_open_quota_redeem_dialog passthrough",

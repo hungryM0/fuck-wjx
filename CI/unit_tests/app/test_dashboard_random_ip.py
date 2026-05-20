@@ -1,5 +1,4 @@
 from __future__ import annotations
-# pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false
 
 import threading
 from types import SimpleNamespace

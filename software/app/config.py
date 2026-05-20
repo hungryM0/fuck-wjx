@@ -13,7 +13,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from software.app.settings_store import (
     app_settings as _app_settings,
@@ -38,12 +38,13 @@ def _read_windows_env_var(key: str) -> str:
     if sys.platform != "win32":
         return ""
     try:
-        import winreg  # type: ignore
+        import winreg
     except Exception:
         return ""
+    registry = cast(Any, winreg)
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as reg_key:
-            value, _ = winreg.QueryValueEx(reg_key, key)
+        with registry.OpenKey(registry.HKEY_CURRENT_USER, "Environment") as reg_key:
+            value, _ = registry.QueryValueEx(reg_key, key)
     except FileNotFoundError:
         return ""
     except Exception:

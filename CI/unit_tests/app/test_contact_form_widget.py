@@ -207,5 +207,5 @@ def test_contact_form_bug_report_auto_payload_and_verify_code(monkeypatch, qtbot
     assert recorder.calls[-1] == ("error", "邮箱参数无效，请检查邮箱后重试")
 
     host = SimpleNamespace(controller=object())
-    form.parentWidget = lambda: host  # type: ignore[method-assign]
+    monkeypatch.setattr(form, "parentWidget", lambda: host)
     assert form._find_controller_host() is host

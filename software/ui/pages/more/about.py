@@ -4,6 +4,7 @@ import threading
 import webbrowser
 from datetime import datetime
 import logging
+from typing import Any, cast
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
 
@@ -267,7 +268,7 @@ class AboutPage(ScrollArea):
         )
         if status == "outdated":
             if hasattr(win, "update_info"):
-                win.update_info = update_info  # type: ignore[union-attr]
+                cast(Any, win).update_info = update_info
             from software.update.updater import show_update_notification
 
             show_update_notification(win)

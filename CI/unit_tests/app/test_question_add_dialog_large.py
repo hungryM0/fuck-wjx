@@ -1,5 +1,4 @@
 from __future__ import annotations
-# pyright: reportOptionalMemberAccess=false
 
 from typing import cast
 

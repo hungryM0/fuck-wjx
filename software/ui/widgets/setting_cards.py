@@ -24,10 +24,10 @@ def set_widget_enabled_with_opacity(
     """统一处理控件禁用态透明度。"""
     widget.setEnabled(bool(enabled))
     effect = widget.graphicsEffect()
-    if effect is None:
+    if not isinstance(effect, QGraphicsOpacityEffect):
         effect = QGraphicsOpacityEffect(widget)
         widget.setGraphicsEffect(effect)
-    effect.setOpacity(1.0 if enabled else float(disabled_opacity))  # type: ignore[union-attr]
+    effect.setOpacity(1.0 if enabled else float(disabled_opacity))
 
 
 class SpinBoxSettingCard(SettingCard):

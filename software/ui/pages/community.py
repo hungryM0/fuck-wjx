@@ -2,6 +2,7 @@
 
 import os
 import webbrowser
+from typing import Any, cast
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QPixmap, QPainter, QPainterPath
@@ -297,7 +298,7 @@ class CommunityPage(ScrollArea):
         """打开联系开发者对话框"""
         window = self.window()
         if hasattr(window, "_open_contact_dialog"):
-            window._open_contact_dialog()  # type: ignore[attr-defined]
+            cast(Any, window)._open_contact_dialog()
             return
 
         from software.ui.dialogs.contact import ContactDialog

@@ -1,9 +1,9 @@
 from __future__ import annotations
-# pyright: reportAttributeAccessIssue=false
 
 from typing import cast
 
 import pytest
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
 import software.ui.dialogs.contact as contact_dialog_module
@@ -44,14 +44,6 @@ class _FakeContactForm(QWidget):
 
     def show_pending_async_warning(self) -> None:
         self.pending_warning_calls += 1
-
-
-class _FakeEvent:
-    def __init__(self) -> None:
-        self.ignored = False
-
-    def ignore(self) -> None:
-        self.ignored = True
 
 
 class _FakeParent(QWidget):
@@ -120,9 +112,9 @@ class ContactDialogTests:
         form = cast(_FakeContactForm, dialog.form)
         form.pending_async = True
 
-        event = _FakeEvent()
+        event = QCloseEvent()
         dialog.closeEvent(event)
-        assert event.ignored is True
+        assert not event.isAccepted()
         assert form.pending_warning_calls == 1
 
         dialog.reject()

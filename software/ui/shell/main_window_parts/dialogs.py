@@ -40,7 +40,7 @@ class MainWindowDialogsMixin:
         return cast(QObject, self)
 
     def _dispatch_to_ui(self, func: Callable[[], Any]) -> Any:
-        if self.thread() == QThread.currentThread():  # type: ignore[attr-defined]
+        if cast(QObject, self).thread() == QThread.currentThread():
             return func()
         if QCoreApplication.instance() is None:
             return func()
@@ -102,7 +102,7 @@ class MainWindowDialogsMixin:
             )
 
     def _dispatch_to_ui_async(self, func: Callable[[], Any]) -> None:
-        if self.thread() == QThread.currentThread():  # type: ignore[attr-defined]
+        if cast(QObject, self).thread() == QThread.currentThread():
             func()
             return
         if QCoreApplication.instance() is None:

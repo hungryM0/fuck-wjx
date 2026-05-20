@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+from typing import Any, cast
 
 from PySide6.QtCore import Property, QByteArray, QEasingCurve, QPointF, QPropertyAnimation, QRectF, QTimer, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
@@ -131,7 +132,7 @@ class ChartOverlay(QWidget):
         self._opacity = value
         self.update()
 
-    opacity = Property(float, _get_opacity, _set_opacity)  # type: ignore[call-arg]
+    opacity = cast(Any, Property)(float, _get_opacity, _set_opacity)
 
     def _smooth_step(self):
         dx = self._target_x - self._current_x

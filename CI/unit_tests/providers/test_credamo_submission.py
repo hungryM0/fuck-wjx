@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -29,6 +29,9 @@ class _FakeDriver:
         if "document.querySelectorAll" in script:
             return False
         return ""
+
+    def set_execute_script_result(self, value: Any) -> None:
+        self.execute_script = _async_return(value)
 
     async def find_element(self, *_args, **_kwargs):
         raise RuntimeError("unused")
@@ -67,7 +70,7 @@ class _FakeDriver:
         return None
 
 
-def _async_return(value=None):
+def _async_return(value=None) -> Callable[..., Any]:
     async def _runner(*_args, **_kwargs):
         return value
 
@@ -121,7 +124,7 @@ class CredamoSubmissionTests:
             (submission, "_unanswered_question_roots", _async_return([("root-2", 5, "k5")])),
             (submission, "_question_number_from_root", _async_return(5)),
         )
-        driver.execute_script = _async_return(payload)  # type: ignore[method-assign]
+        driver.set_execute_script_result(payload)
 
         hint = await submission._extract_submission_recovery_hint(driver)
 
@@ -130,7 +133,7 @@ class CredamoSubmissionTests:
     @pytest.mark.asyncio
     async def test_extract_submission_recovery_hint_returns_none_when_nothing_found(self, patch_attrs) -> None:
         driver = _FakeDriver()
-        driver.execute_script = _async_return({"questionNumbers": [], "messages": []})  # type: ignore[method-assign]
+        driver.set_execute_script_result({"questionNumbers": [], "messages": []})
         patch_attrs(
             (submission, "_page", _async_return(None)),
             (submission, "peek_credamo_runtime_state", lambda _driver: None),
@@ -140,7 +143,7 @@ class CredamoSubmissionTests:
     @pytest.mark.asyncio
     async def test_has_visible_action_controls_handles_true_and_error(self) -> None:
         driver = _FakeDriver()
-        driver.execute_script = _async_return(True)  # type: ignore[method-assign]
+        driver.set_execute_script_result(True)
         assert await submission._has_visible_action_controls(driver)
 
         class _BrokenDriver(_FakeDriver):

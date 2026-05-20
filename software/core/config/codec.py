@@ -12,7 +12,6 @@ from software.core.config.schema import RuntimeConfig
 from software.core.psychometrics.psychometric import normalize_target_alpha
 from software.core.questions.consistency import normalize_rule_dict, sanitize_answer_rules
 from software.core.questions.utils import serialize_random_int_range
-from software.network.proxy import normalize_random_ip_enabled_value
 from software.providers.common import (
     SURVEY_PROVIDER_WJX,
     detect_survey_provider,
@@ -391,13 +390,14 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.answer_duration = _tuple_pair(raw.get("answer_duration"))
     config.timed_mode_enabled = bool(raw.get("timed_mode_enabled", False))
     config.timed_mode_interval = _as_float(raw.get("timed_mode_interval") or 3.0, 3.0)
-    config.random_ip_enabled = normalize_random_ip_enabled_value(_as_bool(raw.get("random_ip_enabled"), False))
     custom_proxy_api = str(raw.get("custom_proxy_api") or "").strip()
     proxy_source = str(raw.get("proxy_source") or "default").strip().lower()
     if proxy_source not in ("default", "benefit", "custom"):
         proxy_source = "custom" if custom_proxy_api else "default"
     config.proxy_source = proxy_source
     config.custom_proxy_api = custom_proxy_api
+    desired_random_ip_enabled = _as_bool(raw.get("random_ip_enabled"), False)
+    config.random_ip_enabled = bool(desired_random_ip_enabled and proxy_source == "custom")
     raw_area_code = raw.get("proxy_area_code")
     config.proxy_area_code = None if raw_area_code is None else str(raw_area_code)
     config.random_ua_enabled = bool(raw.get("random_ua_enabled", False))

@@ -1,9 +1,9 @@
 """联系表单状态轮询。"""
 
 import json
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
-from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtCore import QObject, QTimer, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from software.app.config import DEFAULT_HTTP_HEADERS, PROXY_STATUS_TIMEOUT_SECONDS
@@ -42,12 +42,12 @@ class StatusPollingMixin:
 
     def _ensure_status_manager(self) -> QNetworkAccessManager:
         if self._status_manager is None:
-            self._status_manager = QNetworkAccessManager(self)  # type: ignore[arg-type]
+            self._status_manager = QNetworkAccessManager(cast(QObject, self))
         return self._status_manager
 
     def _ensure_status_timer(self) -> QTimer:
         if self._status_timer is None:
-            self._status_timer = QTimer(self)  # type: ignore[arg-type]
+            self._status_timer = QTimer(cast(QObject, self))
             self._status_timer.setInterval(self._polling_interval)
             self._status_timer.timeout.connect(self._fetch_status_once)
         return self._status_timer

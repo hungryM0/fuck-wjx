@@ -1,5 +1,4 @@
 from __future__ import annotations
-# pyright: reportAttributeAccessIssue=false
 
 from types import SimpleNamespace
 

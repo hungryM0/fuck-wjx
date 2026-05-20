@@ -3,6 +3,7 @@
 import os
 import logging
 from datetime import datetime
+from typing import Any, cast
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QWidget,
@@ -197,7 +198,7 @@ class LogPage(QWidget):
         win = self.window()
         if hasattr(win, "_open_contact_dialog"):
             try:
-                win._open_contact_dialog(default_type="报错反馈", lock_message_type=True)  # type: ignore[union-attr]
+                cast(Any, win)._open_contact_dialog(default_type="报错反馈", lock_message_type=True)
                 return
             except Exception as exc:
                 log_suppressed_exception("_open_bug_report_dialog", exc, level=logging.WARNING)

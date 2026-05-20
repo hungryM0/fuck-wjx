@@ -5,10 +5,15 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+from typing import Any, cast
 
 
 _ES_SYSTEM_REQUIRED = 0x00000001
 _ES_CONTINUOUS = 0x80000000
+
+
+def _kernel32() -> Any:
+    return cast(Any, ctypes).windll.kernel32
 
 
 class SystemSleepBlocker:
@@ -27,9 +32,7 @@ class SystemSleepBlocker:
         if sys.platform != "win32":
             return False
         try:
-            result = ctypes.windll.kernel32.SetThreadExecutionState(  # type: ignore[attr-defined]
-                _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED
-            )
+            result = _kernel32().SetThreadExecutionState(_ES_CONTINUOUS | _ES_SYSTEM_REQUIRED)
         except Exception:
             logging.warning("申请阻止系统自动休眠失败", exc_info=True)
             return False
@@ -47,7 +50,7 @@ class SystemSleepBlocker:
             self._active = False
             return True
         try:
-            result = ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)  # type: ignore[attr-defined]
+            result = _kernel32().SetThreadExecutionState(_ES_CONTINUOUS)
         except Exception:
             logging.warning("恢复系统自动休眠状态失败", exc_info=True)
             return False

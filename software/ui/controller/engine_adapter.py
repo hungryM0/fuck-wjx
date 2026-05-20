@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import collections.abc
 import logging
 import threading
 from inspect import isawaitable
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, cast
 
 from software.core.engine.cleanup import CleanupRunner
 from software.core.engine.runtime_actions import (
@@ -299,7 +300,7 @@ class EngineGuiAdapter:
                     if callable(aclose_driver):
                         close_result = aclose_driver()
                         if isawaitable(close_result):
-                            asyncio.run(close_result)  # pyright: ignore[reportArgumentType]
+                            asyncio.run(cast(collections.abc.Coroutine[Any, Any, Any], close_result))
                         cleaned += 1
                         continue
                     quit_driver = getattr(driver, "quit", None)

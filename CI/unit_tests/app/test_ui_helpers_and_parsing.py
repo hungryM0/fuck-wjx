@@ -340,7 +340,7 @@ class UiHelperAndParsingTests:
         assert emitted == ["emit"]
         assert calls == ["queued"]
 
-        dispatcher.enqueue("not-callable")  # type: ignore[arg-type]
+        dispatcher._queue.put_nowait("not-callable")
         dispatcher.drain()
 
         monkeypatch.setattr(ui_dispatcher_module.QCoreApplication, "instance", lambda: None)

@@ -4,7 +4,7 @@ import copy
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QTimer, Qt, QSize
-from PySide6.QtGui import QGuiApplication, QShowEvent
+from PySide6.QtGui import QGuiApplication, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -281,7 +281,7 @@ class QuestionWizardDialog(
             self._empty_page.setMinimumWidth(0)
             self._empty_page.setMaximumWidth(content_width)
 
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         QTimer.singleShot(0, self._clamp_splitter_sizes)
         QTimer.singleShot(0, self._sync_detail_content_width)

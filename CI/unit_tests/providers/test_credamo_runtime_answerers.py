@@ -19,6 +19,7 @@ class _FakeElement:
         self.filled: list[str] = []
         self.typed: list[str] = []
         self.clicked = 0
+        self.fill_should_fail = False
 
     async def query_selector_all(self, selector: str):
         return list(self.selectors.get(selector, []))
@@ -29,6 +30,8 @@ class _FakeElement:
 
     async def fill(self, value: str, timeout: int = 0) -> None:
         del timeout
+        if self.fill_should_fail:
+            raise RuntimeError("fill failed")
         self.filled.append(value)
         self.value = value
 
@@ -250,10 +253,7 @@ class CredamoRuntimeAnswerersTests:
     async def test_answer_text_uses_fill_then_type_fallback(self, monkeypatch) -> None:
         good = _FakeElement()
         bad = _FakeElement()
-        def bad_fill(value: str, timeout: int = 0) -> None:
-            del value, timeout
-            raise RuntimeError("fill failed")
-        bad.fill = bad_fill  # type: ignore[assignment]
+        bad.fill_should_fail = True
         root = object()
         async def _text_inputs(_root):
             return [good, bad]

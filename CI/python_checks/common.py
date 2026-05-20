@@ -32,6 +32,16 @@ UNIT_TEST_TIMEOUT_SECONDS = int(os.environ.get("SURVEY_CONTROLLER_UNIT_TEST_TIME
 DEFAULT_UNIT_TEST_COVERAGE_FAIL_UNDER = "62"
 PYRIGHT_TIMEOUT_SECONDS = int(os.environ.get("SURVEY_CONTROLLER_PYRIGHT_TIMEOUT_SECONDS", "90"))
 PYTEST_FAILURE_LOG_TAIL_LINES = 40
+TYPE_IGNORE_PATTERNS = (
+    "# " + "type" + ": ignore",
+    "# " + "pyright:",
+)
+TYPE_IGNORE_SCAN_ROOTS = (
+    ROOT_DIR / "wjx",
+    ROOT_DIR / "software",
+    ROOT_DIR / "tencent",
+    ROOT_DIR / "credamo",
+)
 UNICODE_SPACE_TRANSLATION = str.maketrans({
     "\u00a0": " ",
     "\u2000": " ",
@@ -414,6 +424,44 @@ def run_pyright_check(target_dirs: Iterable[Path]) -> tuple[list[dict], str | No
         return [], str(message)
 
     return issues, None
+
+
+def run_type_ignore_check(target_dirs: Iterable[Path]) -> list[dict]:
+    """禁止产品代码用 type ignore / pyright 指令遮住类型问题。"""
+    allowed_roots = {path.resolve() for path in TYPE_IGNORE_SCAN_ROOTS if path.exists()}
+    issues: list[dict] = []
+    for target_dir in target_dirs:
+        try:
+            resolved_target = target_dir.resolve()
+        except OSError:
+            continue
+        if resolved_target not in allowed_roots:
+            continue
+        for path in sorted(target_dir.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            for row, line in enumerate(lines, start=1):
+                column = 0
+                for pattern in TYPE_IGNORE_PATTERNS:
+                    column = line.find(pattern)
+                    if column >= 0:
+                        break
+                if column < 0:
+                    continue
+                issues.append(
+                    {
+                        "phase": "type-ignore",
+                        "path": format_path(path),
+                        "row": row,
+                        "column": column + 1,
+                        "message": "不要用 type ignore / pyright 指令掩盖类型问题，请改成明确类型或小范围 cast。",
+                    }
+                )
+    return issues
 
 
 def run_module_import_checks(modules: Iterable[str]) -> list[dict]:

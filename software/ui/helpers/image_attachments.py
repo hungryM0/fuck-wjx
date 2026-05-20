@@ -47,6 +47,10 @@ class ImageAttachmentManager:
             Qt.TransformationMode.SmoothTransformation,
         )
 
+    def _qbytearray_to_bytes(self, value: QByteArray) -> bytes:
+        data = value.data()
+        return data if isinstance(data, bytes) else bytes(data)
+
     def add_qimage(self, image: QImage, name_hint: str = "clipboard.png"):
         ok, msg = self._ensure_capacity()
         if not ok:
@@ -60,7 +64,7 @@ class ImageAttachmentManager:
         saved = writer.write(image)
         if not saved:
             return False, "图片保存失败"
-        data = bytes(bytearray(buffer.data()))  # type: ignore[arg-type]
+        data = self._qbytearray_to_bytes(buffer.data())
         if len(data) > self.max_size_bytes:
             return False, "图片超过 10MB 限制"
 
@@ -96,7 +100,7 @@ class ImageAttachmentManager:
         if len(data) > self.max_size_bytes:
             return False, "图片超过 10MB 限制"
 
-        fmt = bytearray(reader.format() or b"").decode("utf-8").lower()  # type: ignore[arg-type]
+        fmt = self._qbytearray_to_bytes(reader.format()).decode("utf-8").lower()
         mime = f"image/{fmt}" if fmt else "image/png"
         name = os.path.basename(path) or "image"
         thumb = self._make_thumb(image)
