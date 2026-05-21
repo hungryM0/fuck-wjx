@@ -11,10 +11,12 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     CommandBar,
+    ComboBox,
     FluentIcon,
     HyperlinkButton,
     IndeterminateProgressRing,
     InfoBarIcon,
+    LineEdit,
     ProgressRing,
     PopUpAniStackedWidget,
     PushButton,
@@ -132,6 +134,22 @@ def build_dashboard_page_ui(page: Any) -> None:
     page.random_ip_loading_label = page.random_ip_row.loading_label
     page.random_ip_loading_label.setStyleSheet("color: #606060; font-size: 12px;")
     left_column.addWidget(page.random_ip_row)
+
+    proxy_source_row = QHBoxLayout()
+    proxy_source_row.addWidget(BodyLabel("代理源：", page))
+    page.proxy_source_combo = ComboBox(page)
+    page.proxy_source_combo.addItem("默认", userData="default")
+    page.proxy_source_combo.addItem("限时福利", userData="benefit")
+    page.proxy_source_combo.addItem("自定义", userData="custom")
+    page.proxy_source_combo.setMinimumWidth(140)
+    proxy_source_row.addWidget(page.proxy_source_combo)
+    page.custom_proxy_api_edit = LineEdit(page)
+    page.custom_proxy_api_edit.setPlaceholderText("请输入代理api地址")
+    page.custom_proxy_api_edit.setMinimumWidth(260)
+    page.custom_proxy_api_edit.hide()
+    proxy_source_row.addWidget(page.custom_proxy_api_edit, 1)
+    proxy_source_row.addStretch(1)
+    left_column.addLayout(proxy_source_row)
     quick_action_column = QVBoxLayout()
     quick_action_column.setContentsMargins(0, 0, 0, 0)
     quick_action_column.setSpacing(8)

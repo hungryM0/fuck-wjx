@@ -112,8 +112,6 @@ async def agenerate_answer(
         raise RuntimeError(f"不支持的 AI 服务提供商: {provider}")
     base_url = provider_config["base_url"]
     model = str(config.get("model") or provider_config["default_model"])
-    if provider == "siliconflow" and not model:
-        raise RuntimeError("硅基流动需要先配置模型名称")
 
     request_url = f"{_normalize_endpoint_url(base_url)}{_CHAT_COMPLETIONS_SUFFIX}"
     return await acall_chat_completions(request_url, api_key, model, question_title, system_prompt)

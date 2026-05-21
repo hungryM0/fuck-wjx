@@ -11,29 +11,11 @@ AI_PROVIDERS = {
     "deepseek": {
         "label": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
-        "recommended_models": ["deepseek-chat", "deepseek-reasoner"],
-        "default_model": "deepseek-chat",
-    },
-    "qwen": {
-        "label": "通义千问",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "recommended_models": ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-long", "qwen-flash"],
-        "default_model": "qwen-turbo",
-    },
-    "siliconflow": {
-        "label": "硅基流动",
-        "base_url": "https://api.siliconflow.cn/v1",
-        "recommended_models": ["deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3-VL-8B-Instruct", "PaddlePaddle/PaddleOCR-VL-1.5"],
-        "default_model": "deepseek-ai/DeepSeek-V3.2",
-    },
-    "volces": {
-        "label": "火山引擎",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "recommended_models": ["doubao-seed-1-8-251228", "glm-4-7-251222", "doubao-seed-1-6-251015", "doubao-seed-1-6-lite-251015", "doubao-seed-1-6-flash-250828", "doubao-seed-1-6-250615"],
-        "default_model": "doubao-seed-1-8-251228",
+        "recommended_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "default_model": "deepseek-v4-flash",
     },
     "custom": {
-        "label": "自定义 (OpenAI 兼容)",
+        "label": "OpenAI 兼容",
         "base_url": "",
         "recommended_models": [],
         "default_model": "",

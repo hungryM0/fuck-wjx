@@ -86,9 +86,6 @@ class RuntimeAISection(QObject):
 
     _PROVIDER_DOCS = {
         "deepseek": "https://api-docs.deepseek.com/zh-cn/",
-        "qwen": "https://help.aliyun.com/zh/model-studio/get-api-key",
-        "siliconflow": "https://docs.siliconflow.cn/cn/userguide/quickstart#2-%E6%9F%A5%E7%9C%8B%E6%A8%A1%E5%9E%8B%E5%88%97%E8%A1%A8%E5%92%8C%E6%A8%A1%E5%9E%8B%E8%AF%A6%E6%83%85",
-        "volces": "https://www.volcengine.com/docs/82379/1399008?lang=zh#da0e9d90",
         "custom": "https://platform.openai.com/docs/api-reference/introduction",
     }
 
@@ -177,6 +174,8 @@ class RuntimeAISection(QObject):
         for key, provider in AI_PROVIDERS.items():
             self.ai_provider_combo.addItem(provider.get("label", key), userData=key)
         saved_provider = ai_config.get("provider") or "deepseek"
+        if saved_provider not in AI_PROVIDERS:
+            saved_provider = "deepseek"
         idx = self.ai_provider_combo.findData(saved_provider)
         if idx >= 0:
             self.ai_provider_combo.setCurrentIndex(idx)
@@ -406,6 +405,8 @@ class RuntimeAISection(QObject):
                 ai_config.get("system_prompt") or ""
             ).strip() or get_default_system_prompt(cfg.ai_mode)
         if not getattr(cfg, "ai_provider", ""):
+            cfg.ai_provider = "deepseek"
+        if cfg.ai_provider not in AI_PROVIDERS:
             cfg.ai_provider = "deepseek"
         if not getattr(cfg, "ai_mode", ""):
             cfg.ai_mode = "free"
