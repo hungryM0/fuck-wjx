@@ -197,7 +197,14 @@ class WjxRuntimeInteractionsTests:
         assert await runtime_interactions._question_option_texts(driver, 6) == ["选项1", "选项2"]
         assert await runtime_interactions._visible_matrix_row_count(driver, 6) == 3
         assert await runtime_interactions._visible_text_input_count(driver, 6) == 2
+        page.selector_counts["#div6 li[serial='3']"] = 1
+        page.selector_counts["#div6 li[serial='1']"] = 1
+        page.selector_counts["#div6 li[serial='2']"] = 1
+        driver.script_results.extend([0, 3])
         assert await runtime_interactions._click_reorder_sequence(driver, 6, [2, 0, 1])
+        assert page.locators["#div6 li[serial='3']"].click_calls == 1
+        assert page.locators["#div6 li[serial='1']"].click_calls == 1
+        assert page.locators["#div6 li[serial='2']"].click_calls == 1
 
         submit_page = _Page()
         submit_page.selector_counts["#ctlNext"] = 1
@@ -220,6 +227,15 @@ class WjxRuntimeInteractionsTests:
         failing_submit_driver = _Driver(failing_submit_page)
         failing_submit_driver.script_results = [True]
         assert await runtime_interactions._click_submit_button(failing_submit_driver)
+
+    @pytest.mark.asyncio
+    async def test_confirm_location_picker_clicks_wjx_button_a(self) -> None:
+        page = _Page()
+        page.selector_counts[".layui-layer .button_a"] = 1
+        driver = _Driver(page)
+
+        assert await runtime_interactions._confirm_location_picker(driver)
+        assert page.locators[".layui-layer .button_a"].click_calls == 1
 
 
 def _async_result(value):

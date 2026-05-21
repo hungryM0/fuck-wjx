@@ -440,6 +440,57 @@ class WjxRuntimeAnswerersTests:
         assert recorded == [((1, "single"), {"selected_indices": [1], "selected_texts": ["B"]})]
 
     @pytest.mark.asyncio
+    async def test_answer_page_batch_answers_popup_questions_outside_batch_script(self, monkeypatch) -> None:
+        ctx = _ctx(question_config_index_map={1: ("single", 0), 7: ("location", -1), 15: ("order", -1)})
+        calls: list[tuple[str, object]] = []
+
+        async def _build(_driver, question, _ctx, *, psycho_plan):
+            del _ctx, psycho_plan
+            calls.append(("build", int(question.num)))
+            return runtime_answerers.AnswerAction(
+                question_num=int(question.num),
+                kind="choice",
+                input_type="radio",
+                selected_indices=(0,),
+                selected_texts=("A",),
+                record_type="single",
+            )
+
+        async def _apply(_driver, answer_actions):
+            calls.append(("apply", tuple(action.question_num for action in answer_actions)))
+            return runtime_answerers.BatchFillResult(applied=tuple(action.question_num for action in answer_actions))
+
+        async def _prepare(_driver, question_num):
+            calls.append(("prepare", question_num))
+            return True
+
+        async def _answer_by_meta(_driver, question, _ctx, *, psycho_plan):
+            del _ctx, psycho_plan
+            calls.append(("direct", int(question.num)))
+            return True
+
+        async def _answer_order(_driver, question):
+            calls.append(("order", int(question.num)))
+            return True
+
+        monkeypatch.setattr(runtime_answerers, "build_answer_action", _build)
+        monkeypatch.setattr(runtime_answerers, "apply_answer_actions", _apply)
+        monkeypatch.setattr(runtime_answerers, "_prepare_question_interaction", _prepare)
+        monkeypatch.setattr(runtime_answerers, "answer_question_by_meta", _answer_by_meta)
+        monkeypatch.setattr(runtime_answerers, "_answer_wjx_order", _answer_order)
+        monkeypatch.setattr(runtime_answerers, "record_answer", lambda *_args, **_kwargs: None)
+
+        result = await runtime_answerers.answer_page_batch(
+            object(),
+            [_question(1), _question(7), _question(15)],
+            ctx,
+            psycho_plan=None,
+        )
+
+        assert result.applied == (1, 7, 15)
+        assert calls == [("build", 1), ("apply", (1,)), ("prepare", 7), ("direct", 7), ("prepare", 15), ("order", 15)]
+
+    @pytest.mark.asyncio
     async def test_apply_answer_actions_returns_failed_when_js_errors(self) -> None:
         class _Driver:
             async def execute_script(self, *_args):
@@ -490,12 +541,15 @@ class WjxRuntimeAnswerersTests:
                 "optionFillTexts": [],
             }
         ]
-        assert "const applyLocation" in driver.script
+        assert "const confirmLocation" in driver.script
+        assert "if (!confirmLocation()" in driver.script
         assert "applyLocation(root, action.textValues)" in driver.script
+        assert "const applyOrder" in driver.script
+        assert "applyOrder(root, action.selectedIndices" in driver.script
 
     @pytest.mark.asyncio
     async def test_build_answer_action_skips_unavailable_questions_and_dispatches_helpers(self, monkeypatch) -> None:
-        ctx = _ctx(question_config_index_map={1: ("single", 0), 7: ("location", -1)})
+        ctx = _ctx(question_config_index_map={1: ("single", 0), 7: ("location", -1), 8: ("order", -1)})
         ctx.config.location_parts = {7: ["北京", "北京", "东城区"]}
         question = _question(1)
 
@@ -507,6 +561,15 @@ class WjxRuntimeAnswerersTests:
             kind="location",
             text_values=("北京", "北京", "东城区"),
             record_type="text",
+        )
+        monkeypatch.setattr(runtime_answerers, "_resolve_runtime_option_texts", _async_result(["甲", "乙", "丙"]))
+        monkeypatch.setattr(runtime_answerers.random, "shuffle", lambda values: values.reverse())
+        assert await runtime_answerers.build_answer_action(object(), _question(8), ctx, psycho_plan=None) == runtime_answerers.AnswerAction(
+            question_num=8,
+            kind="order",
+            selected_indices=(2, 1, 0),
+            selected_texts=("丙", "乙", "甲"),
+            record_type="order",
         )
 
         sentinel = runtime_answerers.AnswerAction(question_num=1, kind="choice", input_type="radio")

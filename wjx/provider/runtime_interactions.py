@@ -164,6 +164,30 @@ async def _click_js(driver: BrowserDriver, selector: str, *, verify_selector: Op
         return False
 
 
+async def _click_visible_button_by_selectors(driver: BrowserDriver, selectors: Sequence[str]) -> bool:
+    page = await _page(driver)
+    for selector in selectors:
+        if not str(selector or "").strip():
+            continue
+        try:
+            locator = page.locator(selector).first
+            if await locator.count() <= 0:
+                continue
+            await locator.scroll_into_view_if_needed(timeout=1800)
+            try:
+                await locator.click(timeout=1800)
+                return True
+            except Exception:
+                try:
+                    await locator.click(timeout=1800, force=True)
+                    return True
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return False
+
+
 async def _click_choice_input(driver: BrowserDriver, question_number: int, input_type: str, option_index: int) -> bool:
     if int(question_number or 0) <= 0 or int(option_index) < 0:
         return False
@@ -622,20 +646,75 @@ async def _select_location_input(
                     .filter(Boolean);
                 const finalValue = values.join('-');
                 if (finalValue) setNativeValue(input, finalValue);
-                const done = layer.querySelector('.layer_save_btn a, .button_a, .save_btn');
-                if (done) {
-                    try { done.click(); } catch (e) {}
-                } else if (typeof window.countyok === 'function') {
-                    try { window.countyok(); } catch (e) {}
-                }
                 return String(input.value || finalValue || '').trim();
             })();
         })();
     """
     try:
-        return str(await driver.execute_script(script, q_num, target_parts) or "").strip()
+        value = str(await driver.execute_script(script, q_num, target_parts) or "").strip()
+        if value:
+            try:
+                await _confirm_location_picker(driver)
+            except Exception:
+                pass
+        return value
     except Exception:
         return ""
+
+
+async def _confirm_location_picker(driver: BrowserDriver) -> bool:
+    selectors = (
+        ".layui-layer .button_a",
+        ".layui-layer .layer_save_btn a",
+        ".layui-layer .save_btn",
+        "#layui-layer1 .layui-layer-btn a.layui-layer-btn0",
+        ".layui-layer .layui-layer-btn a.layui-layer-btn0",
+        "#layui-layer1 .layui-layer-btn a",
+        ".layui-layer .layui-layer-btn a",
+    )
+    try:
+        if await _click_visible_button_by_selectors(driver, selectors):
+            return True
+    except Exception:
+        pass
+    script = r"""
+        return (() => {
+            const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
+            const textOf = (el) => String(el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
+            const layers = Array.from(document.querySelectorAll('#layui-layer1, .layui-layer')).filter(visible);
+            for (const layer of layers) {
+                const buttons = Array.from(layer.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).filter(visible);
+                const done = buttons.find((node) => {
+                    const text = textOf(node);
+                    const value = String(node.value || '').replace(/\s+/g, ' ').trim();
+                    const className = String(node.className || '').toLowerCase();
+                    return text === '完成'
+                        || value === '完成'
+                        || className.includes('layui-layer-btn0')
+                        || className.includes('save')
+                        || className.includes('confirm');
+                });
+                if (done) {
+                    try { done.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                    try { done.click(); return true; } catch (e) {}
+                }
+            }
+            if (typeof window.countyok === 'function') {
+                try { window.countyok(); return true; } catch (e) {}
+            }
+            return false;
+        })();
+    """
+    try:
+        return bool(await driver.execute_script(script))
+    except Exception:
+        return False
 
 
 async def _fill_choice_option_additional_text(
@@ -963,6 +1042,63 @@ async def _click_reorder_sequence(driver: BrowserDriver, question_number: int, o
     normalized = [int(item) for item in ordered_indices if int(item) >= 0]
     if q_num <= 0 or not normalized:
         return False
+    page = await _page(driver)
+
+    async def _marked_count() -> int:
+        script = r"""
+            return (() => {
+                const questionNumber = Number(arguments[0] || 0);
+                const root = document.querySelector(`#div${questionNumber}`);
+                if (!root) return 0;
+                const items = Array.from(root.querySelectorAll('li'));
+                return items.filter((item) => {
+                    const marker = item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                    const text = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
+                    const className = String((marker && marker.className) || '').toLowerCase();
+                    const itemClass = String(item.className || '').toLowerCase();
+                    const checked = String(item.getAttribute('check') || '').trim();
+                    return Boolean(text) || checked === '1' || className.includes('sel') || className.includes('on') || className.includes('checked') || itemClass.includes('check');
+                }).length;
+            })();
+        """
+        try:
+            return max(0, int(await driver.execute_script(script, q_num) or 0))
+        except Exception:
+            return 0
+
+    clicked = 0
+    initial_marked = await _marked_count()
+    for original_index in normalized:
+        selectors = (
+            f"#div{q_num} li[serial='{original_index + 1}']",
+            f"#div{q_num} li:nth-child({original_index + 1})",
+        )
+        did_click = False
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    continue
+                await locator.scroll_into_view_if_needed(timeout=1800)
+                try:
+                    await locator.click(timeout=1800)
+                except Exception:
+                    await locator.click(timeout=1800, force=True)
+                did_click = True
+                break
+            except Exception:
+                continue
+        if did_click:
+            clicked += 1
+            try:
+                await page.wait_for_timeout(80)
+            except Exception:
+                pass
+
+    marked = await _marked_count()
+    if clicked > 0 and marked >= min(initial_marked + clicked, len(normalized)):
+        return True
+
     script = r"""
         return (() => {
             const questionNumber = Number(arguments[0] || 0);
@@ -979,15 +1115,34 @@ async def _click_reorder_sequence(driver: BrowserDriver, question_number: int, o
             };
             const items = Array.from(root.querySelectorAll('li')).filter(visible);
             if (!items.length) return false;
+            const rankMarked = () => items.filter((item) => {
+                const marker = item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                const text = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
+                const className = String((marker && marker.className) || '').toLowerCase();
+                const itemClass = String(item.className || '').toLowerCase();
+                const checked = String(item.getAttribute('check') || '').trim();
+                return Boolean(text) || checked === '1' || className.includes('sel') || className.includes('on') || className.includes('checked') || itemClass.includes('check');
+            }).length;
             let clicked = 0;
             for (let rank = 0; rank < orderedIndices.length; rank += 1) {
                 const item = items[orderedIndices[rank]];
                 if (!item) continue;
                 try { item.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
-                try { item.click(); } catch (e) {}
+                const candidates = [
+                    item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index'),
+                    item.querySelector('a, label, span, input:not([type="hidden"])'),
+                    item,
+                ].filter(Boolean);
+                for (const node of candidates) {
+                    try { node.click(); } catch (e) {}
+                    const marker = item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                    const text = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
+                    const className = String((marker && marker.className) || '').toLowerCase();
+                    if (text || className.includes('sel') || className.includes('on') || className.includes('checked')) break;
+                }
                 clicked += 1;
             }
-            return clicked > 0;
+            return clicked > 0 && rankMarked() >= Math.min(clicked, items.length);
         })();
     """
     try:

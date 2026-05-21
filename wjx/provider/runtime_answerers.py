@@ -1238,6 +1238,23 @@ async def _build_wjx_slider_action(
     )
 
 
+async def _build_wjx_order_action(
+    driver: BrowserDriver,
+    question: SurveyQuestionMeta,
+) -> AnswerAction:
+    option_texts = await _resolve_runtime_option_texts(driver, question)
+    option_count = max(1, len(option_texts) or int(question.options or 0))
+    ordered_indices = list(range(option_count))
+    random.shuffle(ordered_indices)
+    return AnswerAction(
+        question_num=int(question.num or 0),
+        kind="order",
+        selected_indices=tuple(ordered_indices),
+        selected_texts=tuple(option_texts[index] for index in ordered_indices if index < len(option_texts)),
+        record_type="order",
+    )
+
+
 async def build_answer_action(
     driver: BrowserDriver,
     question: SurveyQuestionMeta,
@@ -1269,6 +1286,8 @@ async def build_answer_action(
         return await _build_wjx_score_like_action(driver, question, config_index, ctx, psycho_plan=psycho_plan, answer_type="score")
     if entry_type == "slider":
         return await _build_wjx_slider_action(question, config_index, ctx)
+    if entry_type == "order":
+        return await _build_wjx_order_action(driver, question)
     return None
 
 
@@ -1385,6 +1404,40 @@ async def apply_answer_actions(driver: BrowserDriver, actions: Sequence[AnswerAc
                 });
                 return applied > 0 && applied >= Math.min(targets.length, textValues.length);
             };
+            const confirmLocation = () => {
+                const layers = Array.from(document.querySelectorAll('.layui-layer, #layui-layer1')).filter((el) => visible(el));
+                const isVisible = (el) => {
+                    if (!el) return false;
+                    const style = window.getComputedStyle(el);
+                    if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                };
+                const textOf = (el) => String(el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
+                for (const layer of layers) {
+                    const directDone = layer.querySelector('.button_a, .layer_save_btn a, .save_btn');
+                    if (directDone && isVisible(directDone)) {
+                        try { directDone.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                        try { directDone.click(); return true; } catch (e) {}
+                    }
+                    const buttons = Array.from(layer.querySelectorAll('a, button, input[type="button"], input[type="submit"]')).filter(isVisible);
+                    const done = buttons.find((node) => {
+                        const text = textOf(node);
+                        const value = String(node.value || '').replace(/\s+/g, ' ').trim();
+                        const className = String(node.className || '').toLowerCase();
+                        return text === '完成'
+                            || value === '完成'
+                            || className.includes('layui-layer-btn0')
+                            || className.includes('save')
+                            || className.includes('confirm');
+                    });
+                    if (done) {
+                        try { done.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                        try { done.click(); return true; } catch (e) {}
+                    }
+                }
+                return false;
+            };
             const applyLocation = (root, values) => {
                 const targetValues = Array.isArray(values) ? values.map((item) => String(item ?? '').trim()).filter(Boolean) : [];
                 const questionNum = Number(String(root.id || '').replace(/^div/, '') || 0);
@@ -1458,10 +1511,7 @@ async def apply_answer_actions(driver: BrowserDriver, actions: Sequence[AnswerAc
                 if (finalValue) {
                     setNativeValue(input, finalValue);
                 }
-                const done = layer.querySelector('.layer_save_btn a, .button_a, .save_btn');
-                if (done) {
-                    try { done.click(); } catch (e) {}
-                } else if (typeof window.countyok === 'function') {
+                if (!confirmLocation() && typeof window.countyok === 'function') {
                     try { window.countyok(); } catch (e) {}
                 }
                 return String(input.value || finalValue || '').trim() !== '' && selectedValues.length >= targetValues.length;
@@ -1523,6 +1573,35 @@ async def apply_answer_actions(driver: BrowserDriver, actions: Sequence[AnswerAc
                 setNativeValue(input, String(nextValue));
                 return String(input.value || '') === String(nextValue);
             };
+            const applyOrder = (root, indices) => {
+                const orderedIndices = Array.isArray(indices) ? indices.map((item) => Number(item)).filter((item) => item >= 0) : [];
+                const items = Array.from(root.querySelectorAll('li')).filter(visible);
+                if (!orderedIndices.length || !items.length) return false;
+                const isMarked = (item) => {
+                    const marker = item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                    const text = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
+                    const className = String((marker && marker.className) || '').toLowerCase();
+                    return Boolean(text) || className.includes('sel') || className.includes('on') || className.includes('checked');
+                };
+                let clicked = 0;
+                for (let rank = 0; rank < orderedIndices.length; rank += 1) {
+                    const item = items[orderedIndices[rank]];
+                    if (!item) continue;
+                    try { item.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                    const candidates = [
+                        item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index'),
+                        item.querySelector('a, label, span, input:not([type="hidden"])'),
+                        item,
+                    ].filter(Boolean);
+                    for (const node of candidates) {
+                        try { node.click(); } catch (e) {}
+                        if (isMarked(item)) break;
+                    }
+                    clicked += 1;
+                }
+                const marked = items.filter(isMarked).length;
+                return clicked > 0 && marked >= Math.min(clicked, items.length);
+            };
             const applied = [];
             const failed = [];
             for (const action of actions) {
@@ -1571,6 +1650,8 @@ async def apply_answer_actions(driver: BrowserDriver, actions: Sequence[AnswerAc
                         ok = applyMatrix(root, action.matrixIndices || []);
                     } else if (action.kind === 'slider') {
                         ok = applySlider(root, questionNum, action.sliderValue);
+                    } else if (action.kind === 'order') {
+                        ok = applyOrder(root, action.selectedIndices || []);
                     }
                 } catch (e) {
                     ok = false;
@@ -1599,26 +1680,53 @@ async def answer_page_batch(
 ) -> BatchFillResult:
     actions: list[AnswerAction] = []
     skipped: list[int] = []
+    direct_questions: list[SurveyQuestionMeta] = []
+    order_questions: list[SurveyQuestionMeta] = []
     for question in list(questions or []):
         question_num = int(getattr(question, "num", 0) or 0)
         if question_num <= 0:
             continue
+        config_entry = ctx.config.question_config_index_map.get(question_num)
+        if config_entry:
+            entry_type = str(config_entry[0] or "")
+            if entry_type == "location":
+                direct_questions.append(question)
+                continue
+            if entry_type == "order":
+                order_questions.append(question)
+                continue
         action = await build_answer_action(driver, question, ctx, psycho_plan=psycho_plan)
         if action is None:
             skipped.append(question_num)
             continue
         actions.append(action)
-    if not actions:
-        return BatchFillResult(skipped=tuple(skipped))
-    result = await apply_answer_actions(driver, actions)
+    result = await apply_answer_actions(driver, actions) if actions else BatchFillResult()
     action_by_num = {int(action.question_num): action for action in actions}
     for question_num in result.applied:
         action = action_by_num.get(int(question_num))
         if action is not None:
             _record_answer_action(ctx, action)
+    direct_applied: list[int] = []
+    direct_failed: list[int] = []
+    for question in direct_questions:
+        question_num = int(getattr(question, "num", 0) or 0)
+        await _prepare_question_interaction(driver, question_num)
+        if await answer_question_by_meta(driver, question, ctx, psycho_plan=psycho_plan):
+            direct_applied.append(question_num)
+        else:
+            direct_failed.append(question_num)
+    order_applied: list[int] = []
+    order_failed: list[int] = []
+    for question in order_questions:
+        question_num = int(getattr(question, "num", 0) or 0)
+        await _prepare_question_interaction(driver, question_num)
+        if await _answer_wjx_order(driver, question):
+            order_applied.append(question_num)
+        else:
+            order_failed.append(question_num)
     return BatchFillResult(
-        applied=tuple(result.applied),
-        failed=tuple(result.failed),
+        applied=tuple(result.applied) + tuple(direct_applied) + tuple(order_applied),
+        failed=tuple(result.failed) + tuple(direct_failed) + tuple(order_failed),
         skipped=tuple(skipped),
     )
 
