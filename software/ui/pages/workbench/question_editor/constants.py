@@ -15,6 +15,7 @@ TYPE_CHOICES = [
     ("score", "评价题"),
     ("slider", "滑块题"),
     ("order", "排序题"),
+    ("location", "地区题"),
 ]
 
 # 填写策略选项
@@ -27,6 +28,7 @@ TYPE_LABEL_MAP: Dict[str, str] = dict(TYPE_CHOICES)
 TYPE_LABEL_MAP.update(
     {
         "multi_text": "多项填空题",
+        "location": "地区题",
     }
 )
 
@@ -38,6 +40,8 @@ ANSWER_WEIGHT_MAX = 50
 
 def _get_entry_type_label(entry: QuestionEntry) -> str:
     """获取题目类型的中文标签"""
+    if bool(getattr(entry, "is_location", False)):
+        return TYPE_LABEL_MAP["location"]
     return TYPE_LABEL_MAP.get(entry.question_type, entry.question_type)
 
 

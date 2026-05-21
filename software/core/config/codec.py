@@ -231,6 +231,7 @@ def serialize_question_entry(entry) -> Dict[str, Any]:
         "fillable_option_indices": entry.fillable_option_indices,
         "attached_option_selects": list(getattr(entry, "attached_option_selects", []) or []),
         "is_location": getattr(entry, "is_location", False),
+        "location_parts": list(getattr(entry, "location_parts", []) or []),
         "dimension": _normalize_dimension_value(getattr(entry, "dimension", None)),
         "psycho_bias": str(getattr(entry, "psycho_bias", "custom") or "custom"),
     }
@@ -272,6 +273,7 @@ def deserialize_question_entry(data: Dict[str, Any]):
         fillable_option_indices=data.get("fillable_option_indices"),
         attached_option_selects=list(data.get("attached_option_selects") or []),
         is_location=bool(data.get("is_location")),
+        location_parts=list(data.get("location_parts") or []),
         dimension=_normalize_dimension_value(data.get("dimension")),
         psycho_bias=_normalize_psycho_bias(data),
     )

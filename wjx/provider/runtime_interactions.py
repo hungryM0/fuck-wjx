@@ -463,6 +463,181 @@ async def _fill_text_input(
         return False
 
 
+async def _select_location_input(
+    driver: BrowserDriver,
+    question_number: int,
+    location_parts: Optional[Sequence[str]] = None,
+) -> str:
+    q_num = int(question_number or 0)
+    if q_num <= 0:
+        return ""
+    target_parts = [str(item or "").strip() for item in list(location_parts or [])[:3]]
+    script = r"""
+        return (() => {
+            const questionNumber = Number(arguments[0] || 0);
+            const targetParts = Array.isArray(arguments[1]) ? arguments[1].map((item) => String(item || '').trim()) : [];
+            if (!questionNumber) return "";
+            const root = document.querySelector(`#div${questionNumber}`);
+            const input = document.querySelector(`#q${questionNumber}`);
+            if (!root || !input) return "";
+            const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            };
+            const dispatch = (target, names = ['input', 'change', 'blur']) => {
+                for (const name of names) {
+                    try { target.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+                }
+            };
+            const setNativeValue = (target, nextValue) => {
+                const value = String(nextValue || '');
+                try {
+                    const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement?.prototype || {}, 'value');
+                    if (descriptor && descriptor.set) descriptor.set.call(target, value);
+                    else target.value = value;
+                } catch (e) {
+                    try { target.value = value; } catch (err) {}
+                }
+                try { target.setAttribute('value', value); } catch (e) {}
+                dispatch(target);
+            };
+            const normalizeName = (value) => String(value || '')
+                .replace(/\s+/g, '')
+                .replace(/省|市|区|县|自治州|自治县|地区|盟/g, '');
+            const optionMatches = (option, target) => {
+                const expected = String(target || '').trim();
+                if (!expected || expected === '自动选择') return false;
+                const optionText = String(option.textContent || option.innerText || '').replace(/\s+/g, ' ').trim();
+                const optionValue = String(option.value || '').trim();
+                const textNorm = normalizeName(optionText);
+                const expectedNorm = normalizeName(expected);
+                if (!expectedNorm) return false;
+                return optionText === expected
+                    || optionValue === expected
+                    || textNorm === expectedNorm
+                    || textNorm.includes(expectedNorm)
+                    || expectedNorm.includes(textNorm);
+            };
+            const chooseValid = (select, target) => {
+                if (!select) return "";
+                const options = Array.from(select.options || []);
+                const validOptions = options.filter((item, index) => {
+                    const value = String(item.value || '').trim();
+                    const text = String(item.textContent || item.innerText || '').replace(/\s+/g, ' ').trim();
+                    if (!value && index === 0) return false;
+                    if (!text || text.startsWith('--请选择') || text.includes('请选择')) return false;
+                    return Boolean(value || text);
+                });
+                const option = validOptions.find((item) => optionMatches(item, target)) || validOptions[0] || null;
+                if (!option) return "";
+                select.value = option.value;
+                try { option.selected = true; } catch (e) {}
+                dispatch(select);
+                try {
+                    if (window.jQuery) {
+                        window.jQuery(select).val(option.value).trigger('change');
+                    }
+                } catch (e) {}
+                return String(option.value || option.textContent || '').trim();
+            };
+            const readSelectText = (select) => {
+                if (!select) return "";
+                const selected = select.options && select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+                const text = String((selected && (selected.textContent || selected.innerText)) || select.value || '').replace(/\s+/g, ' ').trim();
+                return text.includes('请选择') ? "" : text;
+            };
+            const waitForOptions = (select) => {
+                if (!select) return Promise.resolve(false);
+                return new Promise((resolve) => {
+                    const hasValid = () => Array.from(select.options || []).some((option, index) => {
+                        const text = String(option.textContent || option.innerText || '').replace(/\s+/g, ' ').trim();
+                        const value = String(option.value || '').trim();
+                        return index > 0 && !text.includes('请选择') && Boolean(value || text);
+                    });
+                    if (hasValid()) {
+                        resolve(true);
+                        return;
+                    }
+                    let settled = false;
+                    const observer = new MutationObserver(() => {
+                        if (!hasValid()) return;
+                        if (settled) return;
+                        settled = true;
+                        try { observer.disconnect(); } catch (e) {}
+                        resolve(true);
+                    });
+                    try { observer.observe(select, { childList: true, subtree: true }); } catch (e) {}
+                    window.setTimeout(() => {
+                        if (settled) return;
+                        settled = true;
+                        try { observer.disconnect(); } catch (e) {}
+                        resolve(hasValid());
+                    }, 1200);
+                });
+            };
+            const waitForLayer = () => new Promise((resolve) => {
+                const findLayer = () => {
+                    const layers = Array.from(document.querySelectorAll('.layui-layer, #layui-layer1')).filter(visible);
+                    return layers.find((layer) => layer.querySelector('select.province, select[name="province"]')) || null;
+                };
+                const existing = findLayer();
+                if (existing) {
+                    resolve(existing);
+                    return;
+                }
+                let settled = false;
+                const observer = new MutationObserver(() => {
+                    const layer = findLayer();
+                    if (!layer || settled) return;
+                    settled = true;
+                    try { observer.disconnect(); } catch (e) {}
+                    resolve(layer);
+                });
+                try { observer.observe(document.body || document.documentElement, { childList: true, subtree: true }); } catch (e) {}
+                window.setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    try { observer.disconnect(); } catch (e) {}
+                    resolve(findLayer());
+                }, 1200);
+            });
+            return (async () => {
+                try { input.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                try { input.click(); } catch (e) {}
+                const layer = await waitForLayer();
+                if (!layer) return "";
+                const province = layer.querySelector('select.province, select[name="province"]');
+                const city = layer.querySelector('select.city, select[name="city"]');
+                const area = layer.querySelector('select.area, select[name="area"]');
+                const provinceValue = chooseValid(province, targetParts[0]);
+                if (city) await waitForOptions(city);
+                const cityValue = chooseValid(city, targetParts[1]);
+                if (area) await waitForOptions(area);
+                const areaValue = chooseValid(area, targetParts[2]);
+                const values = [readSelectText(province) || provinceValue, readSelectText(city) || cityValue, readSelectText(area) || areaValue]
+                    .map((item) => String(item || '').trim())
+                    .filter(Boolean);
+                const finalValue = values.join('-');
+                if (finalValue) setNativeValue(input, finalValue);
+                const done = layer.querySelector('.layer_save_btn a, .button_a, .save_btn');
+                if (done) {
+                    try { done.click(); } catch (e) {}
+                } else if (typeof window.countyok === 'function') {
+                    try { window.countyok(); } catch (e) {}
+                }
+                return String(input.value || finalValue || '').trim();
+            })();
+        })();
+    """
+    try:
+        return str(await driver.execute_script(script, q_num, target_parts) or "").strip()
+    except Exception:
+        return ""
+
+
 async def _fill_choice_option_additional_text(
     driver: BrowserDriver,
     question_number: int,
@@ -896,6 +1071,7 @@ __all__ = [
     "_question_option_texts",
     "_question_text",
     "_resolve_current_page_number",
+    "_select_location_input",
     "_set_select_value",
     "_set_slider_value",
     "_visible_matrix_row_count",

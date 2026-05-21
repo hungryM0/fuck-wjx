@@ -85,6 +85,10 @@ def _apply_text_result(entry: QuestionEntry, texts: Any) -> None:
     entry.texts = texts
 
 
+def _apply_location_result(entry: QuestionEntry, parts: Any) -> None:
+    entry.location_parts = [str(item or "").strip() for item in list(parts or [])[:3]]
+
+
 def _apply_option_fill_result(entry: QuestionEntry, option_fill_texts: Any) -> None:
     if entry.question_type not in ("single", "multiple", "dropdown"):
         return
@@ -135,6 +139,7 @@ _WIZARD_DISTRIBUTION_RULES: Sequence[WizardApplyRule] = (
 
 _WIZARD_TEXT_RULES: Sequence[WizardApplyRule] = (
     (QuestionWizardDialog.get_text_results, _apply_text_result),
+    (QuestionWizardDialog.get_location_results, _apply_location_result),
     (QuestionWizardDialog.get_option_fill_results, _apply_option_fill_result),
     (QuestionWizardDialog.get_text_random_modes, _apply_text_random_mode_result),
     (QuestionWizardDialog.get_text_random_int_ranges, _apply_text_random_int_range_result),
@@ -166,6 +171,9 @@ def question_summary(entry: QuestionEntry) -> str:
         return f"倾向预设: {bias_text}"
 
     if entry.question_type in ("text", "multi_text"):
+        if bool(getattr(entry, "is_location", False)):
+            parts = [part for part in list(getattr(entry, "location_parts", []) or []) if str(part or "").strip()]
+            return f"地区: {'-'.join(parts)}" if parts else "地区: 自动选择"
         if entry.question_type == "text":
             random_mode = str(getattr(entry, "text_random_mode", "none") or "none").strip().lower()
             if random_mode == "name":

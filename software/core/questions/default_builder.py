@@ -339,6 +339,7 @@ def build_default_question_entries(
                     else []
                 ),
                 is_location=is_location,
+                location_parts=list(getattr(existing_config, "location_parts", []) or []) if existing_config else [],
             )
         )
     return entries

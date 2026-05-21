@@ -102,6 +102,7 @@ def configure_probabilities(
     target.text_entry_types = []
     target.text_ai_flags = []
     target.text_titles = []
+    target.location_parts = {}
     target.multi_text_blank_modes = []
     target.multi_text_blank_ai_flags = []
     target.multi_text_blank_int_ranges = []
@@ -292,6 +293,10 @@ def configure_probabilities(
                 mapped_value = ("location", -1)
                 target.question_config_index_map[question_num] = mapped_value
                 _remember_provider_mapping(entry, mapped_value)
+                target.location_parts[question_num] = [
+                    str(item or "").strip()
+                    for item in list(getattr(entry, "location_parts", []) or [])[:3]
+                ]
             text_random_mode = str(getattr(entry, "text_random_mode", _TEXT_RANDOM_NONE) or _TEXT_RANDOM_NONE).strip().lower()
             normalized_values = [str(item).strip() for item in (entry.texts or []) if str(item).strip()]
             normalized_blank_ai_flags: List[bool] = []

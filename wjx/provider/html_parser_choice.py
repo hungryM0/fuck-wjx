@@ -440,7 +440,18 @@ def _verify_text_indicates_location(value: Optional[str]) -> bool:
     text = str(value).strip()
     if not text:
         return False
-    return ("地图" in text) or ("map" in text.lower())
+    normalized = text.lower()
+    return (
+        ("地图" in text)
+        or ("省市" in text)
+        or ("省份" in text)
+        or ("城市" in text)
+        or ("地区" in text)
+        or ("map" in normalized)
+        or ("city" in normalized)
+        or ("province" in normalized)
+        or ("area" in normalized)
+    )
 
 def _soup_question_is_location(question_div) -> bool:
     if question_div is None:
@@ -457,6 +468,9 @@ def _soup_question_is_location(question_div) -> bool:
     for input_element in inputs:
         verify_value = input_element.get("verify")
         if _verify_text_indicates_location(verify_value):
+            return True
+        onclick_value = input_element.get("onclick")
+        if onclick_value and "opencitybox" in str(onclick_value).lower():
             return True
     return False
 

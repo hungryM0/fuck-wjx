@@ -38,6 +38,7 @@ from .wizard_sections_common import (
     _TEXT_RANDOM_NONE,
     _apply_ai_label_state_style,
 )
+from .wizard_sections_location import WizardSectionsLocationMixin
 from .wizard_sections_slider import WizardSectionsSliderMixin
 from .wizard_sections_text import WizardSectionsTextMixin
 from .utils import _apply_label_color, _bind_slider_input, _shorten_text
@@ -46,6 +47,7 @@ from .constants import ANSWER_WEIGHT_MAX, ANSWER_WEIGHT_MIN
 
 class WizardSectionsMixin(
     WizardSectionsCommonMixin,
+    WizardSectionsLocationMixin,
     WizardSectionsTextMixin,
     WizardSectionsSliderMixin,
 ):
@@ -53,6 +55,7 @@ class WizardSectionsMixin(
 
     text_container_map: Dict[int, Any]
     text_add_btn_map: Dict[int, Any]
+    location_combo_map: Dict[int, Any]
     text_random_group_map: Dict[int, Any]
     text_random_list_radio_map: Dict[int, Any]
     text_random_name_check_map: Dict[int, Any]

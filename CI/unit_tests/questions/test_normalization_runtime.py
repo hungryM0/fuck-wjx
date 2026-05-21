@@ -65,7 +65,14 @@ class NormalizationRuntimeTests:
                 multi_text_blank_ai_flags=[True, True],
                 multi_text_blank_int_ranges=[[9, 3], []],
             ),
-            QuestionEntry("text", -1, texts=["位置"], question_num=12, is_location=True),
+            QuestionEntry(
+                "text",
+                -1,
+                texts=["位置"],
+                question_num=12,
+                is_location=True,
+                location_parts=["北京", "北京", "东城区"],
+            ),
         ]
 
         configure_probabilities(entries, ctx)
@@ -94,6 +101,7 @@ class NormalizationRuntimeTests:
         assert ctx.text_ai_flags[1] is True
         assert ctx.multi_text_blank_int_ranges[1] == [[3, 9], []]
         assert ctx.question_config_index_map[12] == ("location", -1)
+        assert ctx.location_parts[12] == ["北京", "北京", "东城区"]
 
     def test_configure_probabilities_builds_provider_question_mapping(self) -> None:
         ctx = SimpleNamespace()

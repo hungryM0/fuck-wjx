@@ -33,6 +33,7 @@ class ExecutionConfig:
     text_entry_types: List[str] = field(default_factory=list)
     text_ai_flags: List[bool] = field(default_factory=list)
     text_titles: List[str] = field(default_factory=list)
+    location_parts: Dict[int, List[str]] = field(default_factory=dict)
     multi_text_blank_modes: List[List[str]] = field(default_factory=list)
     multi_text_blank_ai_flags: List[List[bool]] = field(default_factory=list)
     multi_text_blank_int_ranges: List[List[List[int]]] = field(default_factory=list)

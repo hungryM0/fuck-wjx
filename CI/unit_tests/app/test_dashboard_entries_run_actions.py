@@ -96,6 +96,13 @@ class _EntriesPage(DashboardEntriesMixin, DashboardRunActionsMixin):
 
 
 def test_question_summary_covers_text_matrix_choice_and_dimension_branches() -> None:
+    assert question_summary(QuestionEntry("text", None, is_location=True)) == "地区: 自动选择"
+    assert (
+        question_summary(
+            QuestionEntry("text", None, is_location=True, location_parts=["北京", "北京", "东城区"])
+        )
+        == "地区: 北京-北京-东城区"
+    )
     assert question_summary(QuestionEntry("text", None, text_random_mode="name")) == "答案: 随机姓名"
     assert question_summary(QuestionEntry("text", None, text_random_mode="mobile")) == "答案: 随机手机号"
     assert question_summary(QuestionEntry("text", None, text_random_mode="id_card")) == "答案: 随机身份证号"

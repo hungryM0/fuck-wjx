@@ -22,6 +22,7 @@ class WizardRuntimeState:
     ai_label_map: dict[int, BodyLabel] = field(default_factory=dict)
     text_container_map: dict[int, QWidget] = field(default_factory=dict)
     text_add_btn_map: dict[int, PushButton] = field(default_factory=dict)
+    location_combo_map: dict[int, list[Any]] = field(default_factory=dict)
     text_random_mode_map: dict[int, str] = field(default_factory=dict)
     text_random_list_radio_map: dict[int, RadioButton] = field(default_factory=dict)
     text_random_name_check_map: dict[int, RadioButton] = field(default_factory=dict)
@@ -53,6 +54,7 @@ def bind_runtime_state(owner: Any, state: WizardRuntimeState) -> None:
     owner.ai_label_map = state.ai_label_map
     owner.text_container_map = state.text_container_map
     owner.text_add_btn_map = state.text_add_btn_map
+    owner.location_combo_map = state.location_combo_map
     owner.text_random_mode_map = state.text_random_mode_map
     owner.text_random_list_radio_map = state.text_random_list_radio_map
     owner.text_random_name_check_map = state.text_random_name_check_map

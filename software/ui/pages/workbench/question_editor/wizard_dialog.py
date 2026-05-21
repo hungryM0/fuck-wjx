@@ -576,6 +576,9 @@ class QuestionWizardDialog(
     def get_text_results(self) -> Dict[int, List[str]]:
         return wizard_result_builder.get_text_results(self)
 
+    def get_location_results(self) -> Dict[int, List[str]]:
+        return wizard_result_builder.get_location_results(self)
+
     def get_option_fill_results(self) -> Dict[int, List[Optional[str]]]:
         return wizard_result_builder.get_option_fill_results(self)
 

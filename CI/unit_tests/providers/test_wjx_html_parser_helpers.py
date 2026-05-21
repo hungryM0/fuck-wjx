@@ -267,8 +267,12 @@ class WjxHtmlParserHelperTests:
         assert html_parser_choice._extract_custom_select_option_texts(custom_input) == ["苹果", "香蕉"]
         assert html_parser_choice._extract_custom_select_option_texts(typo_custom_input) == ["北京", "上海"]
         assert html_parser_choice._verify_text_indicates_location("腾讯地图")
+        assert html_parser_choice._verify_text_indicates_location("省市区")
         assert not html_parser_choice._verify_text_indicates_location("普通文本")
         assert html_parser_choice._soup_question_is_location(location_div)
+        assert html_parser_choice._soup_question_is_location(
+            _soup("<div><input verify='省市区' onclick='openCityBox(this,3,event,1);' /></div>").div
+        )
         assert html_parser_choice._collect_select_option_texts(soup.div, soup, 7) == ["北京", "上海"]
         assert html_parser_choice._extract_select_option_texts_from_element(soup.find("select")) == ["北京", "上海"]
 

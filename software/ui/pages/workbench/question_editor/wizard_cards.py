@@ -89,6 +89,13 @@ class WizardCardsMixin:
             card_layout: QVBoxLayout,
             option_texts: List[str],
         ) -> None: ...
+        def _build_location_section(
+            self,
+            idx: int,
+            entry: QuestionEntry,
+            card: CardWidget,
+            card_layout: QVBoxLayout,
+        ) -> None: ...
 
     def _resolve_matrix_weights(
         self, entry: QuestionEntry, rows: int, columns: int
@@ -354,7 +361,9 @@ class WizardCardsMixin:
 
         card_layout.addWidget(HorizontalSeparator(card))
 
-        if entry.question_type in ("text", "multi_text"):
+        if bool(getattr(entry, "is_location", False)):
+            self._build_location_section(idx, entry, card, card_layout)
+        elif entry.question_type in ("text", "multi_text"):
             self._build_text_section(idx, entry, card, card_layout)
         elif entry.question_type == "matrix":
             self._build_matrix_section(idx, entry, card, card_layout, option_texts, row_texts)

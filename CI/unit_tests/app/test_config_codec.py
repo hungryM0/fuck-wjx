@@ -116,6 +116,8 @@ class ConfigCodecTests:
                 "multi_text_blank_int_ranges": [[1, 3], "", ["bad"]],
                 "text_random_mode": "integer",
                 "text_random_int_range": ["5", "9"],
+                "is_location": True,
+                "location_parts": ["北京", "北京", "东城区"],
                 "dimension": " 未分组 ",
                 "psycho_bias": "bad",
             }
@@ -129,12 +131,15 @@ class ConfigCodecTests:
         assert entry.multi_text_blank_modes == ["name", "none", "integer"]
         assert entry.multi_text_blank_ai_flags == [True, False]
         assert entry.text_random_int_range == [5, 9]
+        assert entry.is_location is True
+        assert entry.location_parts == ["北京", "北京", "东城区"]
         assert entry.dimension is None
         assert entry.psycho_bias == "custom"
 
         payload = serialize_question_entry(entry)
         assert payload["dimension"] is None
         assert payload["text_random_int_range"] == [5, 9]
+        assert payload["location_parts"] == ["北京", "北京", "东城区"]
 
     def test_normalize_runtime_config_payload_covers_boundaries_and_invalid_values(self) -> None:
         cfg = normalize_runtime_config_payload(

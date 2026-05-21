@@ -3,14 +3,17 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
+from qfluentwidgets import ComboBox, EditableComboBox, LineEdit
 
 from software.core.questions.config import QuestionEntry
 from software.providers.contracts import SurveyQuestionMeta
+from software.ui.pages.workbench.question_editor.constants import _get_entry_type_label
 from software.ui.pages.workbench.question_editor.wizard_cards import WizardCardsMixin
 from software.ui.pages.workbench.question_editor.wizard_logic_tree import LogicTreeState
+from software.ui.pages.workbench.question_editor.wizard_sections_location import WizardSectionsLocationMixin
 
 
-class _Host(WizardCardsMixin):
+class _Host(WizardCardsMixin, WizardSectionsLocationMixin):
     def __init__(self) -> None:
         self.info = [
             SurveyQuestionMeta(
@@ -35,6 +38,9 @@ class _Host(WizardCardsMixin):
         self.entries = [QuestionEntry("single", [1, 2], question_num=11)]
         self.slider_map = {}
         self.matrix_row_slider_map = {}
+        self.text_edit_map = {}
+        self.text_add_btn_map = {}
+        self.location_combo_map = {}
         self.text_random_mode_map = {}
         self.text_random_int_min_edit_map = {}
         self.text_random_int_max_edit_map = {}
@@ -84,6 +90,41 @@ class WizardCardsHelperTests:
         host._restore_entries()
         assert host.entries[0].question_num == 88
         assert host.entries[0].attached_option_selects == [{"x": 1}]
+
+    def test_location_entry_uses_location_label_and_skips_text_controls(self, qtbot) -> None:
+        host = _Host()
+        host.info[0] = SurveyQuestionMeta(
+            num=1,
+            title="您所在的地区",
+            type_code="1",
+            is_text_like=True,
+            is_location=True,
+            required=True,
+        )
+        host.entries[0] = QuestionEntry(
+            "text",
+            [1.0],
+            texts=["无"],
+            question_num=1,
+            question_title="您所在的地区",
+            is_location=True,
+        )
+        parent = QWidget()
+        qtbot.addWidget(parent)
+
+        assert _get_entry_type_label(host.entries[0]) == "地区题"
+        card = host._build_entry_card(0, host.entries[0], parent)
+        qtbot.addWidget(card)
+        badges = host._build_header_badges(0, host.entries[0], host.info[0], parent)
+
+        assert badges[0].text() == "地区题"
+        assert host._has_content is True
+        assert 0 not in host.text_edit_map
+        assert 0 not in host.text_add_btn_map
+        assert all(edit.placeholderText() != "候选答案" for edit in card.findChildren(LineEdit))
+        assert len(card.findChildren(ComboBox)) == 2
+        assert len(card.findChildren(EditableComboBox)) == 1
+        assert 0 in host.location_combo_map
 
     def test_build_attached_select_section_populates_slider_map(self, qtbot) -> None:
         host = _Host()

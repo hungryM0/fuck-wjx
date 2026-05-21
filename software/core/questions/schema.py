@@ -101,5 +101,6 @@ class QuestionEntry:
     fillable_option_indices: Optional[List[int]] = None
     attached_option_selects: List[dict] = field(default_factory=list)
     is_location: bool = False
+    location_parts: List[str] = field(default_factory=list)
     dimension: Optional[str] = None
     psycho_bias: str = "custom"

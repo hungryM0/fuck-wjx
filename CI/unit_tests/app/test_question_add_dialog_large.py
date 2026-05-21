@@ -105,6 +105,19 @@ class QuestionAddDialogLargeTests:
         assert entry.probabilities == -1
         assert entry.option_count == 5
 
+    def test_location_type_builds_location_text_entry(self) -> None:
+        dialog = QuestionAddDialog([])
+        dialog.type_combo.setCurrentText("地区题")
+        assert dialog._resolve_q_type() == "location"
+        assert dialog.option_row_widget.isHidden()
+        assert dialog.answer_count_widget.isHidden()
+
+        entry = dialog._build_entry()
+        assert entry.question_type == "text"
+        assert entry.is_location is True
+        assert entry.location_parts == []
+        assert entry.texts == [DEFAULT_FILL_TEXT]
+
     def test_matrix_preview_and_custom_matrix_entry(self) -> None:
         dialog = QuestionAddDialog([])
         dialog.type_combo.setCurrentIndex(4)

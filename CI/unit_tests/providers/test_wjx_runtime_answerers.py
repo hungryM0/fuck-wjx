@@ -257,6 +257,31 @@ class WjxRuntimeAnswerersTests:
         assert [call[0][2] for call in fill_calls] == ["甲", "13900001111", "3"]
 
     @pytest.mark.asyncio
+    async def test_answer_wjx_location_uses_location_picker(self, monkeypatch) -> None:
+        ctx = _ctx()
+        question = _question(12)
+        recorded: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        ctx.config.location_parts = {12: ["北京", "北京", "东城区"]}
+
+        async def _select_location(_driver, question_num, location_parts):
+            assert question_num == 12
+            assert location_parts == ["北京", "北京", "东城区"]
+            return "北京-北京市-东城区"
+
+        monkeypatch.setattr(runtime_answerers, "_select_location_input", _select_location)
+        monkeypatch.setattr(runtime_answerers, "record_answer", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+        assert await runtime_answerers._answer_wjx_location(object(), question, ctx) is True
+        assert recorded == [((12, "text"), {"text_answer": "北京-北京市-东城区"})]
+
+        async def _select_location_fail(_driver, question_num, location_parts):
+            return ""
+
+        monkeypatch.setattr(runtime_answerers, "_select_location_input", _select_location_fail)
+        assert await runtime_answerers._answer_wjx_location(object(), question, ctx) is False
+
+    @pytest.mark.asyncio
     async def test_answer_wjx_score_matrix_slider_and_order_cover_main_paths(self, monkeypatch) -> None:
         ctx = _ctx(question_dimension_map={10: "D10"})
         question = _question(10, option_texts=["差", "中", "好"], options=3, rows=2)
@@ -340,7 +365,7 @@ class WjxRuntimeAnswerersTests:
         assert await runtime_answerers._answer_wjx_multiple(object(), question, 0, ctx_prob)
         assert recorded[0][1]["selected_indices"][0] == 0
 
-        dispatch_ctx = _ctx(question_config_index_map={1: ("single", 0), 2: ("matrix", 0)})
+        dispatch_ctx = _ctx(question_config_index_map={1: ("single", 0), 2: ("matrix", 0), 3: ("location", -1)})
         dispatch_record: list[str] = []
 
         async def _prepare_question_interaction(*_args, **_kwargs):
@@ -355,14 +380,20 @@ class WjxRuntimeAnswerersTests:
             dispatch_record.append("matrix")
             return True
 
+        async def _answer_location(*_args, **_kwargs):
+            dispatch_record.append("location")
+            return True
+
         monkeypatch.setattr(runtime_answerers, "_prepare_question_interaction", _prepare_question_interaction)
         monkeypatch.setattr(runtime_answerers, "_answer_wjx_single", _answer_single)
         monkeypatch.setattr(runtime_answerers, "_answer_wjx_matrix", _answer_matrix)
+        monkeypatch.setattr(runtime_answerers, "_answer_wjx_location", _answer_location)
 
         assert await runtime_answerers.answer_question_by_meta(object(), _question(1), dispatch_ctx, psycho_plan=None) is True
         assert await runtime_answerers.answer_question_by_meta(object(), _question(2), dispatch_ctx, psycho_plan=None) is True
+        assert await runtime_answerers.answer_question_by_meta(object(), _question(3), dispatch_ctx, psycho_plan=None) is True
         assert await runtime_answerers.answer_question_by_meta(object(), _question(99), _ctx(), psycho_plan=None) is False
-        assert dispatch_record == ["prepare", "single", "prepare", "matrix"]
+        assert dispatch_record == ["prepare", "single", "prepare", "matrix", "prepare", "location"]
 
     @pytest.mark.asyncio
     async def test_answer_page_batch_records_applied_and_reports_failed(self, monkeypatch) -> None:
@@ -422,13 +453,61 @@ class WjxRuntimeAnswerersTests:
         assert result.failed == (5,)
 
     @pytest.mark.asyncio
+    async def test_apply_answer_actions_supports_location_action_script(self) -> None:
+        class _Driver:
+            def __init__(self) -> None:
+                self.payload = None
+                self.script = ""
+
+            async def execute_script(self, script, payload):
+                self.script = script
+                self.payload = payload
+                return {"applied": [12], "failed": []}
+
+        driver = _Driver()
+        result = await runtime_answerers.apply_answer_actions(
+            driver,
+            [
+                runtime_answerers.AnswerAction(
+                    question_num=12,
+                    kind="location",
+                    text_values=("北京", "北京", "东城区"),
+                    record_type="text",
+                )
+            ],
+        )
+
+        assert result.applied == (12,)
+        assert driver.payload == [
+            {
+                "questionNum": 12,
+                "kind": "location",
+                "inputType": "",
+                "selectedIndices": [],
+                "matrixIndices": [],
+                "textValues": ["北京", "北京", "东城区"],
+                "sliderValue": None,
+                "optionFillTexts": [],
+            }
+        ]
+        assert "const applyLocation" in driver.script
+        assert "applyLocation(root, action.textValues)" in driver.script
+
+    @pytest.mark.asyncio
     async def test_build_answer_action_skips_unavailable_questions_and_dispatches_helpers(self, monkeypatch) -> None:
-        ctx = _ctx(question_config_index_map={1: ("single", 0)})
+        ctx = _ctx(question_config_index_map={1: ("single", 0), 7: ("location", -1)})
+        ctx.config.location_parts = {7: ["北京", "北京", "东城区"]}
         question = _question(1)
 
         assert await runtime_answerers.build_answer_action(object(), _question(2, has_jump=True), ctx, psycho_plan=None) is None
         assert await runtime_answerers.build_answer_action(object(), _question(3, has_dependent_display_logic=True), ctx, psycho_plan=None) is None
         assert await runtime_answerers.build_answer_action(object(), _question(99), ctx, psycho_plan=None) is None
+        assert await runtime_answerers.build_answer_action(object(), _question(7), ctx, psycho_plan=None) == runtime_answerers.AnswerAction(
+            question_num=7,
+            kind="location",
+            text_values=("北京", "北京", "东城区"),
+            record_type="text",
+        )
 
         sentinel = runtime_answerers.AnswerAction(question_num=1, kind="choice", input_type="radio")
 

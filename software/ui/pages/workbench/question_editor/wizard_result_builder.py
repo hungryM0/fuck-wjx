@@ -37,6 +37,7 @@ class WizardResultSource(Protocol):
     slider_map: Dict[int, List[NoWheelSlider]]
     matrix_row_slider_map: Dict[int, List[List[NoWheelSlider]]]
     text_edit_map: Dict[int, TextEditsValue]
+    location_combo_map: Dict[int, List[Any]]
     text_random_mode_map: Dict[int, str]
     text_random_int_min_edit_map: Dict[int, LineEdit]
     text_random_int_max_edit_map: Dict[int, LineEdit]
@@ -92,6 +93,25 @@ def get_text_results(source: WizardResultSource) -> Dict[int, List[str]]:
         if not texts:
             texts = [DEFAULT_FILL_TEXT]
         result[idx] = texts
+    return result
+
+
+def get_location_results(source: WizardResultSource) -> Dict[int, List[str]]:
+    result: Dict[int, List[str]] = {}
+    for idx, combos in getattr(source, "location_combo_map", {}).items():
+        parts: List[str] = []
+        for combo in list(combos or [])[:3]:
+            text = ""
+            try:
+                text = str(combo.currentText() or "").strip()
+            except Exception:
+                text = ""
+            if text == "自动选择":
+                text = ""
+            parts.append(text)
+        while len(parts) < 3:
+            parts.append("")
+        result[idx] = parts[:3]
     return result
 
 

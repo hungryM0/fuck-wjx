@@ -35,6 +35,9 @@ class _Combo:
     def currentData(self) -> str:
         return self._value
 
+    def currentText(self) -> str:
+        return self._value
+
 
 class _Segment:
     def __init__(self, value: str) -> None:
@@ -49,6 +52,7 @@ class _Host:
         self.slider_map = {}
         self.matrix_row_slider_map = {}
         self.text_edit_map = {}
+        self.location_combo_map = {}
         self.text_random_mode_map = {}
         self.text_random_int_min_edit_map = {}
         self.text_random_int_max_edit_map = {}
@@ -126,6 +130,8 @@ def test_wizard_result_builder_collects_normal_results(qtbot) -> None:
     assert builder.get_results(host)[1] == [[0, 5], [2, 0]]
     assert builder.get_text_results(host)[0] == ["A"]
     assert builder.get_text_results(host)[1] == ["r1||c2"]
+    host.location_combo_map = {0: [_Combo("北京"), _Combo("北京"), _Combo("东城区")]}
+    assert builder.get_location_results(host) == {0: ["北京", "北京", "东城区"]}
     assert builder.get_text_random_modes(host) == {0: "none", 1: "integer"}
     assert builder.get_text_random_int_ranges(host) == {1: [3, 7]}
     assert builder.get_multi_text_blank_modes(host) == {2: ["name", "integer", "none"]}

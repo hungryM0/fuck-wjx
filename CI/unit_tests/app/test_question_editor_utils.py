@@ -99,6 +99,21 @@ class QuestionEditorUtilsTests:
         assert text_info.text_inputs == 1
         assert text_info.is_text_like is True
 
+        location_entry = QuestionEntry(
+            question_type="text",
+            probabilities=[1.0],
+            texts=["a"],
+            rows=1,
+            option_count=1,
+            distribution_mode="random",
+            custom_weights=None,
+            question_num=3,
+            is_location=True,
+        )
+        location_info = editor_utils._build_entry_info_fallback(location_entry)
+        assert location_info.is_location is True
+        assert location_info.text_inputs == 1
+
     def test_build_entry_info_list_prefers_provider_num_title_then_fallback(self) -> None:
         entry1 = QuestionEntry(
             question_type="single",

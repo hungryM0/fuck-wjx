@@ -242,7 +242,8 @@ class QuestionAddDialog(AddPreviewMixin, MessageBoxBase):
         is_slider = q_type == "slider"
         is_matrix = q_type == "matrix"
         is_order = q_type == "order"
-        self.strategy_row_widget.setVisible(not is_text and not is_matrix and not is_order)
+        is_location = q_type == "location"
+        self.strategy_row_widget.setVisible(not is_text and not is_matrix and not is_order and not is_location)
         self.row_count_widget.setVisible(is_matrix)
         self.matrix_strategy_widget.setVisible(is_matrix)
         self.option_label.setText("列数：" if is_matrix else "选项数量：")
@@ -255,7 +256,7 @@ class QuestionAddDialog(AddPreviewMixin, MessageBoxBase):
             self.option_spin.setValue(1)
             self.option_spin.blockSignals(False)
             self.option_row_widget.setVisible(False)
-        elif is_text:
+        elif is_text or is_location:
             self.option_row_widget.setVisible(False)
         else:
             self.option_row_widget.setVisible(True)
@@ -306,6 +307,22 @@ class QuestionAddDialog(AddPreviewMixin, MessageBoxBase):
                 ai_enabled=bool(self._ai_enabled) if q_type == "text" else False,
                 text_random_mode="none",
                 dimension=None,
+            )
+        if q_type == "location":
+            return QuestionEntry(
+                question_type="text",
+                probabilities=[1.0],
+                texts=[DEFAULT_FILL_TEXT],
+                rows=1,
+                option_count=1,
+                distribution_mode="random",
+                custom_weights=None,
+                question_num=self._entry_index,
+                ai_enabled=False,
+                text_random_mode="none",
+                dimension=None,
+                is_location=True,
+                location_parts=[],
             )
         if q_type == "order":
             return QuestionEntry(

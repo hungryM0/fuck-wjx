@@ -357,6 +357,10 @@ class WjxHtmlParserTests:
                     <div class="topichtml">9. 位置题</div>
                     <input verify="腾讯地图定位" />
                   </div>
+                  <div topic="11" id="div11" type="1">
+                    <div class="topichtml">11. 地区题</div>
+                    <input type="text" verify="省市区" onclick="openCityBox(this,3,event,1);" readonly="readonly" />
+                  </div>
                   <div topic="10" id="div10" type="6">
                     <div class="topichtml">10. 滑块矩阵</div>
                     <tr class="rowtitletr"><td class="title"><span class="itemTitleSpan">体验</span></td></tr>
@@ -381,7 +385,12 @@ class WjxHtmlParserTests:
         assert location["type_code"] == "2"
         assert location["text_inputs"] == 0
 
-        slider_matrix = questions[1]
+        region = questions[1]
+        assert region["is_location"]
+        assert region["type_code"] == "1"
+        assert region["text_inputs"] == 1
+
+        slider_matrix = questions[2]
         assert slider_matrix["is_slider_matrix"]
         assert slider_matrix["slider_min"] == 1.0
         assert slider_matrix["slider_max"] == 5.0

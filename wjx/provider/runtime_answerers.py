@@ -55,6 +55,7 @@ from .runtime_interactions import (
     _fill_text_input,
     _prepare_question_interaction,
     _question_option_texts,
+    _select_location_input,
     _set_select_value,
     _set_slider_value,
 )
@@ -388,6 +389,21 @@ async def _answer_wjx_text(
         record_answer(current, "text", text_answer=" | ".join(applied_values))
     else:
         record_answer(current, "text", text_answer=applied_values[0])
+    return True
+
+
+async def _answer_wjx_location(
+    driver: BrowserDriver,
+    question: SurveyQuestionMeta,
+    ctx: ExecutionState,
+) -> bool:
+    current = int(question.num or 0)
+    location_parts = getattr(ctx.config, "location_parts", {}).get(current, [])
+    value = await _select_location_input(driver, current, location_parts)
+    if not value:
+        logging.warning("问卷星第%d题（地区）选择失败。", current)
+        return False
+    record_answer(current, "text", text_answer=value)
     return True
 
 
@@ -916,6 +932,25 @@ async def _build_wjx_text_action(
     )
 
 
+async def _build_wjx_location_action(
+    driver: BrowserDriver,
+    question: SurveyQuestionMeta,
+    ctx: ExecutionState,
+) -> Optional[AnswerAction]:
+    del driver
+    current = int(question.num or 0)
+    location_parts = getattr(ctx.config, "location_parts", {}).get(current, [])
+    parts = [str(item or "").strip() for item in list(location_parts or [])[:3]]
+    if not any(parts):
+        return None
+    return AnswerAction(
+        question_num=current,
+        kind="location",
+        text_values=tuple(parts),
+        record_type="text",
+    )
+
+
 async def _build_wjx_score_like_action(
     driver: BrowserDriver,
     question: SurveyQuestionMeta,
@@ -1224,6 +1259,8 @@ async def build_answer_action(
         return await _build_wjx_dropdown_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
     if entry_type in {"text", "multi_text"}:
         return await _build_wjx_text_action(driver, question, config_index, ctx)
+    if entry_type == "location":
+        return await _build_wjx_location_action(driver, question, ctx)
     if entry_type == "matrix":
         return await _build_wjx_matrix_action(question, config_index, ctx, psycho_plan=psycho_plan)
     if entry_type == "scale":
@@ -1348,6 +1385,87 @@ async def apply_answer_actions(driver: BrowserDriver, actions: Sequence[AnswerAc
                 });
                 return applied > 0 && applied >= Math.min(targets.length, textValues.length);
             };
+            const applyLocation = (root, values) => {
+                const targetValues = Array.isArray(values) ? values.map((item) => String(item ?? '').trim()).filter(Boolean) : [];
+                const questionNum = Number(String(root.id || '').replace(/^div/, '') || 0);
+                const input = document.querySelector(`#q${questionNum}`);
+                if (!input) return false;
+                try { input.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                try { input.click(); } catch (e) {}
+                const layer = Array.from(document.querySelectorAll('.layui-layer, #layui-layer1')).find((el) => visible(el) && el.querySelector('select.province, select[name="province"]'));
+                if (!layer) return false;
+                const dispatch = (target, names = ['input', 'change', 'blur']) => {
+                    for (const name of names) {
+                        try { target.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+                    }
+                };
+                const setNativeValue = (target, nextValue) => {
+                    const value = String(nextValue ?? '');
+                    try {
+                        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement?.prototype || {}, 'value');
+                        if (descriptor && descriptor.set) descriptor.set.call(target, value);
+                        else target.value = value;
+                    } catch (e) {
+                        try { target.value = value; } catch (err) {}
+                    }
+                    try { target.setAttribute('value', value); } catch (e) {}
+                    dispatch(target);
+                };
+                const normalizeName = (value) => String(value || '').replace(/\s+/g, '').replace(/省|市|区|县|自治州|自治县|地区|盟/g, '');
+                const optionMatches = (option, target) => {
+                    const expected = String(target || '').trim();
+                    if (!expected || expected === '自动选择') return false;
+                    const optionText = String(option.textContent || option.innerText || '').replace(/\s+/g, ' ').trim();
+                    const optionValue = String(option.value || '').trim();
+                    const textNorm = normalizeName(optionText);
+                    const expectedNorm = normalizeName(expected);
+                    return optionText === expected
+                        || optionValue === expected
+                        || textNorm === expectedNorm
+                        || textNorm.includes(expectedNorm)
+                        || expectedNorm.includes(textNorm);
+                };
+                const chooseValid = (select, target) => {
+                    if (!select) return '';
+                    const options = Array.from(select.options || []);
+                    const validOptions = options.filter((item, index) => {
+                        const value = String(item.value || '').trim();
+                        const text = String(item.textContent || item.innerText || '').replace(/\s+/g, ' ').trim();
+                        if (!value && index === 0) return false;
+                        if (!text || text.startsWith('--请选择') || text.includes('请选择')) return false;
+                        return Boolean(value || text);
+                    });
+                    const option = validOptions.find((item) => optionMatches(item, target)) || validOptions[0] || null;
+                    if (!option) return '';
+                    select.value = option.value;
+                    try { option.selected = true; } catch (e) {}
+                    dispatch(select);
+                    try {
+                        if (window.jQuery) {
+                            window.jQuery(select).val(option.value).trigger('change');
+                        }
+                    } catch (e) {}
+                    return String(option.value || option.textContent || '').trim();
+                };
+                const province = layer.querySelector('select.province, select[name="province"]');
+                const city = layer.querySelector('select.city, select[name="city"]');
+                const area = layer.querySelector('select.area, select[name="area"]');
+                const provinceValue = chooseValid(province, targetValues[0]);
+                const cityValue = chooseValid(city, targetValues[1]);
+                const areaValue = chooseValid(area, targetValues[2]);
+                const selectedValues = [provinceValue, cityValue, areaValue].map((item) => String(item || '').trim()).filter(Boolean);
+                const finalValue = selectedValues.join('-');
+                if (finalValue) {
+                    setNativeValue(input, finalValue);
+                }
+                const done = layer.querySelector('.layer_save_btn a, .button_a, .save_btn');
+                if (done) {
+                    try { done.click(); } catch (e) {}
+                } else if (typeof window.countyok === 'function') {
+                    try { window.countyok(); } catch (e) {}
+                }
+                return String(input.value || finalValue || '').trim() !== '' && selectedValues.length >= targetValues.length;
+            };
             const applyMatrix = (root, indices) => {
                 const rows = Array.from(root.querySelectorAll('tr')).filter((node) => {
                     const id = String(node.getAttribute('id') || '');
@@ -1447,6 +1565,8 @@ async def apply_answer_actions(driver: BrowserDriver, actions: Sequence[AnswerAc
                         }
                     } else if (action.kind === 'text') {
                         ok = applyText(root, action.textValues);
+                    } else if (action.kind === 'location') {
+                        ok = applyLocation(root, action.textValues);
                     } else if (action.kind === 'matrix') {
                         ok = applyMatrix(root, action.matrixIndices || []);
                     } else if (action.kind === 'slider') {
@@ -1524,6 +1644,8 @@ async def answer_question_by_meta(
         return bool(await _answer_wjx_dropdown(driver, question, config_index, ctx, psycho_plan=psycho_plan))
     if entry_type in {"text", "multi_text"}:
         return bool(await _answer_wjx_text(driver, question, config_index, ctx))
+    if entry_type == "location":
+        return bool(await _answer_wjx_location(driver, question, ctx))
     if entry_type == "matrix":
         return bool(await _answer_wjx_matrix(driver, question, config_index, ctx, psycho_plan=psycho_plan))
     if entry_type == "scale":
