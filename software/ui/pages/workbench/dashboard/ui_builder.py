@@ -148,6 +148,14 @@ def build_dashboard_page_ui(page: Any) -> None:
     page.custom_proxy_api_edit.setMinimumWidth(260)
     page.custom_proxy_api_edit.hide()
     proxy_source_row.addWidget(page.custom_proxy_api_edit, 1)
+    page.custom_proxy_trial_link = HyperlinkButton(
+        FluentIcon.LINK,
+        "https://surveydoc.hungrym0.top/random.html#%E8%87%AA%E5%AE%9A%E4%B9%89%E4%BB%A3%E7%90%86%E6%BA%90",
+        "使用教程",
+        page,
+    )
+    page.custom_proxy_trial_link.hide()
+    proxy_source_row.addWidget(page.custom_proxy_trial_link)
     proxy_source_row.addStretch(1)
     left_column.addLayout(proxy_source_row)
     quick_action_column = QVBoxLayout()

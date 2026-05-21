@@ -26,6 +26,7 @@ class DashboardRunActionsMixin:
         target_spin: Any
         thread_spin: Any
         proxy_source_combo: Any
+        custom_proxy_trial_link: Any
         custom_proxy_api_edit: Any
         random_ip_cb: Any
         progress_bar: Any
@@ -117,7 +118,10 @@ class DashboardRunActionsMixin:
         if not hasattr(self, "custom_proxy_api_edit"):
             return
         selected = self._normalize_proxy_source(source or self._selected_proxy_source())
-        self.custom_proxy_api_edit.setVisible(selected == _PROXY_SOURCE_CUSTOM)
+        visible = selected == _PROXY_SOURCE_CUSTOM
+        if hasattr(self, "custom_proxy_trial_link"):
+            self.custom_proxy_trial_link.setVisible(visible)
+        self.custom_proxy_api_edit.setVisible(visible)
 
     def _sync_custom_proxy_api_text(self, text: str) -> None:
         if not hasattr(self, "custom_proxy_api_edit"):
