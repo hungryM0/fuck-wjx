@@ -3,11 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
-from qfluentwidgets import ComboBox, EditableComboBox, LineEdit
+from qfluentwidgets import ComboBox, LineEdit
 
 from software.core.questions.config import QuestionEntry
 from software.providers.contracts import SurveyQuestionMeta
 from software.ui.pages.workbench.question_editor.constants import _get_entry_type_label
+from software.ui.pages.workbench.question_editor.location_options import AUTO_LOCATION_TEXT
 from software.ui.pages.workbench.question_editor.wizard_cards import WizardCardsMixin
 from software.ui.pages.workbench.question_editor.wizard_logic_tree import LogicTreeState
 from software.ui.pages.workbench.question_editor.wizard_sections_location import WizardSectionsLocationMixin
@@ -122,9 +123,50 @@ class WizardCardsHelperTests:
         assert 0 not in host.text_edit_map
         assert 0 not in host.text_add_btn_map
         assert all(edit.placeholderText() != "候选答案" for edit in card.findChildren(LineEdit))
-        assert len(card.findChildren(ComboBox)) == 2
-        assert len(card.findChildren(EditableComboBox)) == 1
+        assert len(card.findChildren(ComboBox)) == 3
         assert 0 in host.location_combo_map
+
+    def test_location_entry_populates_city_and_area_cascades(self, qtbot) -> None:
+        host = _Host()
+        host.info[0] = SurveyQuestionMeta(
+            num=1,
+            title="您所在的地区",
+            type_code="1",
+            is_text_like=True,
+            is_location=True,
+            required=True,
+        )
+        host.entries[0] = QuestionEntry(
+            "text",
+            [1.0],
+            texts=["无"],
+            question_num=1,
+            question_title="您所在的地区",
+            is_location=True,
+        )
+        parent = QWidget()
+        qtbot.addWidget(parent)
+
+        card = host._build_entry_card(0, host.entries[0], parent)
+        qtbot.addWidget(card)
+
+        province_combo, city_combo, area_combo = host.location_combo_map[0]
+        assert province_combo.itemText(0) == AUTO_LOCATION_TEXT
+        assert city_combo.count() == 1
+        assert area_combo.count() == 1
+
+        province_combo.setCurrentIndex(1)
+        qtbot.wait(20)
+        assert city_combo.count() == 2
+        assert any(city_combo.itemText(i) == "北京市" for i in range(city_combo.count()))
+
+        for i in range(city_combo.count()):
+            if city_combo.itemText(i) == "北京市":
+                city_combo.setCurrentIndex(i)
+                break
+        qtbot.wait(20)
+        assert area_combo.count() > 1
+        assert any(area_combo.itemText(i) == "东城区" for i in range(area_combo.count()))
 
     def test_build_attached_select_section_populates_slider_map(self, qtbot) -> None:
         host = _Host()

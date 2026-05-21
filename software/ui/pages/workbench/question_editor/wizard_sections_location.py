@@ -6,11 +6,16 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CardWidget, ComboBox, EditableComboBox
+from qfluentwidgets import BodyLabel, CardWidget, ComboBox
 
 from software.core.questions.config import QuestionEntry
 
-from .location_options import AUTO_LOCATION_TEXT, load_location_provinces, simplify_location_name
+from .location_options import (
+    AUTO_LOCATION_TEXT,
+    load_location_provinces,
+    _normalize_area_display_name,
+    _normalize_province_display_name,
+)
 from .utils import _apply_label_color
 
 
@@ -41,7 +46,7 @@ class WizardSectionsLocationMixin:
 
         province_combo = ComboBox(container)
         city_combo = ComboBox(container)
-        area_combo = EditableComboBox(container)
+        area_combo = ComboBox(container)
         for combo in (province_combo, city_combo, area_combo):
             combo.setMinimumWidth(150)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -49,7 +54,10 @@ class WizardSectionsLocationMixin:
         provinces = load_location_provinces()
         province_combo.addItem(AUTO_LOCATION_TEXT, userData="")
         for province in provinces:
-            province_combo.addItem(simplify_location_name(province.get("name")), userData=province)
+            province_combo.addItem(
+                str(province.get("display_name") or _normalize_province_display_name(province.get("name")) or province.get("name") or "").strip(),
+                userData=province,
+            )
 
         city_combo.addItem(AUTO_LOCATION_TEXT, userData="")
         area_combo.addItem(AUTO_LOCATION_TEXT, userData="")
@@ -73,40 +81,66 @@ class WizardSectionsLocationMixin:
         layout.addLayout(row)
         card_layout.addWidget(container)
 
-        def populate_cities(province_data: Any, preferred: str = "") -> None:
+        def populate_areas(city_data: Any, preferred: str = "") -> None:
+            area_combo.clear()
+            area_combo.addItem(AUTO_LOCATION_TEXT, userData="")
+            if isinstance(city_data, dict):
+                area_nodes = list(city_data.get("areas") or [])
+                for area in area_nodes:
+                    if not isinstance(area, dict):
+                        continue
+                    name = _normalize_area_display_name(area.get("name"))
+                    if name:
+                        area_combo.addItem(name, userData=area)
+            preferred = _normalize_area_display_name(preferred)
+            target_index = 0
+            if preferred:
+                for area_index in range(area_combo.count()):
+                    if area_combo.itemText(area_index) == preferred:
+                        target_index = area_index
+                        break
+            area_combo.setCurrentIndex(target_index)
+
+        def populate_cities(province_data: Any, preferred_city: str = "", preferred_area: str = "") -> None:
             city_combo.clear()
             city_combo.addItem(AUTO_LOCATION_TEXT, userData="")
             if isinstance(province_data, dict):
                 for city in list(province_data.get("cities") or []):
                     if not isinstance(city, dict):
                         continue
-                    name = simplify_location_name(city.get("name"))
-                    if name and name != "市辖区":
+                    name = str(city.get("display_name") or city.get("name") or "").strip()
+                    if name:
                         city_combo.addItem(name, userData=city)
-            preferred = simplify_location_name(preferred)
+            preferred_city = str(preferred_city or "").strip()
             target_index = 0
-            if preferred:
+            if preferred_city:
                 for city_index in range(city_combo.count()):
-                    if city_combo.itemText(city_index) == preferred:
+                    if city_combo.itemText(city_index) == preferred_city:
                         target_index = city_index
                         break
             city_combo.setCurrentIndex(target_index)
+            city_data = city_combo.currentData()
+            populate_areas(city_data, preferred_area)
+
+        def on_city_changed(_index: int) -> None:
+            populate_areas(city_combo.currentData())
 
         def on_province_changed(_index: int) -> None:
             populate_cities(province_combo.currentData())
 
         province_combo.currentIndexChanged.connect(on_province_changed)
+        city_combo.currentIndexChanged.connect(on_city_changed)
 
-        preferred_province = simplify_location_name(saved_parts[0] if saved_parts else "")
+        preferred_province = str(saved_parts[0] if saved_parts else "").strip()
         if preferred_province:
             for province_index in range(province_combo.count()):
                 if province_combo.itemText(province_index) == preferred_province:
                     province_combo.setCurrentIndex(province_index)
                     break
-        populate_cities(province_combo.currentData(), saved_parts[1] if len(saved_parts) > 1 else "")
-
-        preferred_area = str(saved_parts[2] if len(saved_parts) > 2 else "").strip()
-        if preferred_area:
-            area_combo.setText(preferred_area)
+        populate_cities(
+            province_combo.currentData(),
+            saved_parts[1] if len(saved_parts) > 1 else "",
+            saved_parts[2] if len(saved_parts) > 2 else "",
+        )
 
         self.location_combo_map[idx] = [province_combo, city_combo, area_combo]

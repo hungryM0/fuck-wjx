@@ -34,7 +34,10 @@ def _should_treat_question_as_text_like(
     option_count: int,
     text_input_count: int,
     has_slider_matrix: bool = False,
+    is_location: bool = False,
 ) -> bool:
+    if is_location:
+        return False
     if has_slider_matrix:
         return False
     normalized = _normalize_question_type_code(type_code)

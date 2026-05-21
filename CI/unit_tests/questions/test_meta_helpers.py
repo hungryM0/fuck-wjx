@@ -16,6 +16,10 @@ class QuestionMetaHelperTests:
         meta = SurveyQuestionMeta(num=2, title='矩阵', type_code='9')
         assert infer_question_entry_type(meta) == 'matrix'
 
+    def test_infer_question_entry_type_keeps_location_as_text_entry_for_runtime(self) -> None:
+        meta = SurveyQuestionMeta(num=3, title='地区', type_code='1', is_location=True, text_inputs=0, is_text_like=False)
+        assert infer_question_entry_type(meta) == 'text'
+
     def test_normalize_fillable_option_indices_deduplicates_and_clamps(self) -> None:
         result = normalize_fillable_option_indices([0, 2, 2, -1, 5], 3)
         assert result == [0, 2]

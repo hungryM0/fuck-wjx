@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QLabel
 from software.core.questions.config import QuestionEntry
 from software.providers.contracts import SurveyQuestionMeta
 from software.ui.pages.workbench.question_editor import utils as editor_utils
+from software.ui.pages.workbench.question_editor import location_options
 
 
 class _ColorLabel(QLabel):
@@ -112,7 +113,8 @@ class QuestionEditorUtilsTests:
         )
         location_info = editor_utils._build_entry_info_fallback(location_entry)
         assert location_info.is_location is True
-        assert location_info.text_inputs == 1
+        assert location_info.text_inputs == 0
+        assert location_info.is_text_like is False
 
     def test_build_entry_info_list_prefers_provider_num_title_then_fallback(self) -> None:
         entry1 = QuestionEntry(
@@ -172,3 +174,13 @@ class QuestionEditorUtilsTests:
 
         fallback = editor_utils.build_entry_info_list([entry3], None)
         assert fallback[0].title == "题目 三"
+
+    def test_load_location_provinces_includes_three_level_tree(self) -> None:
+        provinces = location_options.load_location_provinces()
+        beijing = next(item for item in provinces if item["name"] == "北京市")
+        assert beijing["display_name"] == "北京"
+        assert len(beijing["cities"]) == 1
+        city = beijing["cities"][0]
+        assert city["display_name"] == "北京市"
+        assert len(city["areas"]) == 16
+        assert city["areas"][0]["name"] == "东城区"

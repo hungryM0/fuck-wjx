@@ -250,6 +250,7 @@ class WjxHtmlParserHelperTests:
         custom_input = _soup("<input custom='请选择, 苹果,香蕉, 苹果' />").input
         typo_custom_input = _soup("<input cusom='北京|上海|北京' />").input
         location_div = _soup("<div><input verify='地图定位' /></div>").div
+        location_input = _soup("<input type='text' verify='省市区' onclick='openCityBox(this,3,event,1);' readonly='readonly' />").input
         soup = _soup(
             """
             <div>
@@ -273,6 +274,7 @@ class WjxHtmlParserHelperTests:
         assert html_parser_choice._soup_question_is_location(
             _soup("<div><input verify='省市区' onclick='openCityBox(this,3,event,1);' /></div>").div
         )
+        assert html_parser_common._count_text_inputs_in_soup(_soup(f"<div>{location_input}</div>").div) == 0
         assert html_parser_choice._collect_select_option_texts(soup.div, soup, 7) == ["北京", "上海"]
         assert html_parser_choice._extract_select_option_texts_from_element(soup.find("select")) == ["北京", "上海"]
 

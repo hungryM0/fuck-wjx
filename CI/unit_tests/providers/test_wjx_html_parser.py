@@ -388,7 +388,7 @@ class WjxHtmlParserTests:
         region = questions[1]
         assert region["is_location"]
         assert region["type_code"] == "1"
-        assert region["text_inputs"] == 1
+        assert region["text_inputs"] == 0
 
         slider_matrix = questions[2]
         assert slider_matrix["is_slider_matrix"]

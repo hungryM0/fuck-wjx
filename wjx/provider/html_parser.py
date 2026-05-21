@@ -290,6 +290,7 @@ def parse_survey_questions_from_html(html: str) -> List[Dict[str, Any]]:
                 option_count,
                 text_input_count,
                 has_slider_matrix=is_slider_matrix,
+                is_location=is_location,
             )
             is_multi_text = _should_mark_as_multi_text(
                 type_code,

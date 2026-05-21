@@ -152,8 +152,8 @@ def _build_entry_info_fallback(entry: QuestionEntry) -> SurveyQuestionMeta:
         "rows": int(max(1, getattr(entry, "rows", 1) or 1)),
         "is_location": bool(getattr(entry, "is_location", False)),
         "is_multi_text": str(getattr(entry, "question_type", "") or "").strip() == "multi_text",
-        "is_text_like": str(getattr(entry, "question_type", "") or "").strip()
-        in {"text", "multi_text"},
+        "is_text_like": str(getattr(entry, "question_type", "") or "").strip() in {"text", "multi_text"}
+        and not bool(getattr(entry, "is_location", False)),
     }
     if info["question_type"] == "multi_text":
         info["text_inputs"] = max(
@@ -162,8 +162,10 @@ def _build_entry_info_fallback(entry: QuestionEntry) -> SurveyQuestionMeta:
             len(getattr(entry, "multi_text_blank_ai_flags", []) or []),
             len(getattr(entry, "multi_text_blank_int_ranges", []) or []),
         )
-    elif info["question_type"] == "text":
+    elif info["question_type"] == "text" and not bool(getattr(entry, "is_location", False)):
         info["text_inputs"] = 1
+    elif bool(getattr(entry, "is_location", False)):
+        info["text_inputs"] = 0
     raw_fillable_options = getattr(entry, "fillable_option_indices", None)
     if isinstance(raw_fillable_options, list):
         fillable_options: List[int] = []

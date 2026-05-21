@@ -15,6 +15,7 @@ from software.logging.log_utils import log_suppressed_exception
 _TEXT_INPUT_ALLOWED_TYPES = {"text", "tel", "email", "number", "search", "url", "password"}
 _KNOWN_NON_TEXT_QUESTION_TYPES = {"3", "4", "5", "6", "7", "8", "11", "12", "13", "15", "16", "17"}
 _SELECT_PLACEHOLDER_PREFIXES = ("请选择", "请先选择")
+_LOCATION_VERIFY_MARKERS = ("地图", "省市", "省份", "城市", "地区", "map", "city", "province", "area")
 
 
 def _normalize_html_text(value: Optional[str]) -> str:
@@ -41,6 +42,27 @@ def _is_select_placeholder_option(index: int, value: Any, text: Any) -> bool:
     if normalized_value in {"", "0", "-1", "-2"}:
         return True
     return _text_looks_like_select_placeholder(normalized_text)
+
+
+def _input_looks_like_location(input_element) -> bool:
+    if input_element is None:
+        return False
+    try:
+        verify_value = str(input_element.get("verify") or "").strip()
+    except Exception:
+        verify_value = ""
+    try:
+        onclick_value = str(input_element.get("onclick") or "").strip().lower()
+    except Exception:
+        onclick_value = ""
+    if not verify_value and "opencitybox" not in onclick_value:
+        return False
+    normalized = verify_value.lower()
+    if any(marker in verify_value for marker in _LOCATION_VERIFY_MARKERS if marker in {"地图", "省市", "省份", "城市", "地区"}):
+        return True
+    if any(marker in normalized for marker in ("map", "city", "province", "area")):
+        return True
+    return "opencitybox" in onclick_value
 
 
 def _soup_question_is_required(question_div) -> bool:
@@ -268,6 +290,8 @@ def _count_text_inputs_in_soup(question_div) -> int:
 
         if input_type == "hidden" or "display:none" in style_text or "visibility:hidden" in style_text:
             continue
+        if tag_name == "input" and _input_looks_like_location(cand):
+            continue
 
         if tag_name == "input":
             try:
@@ -326,6 +350,8 @@ def _extract_text_input_labels(question_div) -> List[str]:
             is_textcont = "textcont" in class_text or "textedit" in class_text
 
             if input_type == "hidden" or "display:none" in style_text or "visibility:hidden" in style_text:
+                continue
+            if tag_name == "input" and _input_looks_like_location(cand):
                 continue
 
             if tag_name == "input":
