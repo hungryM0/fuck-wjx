@@ -11,10 +11,11 @@ from software.logging.log_utils import log_suppressed_exception
 from software.io.config import RuntimeConfig
 from software.providers.common import detect_survey_provider
 from software.ui.helpers.proxy_access import apply_proxy_source_settings
-
-_PROXY_SOURCE_DEFAULT = "default"
-_PROXY_SOURCE_BENEFIT = "benefit"
-_PROXY_SOURCE_CUSTOM = "custom"
+from software.ui.pages.workbench.runtime_panel.proxy_source import (
+    PROXY_SOURCE_CUSTOM as _PROXY_SOURCE_CUSTOM,
+    PROXY_SOURCE_DEFAULT as _PROXY_SOURCE_DEFAULT,
+    normalize_proxy_source,
+)
 
 
 class DashboardRunActionsMixin:
@@ -87,17 +88,7 @@ class DashboardRunActionsMixin:
 
     @staticmethod
     def _normalize_proxy_source(source: str) -> str:
-        normalized = str(source or _PROXY_SOURCE_DEFAULT).strip().lower()
-        return (
-            normalized
-            if normalized
-            in {
-                _PROXY_SOURCE_DEFAULT,
-                _PROXY_SOURCE_BENEFIT,
-                _PROXY_SOURCE_CUSTOM,
-            }
-            else _PROXY_SOURCE_DEFAULT
-        )
+        return normalize_proxy_source(source)
 
     def _selected_proxy_source(self) -> str:
         if not hasattr(self, "proxy_source_combo"):
@@ -147,18 +138,18 @@ class DashboardRunActionsMixin:
     def _on_proxy_source_changed(self) -> None:
         source = self._selected_proxy_source()
         try:
-            if hasattr(self.runtime_page, "_on_proxy_source_changed"):
-                runtime_combo = self.runtime_page.random_ip_card.proxyCombo
-                index = runtime_combo.findData(source)
-                if index >= 0 and runtime_combo.currentIndex() != index:
-                    runtime_combo.setCurrentIndex(index)
-                else:
-                    self.runtime_page._on_proxy_source_changed()
-                if hasattr(self, "custom_proxy_api_edit"):
-                    self.runtime_page.random_ip_card.customApiEdit.setText(
-                        self.custom_proxy_api_edit.text().strip()
-                    )
-                    self.runtime_page.random_ip_card._on_api_edit_finished()
+            if hasattr(self.runtime_page, "set_proxy_source"):
+                api_url = (
+                    self.custom_proxy_api_edit.text().strip()
+                    if source == _PROXY_SOURCE_CUSTOM and hasattr(self, "custom_proxy_api_edit")
+                    else None
+                )
+                self.runtime_page.set_proxy_source(
+                    source,
+                    custom_api_url=api_url,
+                    emit_state=False,
+                    show_tip=True,
+                )
             else:
                 api_url = (
                     self.custom_proxy_api_edit.text().strip()
@@ -181,8 +172,10 @@ class DashboardRunActionsMixin:
             return
         try:
             api_url = self.custom_proxy_api_edit.text().strip()
-            self.runtime_page.random_ip_card.customApiEdit.setText(api_url)
-            self.runtime_page.random_ip_card._on_api_edit_finished()
+            if hasattr(self.runtime_page, "set_custom_proxy_api"):
+                self.runtime_page.set_custom_proxy_api(api_url)
+            else:
+                apply_proxy_source_settings(_PROXY_SOURCE_CUSTOM, custom_api_url=api_url or None)
         except Exception as exc:
             log_suppressed_exception(
                 "_on_custom_proxy_api_changed",

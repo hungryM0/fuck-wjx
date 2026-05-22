@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from PySide6.QtCore import QObject, Signal
 
@@ -93,7 +92,7 @@ def _patch_page_dependencies(monkeypatch) -> None:
     import software.ui.pages.workbench.dashboard.parts.progress as progress_module
     import software.ui.pages.workbench.dashboard.parts.random_ip as dash_random_ip
     import software.ui.pages.workbench.runtime_panel.ai as ai_module
-    import software.ui.pages.workbench.runtime_panel.main as runtime_main
+    import software.ui.pages.workbench.runtime_panel.proxy_sync as runtime_proxy_sync
     import software.ui.pages.workbench.runtime_panel.random_ip_card as random_ip_card
     import software.ui.pages.workbench.shared.clipboard as clipboard_module
 
@@ -120,8 +119,9 @@ def _patch_page_dependencies(monkeypatch) -> None:
     monkeypatch.setattr(ai_module, "get_ai_settings", lambda: {"ai_mode": "free"})
     monkeypatch.setattr(ai_module, "save_ai_settings", lambda **_kwargs: None)
     monkeypatch.setattr(ai_module, "get_default_system_prompt", lambda _mode="free": "默认提示")
-    monkeypatch.setattr(runtime_main, "apply_proxy_source_settings", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runtime_main, "get_proxy_minute_by_answer_seconds", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(runtime_proxy_sync, "apply_proxy_source_settings", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime_proxy_sync, "apply_custom_proxy_api", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime_proxy_sync, "get_proxy_minute_by_answer_seconds", lambda *_args, **_kwargs: 1)
     monkeypatch.setattr(dashboard_module, "load_shop_icon", lambda: None)
     monkeypatch.setattr(dash_random_ip, "load_shop_icon", lambda: None)
     monkeypatch.setattr(dash_random_ip, "get_session_snapshot", lambda: {"authenticated": False})

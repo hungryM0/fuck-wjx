@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-
-import pytest
 from PySide6.QtWidgets import QTableWidget
 
 import software.ui.pages.workbench.dashboard.parts.entries as entries_module
@@ -53,6 +51,8 @@ class _EntriesPage(DashboardEntriesMixin, DashboardRunActionsMixin):
             reliability_card=SimpleNamespace(switchButton=SimpleNamespace(isChecked=lambda: False)),
             update_config=MagicMock(side_effect=lambda cfg: setattr(cfg, "headless_mode", False)),
             focus_answer_duration_setting=MagicMock(),
+            set_proxy_source=MagicMock(return_value="default"),
+            set_custom_proxy_api=MagicMock(),
         )
         self.strategy_page = SimpleNamespace(
             get_rules=MagicMock(return_value=[{"id": "r1"}]),

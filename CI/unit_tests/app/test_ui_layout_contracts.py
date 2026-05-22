@@ -179,7 +179,7 @@ def test_workbench_pages_survive_125_percent_dpi_subprocess() -> None:
         from software.ui.pages.workbench.runtime_panel.main import RuntimePage
 
         import software.ui.pages.workbench.runtime_panel.ai as ai_module
-        import software.ui.pages.workbench.runtime_panel.main as runtime_main
+        import software.ui.pages.workbench.runtime_panel.proxy_sync as runtime_proxy_sync
         import software.ui.pages.workbench.runtime_panel.random_ip_card as random_ip_card
 
         random_ip_card.load_area_codes = lambda supported_only=True: [
@@ -193,8 +193,9 @@ def test_workbench_pages_survive_125_percent_dpi_subprocess() -> None:
         ai_module.get_ai_settings = lambda: {"ai_mode": "free"}
         ai_module.save_ai_settings = lambda **_kwargs: None
         ai_module.get_default_system_prompt = lambda _mode="free": "默认提示"
-        runtime_main.apply_proxy_source_settings = lambda *_args, **_kwargs: None
-        runtime_main.get_proxy_minute_by_answer_seconds = lambda *_args, **_kwargs: 1
+        runtime_proxy_sync.apply_proxy_source_settings = lambda *_args, **_kwargs: None
+        runtime_proxy_sync.apply_custom_proxy_api = lambda *_args, **_kwargs: None
+        runtime_proxy_sync.get_proxy_minute_by_answer_seconds = lambda *_args, **_kwargs: 1
 
         app = QApplication([])
         page = RuntimePage(_FakeController())
