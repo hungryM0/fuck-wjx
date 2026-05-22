@@ -184,3 +184,23 @@ class QuestionEditorUtilsTests:
         assert city["display_name"] == "北京市"
         assert len(city["areas"]) == 16
         assert city["areas"][0]["name"] == "东城区"
+
+    def test_load_location_provinces_uses_cache_and_returns_isolated_copy(self, monkeypatch) -> None:
+        calls: list[object] = []
+        payload = [
+            {
+                "code": "110000",
+                "name": "北京市",
+                "children": [{"name": "东城区"}],
+            }
+        ]
+        location_options._load_location_provinces_cached.cache_clear()
+        monkeypatch.setattr(location_options, "_read_location_tree", lambda: calls.append(object()) or payload)
+
+        first = location_options.load_location_provinces()
+        first[0]["name"] = "已污染"
+        second = location_options.load_location_provinces()
+
+        assert len(calls) == 1
+        assert second[0]["name"] == "北京市"
+        location_options._load_location_provinces_cached.cache_clear()

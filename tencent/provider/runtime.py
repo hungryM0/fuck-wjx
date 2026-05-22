@@ -311,6 +311,13 @@ async def brush_qq(
             logging.info("更新线程状态失败：已中断", exc_info=True)
         return False
 
+    if not bool(getattr(runtime_config, "submit_enabled", True)):
+        try:
+            ctx.update_thread_status(thread_name, "单测完成", running=False)
+        except Exception:
+            logging.info("更新线程状态失败：单测完成", exc_info=True)
+        return True
+
     try:
         ctx.update_thread_status(thread_name, "提交中", running=True)
     except Exception:

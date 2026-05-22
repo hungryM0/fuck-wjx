@@ -636,6 +636,12 @@ async def brush_credamo(
         survey_provider=getattr(config, "survey_provider", ""),
     ):
         return False
+    if not bool(getattr(config, "submit_enabled", True)):
+        try:
+            state.update_thread_status(thread_name, "单测完成", running=False)
+        except Exception:
+            logging.info("更新 Credamo 线程状态失败：单测完成", exc_info=True)
+        return True
     try:
         state.update_thread_status(thread_name, "提交中", running=True)
     except Exception:

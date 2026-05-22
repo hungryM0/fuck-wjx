@@ -130,6 +130,26 @@ class RunStopPolicyTests:
         assert should_stop
         assert 1 in state.reverse_fill_runtime.committed_row_numbers
 
+    def test_record_success_accepts_no_submit_status_text(self, make_callable_mock) -> None:
+        config = ExecutionConfig(target_num=1, random_proxy_ip_enabled=False)
+        state = ExecutionState(config=config)
+        increment_thread_success = state.increment_thread_success
+        state.increment_thread_success = make_callable_mock(side_effect=increment_thread_success)
+        policy = RunStopPolicy(config, state)
+        stop_signal = threading.Event()
+
+        should_stop = policy.record_success(
+            stop_signal,
+            thread_name='Slot-1',
+            status_text='单测完成',
+            terminal_message='不提交单测已完成',
+        )
+
+        assert should_stop
+        assert state.cur_num == 1
+        assert state.get_terminal_stop_snapshot()[2] == '不提交单测已完成'
+        state.increment_thread_success.assert_called_once_with('Slot-1', status_text='单测完成')
+
     def test_record_failure_stops_when_reverse_fill_sample_is_exhausted(self) -> None:
         spec = ReverseFillSpec(source_path='demo.xlsx', selected_format='wjx_sequence', detected_format='wjx_sequence', start_row=1, total_samples=2, available_samples=2, target_num=2, samples=[ReverseFillSampleRow(data_row_number=1, worksheet_row_number=2, answers={}), ReverseFillSampleRow(data_row_number=2, worksheet_row_number=3, answers={})])
         state = ExecutionState(config=ExecutionConfig(reverse_fill_spec=spec, target_num=2), cur_num=1)

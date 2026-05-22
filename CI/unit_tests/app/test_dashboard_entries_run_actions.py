@@ -313,7 +313,10 @@ def test_run_question_wizard_and_run_actions(monkeypatch, qtbot) -> None:
 
     page.run_coordinator = SimpleNamespace(start=MagicMock(), build_config=MagicMock(return_value=RuntimeConfig(target=8)))
     page._on_start_clicked(enable_reverse_fill=True)
-    page.run_coordinator.start.assert_called_once_with(enable_reverse_fill=True)
+    page.run_coordinator.start.assert_called_once_with(
+        enable_reverse_fill=True,
+        submit_enabled=True,
+    )
     assert page._build_config().target == 8
 
     delattr(page, "run_coordinator")

@@ -33,6 +33,7 @@ class AsyncRuntimeEngine:
         self._stop_event: Optional[asyncio.Event] = None
         self._pause_event: Optional[asyncio.Event] = None
         self._browser_pool: Optional[AsyncBrowserOwnerPool] = None
+        self._retained_no_submit_browser_pool: Optional[AsyncBrowserOwnerPool] = None
         self._closed = False
         self._state: Optional[ExecutionState] = None
 
@@ -80,6 +81,13 @@ class AsyncRuntimeEngine:
         return future
 
     async def _run(self, *, config: ExecutionConfig, state: ExecutionState, gui_instance: Any = None) -> None:
+        retained_pool = self._retained_no_submit_browser_pool
+        if retained_pool is not None:
+            try:
+                await retained_pool.shutdown()
+            except Exception:
+                logging.debug("清理上一次单测保留浏览器失败", exc_info=True)
+            self._retained_no_submit_browser_pool = None
         self._stop_event = asyncio.Event()
         self._pause_event = asyncio.Event()
         self._state = state
@@ -137,7 +145,15 @@ class AsyncRuntimeEngine:
                 self._stop_event.set()
             await scheduler.close()
             if self._browser_pool is not None:
-                await self._browser_pool.shutdown()
+                should_retain_browser_pool = bool(
+                    not getattr(config, "submit_enabled", True)
+                    and state.cur_num >= max(1, int(getattr(config, "target_num", 0) or 0))
+                    and str(state.get_terminal_stop_snapshot()[0] or "") == "target_reached"
+                )
+                if should_retain_browser_pool:
+                    self._retained_no_submit_browser_pool = self._browser_pool
+                else:
+                    await self._browser_pool.shutdown()
                 self._browser_pool = None
             state.stop_event.set()
             self._stop_event = None
@@ -190,6 +206,15 @@ class AsyncRuntimeEngine:
                 future.result(timeout=max(0.0, float(timeout or 0.0)))
             except Exception:
                 logging.debug("AsyncRuntimeEngine shutdown 等待运行结束失败", exc_info=True)
+        retained_pool = self._retained_no_submit_browser_pool
+        if retained_pool is not None and self._loop is not None and not self._loop.is_closed():
+            try:
+                close_future = asyncio.run_coroutine_threadsafe(retained_pool.shutdown(), self._loop)
+                close_future.result(timeout=max(0.0, float(timeout or 0.0)))
+            except Exception:
+                logging.debug("AsyncRuntimeEngine shutdown 清理单测保留浏览器失败", exc_info=True)
+            finally:
+                self._retained_no_submit_browser_pool = None
         loop = self._loop
         thread = self._thread
         if loop is not None and not loop.is_closed():

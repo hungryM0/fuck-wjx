@@ -251,6 +251,57 @@ class AsyncRuntimeEngineLargeTests:
         assert engine._pause_event is None
         assert engine._state is None
 
+    @pytest.mark.asyncio
+    async def test_run_retains_browser_pool_after_successful_no_submit_test(self, monkeypatch) -> None:
+        engine = _build_engine()
+        config = ExecutionConfig(
+            num_threads=1,
+            headless_mode=False,
+            target_num=1,
+            submit_enabled=False,
+            survey_provider="wjx",
+        )
+        state = ExecutionState(config=config)
+        created_pools: list[SimpleNamespace] = []
+
+        class _FakeRunner:
+            def __init__(self, **_kwargs) -> None:
+                pass
+
+            async def run(self) -> None:
+                state.cur_num = 1
+                state.mark_terminal_stop("target_reached", message="不提交单测已完成")
+
+        class _FakeScheduler:
+            def __init__(self, *, concurrency: int) -> None:
+                self.concurrency = concurrency
+                self.close_calls = 0
+
+            async def close(self) -> None:
+                self.close_calls += 1
+
+        class _FakePool:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+                self.shutdown_calls = 0
+                created_pools.append(self)
+
+            async def shutdown(self) -> None:
+                self.shutdown_calls += 1
+
+        monkeypatch.setattr(async_engine, "BrowserPoolConfig", SimpleNamespace(from_concurrency=lambda concurrency, headless: SimpleNamespace(owner_count=1, contexts_per_owner=1, logical_concurrency=concurrency, headless=headless)))
+        monkeypatch.setattr(async_engine, "AsyncBrowserOwnerPool", _FakePool)
+        monkeypatch.setattr(async_engine, "AsyncScheduler", _FakeScheduler)
+        monkeypatch.setattr(async_engine, "AsyncRunContext", lambda **kwargs: SimpleNamespace(**kwargs))
+        monkeypatch.setattr(async_engine, "AsyncSlotRunner", _FakeRunner)
+        monkeypatch.setattr(async_engine, "build_owner_window_positions", lambda owner_count: [(50, 50)] * owner_count)
+
+        await engine._run(config=config, state=state, gui_instance="gui")
+
+        assert created_pools[0].shutdown_calls == 0
+        assert engine._browser_pool is None
+        assert engine._retained_no_submit_browser_pool is created_pools[0]
+
     def test_shutdown_handles_future_errors_and_stops_loop(self) -> None:
         engine = _build_engine()
         engine._closed = False

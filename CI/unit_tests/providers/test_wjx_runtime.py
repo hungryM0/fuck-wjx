@@ -142,6 +142,47 @@ class WjxRuntimeTests:
         assert runtime.get_wjx_runtime_state(driver).page_number == 1
 
     @pytest.mark.asyncio
+    async def test_brush_no_submit_test_answers_without_submit(self, monkeypatch) -> None:
+        driver = _FakeDriver()
+        q1 = SurveyQuestionMeta(num=1, title="Q1", type_code="3", page=1)
+        ctx = _make_state({1: q1}, {1: ("single", 0)})
+        ctx.config.submit_enabled = False
+        status_updates: list[tuple[str, bool]] = []
+        ctx.update_thread_status = lambda _thread, text, *, running: status_updates.append((text, running))
+        submitted: list[str] = []
+
+        async def _gate(*_args, **_kwargs):
+            return True
+
+        async def _snapshot(*_args, **_kwargs):
+            return {1: {"visible": True, "type": "3", "text": "Q1"}}
+
+        async def _answer(*_args, **_kwargs):
+            return None
+
+        async def _finalize(*_args, **_kwargs):
+            return True
+
+        async def _submit(*_args, **_kwargs):
+            submitted.append("submit")
+
+        monkeypatch.setattr(runtime, "_prepare_runtime_entry_gate", _gate)
+        monkeypatch.setattr(
+            runtime,
+            "_resolve_page_snapshot",
+            _snapshot,
+        )
+        monkeypatch.setattr(runtime, "answer_question_by_meta", _answer)
+        monkeypatch.setattr(runtime, "_finalize_page", _finalize)
+        monkeypatch.setattr(runtime, "submit", _submit)
+
+        result = await runtime.brush(driver, ctx, thread_name="Worker-1")
+
+        assert result is True
+        assert submitted == []
+        assert ("单测完成", False) in status_updates
+
+    @pytest.mark.asyncio
     async def test_brush_skips_hidden_questions_and_updates_abort_status(self, monkeypatch) -> None:
         driver = _FakeDriver()
         q1 = SurveyQuestionMeta(num=1, title="Q1", type_code="3", page=1)

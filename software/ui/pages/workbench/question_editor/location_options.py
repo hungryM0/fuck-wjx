@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import copy
+from functools import lru_cache
 from importlib import resources
 from typing import Any, List
 
@@ -96,7 +98,8 @@ def _normalize_province_node(raw_province: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_location_provinces() -> List[dict[str, Any]]:
+@lru_cache(maxsize=1)
+def _load_location_provinces_cached() -> tuple[dict[str, Any], ...]:
     provinces: List[dict[str, Any]] = []
     location_tree = _read_location_tree()
     if location_tree:
@@ -107,7 +110,7 @@ def load_location_provinces() -> List[dict[str, Any]]:
             if not name:
                 continue
             provinces.append(_normalize_province_node(province))
-        return provinces
+        return tuple(provinces)
 
     for province in load_area_codes(supported_only=False):
         if not isinstance(province, dict):
@@ -124,7 +127,11 @@ def load_location_provinces() -> List[dict[str, Any]]:
                 "cities": raw_cities if isinstance(raw_cities, list) else [],
             }
         )
-    return provinces
+    return tuple(provinces)
+
+
+def load_location_provinces() -> List[dict[str, Any]]:
+    return copy.deepcopy(list(_load_location_provinces_cached()))
 
 
 def simplify_location_name(value: Any) -> str:

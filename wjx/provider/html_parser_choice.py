@@ -440,17 +440,12 @@ def _verify_text_indicates_location(value: Optional[str]) -> bool:
     text = str(value).strip()
     if not text:
         return False
-    normalized = text.lower()
     return (
         ("地图" in text)
         or ("省市" in text)
         or ("省份" in text)
         or ("城市" in text)
         or ("地区" in text)
-        or ("map" in normalized)
-        or ("city" in normalized)
-        or ("province" in normalized)
-        or ("area" in normalized)
     )
 
 def _soup_question_is_location(question_div) -> bool:

@@ -61,6 +61,7 @@ class ExecutionConfig:
     target_num: int = 1
     fail_threshold: int = 5
     stop_on_fail_enabled: bool = True
+    submit_enabled: bool = True
 
     submit_interval_range_seconds: Tuple[int, int] = (0, 0)
     answer_duration_range_seconds: Tuple[int, int] = (0, 0)

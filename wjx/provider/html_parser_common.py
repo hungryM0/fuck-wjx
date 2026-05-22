@@ -57,10 +57,7 @@ def _input_looks_like_location(input_element) -> bool:
         onclick_value = ""
     if not verify_value and "opencitybox" not in onclick_value:
         return False
-    normalized = verify_value.lower()
     if any(marker in verify_value for marker in _LOCATION_VERIFY_MARKERS if marker in {"地图", "省市", "省份", "城市", "地区"}):
-        return True
-    if any(marker in normalized for marker in ("map", "city", "province", "area")):
         return True
     return "opencitybox" in onclick_value
 

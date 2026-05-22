@@ -448,6 +448,34 @@ class AsyncRuntimeLoopLargeTests:
         assert session.close_calls == 1
 
     @pytest.mark.asyncio
+    async def test_run_no_submit_path_skips_finalize_after_submit(self, monkeypatch) -> None:
+        config = ExecutionConfig(target_num=1, submit_enabled=False, survey_provider="wjx")
+        runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
+        scheduler.acquire_values = [7]
+        state.release_joint_sample = lambda *_args, **_kwargs: None
+        state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
+        state.mark_thread_finished = lambda *_args, **_kwargs: None
+        monkeypatch.setattr(runtime_loop, "fill_survey", lambda *_args, **_kwargs: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
+        session = _FakeSession(driver=SimpleNamespace())
+        monkeypatch.setattr(runner, "_open_session", lambda: asyncio.sleep(0, result=session))
+        monkeypatch.setattr(runner, "_load_survey_or_record_failure", lambda _session: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner, "_handle_device_quota_limit", lambda _session: asyncio.sleep(0, result=False))
+        success_calls: list[dict[str, object]] = []
+        runner.stop_policy.record_success = lambda stop_signal, **kwargs: success_calls.append({"stop_signal": stop_signal, **kwargs}) or True
+
+        async def fail_finalize(_session):
+            raise AssertionError("不提交单测不应进入提交收尾")
+
+        monkeypatch.setattr(runner, "_finalize_after_submit", fail_finalize)
+
+        await runner.run()
+
+        assert success_calls[0]["status_text"] == "单测完成"
+        assert scheduler.release_calls[0]["requeue"] is False
+        assert session.close_calls == 0
+
+    @pytest.mark.asyncio
     async def test_run_aborted_finalize_breaks_without_requeue(self, monkeypatch) -> None:
         runner, state, _ctx, _loop, scheduler = _build_runner()
         scheduler.acquire_values = [3]

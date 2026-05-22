@@ -130,7 +130,14 @@ class RunStopPolicy:
             return True
         return False
 
-    def record_success(self, stop_signal: StopSignalLike, thread_name: Optional[str] = None) -> bool:
+    def record_success(
+        self,
+        stop_signal: StopSignalLike,
+        thread_name: Optional[str] = None,
+        *,
+        status_text: str = "提交成功",
+        terminal_message: str = "目标份数已达成",
+    ) -> bool:
         should_handle_random_ip = False
         trigger_target_stop = False
         should_break = False
@@ -172,13 +179,13 @@ class RunStopPolicy:
             except Exception:
                 logging.info("提交成功后写入比例统计失败", exc_info=True)
             try:
-                self.state.increment_thread_success(thread_name, status_text="提交成功")
+                self.state.increment_thread_success(thread_name, status_text=status_text)
             except Exception:
                 logging.info("更新线程成功计数失败", exc_info=True)
         if should_break:
             stop_signal.set()
         if trigger_target_stop:
-            self.trigger_target_reached_stop(stop_signal)
+            self.trigger_target_reached_stop(stop_signal, message=terminal_message)
         if should_handle_random_ip:
             try:
                 trigger_random_ip_submission(self.gui_instance, stop_signal)
@@ -186,14 +193,19 @@ class RunStopPolicy:
                 logging.info("提交成功后刷新随机IP失败", exc_info=True)
         return should_break or trigger_target_stop
 
-    def trigger_target_reached_stop(self, stop_signal: Optional[StopSignalLike]) -> None:
+    def trigger_target_reached_stop(
+        self,
+        stop_signal: Optional[StopSignalLike],
+        *,
+        message: str = "目标份数已达成",
+    ) -> None:
         with self.state._target_reached_stop_lock:
             if self.state._target_reached_stop_triggered:
                 if stop_signal:
                     stop_signal.set()
                 return
             self.state._target_reached_stop_triggered = True
-        self.state.mark_terminal_stop("target_reached", message="目标份数已达成")
+        self.state.mark_terminal_stop("target_reached", message=message)
         if stop_signal:
             stop_signal.set()
 

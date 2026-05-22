@@ -215,7 +215,7 @@ class MainWindowLazyPagesMixin:
         menu.addAction(changelog_action)
 
         # 使用教程
-        tutorial_action = Action(FluentIcon.HELP, "使用教程")
+        tutorial_action = Action(FluentIcon.LIBRARY, "使用教程")
         tutorial_action.triggered.connect(self._open_usage_tutorial)
         menu.addAction(tutorial_action)
 

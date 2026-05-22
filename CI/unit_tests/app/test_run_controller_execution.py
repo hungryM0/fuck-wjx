@@ -439,6 +439,19 @@ class RunControllerExecutionTests:
         assert controller.running is False
         assert controller.runStateChanged.calls == [(False,)]
 
+        controller = _DummyExecutionController()
+        cleanup = []
+        controller._schedule_cleanup = lambda adapter=None: cleanup.append(adapter)
+        controller._emit_status = lambda: cleanup.append("status")
+        controller._execution_state = _FakeExecutionState(target_num=1, num_threads=1)
+        controller._execution_state.config.submit_enabled = False
+        controller._execution_state.terminal_snapshot = ("target_reached", "", "")
+        controller.running = True
+        monkeypatch.setattr(controller_module.threading, "current_thread", lambda: controller_module.threading.main_thread())
+        controller._on_run_finished("adapter-no-submit")
+        assert cleanup == ["status"]
+        assert controller.running is False
+
         controller2 = _DummyExecutionController()
         dispatched = []
         controller2._dispatch_to_ui_async = lambda callback: dispatched.append(callback)
@@ -633,3 +646,17 @@ class RunControllerExecutionTests:
         controller._emit_status()
         assert scheduled == [None]
         assert controller._completion_cleanup_done is True
+
+        controller = _DummyExecutionController()
+        ctx = _FakeExecutionState(target_num=1, num_threads=1)
+        ctx.cur_num = 1
+        ctx.config.submit_enabled = False
+        ctx.terminal_snapshot = ("target_reached", "", "")
+        controller._execution_state = ctx
+        controller.running = False
+        scheduled = []
+        controller._schedule_cleanup = lambda adapter=None: scheduled.append(adapter)
+        controller._emit_status()
+        assert controller.statusUpdated.calls[-1][0].startswith("单测完成 1/1 份")
+        assert scheduled == []
+        assert controller._completion_cleanup_done is False

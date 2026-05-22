@@ -75,7 +75,9 @@ class _FakeDashboard:
         return RuntimeConfig(
             url="https://example.com/survey",
             target=self.target_spin.value(),
-            threads=1,
+            threads=4,
+            headless_mode=True,
+            random_ip_enabled=True,
         )
 
     def _sync_start_button_state(self, running=None) -> None:
@@ -199,6 +201,27 @@ def test_normal_start_ignores_reverse_fill_target_override() -> None:
     cfg = controller.started_configs[0]
     assert cfg.target == 3
     assert cfg.reverse_fill_enabled is False
+
+
+def test_no_submit_test_forces_single_headed_run_without_random_ip() -> None:
+    controller = _FakeController()
+    dashboard = _FakeDashboard(target=8)
+    coordinator = WorkbenchRunCoordinator(
+        controller=controller,
+        state=_state_with_one_entry(),
+        dashboard=dashboard,
+    )
+
+    started = coordinator.start(submit_enabled=False)
+
+    assert started is True
+    assert len(controller.started_configs) == 1
+    cfg = controller.started_configs[0]
+    assert cfg.submit_enabled is False
+    assert cfg.target == 1
+    assert cfg.threads == 1
+    assert cfg.headless_mode is False
+    assert cfg.random_ip_enabled is False
 
 
 def test_starting_state_locks_dashboard_run_controls() -> None:

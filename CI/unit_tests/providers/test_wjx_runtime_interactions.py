@@ -97,6 +97,37 @@ class _Driver:
         return None
 
 
+class _LocationDriver(_Driver):
+    def __init__(self, *, result: str, confirm_result: bool = True) -> None:
+        page = _Page()
+        for selector in (
+            ".layui-layer .button_a",
+            ".layui-layer .layer_save_btn a",
+            ".layui-layer .save_btn",
+            "#layui-layer1 .layui-layer-btn a.layui-layer-btn0",
+            ".layui-layer .layui-layer-btn a.layui-layer-btn0",
+            "#layui-layer1 .layui-layer-btn a",
+            ".layui-layer .layui-layer-btn a",
+        ):
+            page.selector_counts[selector] = 0
+        super().__init__(page)
+        self.result = result
+        self.confirm_result = confirm_result
+
+    async def execute_script(self, script: str, *args: Any) -> Any:
+        self.script_calls.append((script, args))
+        if "const chooseValid" in script:
+            parts = list(args[1] or []) if len(args) > 1 else []
+            if parts == ["北京", "北京", "不存在"]:
+                return ""
+            if parts == ["不存在", "", ""]:
+                return ""
+            if parts == ["北京", "不存在", ""]:
+                return ""
+            return self.result
+        return self.confirm_result
+
+
 class WjxRuntimeInteractionsTests:
     @pytest.mark.asyncio
     async def test_page_wait_and_snapshot_helpers_cover_success_and_fallback_paths(self, monkeypatch) -> None:
@@ -197,14 +228,19 @@ class WjxRuntimeInteractionsTests:
         assert await runtime_interactions._question_option_texts(driver, 6) == ["选项1", "选项2"]
         assert await runtime_interactions._visible_matrix_row_count(driver, 6) == 3
         assert await runtime_interactions._visible_text_input_count(driver, 6) == 2
-        page.selector_counts["#div6 li[serial='3']"] = 1
-        page.selector_counts["#div6 li[serial='1']"] = 1
-        page.selector_counts["#div6 li[serial='2']"] = 1
-        driver.script_results.extend([0, 3])
         assert await runtime_interactions._click_reorder_sequence(driver, 6, [2, 0, 1])
-        assert page.locators["#div6 li[serial='3']"].click_calls == 1
-        assert page.locators["#div6 li[serial='1']"].click_calls == 1
-        assert page.locators["#div6 li[serial='2']"].click_calls == 1
+        script, args = driver.script_calls[-1]
+        assert "return (async () =>" in script
+        assert "const sleep = (ms)" in script
+        assert "keepQuestionInView" in script
+        assert "const clickItem" in script
+        assert "node.click()" in script
+        assert "const markedCount" in script
+        assert "return markedCount() >= expected" in script
+        assert "return clicked >= expected" not in script
+        assert "rankMarked" not in script
+        assert args == (6, [2, 0, 1])
+        assert not page.locators.get("#div6 li[serial='3']")
 
         submit_page = _Page()
         submit_page.selector_counts["#ctlNext"] = 1
@@ -236,6 +272,64 @@ class WjxRuntimeInteractionsTests:
 
         assert await runtime_interactions._confirm_location_picker(driver)
         assert page.locators[".layui-layer .button_a"].click_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_confirm_location_picker_uses_legacy_save_and_script_fallback(self) -> None:
+        legacy_page = _Page()
+        legacy_page.selector_counts[".layui-layer .button_a"] = 0
+        legacy_page.selector_counts[".layui-layer .layer_save_btn a"] = 1
+        legacy_driver = _Driver(legacy_page)
+
+        assert await runtime_interactions._confirm_location_picker(legacy_driver)
+        assert legacy_page.locators[".layui-layer .layer_save_btn a"].click_calls == 1
+
+        fallback_page = _Page()
+        for selector in (
+            ".layui-layer .button_a",
+            ".layui-layer .layer_save_btn a",
+            ".layui-layer .save_btn",
+            "#layui-layer1 .layui-layer-btn a.layui-layer-btn0",
+            ".layui-layer .layui-layer-btn a.layui-layer-btn0",
+            "#layui-layer1 .layui-layer-btn a",
+            ".layui-layer .layui-layer-btn a",
+        ):
+            fallback_page.selector_counts[selector] = 0
+        fallback_driver = _Driver(fallback_page)
+        fallback_driver.script_results = [True]
+
+        assert await runtime_interactions._confirm_location_picker(fallback_driver)
+        assert "window.countyok" in fallback_driver.script_calls[-1][0]
+
+    @pytest.mark.asyncio
+    async def test_select_location_input_fails_when_target_part_missing(self) -> None:
+        assert await runtime_interactions._select_location_input(
+            _LocationDriver(result=""),
+            12,
+            ["不存在", "", ""],
+        ) == ""
+        assert await runtime_interactions._select_location_input(
+            _LocationDriver(result=""),
+            12,
+            ["北京", "不存在", ""],
+        ) == ""
+        assert await runtime_interactions._select_location_input(
+            _LocationDriver(result=""),
+            12,
+            ["北京", "北京", "不存在"],
+        ) == ""
+
+    @pytest.mark.asyncio
+    async def test_select_location_input_allows_auto_parts_and_requires_confirm(self) -> None:
+        assert await runtime_interactions._select_location_input(
+            _LocationDriver(result="北京-北京-东城区", confirm_result=True),
+            12,
+            ["", "", ""],
+        ) == "北京-北京-东城区"
+        assert await runtime_interactions._select_location_input(
+            _LocationDriver(result="北京-北京-东城区", confirm_result=False),
+            12,
+            ["北京", "北京", "东城区"],
+        ) == ""
 
 
 def _async_result(value):

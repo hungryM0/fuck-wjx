@@ -131,6 +131,49 @@ class CredamoRuntimeTests:
         assert calls == ["single", "dropdown", "next", "order", "submit"]
 
     @pytest.mark.asyncio
+    async def test_brush_credamo_no_submit_test_answers_without_submit(self, restore_credamo_runtime_patchpoints, patch_attrs) -> None:
+        _ = restore_credamo_runtime_patchpoints
+        stop_signal = threading.Event()
+        status_updates: list[tuple[str, bool]] = []
+        state = SimpleNamespace(
+            stop_event=stop_signal,
+            update_thread_step=lambda *args, **kwargs: None,
+            update_thread_status=lambda _thread, text, *, running: status_updates.append((text, running)),
+        )
+        config = SimpleNamespace(
+            question_config_index_map={1: ("single", 0)},
+            single_prob=[-1],
+            droplist_prob=[],
+            scale_prob=[],
+            multiple_prob=[],
+            texts=[],
+            answer_duration_range_seconds=[0, 0],
+            submit_enabled=False,
+        )
+        root = self._FakeQuestionRoot(1)
+        pending_iter = iter([[(root, 1, "k1")], []])
+        calls: list[object] = []
+        patch_attrs(
+            (runtime, "_page", _async_return(object())),
+            (runtime, "_wait_for_question_roots", _async_return([root])),
+            (runtime, "_has_answerable_question_roots", _async_return(True)),
+            (runtime, "_unanswered_question_roots", lambda *_args, **_kwargs: _async_return(next(pending_iter))()),
+            (runtime, "_wait_for_dynamic_question_roots", _async_return([])),
+            (runtime, "_question_number_from_root", lambda _page, item, _fallback: _async_return(item.question_num)()),
+            (runtime, "_root_text", _async_return("Q")),
+            (runtime, "_navigation_action", _async_return("submit")),
+            (runtime, "_answer_single_like", _async_append(calls, "single", result=True)),
+            (runtime, "simulate_answer_duration_delay", _async_return(False)),
+            (runtime, "_click_submit", _async_append(calls, "submit", result=True)),
+        )
+
+        result = await runtime.brush_credamo(object(), config, state, stop_signal=stop_signal, thread_name="Worker-1")
+
+        assert result
+        assert calls == ["single"]
+        assert ("单测完成", False) in status_updates
+
+    @pytest.mark.asyncio
     async def test_brush_credamo_answers_revealed_questions_and_matrix_and_multiple(self, restore_credamo_runtime_patchpoints, patch_attrs) -> None:
         _ = restore_credamo_runtime_patchpoints
         stop_signal = threading.Event()

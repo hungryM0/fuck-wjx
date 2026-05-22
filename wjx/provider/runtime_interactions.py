@@ -546,7 +546,9 @@ async def _select_location_input(
                     || expectedNorm.includes(textNorm);
             };
             const chooseValid = (select, target) => {
-                if (!select) return "";
+                const expected = String(target || '').trim();
+                const hasTarget = Boolean(expected) && expected !== '自动选择';
+                if (!select) return hasTarget ? null : { value: "", text: "" };
                 const options = Array.from(select.options || []);
                 const validOptions = options.filter((item, index) => {
                     const value = String(item.value || '').trim();
@@ -555,8 +557,11 @@ async def _select_location_input(
                     if (!text || text.startsWith('--请选择') || text.includes('请选择')) return false;
                     return Boolean(value || text);
                 });
-                const option = validOptions.find((item) => optionMatches(item, target)) || validOptions[0] || null;
-                if (!option) return "";
+                if (!validOptions.length) return null;
+                const option = hasTarget
+                    ? (validOptions.find((item) => optionMatches(item, expected)) || null)
+                    : validOptions[0];
+                if (!option) return null;
                 select.value = option.value;
                 try { option.selected = true; } catch (e) {}
                 dispatch(select);
@@ -565,7 +570,10 @@ async def _select_location_input(
                         window.jQuery(select).val(option.value).trigger('change');
                     }
                 } catch (e) {}
-                return String(option.value || option.textContent || '').trim();
+                return {
+                    value: String(option.value || '').trim(),
+                    text: String(option.textContent || option.innerText || option.value || '').replace(/\s+/g, ' ').trim(),
+                };
             };
             const readSelectText = (select) => {
                 if (!select) return "";
@@ -637,11 +645,18 @@ async def _select_location_input(
                 const city = layer.querySelector('select.city, select[name="city"]');
                 const area = layer.querySelector('select.area, select[name="area"]');
                 const provinceValue = chooseValid(province, targetParts[0]);
+                if (!provinceValue) return "";
                 if (city) await waitForOptions(city);
                 const cityValue = chooseValid(city, targetParts[1]);
+                if (!cityValue) return "";
                 if (area) await waitForOptions(area);
                 const areaValue = chooseValid(area, targetParts[2]);
-                const values = [readSelectText(province) || provinceValue, readSelectText(city) || cityValue, readSelectText(area) || areaValue]
+                if (!areaValue) return "";
+                const values = [
+                    readSelectText(province) || provinceValue.text || provinceValue.value,
+                    readSelectText(city) || cityValue.text || cityValue.value,
+                    readSelectText(area) || areaValue.text || areaValue.value,
+                ]
                     .map((item) => String(item || '').trim())
                     .filter(Boolean);
                 const finalValue = values.join('-');
@@ -654,9 +669,10 @@ async def _select_location_input(
         value = str(await driver.execute_script(script, q_num, target_parts) or "").strip()
         if value:
             try:
-                await _confirm_location_picker(driver)
+                if not await _confirm_location_picker(driver):
+                    return ""
             except Exception:
-                pass
+                return ""
         return value
     except Exception:
         return ""
@@ -1042,69 +1058,16 @@ async def _click_reorder_sequence(driver: BrowserDriver, question_number: int, o
     normalized = [int(item) for item in ordered_indices if int(item) >= 0]
     if q_num <= 0 or not normalized:
         return False
-    page = await _page(driver)
-
-    async def _marked_count() -> int:
-        script = r"""
-            return (() => {
-                const questionNumber = Number(arguments[0] || 0);
-                const root = document.querySelector(`#div${questionNumber}`);
-                if (!root) return 0;
-                const items = Array.from(root.querySelectorAll('li'));
-                return items.filter((item) => {
-                    const marker = item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
-                    const text = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
-                    const className = String((marker && marker.className) || '').toLowerCase();
-                    const itemClass = String(item.className || '').toLowerCase();
-                    const checked = String(item.getAttribute('check') || '').trim();
-                    return Boolean(text) || checked === '1' || className.includes('sel') || className.includes('on') || className.includes('checked') || itemClass.includes('check');
-                }).length;
-            })();
-        """
-        try:
-            return max(0, int(await driver.execute_script(script, q_num) or 0))
-        except Exception:
-            return 0
-
-    clicked = 0
-    initial_marked = await _marked_count()
-    for original_index in normalized:
-        selectors = (
-            f"#div{q_num} li[serial='{original_index + 1}']",
-            f"#div{q_num} li:nth-child({original_index + 1})",
-        )
-        did_click = False
-        for selector in selectors:
-            try:
-                locator = page.locator(selector).first
-                if await locator.count() <= 0:
-                    continue
-                await locator.scroll_into_view_if_needed(timeout=1800)
-                try:
-                    await locator.click(timeout=1800)
-                except Exception:
-                    await locator.click(timeout=1800, force=True)
-                did_click = True
-                break
-            except Exception:
-                continue
-        if did_click:
-            clicked += 1
-            try:
-                await page.wait_for_timeout(80)
-            except Exception:
-                pass
-
-    marked = await _marked_count()
-    if clicked > 0 and marked >= min(initial_marked + clicked, len(normalized)):
-        return True
 
     script = r"""
-        return (() => {
+        return (async () => {
             const questionNumber = Number(arguments[0] || 0);
-            const orderedIndices = Array.isArray(arguments[1]) ? arguments[1].map((item) => Number(item)) : [];
+            const orderedIndices = Array.isArray(arguments[1])
+                ? arguments[1].map((item) => Number(item)).filter((item) => Number.isInteger(item) && item >= 0)
+                : [];
             const root = document.querySelector(`#div${questionNumber}`);
             if (!root || !orderedIndices.length) return false;
+            const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
             const visible = (el) => {
                 if (!el) return false;
                 const style = window.getComputedStyle(el);
@@ -1113,36 +1076,91 @@ async def _click_reorder_sequence(driver: BrowserDriver, question_number: int, o
                 const rect = el.getBoundingClientRect();
                 return rect.width > 0 && rect.height > 0;
             };
-            const items = Array.from(root.querySelectorAll('li')).filter(visible);
-            if (!items.length) return false;
-            const rankMarked = () => items.filter((item) => {
-                const marker = item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
-                const text = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
-                const className = String((marker && marker.className) || '').toLowerCase();
-                const itemClass = String(item.className || '').toLowerCase();
-                const checked = String(item.getAttribute('check') || '').trim();
-                return Boolean(text) || checked === '1' || className.includes('sel') || className.includes('on') || className.includes('checked') || itemClass.includes('check');
-            }).length;
-            let clicked = 0;
-            for (let rank = 0; rank < orderedIndices.length; rank += 1) {
-                const item = items[orderedIndices[rank]];
-                if (!item) continue;
-                try { item.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+            const optionItems = () => Array.from(root.querySelectorAll('li')).filter(visible);
+            const isMarked = (item) => {
+                const marker = item?.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
+                const markerText = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
+                const markerClass = String((marker && marker.className) || '').toLowerCase();
+                const itemClass = String(item?.className || '').toLowerCase();
+                const checked = String(item?.getAttribute('check') || '').trim();
+                const input = item?.querySelector('input[type="checkbox"], input[type="radio"]');
+                return Boolean(markerText)
+                    || checked === '1'
+                    || Boolean(input?.checked)
+                    || markerClass.includes('sel')
+                    || markerClass.includes('on')
+                    || markerClass.includes('checked')
+                    || itemClass.includes('checked');
+            };
+            const keepQuestionInView = () => {
+                const rect = root.getBoundingClientRect();
+                const targetTop = Math.max(70, Math.min(160, window.innerHeight * 0.22));
+                if (rect.top < 50 || rect.top > window.innerHeight * 0.48) {
+                    const nextTop = Math.max(0, window.scrollY + rect.top - targetTop);
+                    try { window.scrollTo({ top: nextTop, left: window.scrollX, behavior: 'auto' }); } catch (e) {
+                        try { window.scrollTo(window.scrollX, nextTop); } catch (err) {}
+                    }
+                }
+            };
+            const findItem = (optionIndex) => {
+                const serialItem = root.querySelector(`li[serial="${optionIndex + 1}"]`);
+                if (serialItem && visible(serialItem)) return serialItem;
+                return optionItems()[optionIndex] || null;
+            };
+            const markedCount = () => optionItems().filter((item) => isMarked(item)).length;
+            const clickItem = (item) => {
                 const candidates = [
-                    item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index'),
-                    item.querySelector('a, label, span, input:not([type="hidden"])'),
+                    item?.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index'),
+                    item?.querySelector('a, label, span, input:not([type="hidden"])'),
                     item,
                 ].filter(Boolean);
                 for (const node of candidates) {
-                    try { node.click(); } catch (e) {}
-                    const marker = item.querySelector('.sortnum, .sortnum-sel, .order-number, .order-index');
-                    const text = String((marker && (marker.textContent || marker.innerText)) || '').replace(/\s+/g, '').trim();
-                    const className = String((marker && marker.className) || '').toLowerCase();
-                    if (text || className.includes('sel') || className.includes('on') || className.includes('checked')) break;
+                    try {
+                        node.click();
+                        return true;
+                    } catch (e) {
+                        try {
+                            node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                            return true;
+                        } catch (err) {}
+                    }
                 }
-                clicked += 1;
+                return false;
+            };
+            const uniqueIndices = Array.from(new Set(orderedIndices));
+            const expected = Math.min(uniqueIndices.length, optionItems().length);
+            if (expected <= 0) return false;
+            keepQuestionInView();
+            await sleep(120);
+            for (const optionIndex of uniqueIndices) {
+                let item = findItem(optionIndex);
+                if (!item) continue;
+                if (isMarked(item)) continue;
+                keepQuestionInView();
+                await sleep(90);
+                let ranked = false;
+                for (let attempt = 0; attempt < 3; attempt += 1) {
+                    item = findItem(optionIndex) || item;
+                    if (!item || isMarked(item)) {
+                        ranked = true;
+                        break;
+                    }
+                    const before = markedCount();
+                    clickItem(item);
+                    await sleep(320);
+                    item = findItem(optionIndex) || item;
+                    const after = markedCount();
+                    if ((item && isMarked(item)) || after > before) {
+                        ranked = true;
+                        break;
+                    }
+                    keepQuestionInView();
+                    await sleep(120);
+                }
+                if (!ranked) return false;
             }
-            return clicked > 0 && rankMarked() >= Math.min(clicked, items.length);
+            await sleep(180);
+            return markedCount() >= expected;
         })();
     """
     try:

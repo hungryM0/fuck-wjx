@@ -188,6 +188,37 @@ class TencentRuntimeTests:
         assert ("提交中", True) in ctx.status_updates
 
     @pytest.mark.asyncio
+    async def test_brush_qq_no_submit_test_answers_without_submit(self, make_runtime_state, patch_attrs) -> None:
+        ctx = make_runtime_state({1: _meta(1)}, {1: ("single", 0)})
+        ctx.config.submit_enabled = False
+        calls: list[object] = []
+        patch_attrs(
+            (runtime, "_wait_for_question_visible", _async_return(True)),
+            (runtime, "_is_question_visible", _async_return(True)),
+            (runtime, "_human_scroll_after_question", _async_return(None)),
+            (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
+            (runtime, "_is_headless_mode", lambda _ctx: True),
+            (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
+            (runtime, "has_configured_answer_duration", lambda _value: False),
+            (runtime, "simulate_answer_duration_delay", _async_return(False)),
+            (runtime, "_answer_question_by_meta", _async_append(calls, "answer", result=True)),
+            (runtime, "submit", _async_append(calls, "submit")),
+        )
+
+        result = await runtime.brush_qq(
+            object(),
+            object(),
+            ctx,
+            stop_signal=threading.Event(),
+            thread_name="Worker-1",
+            psycho_plan=None,
+        )
+
+        assert result
+        assert calls == ["answer"]
+        assert ("单测完成", False) in ctx.status_updates
+
+    @pytest.mark.asyncio
     async def test_answer_question_by_meta_returns_false_when_mapping_missing(self, make_runtime_state) -> None:
         ctx = make_runtime_state({}, {})
         question = _meta(9, provider_question_id="q9")

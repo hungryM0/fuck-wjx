@@ -298,6 +298,9 @@ class AsyncSlotRunner:
     async def _close_session(self, session: Optional[AsyncBrowserSession]) -> None:
         if session is not None:
             await session.close()
+        self._release_session_proxy()
+
+    def _release_session_proxy(self) -> None:
         if self.proxy_address:
             try:
                 self.state.release_proxy_in_use(self.slot_label)
@@ -385,6 +388,23 @@ class AsyncSlotRunner:
             gui_instance=self.gui_instance,
             thread_name=self.slot_label,
         )
+
+    def _finalize_without_submit(self) -> Any:
+        should_stop = self.stop_policy.record_success(
+            self.stop_proxy,
+            thread_name=self.slot_label,
+            status_text="单测完成",
+            terminal_message="不提交单测已完成",
+        )
+        return type(
+            "_NoSubmitOutcome",
+            (),
+            {
+                "status": "success",
+                "should_rotate_proxy": False,
+                "should_stop": should_stop,
+            },
+        )()
 
     async def _wait_for_next_unique_proxy(self) -> bool:
         if not self.config.random_proxy_ip_enabled:
@@ -502,6 +522,7 @@ class AsyncSlotRunner:
             if token_id is None:
                 break
             session: Optional[AsyncBrowserSession] = None
+            keep_session_open = False
             should_requeue_dispatch = True
             dispatch_delay_seconds = 0.0
             try:
@@ -558,11 +579,17 @@ class AsyncSlotRunner:
                         should_requeue_dispatch = False
                         break
                     continue
-                outcome = await self._finalize_after_submit(session)
+                outcome = (
+                    await self._finalize_after_submit(session)
+                    if bool(getattr(self.config, "submit_enabled", True))
+                    else self._finalize_without_submit()
+                )
                 if outcome.status == "success":
+                    keep_session_open = not bool(getattr(self.config, "submit_enabled", True))
                     if bool(getattr(outcome, "should_rotate_proxy", False)):
                         await self._close_session(session)
                         session = None
+                        keep_session_open = False
                         if not await self._wait_for_next_unique_proxy():
                             should_requeue_dispatch = False
                             break
@@ -610,7 +637,10 @@ class AsyncSlotRunner:
                     break
                 self._release_round_resources(requeue_reverse_fill=True)
             finally:
-                await self._close_session(session)
+                if not keep_session_open:
+                    await self._close_session(session)
+                else:
+                    self._release_session_proxy()
                 await self.scheduler.release(
                     int(token_id),
                     requeue=bool(should_requeue_dispatch and not self.run_context.stop_requested()),

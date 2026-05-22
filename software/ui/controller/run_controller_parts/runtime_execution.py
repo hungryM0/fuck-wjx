@@ -270,7 +270,8 @@ class RunControllerExecutionMixin:
         logging.debug("开始配置任务：目标%s份，%s个线程", config.target, config.threads)
 
         self.config = config
-        self.sync_runtime_ui_state_from_config(config)
+        if bool(getattr(config, "submit_enabled", True)):
+            self.sync_runtime_ui_state_from_config(config)
         self.survey_provider = prepared.survey_provider
         self.question_entries = list(prepared.question_entries)
         self.questions_info = list(prepared.questions_info)
@@ -373,7 +374,14 @@ class RunControllerExecutionMixin:
         if threading.current_thread() is not threading.main_thread():
             self._dispatch_to_ui_async(lambda: self._on_run_finished(adapter_snapshot))
             return
-        self._schedule_cleanup(adapter_snapshot)
+        ctx = getattr(self, "_execution_state", None)
+        is_no_submit_test = bool(
+            ctx is not None
+            and not bool(getattr(getattr(ctx, "config", None), "submit_enabled", True))
+            and str(ctx.get_terminal_stop_snapshot()[0] or "") == "target_reached"
+        )
+        if not is_no_submit_test:
+            self._schedule_cleanup(adapter_snapshot)
         was_active = bool(self.running or self._stopping or self._initializing)
         self._stopped_by_stop_run = False
         self._stopping = False
@@ -658,6 +666,13 @@ class RunControllerExecutionMixin:
             status_prefix = "已暂停"
         elif not self.running and terminal_category == "user_stopped":
             status_prefix = "已停止"
+        elif (
+            not self.running
+            and terminal_category == "target_reached"
+            and ctx is not None
+            and not bool(getattr(getattr(ctx, "config", None), "submit_enabled", True))
+        ):
+            status_prefix = "单测完成"
         else:
             status_prefix = "已提交"
         status = f"{status_prefix} {current}/{target} 份 | 提交连续失败 {fail} 次"
@@ -701,7 +716,10 @@ class RunControllerExecutionMixin:
             self.pauseStateChanged.emit(bool(paused), str(reason or ""))
 
         should_force_cleanup = (
-            target > 0 and current >= target and not self._completion_cleanup_done
+            target > 0
+            and current >= target
+            and not self._completion_cleanup_done
+            and bool(getattr(getattr(ctx, "config", None), "submit_enabled", True))
         )
         if should_force_cleanup:
             self._completion_cleanup_done = True

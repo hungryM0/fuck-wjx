@@ -491,6 +491,43 @@ class WjxRuntimeAnswerersTests:
         assert calls == [("build", 1), ("apply", (1,)), ("prepare", 7), ("direct", 7), ("prepare", 15), ("order", 15)]
 
     @pytest.mark.asyncio
+    async def test_answer_page_batch_reports_popup_failures_without_batch_script(self, monkeypatch) -> None:
+        ctx = _ctx(question_config_index_map={7: ("location", -1), 15: ("order", -1)})
+        calls: list[tuple[str, object]] = []
+
+        async def _apply(_driver, _answer_actions):
+            raise AssertionError("地区题和排序题不应进入批量脚本")
+
+        async def _prepare(_driver, question_num):
+            calls.append(("prepare", question_num))
+            return True
+
+        async def _answer_by_meta(_driver, question, _ctx, *, psycho_plan):
+            del _ctx, psycho_plan
+            calls.append(("direct", int(question.num)))
+            return False
+
+        async def _answer_order(_driver, question):
+            calls.append(("order", int(question.num)))
+            return False
+
+        monkeypatch.setattr(runtime_answerers, "apply_answer_actions", _apply)
+        monkeypatch.setattr(runtime_answerers, "_prepare_question_interaction", _prepare)
+        monkeypatch.setattr(runtime_answerers, "answer_question_by_meta", _answer_by_meta)
+        monkeypatch.setattr(runtime_answerers, "_answer_wjx_order", _answer_order)
+
+        result = await runtime_answerers.answer_page_batch(
+            object(),
+            [_question(7), _question(15)],
+            ctx,
+            psycho_plan=None,
+        )
+
+        assert result.applied == ()
+        assert result.failed == (7, 15)
+        assert calls == [("prepare", 7), ("direct", 7), ("prepare", 15), ("order", 15)]
+
+    @pytest.mark.asyncio
     async def test_apply_answer_actions_returns_failed_when_js_errors(self) -> None:
         class _Driver:
             async def execute_script(self, *_args):
@@ -504,7 +541,7 @@ class WjxRuntimeAnswerersTests:
         assert result.failed == (5,)
 
     @pytest.mark.asyncio
-    async def test_apply_answer_actions_supports_location_action_script(self) -> None:
+    async def test_apply_answer_actions_excludes_location_action_script(self) -> None:
         class _Driver:
             def __init__(self) -> None:
                 self.payload = None
@@ -528,24 +565,35 @@ class WjxRuntimeAnswerersTests:
             ],
         )
 
-        assert result.applied == (12,)
-        assert driver.payload == [
-            {
-                "questionNum": 12,
-                "kind": "location",
-                "inputType": "",
-                "selectedIndices": [],
-                "matrixIndices": [],
-                "textValues": ["北京", "北京", "东城区"],
-                "sliderValue": None,
-                "optionFillTexts": [],
-            }
-        ]
-        assert "const confirmLocation" in driver.script
-        assert "if (!confirmLocation()" in driver.script
-        assert "applyLocation(root, action.textValues)" in driver.script
-        assert "const applyOrder" in driver.script
-        assert "applyOrder(root, action.selectedIndices" in driver.script
+        assert result.failed == (12,)
+        assert driver.payload is None
+        assert "const confirmLocation" not in driver.script
+        assert "applyLocation(root, action.textValues)" not in driver.script
+
+    @pytest.mark.asyncio
+    async def test_apply_answer_actions_excludes_order_action_script(self) -> None:
+        class _Driver:
+            def __init__(self) -> None:
+                self.payload = None
+                self.script = ""
+
+            async def execute_script(self, script, payload):
+                self.script = script
+                self.payload = payload
+                return {"applied": [8], "failed": []}
+
+        driver = _Driver()
+        result = await runtime_answerers.apply_answer_actions(
+            driver,
+            [runtime_answerers.AnswerAction(question_num=8, kind="order", selected_indices=(2, 0, 1), record_type="order")],
+        )
+
+        assert result.failed == (8,)
+        assert driver.payload is None
+        assert "const applyOrder" not in driver.script
+        assert "applyOrder(root, action.selectedIndices" not in driver.script
+        assert "const isMarked" not in driver.script
+        assert "rankMarked" not in driver.script
 
     @pytest.mark.asyncio
     async def test_build_answer_action_skips_unavailable_questions_and_dispatches_helpers(self, monkeypatch) -> None:
@@ -556,12 +604,7 @@ class WjxRuntimeAnswerersTests:
         assert await runtime_answerers.build_answer_action(object(), _question(2, has_jump=True), ctx, psycho_plan=None) is None
         assert await runtime_answerers.build_answer_action(object(), _question(3, has_dependent_display_logic=True), ctx, psycho_plan=None) is None
         assert await runtime_answerers.build_answer_action(object(), _question(99), ctx, psycho_plan=None) is None
-        assert await runtime_answerers.build_answer_action(object(), _question(7), ctx, psycho_plan=None) == runtime_answerers.AnswerAction(
-            question_num=7,
-            kind="location",
-            text_values=("北京", "北京", "东城区"),
-            record_type="text",
-        )
+        assert await runtime_answerers.build_answer_action(object(), _question(7), ctx, psycho_plan=None) is None
         monkeypatch.setattr(runtime_answerers, "_resolve_runtime_option_texts", _async_result(["甲", "乙", "丙"]))
         monkeypatch.setattr(runtime_answerers.random, "shuffle", lambda values: values.reverse())
         assert await runtime_answerers.build_answer_action(object(), _question(8), ctx, psycho_plan=None) == runtime_answerers.AnswerAction(

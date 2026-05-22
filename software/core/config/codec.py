@@ -420,6 +420,7 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         config.random_ua_ratios = {"wechat": 33, "mobile": 33, "pc": 34}
 
     config.fail_stop_enabled = bool(raw.get("fail_stop_enabled", True))
+    config.submit_enabled = _as_bool(raw.get("submit_enabled"), True)
     config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
     config.reliability_mode_enabled = bool(raw.get("reliability_mode_enabled", True))
     config.psycho_target_alpha = normalize_target_alpha(raw.get("psycho_target_alpha"))
