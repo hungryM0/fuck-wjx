@@ -36,6 +36,7 @@ SLIDER_TARGET_MIN = 0
 SLIDER_TARGET_MAX = 100
 ANSWER_WEIGHT_MIN = 0
 ANSWER_WEIGHT_MAX = 50
+MULTIPLE_OPTION_WEIGHT_MAX = 100
 
 
 def _get_entry_type_label(entry: QuestionEntry) -> str:

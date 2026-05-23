@@ -389,6 +389,18 @@ def _soup_question_looks_like_description(question_div, type_code: str) -> bool:
     """
     if question_div is None:
         return False
+    try:
+        relation = str(question_div.get("relation") or "").strip()
+        style_text = str(question_div.get("style") or "").lower()
+        is_unreachable_placeholder = (
+            relation == "-1"
+            and "display:none" in style_text.replace(" ", "")
+            and not _soup_question_is_required(question_div)
+        )
+        if is_unreachable_placeholder:
+            return True
+    except Exception:
+        pass
     # 只对选择类题型做检测（type 3/4 是最常见的误识别情况）
     if type_code not in {"3", "4"}:
         return False

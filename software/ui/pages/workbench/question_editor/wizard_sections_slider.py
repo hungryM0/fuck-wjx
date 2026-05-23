@@ -27,10 +27,10 @@ from software.ui.widgets.no_wheel import NoWheelSlider
 
 from .psycho_config import (
     BIAS_PRESET_CHOICES,
-    PSYCHO_SUPPORTED_TYPES,
     build_bias_weights,
+    entry_supports_psycho_presets,
 )
-from .constants import ANSWER_WEIGHT_MAX, ANSWER_WEIGHT_MIN
+from .constants import ANSWER_WEIGHT_MAX, ANSWER_WEIGHT_MIN, MULTIPLE_OPTION_WEIGHT_MAX
 from .utils import _apply_label_color, _bind_slider_input
 from .wizard_sections_common import (
     _TEXT_RANDOM_ID_CARD,
@@ -105,7 +105,7 @@ class WizardSectionsSliderMixin:
 
         # 倾向预设选择器（仅支持的题型）
         _preset_seg = None
-        if entry.question_type in PSYCHO_SUPPORTED_TYPES:
+        if entry_supports_psycho_presets(entry, option_texts):
             preset_row = QHBoxLayout()
             preset_row.setSpacing(8)
             preset_label = BodyLabel("倾向预设：", card)
@@ -187,10 +187,10 @@ class WizardSectionsSliderMixin:
                 scope="option",
                 media_index=opt_idx,
                 text=opt_text,
-                text_width=140,
+                text_width=0,
                 font_style="font-size: 13px;",
             )
-            header_row.addWidget(option_widget, 0)
+            header_row.addWidget(option_widget, 1)
 
             has_jump = bool(info_entry.get("has_jump"))
             if has_jump:
@@ -215,6 +215,8 @@ class WizardSectionsSliderMixin:
             slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
             if entry.question_type == "slider":
                 slider.setRange(slider_min, slider_max)
+            elif is_multiple:
+                slider.setRange(ANSWER_WEIGHT_MIN, MULTIPLE_OPTION_WEIGHT_MAX)
             else:
                 slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
             slider.setValue(

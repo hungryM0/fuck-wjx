@@ -22,6 +22,7 @@ from software.ui.pages.workbench.question_editor.wizard_dialog import (
 )
 from software.ui.pages.workbench.question_editor.psycho_config import (
     PSYCHO_SUPPORTED_TYPES,
+    entry_supports_psycho_presets,
 )
 from software.ui.pages.workbench.shared.table_helpers import set_table_text
 from software.ui.pages.workbench.strategy.utils import entry_dimension_label
@@ -162,7 +163,10 @@ _WIZARD_META_RULES: Sequence[WizardApplyRule] = (
 def question_summary(entry: QuestionEntry) -> str:
     """生成题目配置摘要"""
     bias = getattr(entry, "psycho_bias", "custom") or "custom"
-    if getattr(entry, "question_type", "") in PSYCHO_SUPPORTED_TYPES and bias in (
+    if (
+        getattr(entry, "question_type", "") in PSYCHO_SUPPORTED_TYPES
+        or entry_supports_psycho_presets(entry, list(getattr(entry, "texts", []) or []))
+    ) and bias in (
         "left",
         "center",
         "right",

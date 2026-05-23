@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-JOINT_PSYCHOMETRIC_SUPPORTED_TYPES = frozenset({"scale", "score", "dropdown", "matrix"})
+JOINT_PSYCHOMETRIC_SUPPORTED_TYPES = frozenset({"single", "scale", "score", "dropdown", "matrix"})
 _PSYCHO_BIAS_CHOICES = {"left", "center", "right"}
 _MICRO_JITTER_SIGMA = 0.03
 
@@ -98,10 +98,26 @@ class PsychometricBlueprintItem:
     bias: str
     target_probabilities: List[float]
     row_index: Optional[int] = None
+    score_by_choice_index: Optional[List[int]] = None
 
     @property
     def choice_key(self) -> str:
         return build_psychometric_choice_key(self.question_index, self.row_index)
+
+    def choice_index_for_score(self, score_index: int) -> int:
+        if not isinstance(self.score_by_choice_index, list) or not self.score_by_choice_index:
+            return max(0, min(self.option_count - 1, int(score_index or 0)))
+        try:
+            target_score = int(score_index or 0)
+        except Exception:
+            target_score = 0
+        for choice_index, mapped_score in enumerate(self.score_by_choice_index):
+            try:
+                if int(mapped_score) == target_score:
+                    return max(0, min(self.option_count - 1, choice_index))
+            except Exception:
+                continue
+        return max(0, min(self.option_count - 1, target_score))
 
     def to_runtime_item(self) -> PsychometricItem:
         if self.question_type == "matrix" and self.row_index is not None:
@@ -112,6 +128,7 @@ class PsychometricBlueprintItem:
                 option_count=self.option_count,
                 bias=self.bias,
                 target_probabilities=list(self.target_probabilities),
+                score_by_choice_index=list(self.score_by_choice_index or []) or None,
             )
         return PsychometricItem(
             kind=self.question_type,
@@ -119,6 +136,7 @@ class PsychometricBlueprintItem:
             option_count=self.option_count,
             bias=self.bias,
             target_probabilities=list(self.target_probabilities),
+            score_by_choice_index=list(self.score_by_choice_index or []) or None,
         )
 
 
@@ -238,9 +256,23 @@ def build_psychometric_blueprint(config: "ExecutionConfig") -> Dict[str, List[Ps
         meta_option_count = int(question_meta.options or 0)
         saved_bias = config.question_psycho_bias_map.get(question_num, "custom")
 
-        if question_type in {"scale", "score"}:
-            probability_config = config.scale_prob[start_index] if start_index < len(config.scale_prob) else -1
-            option_count = _resolve_option_count(probability_config, meta_option_count, default_value=5)
+        if question_type in {"single", "scale", "score"}:
+            if question_type == "single":
+                score_map = list((getattr(config, "question_ordinal_score_map", {}) or {}).get(question_num) or [])
+                if not score_map:
+                    continue
+                probability_config = config.single_prob[start_index] if start_index < len(config.single_prob) else -1
+                option_count = _resolve_option_count(
+                    probability_config,
+                    meta_option_count,
+                    default_value=len(score_map),
+                )
+                if len(score_map) != option_count:
+                    continue
+            else:
+                score_map = []
+                probability_config = config.scale_prob[start_index] if start_index < len(config.scale_prob) else -1
+                option_count = _resolve_option_count(probability_config, meta_option_count, default_value=5)
             bias = _resolve_bias(saved_bias, probability_config, option_count)
             grouped_items.setdefault(dimension, []).append(
                 PsychometricBlueprintItem(
@@ -249,6 +281,7 @@ def build_psychometric_blueprint(config: "ExecutionConfig") -> Dict[str, List[Ps
                     option_count=option_count,
                     bias=bias,
                     target_probabilities=_resolve_target_probabilities(probability_config, option_count, bias),
+                    score_by_choice_index=score_map or None,
                 )
             )
             continue
@@ -430,13 +463,14 @@ def _evaluate_dimension_plan(
             + (_MICRO_JITTER_SIGMA * micro_jitter_noise[item_index][sample_index])
             for sample_index in range(sample_count)
         ]
-        assigned = _assign_choices_from_scores(scores, quotas)
-        choices_by_item[item.choice_key] = assigned
-        for sample_index, choice in enumerate(assigned):
+        assigned_scores = _assign_choices_from_scores(scores, quotas)
+        assigned_choices = [item.choice_index_for_score(score_index) for score_index in assigned_scores]
+        choices_by_item[item.choice_key] = assigned_choices
+        for sample_index, score_index in enumerate(assigned_scores):
             if is_reversed:
-                response_rows[sample_index][item_index] = float(item.option_count - choice)
+                response_rows[sample_index][item_index] = float(item.option_count - score_index)
             else:
-                response_rows[sample_index][item_index] = float(choice + 1)
+                response_rows[sample_index][item_index] = float(score_index + 1)
 
     return cronbach_alpha(response_rows), choices_by_item
 

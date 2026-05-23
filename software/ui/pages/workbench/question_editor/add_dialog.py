@@ -27,6 +27,7 @@ from software.ui.helpers.qfluent_compat import resolve_mask_dialog_parent
 from .constants import (
     ANSWER_WEIGHT_MAX,
     ANSWER_WEIGHT_MIN,
+    MULTIPLE_OPTION_WEIGHT_MAX,
     SLIDER_TARGET_MAX,
     SLIDER_TARGET_MIN,
     TYPE_CHOICES,
@@ -380,8 +381,13 @@ class QuestionAddDialog(AddPreviewMixin, MessageBoxBase):
                 custom_weights = [custom_weights[0] if custom_weights else 50.0]
                 option_count = 1
             else:
+                max_weight = (
+                    MULTIPLE_OPTION_WEIGHT_MAX
+                    if q_type == "multiple"
+                    else ANSWER_WEIGHT_MAX
+                )
                 custom_weights = [
-                    float(max(ANSWER_WEIGHT_MIN, min(ANSWER_WEIGHT_MAX, v)))
+                    float(max(ANSWER_WEIGHT_MIN, min(max_weight, v)))
                     for v in self._slider_values[:count]
                 ]
 

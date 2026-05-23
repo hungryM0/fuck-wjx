@@ -152,6 +152,34 @@ class WjxRuntimeAnswerersTests:
         assert recorded[-1][1]["selected_indices"] == [1]
 
     @pytest.mark.asyncio
+    async def test_answer_wjx_single_uses_psychometric_plan_when_dimensioned(self, monkeypatch) -> None:
+        ctx = _ctx(question_dimension_map={3: "D1"})
+        question = _question(3, option_texts=["差", "中", "好"])
+        selected: list[int] = []
+        monkeypatch.setattr(runtime_answerers, "normalize_droplist_probs", lambda weights, count: [0.2, 0.3, 0.5][:count])
+        monkeypatch.setattr(runtime_answerers, "apply_persona_boost", lambda texts, probs: probs)
+        monkeypatch.setattr(runtime_answerers, "is_strict_ratio_question", lambda _ctx, _current: False)
+        monkeypatch.setattr(runtime_answerers, "resolve_distribution_probabilities", lambda probs, *_args, **_kwargs: probs)
+        monkeypatch.setattr(runtime_answerers, "enforce_reference_rank_order", lambda probs, _reference: probs)
+        monkeypatch.setattr(runtime_answerers, "get_tendency_index", lambda *_args, **_kwargs: 2)
+
+        async def _click_choice_input(_driver, _current, _input_type, selected_index):
+            selected.append(selected_index)
+            return True
+
+        async def _resolve_fill(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(runtime_answerers, "_click_choice_input", _click_choice_input)
+        monkeypatch.setattr(runtime_answerers, "resolve_runtime_option_fill_text_from_config", _resolve_fill)
+        monkeypatch.setattr(runtime_answerers, "record_answer", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(runtime_answerers, "record_pending_distribution_choice", lambda *_args, **_kwargs: None)
+
+        assert await runtime_answerers._answer_wjx_single(object(), question, 0, ctx, psycho_plan=object())
+
+        assert selected == [2]
+
+    @pytest.mark.asyncio
     async def test_answer_wjx_dropdown_covers_dimension_and_click_fail_paths(self, monkeypatch, caplog) -> None:
         ctx = _ctx(question_dimension_map={7: "D1"})
         question = _question(7, option_texts=["一", "二", "三"])

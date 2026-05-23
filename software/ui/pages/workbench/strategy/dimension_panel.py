@@ -248,13 +248,13 @@ class DimensionGroupingPanel(QWidget):
     ) -> List[Tuple[int, QuestionEntry, SurveyQuestionMeta]]:
         rows: List[Tuple[int, QuestionEntry, SurveyQuestionMeta]] = []
         for idx, entry in enumerate(self._entries):
-            if not question_supports_dimension_grouping(entry):
-                continue
             question_num = to_int(getattr(entry, "question_num", idx + 1), idx + 1)
             info = self._question_info_map.get(
                 question_num,
                 ensure_survey_question_meta({}, index=question_num),
             )
+            if not question_supports_dimension_grouping(entry, info):
+                continue
             rows.append((idx, entry, info))
         return rows
 
@@ -274,6 +274,7 @@ class DimensionGroupingPanel(QWidget):
         if type_code == "5" and info.get("is_rating"):
             return "评价题"
         return {
+            "single": "量表型单选",
             "scale": "量表题",
             "score": "评价题",
             "matrix": "矩阵题",

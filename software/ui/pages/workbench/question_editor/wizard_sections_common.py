@@ -155,8 +155,9 @@ class WizardSectionsCommonMixin:
 
         label = BodyLabel(text, container)
         label.setWordWrap(True)
-        label.setMinimumWidth(min(96, text_width))
-        label.setMaximumWidth(text_width)
+        label.setMinimumWidth(min(96, text_width) if text_width > 0 else 96)
+        if text_width > 0:
+            label.setMaximumWidth(text_width)
         label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         label.setStyleSheet(font_style)

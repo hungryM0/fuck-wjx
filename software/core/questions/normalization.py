@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 from software.app.config import DEFAULT_FILL_TEXT, DIMENSION_UNGROUPED
 from software.core.psychometrics import JOINT_PSYCHOMETRIC_SUPPORTED_TYPES
+from software.core.psychometrics.ordinal_options import infer_ordinal_option_mapping
 from software.core.questions.schema import (
     GLOBAL_RELIABILITY_DIMENSION,
     QuestionEntry,
@@ -48,8 +49,13 @@ def _resolve_runtime_dimension(
     *,
     reliability_mode_enabled: bool,
     strict_ratio: bool,
+    allows_reliability: Optional[bool] = None,
 ) -> Optional[str]:
-    allows_joint_ratio = str(getattr(entry, "question_type", "") or "").strip() in JOINT_PSYCHOMETRIC_SUPPORTED_TYPES
+    allows_joint_ratio = (
+        bool(allows_reliability)
+        if allows_reliability is not None
+        else str(getattr(entry, "question_type", "") or "").strip() in JOINT_PSYCHOMETRIC_SUPPORTED_TYPES
+    )
     if not reliability_mode_enabled or (strict_ratio and not allows_joint_ratio):
         return None
     raw_dimension = str(getattr(entry, "dimension", "") or "").strip()
@@ -113,6 +119,7 @@ def configure_probabilities(
     target.question_config_index_map = {}
     target.provider_question_config_index_map = {}
     target.question_dimension_map = {}
+    target.question_ordinal_score_map = {}
     target.question_strict_ratio_map = {}
     target.question_psycho_bias_map = {}
 
@@ -151,6 +158,20 @@ def configure_probabilities(
             mapped_value = ("single", idx_single)
             target.question_config_index_map[question_num] = mapped_value
             _remember_provider_mapping(entry, mapped_value)
+            raw_meta = getattr(target, "questions_metadata", {}).get(question_num) if hasattr(target, "questions_metadata") else None
+            option_texts = list(getattr(raw_meta, "option_texts", []) or [])
+            ordinal_mapping = infer_ordinal_option_mapping(option_texts)
+            is_ordinal_single = ordinal_mapping is not None and ordinal_mapping.option_count == max(1, entry.option_count)
+            if is_ordinal_single and ordinal_mapping is not None:
+                target.question_ordinal_score_map[question_num] = list(ordinal_mapping.score_by_choice_index)
+                target.question_dimension_map[question_num] = _resolve_runtime_dimension(
+                    entry,
+                    reliability_mode_enabled=reliability_mode_enabled,
+                    strict_ratio=strict_ratio,
+                    allows_reliability=True,
+                )
+                target.question_psycho_bias_map[question_num] = str(getattr(entry, "psycho_bias", "custom") or "custom")
+                reliability_candidates.append((question_num, strict_ratio, entry.question_type))
             idx_single += 1
             target.single_prob.append(_normalize_single_like_prob_config(probs, entry.option_count))
             target.single_option_fill_texts.append(_normalize_option_fill_texts(entry.option_fill_texts, entry.option_count))

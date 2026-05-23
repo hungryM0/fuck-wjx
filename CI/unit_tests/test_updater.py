@@ -11,33 +11,40 @@ class UpdateHelperTests:
         preview = updater._preview_release_notes('# 标题\n\n---\n\n**加粗** 和 ~~删除线~~\n\n* 列表项\n\n普通段落', 18)
         assert preview == '标题\n\n加粗 和 删除线\n- 列表项\n...'
 
-    def test_check_updates_falls_back_to_github_when_velopack_manager_missing(self) -> None:
+    def test_check_updates_uses_velopack_feed_when_manager_missing(self) -> None:
         with (
             patch.object(updater, "__VERSION__", "3.1.1"),
             patch.object(updater, "_safe_create_update_manager", return_value=None),
-            patch.object(updater, "_fetch_latest_github_release", return_value={"tag_name": "v3.1.2", "body": "GitHub 说明", "html_url": "https://example.com/release"}),
+            patch.object(
+                updater,
+                "_fetch_latest_velopack_feed_release",
+                return_value={"Version": "3.1.2", "Type": "Full"},
+            ),
         ):
             result = updater.UpdateManager.check_updates()
         assert result["status"] == "outdated"
         assert result["has_update"] is True
         assert result["version"] == "3.1.2"
-        assert result["release_notes"] == "GitHub 说明"
         assert result["manual_only"] is True
-        assert result["manual_release_url"] == "https://example.com/release"
+        assert result["manual_release_url"].endswith("/v3.1.2")
 
-    def test_check_updates_returns_unknown_when_github_fallback_missing(self) -> None:
+    def test_check_updates_returns_unknown_when_feed_fallback_missing(self) -> None:
         with (
             patch.object(updater, "_safe_create_update_manager", return_value=None),
-            patch.object(updater, "_fetch_latest_github_release", return_value=None),
+            patch.object(updater, "_fetch_latest_velopack_feed_release", return_value=None),
         ):
             result = updater.UpdateManager.check_updates()
         assert result["status"] == "unknown"
         assert result["has_update"] is False
 
-    def test_check_updates_returns_preview_when_github_latest_is_older(self) -> None:
+    def test_check_updates_returns_preview_when_feed_latest_is_older(self) -> None:
         with (
             patch.object(updater, "_safe_create_update_manager", return_value=None),
-            patch.object(updater, "_fetch_latest_github_release", return_value={"tag_name": "v3.1.0", "body": "旧版本说明", "html_url": "https://example.com/release"}),
+            patch.object(
+                updater,
+                "_fetch_latest_velopack_feed_release",
+                return_value={"Version": "3.1.0", "Type": "Full"},
+            ),
             patch.object(updater, "__VERSION__", "3.1.2b1"),
         ):
             result = updater.UpdateManager.check_updates()

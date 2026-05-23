@@ -143,10 +143,10 @@ class WizardSectionsMixin(
                     scope="option",
                     media_index=col_idx,
                     text=opt_text,
-                    text_width=140,
+                    text_width=0,
                     font_style="font-size: 13px;",
                 )
-                header_row.addWidget(option_widget, 0)
+                header_row.addWidget(option_widget, 1)
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, parent_widget)
                 slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)

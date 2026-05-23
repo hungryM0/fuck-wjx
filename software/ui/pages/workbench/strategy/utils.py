@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable, List, Optional
 
 from software.app.config import DIMENSION_UNGROUPED
+from software.core.psychometrics.ordinal_options import infer_ordinal_option_mapping
 from software.core.questions.config import QuestionEntry
 
 DIMENSION_SUPPORTED_TYPES = {"scale", "score", "matrix"}
@@ -30,10 +31,14 @@ def entry_dimension_label(entry: QuestionEntry) -> str:
     return normalize_dimension_name(getattr(entry, "dimension", None)) or DIMENSION_UNGROUPED
 
 
-def question_supports_dimension_grouping(entry: QuestionEntry) -> bool:
-    return (
-        str(getattr(entry, "question_type", "") or "").strip().lower() in DIMENSION_SUPPORTED_TYPES
-    )
+def question_supports_dimension_grouping(entry: QuestionEntry, info: Any = None) -> bool:
+    question_type = str(getattr(entry, "question_type", "") or "").strip().lower()
+    if question_type in DIMENSION_SUPPORTED_TYPES:
+        return True
+    if question_type != "single":
+        return False
+    option_texts = list(getattr(info, "option_texts", []) or getattr(entry, "texts", []) or [])
+    return infer_ordinal_option_mapping(option_texts) is not None
 
 
 def sanitize_dimension_groups(

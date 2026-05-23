@@ -17,6 +17,7 @@ from software.core.questions.schema import (
     _TEXT_RANDOM_NAME,
     _TEXT_RANDOM_NAME_TOKEN,
 )
+from software.providers.contracts import SurveyQuestionMeta
 
 
 class NormalizationRuntimeTests:
@@ -147,6 +148,35 @@ class NormalizationRuntimeTests:
             1: GLOBAL_RELIABILITY_DIMENSION,
             2: GLOBAL_RELIABILITY_DIMENSION,
         }
+
+    def test_configure_probabilities_adds_only_ordinal_single_to_reliability(self) -> None:
+        ctx = SimpleNamespace(
+            questions_metadata={
+                1: SurveyQuestionMeta(
+                    num=1,
+                    title="满意度",
+                    type_code="3",
+                    options=5,
+                    option_texts=["非常满意", "满意", "一般", "不满意", "非常不满意"],
+                ),
+                2: SurveyQuestionMeta(
+                    num=2,
+                    title="性别",
+                    type_code="3",
+                    options=2,
+                    option_texts=["男", "女"],
+                ),
+            }
+        )
+        entries = [
+            QuestionEntry("single", [1, 1, 1, 1, 1], option_count=5, question_num=1),
+            QuestionEntry("single", [1, 1], option_count=2, question_num=2),
+        ]
+
+        configure_probabilities(entries, ctx)
+
+        assert ctx.question_dimension_map == {1: GLOBAL_RELIABILITY_DIMENSION}
+        assert ctx.question_ordinal_score_map == {1: [4, 3, 2, 1, 0]}
 
     @pytest.mark.parametrize(
         ("entry", "message"),

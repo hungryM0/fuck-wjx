@@ -58,7 +58,7 @@ async def _answer_question_by_meta(
         return False
     entry_type, config_index = config_entry
     if entry_type == "single":
-        await _answer_qq_single(driver, question, config_index, ctx)
+        await _answer_qq_single(driver, question, config_index, ctx, psycho_plan=psycho_plan)
         return True
     if entry_type == "multiple":
         await _answer_qq_multiple(driver, question, config_index, ctx)

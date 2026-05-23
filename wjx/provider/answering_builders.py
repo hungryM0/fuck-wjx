@@ -57,6 +57,8 @@ async def _build_wjx_single_action(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any] = None,
 ) -> Optional[AnswerAction]:
     config = ctx.config
     current = int(question.num or 0)
@@ -70,18 +72,37 @@ async def _build_wjx_single_action(
         forced_index = _valid_forced_choice_index(question.forced_option_index, option_count)
 
     strict_ratio = False
+    dimension = config.question_dimension_map.get(current)
+    has_reliability_dimension = isinstance(dimension, str) and bool(str(dimension).strip())
     if forced_index is None:
         probabilities = config.single_prob[config_index] if config_index < len(config.single_prob) else -1
         probabilities = normalize_droplist_probs(probabilities, option_count)
         strict_ratio = is_strict_ratio_question(ctx, current)
         if not strict_ratio:
             probabilities = apply_persona_boost(option_texts, probabilities)
-        probabilities = apply_single_like_consistency(probabilities, current)
-        if strict_ratio:
+        if not has_reliability_dimension:
+            probabilities = apply_single_like_consistency(probabilities, current)
+        if strict_ratio or has_reliability_dimension:
             strict_reference = list(probabilities)
-            probabilities = resolve_distribution_probabilities(probabilities, option_count, ctx, current)
+            probabilities = resolve_distribution_probabilities(
+                probabilities,
+                option_count,
+                ctx,
+                current,
+                psycho_plan=psycho_plan,
+            )
             probabilities = enforce_reference_rank_order(probabilities, strict_reference)
-        selected_index = weighted_index(probabilities)
+        selected_index = (
+            get_tendency_index(
+                option_count,
+                probabilities,
+                dimension=dimension,
+                psycho_plan=psycho_plan,
+                question_index=current,
+            )
+            if has_reliability_dimension
+            else weighted_index(probabilities)
+        )
     else:
         selected_index = forced_index
 
@@ -103,7 +124,7 @@ async def _build_wjx_single_action(
         option_fill_texts=((selected_index, fill_value),) if fill_value else (),
         selected_texts=tuple(selected_texts),
         record_type="single",
-        pending_distribution_choices=((selected_index, option_count, None),) if forced_index is None and strict_ratio else (),
+        pending_distribution_choices=((selected_index, option_count, None),) if forced_index is None and (strict_ratio or has_reliability_dimension) else (),
     )
 
 
@@ -556,7 +577,7 @@ async def build_answer_action(
         return None
     entry_type, config_index = config_entry
     if entry_type == "single":
-        return await _build_wjx_single_action(driver, question, config_index, ctx)
+        return await _build_wjx_single_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
     if entry_type == "multiple":
         return await _build_wjx_multiple_action(driver, question, config_index, ctx)
     if entry_type == "dropdown":

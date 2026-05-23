@@ -294,7 +294,7 @@ class UpdateManager:
 
         manager = _safe_create_update_manager()
         if manager is None:
-            return _build_github_update_result(current_version)
+            return _build_velopack_feed_update_result(current_version)
 
         try:
             installed_version = str(manager.get_current_version() or current_version).strip() or current_version

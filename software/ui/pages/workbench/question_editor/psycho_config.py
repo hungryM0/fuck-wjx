@@ -1,6 +1,8 @@
 """倾向预设配置：常量与权重生成工具函数"""
 
-from typing import List
+from typing import Any, List
+
+from software.core.psychometrics.ordinal_options import infer_ordinal_option_mapping
 
 
 # 支持倾向预设的题型
@@ -38,3 +40,12 @@ def build_bias_weights(option_count: int, bias: str) -> List[float]:
     if not max_val:
         return [round(100 / count)] * count
     return [round(v / max_val * 100) for v in raw]
+
+
+def entry_supports_psycho_presets(entry: Any, option_texts: List[str] | None = None) -> bool:
+    question_type = str(getattr(entry, "question_type", "") or "").strip().lower()
+    if question_type in PSYCHO_SUPPORTED_TYPES:
+        return True
+    if question_type != "single":
+        return False
+    return infer_ordinal_option_mapping(option_texts or []) is not None

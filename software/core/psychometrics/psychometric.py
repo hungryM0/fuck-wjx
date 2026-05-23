@@ -86,10 +86,40 @@ class PsychometricItem:
     option_count: int = 5  # 选项数量
     bias: str = "center"  # 偏向
     target_probabilities: Optional[List[float]] = None  # 最终目标配比（无则按预设补）
+    score_by_choice_index: Optional[List[int]] = None
 
     @property
     def choice_key(self) -> str:
         return _build_choice_key(self.question_index, self.row_index)
+
+    def choice_index_for_score(self, score_index: int) -> int:
+        if not isinstance(self.score_by_choice_index, list) or not self.score_by_choice_index:
+            return max(0, min(self.option_count - 1, int(score_index or 0)))
+        try:
+            target_score = int(score_index or 0)
+        except Exception:
+            target_score = 0
+        for choice_index, mapped_score in enumerate(self.score_by_choice_index):
+            try:
+                if int(mapped_score) == target_score:
+                    return max(0, min(self.option_count - 1, choice_index))
+            except Exception:
+                continue
+        return max(0, min(self.option_count - 1, target_score))
+
+    def score_for_choice_index(self, choice_index: int) -> int:
+        if not isinstance(self.score_by_choice_index, list) or not self.score_by_choice_index:
+            return max(0, min(self.option_count - 1, int(choice_index or 0)))
+        try:
+            index = int(choice_index or 0)
+        except Exception:
+            index = 0
+        if 0 <= index < len(self.score_by_choice_index):
+            try:
+                return max(0, min(self.option_count - 1, int(self.score_by_choice_index[index])))
+            except Exception:
+                return max(0, min(self.option_count - 1, index))
+        return max(0, min(self.option_count - 1, index))
 
 
 def _coerce_psychometric_item(raw_item: Any) -> Optional[PsychometricItem]:
@@ -104,6 +134,7 @@ def _coerce_psychometric_item(raw_item: Any) -> Optional[PsychometricItem]:
             option_count=raw_item.option_count,
             bias=raw_item.bias,
             target_probabilities=list(probabilities),
+            score_by_choice_index=list(raw_item.score_by_choice_index or []) or None,
         )
 
     if isinstance(raw_item, (tuple, list)) and len(raw_item) >= 5:
@@ -119,6 +150,7 @@ def _coerce_psychometric_item(raw_item: Any) -> Optional[PsychometricItem]:
             option_count=max(2, int(opt_count or 5)),
             bias=str(bias or "center"),
             target_probabilities=list(probabilities),
+            score_by_choice_index=None,
         )
 
     to_runtime_item = getattr(raw_item, "to_runtime_item", None)
@@ -145,6 +177,7 @@ def _coerce_psychometric_item(raw_item: Any) -> Optional[PsychometricItem]:
         option_count=option_count,
         bias=bias,
         target_probabilities=list(probabilities),
+        score_by_choice_index=list(getattr(raw_item, "score_by_choice_index", None) or []) or None,
     )
 
 
@@ -227,7 +260,7 @@ def build_psychometric_plan(
     for item in items:
         item_orientation = dimension_orientation.item_orientations.get(item.choice_key)
         effective_bias = item_orientation.direction if item_orientation is not None else item.bias
-        choice = generate_psycho_answer(
+        score_index = generate_psycho_answer(
             theta=theta,
             option_count=item.option_count,
             bias=effective_bias,
@@ -235,7 +268,7 @@ def build_psychometric_plan(
             is_reversed=item.choice_key in reversed_keys,
         )
 
-        choices[_build_choice_key(item.question_index, item.row_index)] = choice
+        choices[_build_choice_key(item.question_index, item.row_index)] = item.choice_index_for_score(score_index)
 
     logger.info(
         "心理测量计划已启用 | 目标α=%.2f 题数=%d θ=%.2f σ_e=%.2f 主方向=%s 反向题=%d",

@@ -57,9 +57,11 @@ async def _answer_wjx_single(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any] = None,
 ) -> bool:
     _sync_patch_targets()
-    return await _direct._answer_wjx_single(driver, question, config_index, ctx)
+    return await _direct._answer_wjx_single(driver, question, config_index, ctx, psycho_plan=psycho_plan)
 
 
 async def _answer_wjx_dropdown(
@@ -155,9 +157,11 @@ async def _build_wjx_single_action(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any] = None,
 ) -> Optional[AnswerAction]:
     _sync_patch_targets()
-    return await _builders._build_wjx_single_action(driver, question, config_index, ctx)
+    return await _builders._build_wjx_single_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
 
 
 async def _build_wjx_dropdown_action(

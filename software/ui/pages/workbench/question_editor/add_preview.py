@@ -23,6 +23,7 @@ from software.logging.log_utils import log_suppressed_exception
 from .constants import (
     ANSWER_WEIGHT_MAX,
     ANSWER_WEIGHT_MIN,
+    MULTIPLE_OPTION_WEIGHT_MAX,
     SLIDER_TARGET_MAX,
     SLIDER_TARGET_MIN,
     _get_type_label,
@@ -366,6 +367,8 @@ class AddPreviewMixin:
             slider = NoWheelSlider(Qt.Orientation.Horizontal, opt_widget)
             if is_slider:
                 slider.setRange(SLIDER_TARGET_MIN, SLIDER_TARGET_MAX)
+            elif is_multiple:
+                slider.setRange(ANSWER_WEIGHT_MIN, MULTIPLE_OPTION_WEIGHT_MAX)
             else:
                 slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
             slider.setValue(

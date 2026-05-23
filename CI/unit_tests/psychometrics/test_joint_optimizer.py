@@ -20,6 +20,24 @@ class JointOptimizerTests:
         assert mood_items[2].bias == 'center'
         assert career_items[0].bias == 'right'
 
+    def test_build_psychometric_blueprint_includes_only_mapped_ordinal_single(self) -> None:
+        config = ExecutionConfig(
+            question_config_index_map={1: ('single', 0), 2: ('single', 1)},
+            question_dimension_map={1: 'mood', 2: 'mood'},
+            question_psycho_bias_map={1: 'custom', 2: 'custom'},
+            question_ordinal_score_map={1: [4, 3, 2, 1, 0]},
+            questions_metadata={1: {'options': 5}, 2: {'options': 2}},
+            single_prob=[[1, 1, 1, 1, 1], [1, 1]],
+        )
+
+        grouped = build_psychometric_blueprint(config)
+
+        assert list(grouped.keys()) == ['mood']
+        assert len(grouped['mood']) == 1
+        assert grouped['mood'][0].question_type == 'single'
+        assert grouped['mood'][0].score_by_choice_index == [4, 3, 2, 1, 0]
+        assert grouped['mood'][0].choice_index_for_score(4) == 0
+
     def test_build_joint_psychometric_answer_plan_returns_choices_and_skip_diagnostics(self) -> None:
         config = ExecutionConfig(target_num=4, psycho_target_alpha=0.9, question_config_index_map={1: ('scale', 0), 2: ('scale', 1), 3: ('scale', 2), 4: ('scale', 3)}, question_dimension_map={1: 'stress', 2: 'stress', 3: 'stress', 4: 'single-item'}, question_psycho_bias_map={1: 'custom', 2: 'custom', 3: 'custom', 4: 'custom'}, questions_metadata={1: {'options': 5}, 2: {'options': 5}, 3: {'options': 5}, 4: {'options': 5}}, scale_prob=[[1, 0, 0, 0, 0], [1, 0, 0, 0, 0], [0, 0, 0, 0, 1], [0, 1, 0, 0, 0]])
         with patch('software.core.psychometrics.joint_optimizer.randn', return_value=0.0):

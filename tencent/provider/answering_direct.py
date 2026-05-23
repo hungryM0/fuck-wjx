@@ -68,6 +68,8 @@ async def _answer_qq_single(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any] = None,
 ) -> None:
     config = ctx.config
     current = int(question.num or 0)
@@ -76,18 +78,36 @@ async def _answer_qq_single(
     probabilities = config.single_prob[config_index] if config_index < len(config.single_prob) else -1
     probabilities = normalize_droplist_probs(probabilities, option_count)
     strict_ratio = is_strict_ratio_question(ctx, current)
+    dimension = config.question_dimension_map.get(current)
+    has_reliability_dimension = isinstance(dimension, str) and bool(str(dimension).strip())
     if not strict_ratio:
         probabilities = apply_persona_boost(option_texts, probabilities)
-    probabilities = apply_single_like_consistency(probabilities, current)
-    if strict_ratio:
+    if not has_reliability_dimension:
+        probabilities = apply_single_like_consistency(probabilities, current)
+    if strict_ratio or has_reliability_dimension:
         strict_reference = list(probabilities)
-        probabilities = resolve_distribution_probabilities(probabilities, option_count, ctx, current)
+        probabilities = resolve_distribution_probabilities(
+            probabilities,
+            option_count,
+            ctx,
+            current,
+            psycho_plan=psycho_plan,
+        )
         probabilities = enforce_reference_rank_order(probabilities, strict_reference)
-    selected_index = weighted_index(probabilities)
+    if has_reliability_dimension:
+        selected_index = get_tendency_index(
+            option_count,
+            probabilities,
+            dimension=dimension,
+            psycho_plan=psycho_plan,
+            question_index=current,
+        )
+    else:
+        selected_index = weighted_index(probabilities)
     if not await _click_choice_input(driver, str(question.provider_question_id or ""), "radio", selected_index):
         logging.warning("腾讯问卷第%d题（单选）点击未生效，已跳过。", current)
         return
-    if strict_ratio:
+    if strict_ratio or has_reliability_dimension:
         record_pending_distribution_choice(ctx, current, selected_index, option_count)
     selected_text = option_texts[selected_index] if selected_index < len(option_texts) else ""
     fill_entries = (

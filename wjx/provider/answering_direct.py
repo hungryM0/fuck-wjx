@@ -76,6 +76,8 @@ async def _answer_wjx_single(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any] = None,
 ) -> bool:
     config = ctx.config
     current = int(question.num or 0)
@@ -100,18 +102,36 @@ async def _answer_wjx_single(
         if 0 <= candidate < option_count:
             forced_index = candidate
 
+    dimension = config.question_dimension_map.get(current)
+    has_reliability_dimension = isinstance(dimension, str) and bool(str(dimension).strip())
     if forced_index is None:
         probabilities = config.single_prob[config_index] if config_index < len(config.single_prob) else -1
         probabilities = normalize_droplist_probs(probabilities, option_count)
         strict_ratio = is_strict_ratio_question(ctx, current)
         if not strict_ratio:
             probabilities = apply_persona_boost(option_texts, probabilities)
-        probabilities = apply_single_like_consistency(probabilities, current)
-        if strict_ratio:
+        if not has_reliability_dimension:
+            probabilities = apply_single_like_consistency(probabilities, current)
+        if strict_ratio or has_reliability_dimension:
             strict_reference = list(probabilities)
-            probabilities = resolve_distribution_probabilities(probabilities, option_count, ctx, current)
+            probabilities = resolve_distribution_probabilities(
+                probabilities,
+                option_count,
+                ctx,
+                current,
+                psycho_plan=psycho_plan,
+            )
             probabilities = enforce_reference_rank_order(probabilities, strict_reference)
-        selected_index = weighted_index(probabilities)
+        if has_reliability_dimension:
+            selected_index = get_tendency_index(
+                option_count,
+                probabilities,
+                dimension=dimension,
+                psycho_plan=psycho_plan,
+                question_index=current,
+            )
+        else:
+            selected_index = weighted_index(probabilities)
     else:
         selected_index = forced_index
         strict_ratio = False
@@ -138,7 +158,7 @@ async def _answer_wjx_single(
     ):
         selected_text = f"{selected_text} / {fill_value}" if selected_text else fill_value
 
-    if forced_index is None and strict_ratio:
+    if forced_index is None and (strict_ratio or has_reliability_dimension):
         record_pending_distribution_choice(ctx, current, selected_index, option_count)
     record_answer(current, "single", selected_indices=[selected_index], selected_texts=[selected_text])
     return True

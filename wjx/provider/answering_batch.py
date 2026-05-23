@@ -113,7 +113,7 @@ async def answer_question_by_meta(
     entry_type, config_index = config_entry
     await _prepare_question_interaction(driver, int(question.num or 0))
     if entry_type == "single":
-        return bool(await _answer_wjx_single(driver, question, config_index, ctx))
+        return bool(await _answer_wjx_single(driver, question, config_index, ctx, psycho_plan=psycho_plan))
     if entry_type == "multiple":
         return bool(await _answer_wjx_multiple(driver, question, config_index, ctx))
     if entry_type == "dropdown":

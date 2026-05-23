@@ -346,6 +346,46 @@ class WjxHtmlParserTests:
         assert by_num[22]["display_num"] == 21
         assert by_num[23]["display_num"] == 22
 
+    def test_parse_survey_questions_marks_hidden_relation_minus_one_blocks_as_description(self) -> None:
+        html = """
+        <html>
+          <body>
+            <div id="divQuestion">
+              <fieldset>
+                <div topic="8" id="div8" style="display:none;" relation="-1" type="1">
+                  <div class="field-label">
+                    <div class="topicnumber">8.</div>
+                    <div class="topichtml">（二）接触渠道与接触频率</div>
+                  </div>
+                  <div class="ui-input-text">
+                    <input type="text" id="q8" name="q8" />
+                  </div>
+                </div>
+                <div topic="9" id="div9" req="1" type="4">
+                  <div class="field-label">
+                    <span class="req">*</span>
+                    <div class="topicnumber">8.</div>
+                    <div class="topichtml">您主要通过哪些渠道接触韶山文化相关内容？（可多选）</div>
+                  </div>
+                  <div class="ui-controlgroup">
+                    <div><span class="label">A. 短视频平台</span></div>
+                    <div><span class="label">B. 社交平台</span></div>
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+          </body>
+        </html>
+        """
+
+        questions = parse_survey_questions_from_html(html)
+
+        assert questions[0]["num"] == 8
+        assert questions[0]["is_description"]
+        assert questions[1]["num"] == 9
+        assert questions[1]["display_num"] == 1
+        assert not questions[1]["is_description"]
+
     def test_parse_survey_questions_from_html_falls_back_to_nested_topic_divs_and_slider_matrix(self) -> None:
         html = """
         <html>

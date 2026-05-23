@@ -88,9 +88,11 @@ async def _answer_qq_single(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any] = None,
 ) -> None:
     _sync_patch_targets()
-    await _direct._answer_qq_single(driver, question, config_index, ctx)
+    await _direct._answer_qq_single(driver, question, config_index, ctx, psycho_plan=psycho_plan)
 
 
 async def _answer_qq_dropdown(
@@ -172,9 +174,11 @@ async def _build_qq_single_action(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any] = None,
 ) -> Optional[AnswerAction]:
     _sync_patch_targets()
-    return await _builders._build_qq_single_action(driver, question, config_index, ctx)
+    return await _builders._build_qq_single_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
 
 
 async def _build_qq_text_action(

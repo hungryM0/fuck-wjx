@@ -170,6 +170,7 @@ def build_answer_action(
     config_index: int,
     config: Any,
     question_meta: Any,
+    psycho_plan: Any = None,
 ) -> Optional[AnswerAction]:
     _sync_patch_targets()
     return _builders.build_answer_action(
@@ -179,6 +180,7 @@ def build_answer_action(
         config_index=config_index,
         config=config,
         question_meta=question_meta,
+        psycho_plan=psycho_plan,
     )
 
 

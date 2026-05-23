@@ -305,6 +305,39 @@ async def _answer_order(page: Any, root: Any) -> bool:
     return await _ANSWER_ORDER(page, root)
 
 
+def _resolve_plan_choice(
+    psycho_plan: Any,
+    question_num: int,
+    *,
+    row_index: int | None = None,
+) -> Optional[int]:
+    if psycho_plan is None or not hasattr(psycho_plan, "get_choice"):
+        return None
+    try:
+        choice = psycho_plan.get_choice(int(question_num), row_index)
+    except Exception:
+        return None
+    try:
+        selected = int(choice)
+    except Exception:
+        return None
+    return selected if selected >= 0 else None
+
+
+def _one_hot_weight(choice_index: Optional[int], option_count: Any) -> Any:
+    if choice_index is None:
+        return -1
+    try:
+        count = int(option_count or 0)
+    except Exception:
+        count = 0
+    if count <= 0 or choice_index >= count:
+        return -1
+    weights = [0.0] * count
+    weights[int(choice_index)] = 1.0
+    return weights
+
+
 async def _attempt_answer_current_root(
     page: Any,
     root: Any,
@@ -312,6 +345,7 @@ async def _attempt_answer_current_root(
     config: ExecutionConfig,
     *,
     fallback_page_id: Any = None,
+    psycho_plan: Optional[Any] = None,
 ) -> bool:
     resolved_question_num, config_entry, question_meta = await _resolve_config_binding(
         page,
@@ -328,17 +362,24 @@ async def _attempt_answer_current_root(
     entry_type, config_index = config_entry
     action_attempted = False
     if entry_type == "single":
-        weights = config.single_prob[config_index] if config_index < len(config.single_prob) else -1
+        plan_choice = _resolve_plan_choice(psycho_plan, resolved_question_num)
+        weights = _one_hot_weight(plan_choice, getattr(question_meta, "options", 0)) if plan_choice is not None else config.single_prob[config_index] if config_index < len(config.single_prob) else -1
         action_attempted = bool(await _answer_single_like(page, root, weights, 0))
     elif entry_type in {"scale", "score"}:
-        weights = config.scale_prob[config_index] if config_index < len(config.scale_prob) else -1
+        plan_choice = _resolve_plan_choice(psycho_plan, resolved_question_num)
+        weights = _one_hot_weight(plan_choice, getattr(question_meta, "options", 0)) if plan_choice is not None else config.scale_prob[config_index] if config_index < len(config.scale_prob) else -1
         action_attempted = bool(await _answer_scale(page, root, weights))
     elif entry_type == "matrix":
         row_count = max(1, int(getattr(question_meta, "rows", 1) or 1))
         row_weights = []
         for row_offset in range(row_count):
             matrix_index = config_index + row_offset
-            row_weights.append(config.matrix_prob[matrix_index] if matrix_index < len(config.matrix_prob) else -1)
+            plan_choice = _resolve_plan_choice(psycho_plan, resolved_question_num, row_index=row_offset)
+            row_weights.append(
+                _one_hot_weight(plan_choice, getattr(question_meta, "options", 0))
+                if plan_choice is not None
+                else config.matrix_prob[matrix_index] if matrix_index < len(config.matrix_prob) else -1
+            )
         action_attempted = bool(await _answer_matrix(page, root, row_weights, config_index))
     elif entry_type == "dropdown":
         weights = config.droplist_prob[config_index] if config_index < len(config.droplist_prob) else -1
@@ -394,6 +435,7 @@ async def _answer_pending_roots_batch(
     config: ExecutionConfig,
     *,
     page_index: int,
+    psycho_plan: Optional[Any] = None,
 ) -> set[str]:
     if not pending_roots:
         return set()
@@ -423,6 +465,7 @@ async def _answer_pending_roots_batch(
             config_index=config_index,
             config=config,
             question_meta=question_meta,
+            psycho_plan=psycho_plan,
         )
         if action is None:
             continue
@@ -437,6 +480,33 @@ async def _answer_pending_roots_batch(
         if question_key:
             answered_keys.add(question_key)
     return answered_keys
+
+
+async def _attempt_answer_current_root_with_optional_plan(
+    page: Any,
+    root: Any,
+    question_num: int,
+    config: ExecutionConfig,
+    *,
+    fallback_page_id: Any = None,
+    psycho_plan: Optional[Any] = None,
+) -> bool:
+    if psycho_plan is None:
+        return await _attempt_answer_current_root(
+            page,
+            root,
+            question_num,
+            config,
+            fallback_page_id=fallback_page_id,
+        )
+    return await _attempt_answer_current_root(
+        page,
+        root,
+        question_num,
+        config,
+        fallback_page_id=fallback_page_id,
+        psycho_plan=psycho_plan,
+    )
 
 
 async def refill_required_questions_on_current_page(
@@ -487,12 +557,13 @@ async def refill_required_questions_on_current_page(
                 state.update_thread_status(thread_name or "Worker-?", f"补答第{resolved_question_num}题", running=True)
             except Exception:
                 logging.info("更新 Credamo 线程状态失败：补答第%s题", resolved_question_num, exc_info=True)
-        if await _attempt_answer_current_root(
+        if await _attempt_answer_current_root_with_optional_plan(
             page,
             root,
             question_num,
             config,
             fallback_page_id=fallback_page_id,
+            psycho_plan=getattr(runtime_state, "psycho_plan", None),
         ):
             filled_count += 1
     return filled_count
@@ -555,6 +626,7 @@ async def brush_credamo(
                 pending_roots,
                 config,
                 page_index=page_index,
+                psycho_plan=psycho_plan,
             )
             if batch_answered_keys:
                 answered_keys.update(batch_answered_keys)
@@ -592,12 +664,13 @@ async def brush_credamo(
                 except Exception:
                     logging.info("更新 Credamo 线程进度失败", exc_info=True)
 
-                answered = await _attempt_answer_current_root(
+                answered = await _attempt_answer_current_root_with_optional_plan(
                     page,
                     root,
                     question_num,
                     config,
                     fallback_page_id=page_index,
+                    psycho_plan=psycho_plan,
                 )
                 if answered:
                     answered_keys.add(question_key)

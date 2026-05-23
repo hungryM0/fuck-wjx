@@ -405,6 +405,19 @@ class CredamoRuntimeAnswerersTests:
         assert action is not None
         assert action.selected_indices == (1,)
 
+        plan_action = runtime_answerers.build_answer_action(
+            root_index=0,
+            question_num=3,
+            entry_type="single",
+            config_index=0,
+            config=config,
+            question_meta=SimpleNamespace(options=2),
+            psycho_plan=SimpleNamespace(get_choice=lambda *_args: 0),
+        )
+
+        assert plan_action is not None
+        assert plan_action.selected_indices == (0,)
+
         class _FailPage:
             async def evaluate(self, *_args):
                 raise RuntimeError("js boom")

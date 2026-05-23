@@ -23,7 +23,12 @@ from software.providers.contracts import (
 )
 from software.ui.widgets.no_wheel import NoWheelSlider
 
-from .constants import ANSWER_WEIGHT_MAX, ANSWER_WEIGHT_MIN, SLIDER_TARGET_MAX, _get_entry_type_label
+from .constants import (
+    ANSWER_WEIGHT_MIN,
+    MULTIPLE_OPTION_WEIGHT_MAX,
+    SLIDER_TARGET_MAX,
+    _get_entry_type_label,
+)
 from .question_media_preview import QuestionMediaStrip
 from .utils import _apply_label_color, _shorten_text, resolve_display_question_num
 from .wizard_validation import (
@@ -458,18 +463,17 @@ class WizardCardsMixin:
                 text_label = BodyLabel(select_text, card)
                 text_label.setWordWrap(True)
                 text_label.setMinimumWidth(96)
-                text_label.setMaximumWidth(140)
                 text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
                 text_label.setStyleSheet("font-size: 13px;")
-                header_row.addWidget(text_label, 0)
+                header_row.addWidget(text_label, 1)
 
                 slider = NoWheelSlider(Qt.Orientation.Horizontal, card)
-                slider.setRange(ANSWER_WEIGHT_MIN, ANSWER_WEIGHT_MAX)
+                slider.setRange(ANSWER_WEIGHT_MIN, MULTIPLE_OPTION_WEIGHT_MAX)
                 slider.setValue(
                     int(
                         min(
-                            ANSWER_WEIGHT_MAX,
+                            MULTIPLE_OPTION_WEIGHT_MAX,
                             max(ANSWER_WEIGHT_MIN, round(weights[opt_idx])),
                         )
                     )
