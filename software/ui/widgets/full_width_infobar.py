@@ -11,8 +11,10 @@ class FullWidthInfoBar(InfoBar):
     def __init__(self, *args, **kwargs):
         self._syncing = False
         self._parent_filter_installed = False
+        self._sync_timers = []
         super().__init__(*args, **kwargs)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.destroyed.connect(self._clear_sync_timers)
 
     def sizeHint(self):
         hint = super().sizeHint()
@@ -54,7 +56,25 @@ class FullWidthInfoBar(InfoBar):
 
     def _schedule_deferred_sync(self) -> None:
         for delay in (0, 30, 120):
-            QTimer.singleShot(delay, self._adjustText)
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._adjustText)
+            timer.timeout.connect(lambda timer=timer: self._drop_sync_timer(timer))
+            self._sync_timers.append(timer)
+            timer.start(delay)
+
+    def _drop_sync_timer(self, timer: QTimer) -> None:
+        try:
+            self._sync_timers.remove(timer)
+        except ValueError:
+            pass
+        timer.deleteLater()
+
+    def _clear_sync_timers(self) -> None:
+        for timer in list(self._sync_timers):
+            timer.stop()
+            timer.deleteLater()
+        self._sync_timers.clear()
 
     def showEvent(self, e):
         super().showEvent(e)

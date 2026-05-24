@@ -169,6 +169,7 @@ def test_workbench_pages_fit_minimum_window_width_without_horizontal_overflow(mo
 def test_workbench_pages_survive_125_percent_dpi_subprocess() -> None:
     script = textwrap.dedent(
         """
+        from PySide6.QtCore import QCoreApplication, QEvent
         from PySide6.QtWidgets import QApplication
 
         from CI.unit_tests.app.test_ui_layout_contracts import (
@@ -207,6 +208,12 @@ def test_workbench_pages_survive_125_percent_dpi_subprocess() -> None:
         assert ratio >= 1.24, ratio
         _assert_no_horizontal_scrollbar(page)
         _assert_layout_items_do_not_overlap(page)
+
+        page.close()
+        page.deleteLater()
+        app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
         """
     )
     env = os.environ.copy()

@@ -1,4 +1,5 @@
 """日志配置与工具函数 - 初始化日志系统、级别控制、缓冲区管理"""
+import atexit
 import logging
 import os
 import queue
@@ -539,6 +540,7 @@ _root_logger = logging.getLogger()
 if not any(isinstance(h, LogBufferHandler) for h in _root_logger.handlers):
     _root_logger.addHandler(LOG_BUFFER_HANDLER)
 _root_logger.setLevel(logging.INFO)
+atexit.register(lambda: shutdown_logging())
 
 
 def _create_session_log_file_path() -> str:
