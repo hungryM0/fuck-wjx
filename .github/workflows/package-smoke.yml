@@ -1,0 +1,85 @@
+name: Package Smoke Test
+
+on:
+  workflow_dispatch:
+  pull_request: {}
+  schedule:
+    - cron: "0 16 * * 1,4"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  VELOPACK_CHANNEL: "smoke"
+  VELOPACK_KEEP_FULL_VERSIONS: "1"
+
+concurrency:
+  group: package-smoke-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-smoke:
+    name: Build Installer Without Publishing
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install Python dependencies
+        run: uv sync --locked --no-dev --group build
+
+      - name: Show Python and Nuitka version
+        shell: powershell
+        run: |
+          uv run python --version
+          uv run python -m nuitka --version
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Velopack CLI
+        shell: powershell
+        run: dotnet tool install -g vpk
+
+      - name: Resolve smoke metadata
+        id: smoke_meta
+        shell: powershell
+        run: |
+          $runNumber = "${{ github.run_number }}"
+          $runAttempt = "${{ github.run_attempt }}"
+          $packVersion = "0.0.$runNumber"
+          $releaseDir = Join-Path "${{ github.workspace }}" "Releases"
+          "pack_version=$packVersion" >> $env:GITHUB_OUTPUT
+          "run_attempt=$runAttempt" >> $env:GITHUB_OUTPUT
+          "release_dir=$releaseDir" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer
+        shell: powershell
+        run: |
+          .\Setup\build-release-installer.ps1 `
+            -SkipSync `
+            -Channel "${env:VELOPACK_CHANNEL}" `
+            -PackVersion "${{ steps.smoke_meta.outputs.pack_version }}" `
+            -KeepFullVersions "${env:VELOPACK_KEEP_FULL_VERSIONS}"
+
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-smoke-${{ steps.smoke_meta.outputs.pack_version }}-${{ steps.smoke_meta.outputs.run_attempt }}
+          path: ${{ steps.smoke_meta.outputs.release_dir }}
+          if-no-files-found: error
+          retention-days: 3
