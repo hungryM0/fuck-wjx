@@ -569,6 +569,38 @@ class WjxRuntimeAnswerersTests:
         assert result.failed == (5,)
 
     @pytest.mark.asyncio
+    async def test_apply_answer_actions_option_fill_falls_back_to_following_input(self) -> None:
+        class _Driver:
+            def __init__(self) -> None:
+                self.script = ""
+                self.payload = None
+
+            async def execute_script(self, script, payload):
+                self.script = script
+                self.payload = payload
+                return {"applied": [6], "failed": []}
+
+        driver = _Driver()
+        result = await runtime_answerers.apply_answer_actions(
+            driver,
+            [
+                runtime_answerers.AnswerAction(
+                    question_num=6,
+                    kind="choice",
+                    input_type="checkbox",
+                    selected_indices=(5,),
+                    option_fill_texts=((5, "其他内容"),),
+                    record_type="multiple",
+                )
+            ],
+        )
+
+        assert result.applied == (6,)
+        assert driver.payload[0]["optionFillTexts"] == [{"optionIndex": 5, "value": "其他内容"}]
+        assert "compareDocumentPosition" in driver.script
+        assert "DOCUMENT_POSITION_FOLLOWING" in driver.script
+
+    @pytest.mark.asyncio
     async def test_apply_answer_actions_excludes_location_action_script(self) -> None:
         class _Driver:
             def __init__(self) -> None:

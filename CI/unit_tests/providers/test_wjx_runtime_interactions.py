@@ -180,6 +180,10 @@ class WjxRuntimeInteractionsTests:
         assert not await runtime_interactions._fill_text_input(driver, 0, "文本")
 
         assert await runtime_interactions._fill_choice_option_additional_text(driver, 5, 1, "补充", input_type="checkbox")
+        script, args = driver.script_calls[-1]
+        assert "compareDocumentPosition" in script
+        assert "DOCUMENT_POSITION_FOLLOWING" in script
+        assert args == (5, 1, "补充", "checkbox")
         assert not await runtime_interactions._fill_choice_option_additional_text(driver, 5, 1, "", input_type="checkbox")
 
     @pytest.mark.asyncio

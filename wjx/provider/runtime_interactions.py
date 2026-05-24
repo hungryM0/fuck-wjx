@@ -773,9 +773,18 @@ async def _fill_choice_option_additional_text(
             };
             const options = Array.from(root.querySelectorAll('.ui-controlgroup > div'));
             const optionRoot = options[optionIndex] || null;
-            const target = optionRoot
+            let target = optionRoot
                 ? Array.from(optionRoot.querySelectorAll('input, textarea')).find((el) => visible(el) && isTextInput(el))
                 : null;
+            if (!target) {
+                const choiceInputs = Array.from(root.querySelectorAll(`input[type="${inputType}"]`)).filter(visible);
+                const choice = choiceInputs[optionIndex] || null;
+                const anchors = [optionRoot, choice].filter(Boolean);
+                const textInputs = Array.from(root.querySelectorAll('input, textarea')).filter((el) => visible(el) && isTextInput(el));
+                target = textInputs.find((el) => anchors.some((anchor) => {
+                    try { return !!(anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING); } catch (e) { return false; }
+                })) || null;
+            }
             if (!target) return false;
             try { target.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
             try { target.focus(); } catch (e) {}

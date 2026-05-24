@@ -7,7 +7,7 @@ import os
 import sys
 from typing import List
 
-from PySide6.QtCore import Qt, QTimer, Signal, QEvent, Slot
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal, QEvent, Slot
 from PySide6.QtGui import QIcon, QGuiApplication, QColor
 from PySide6.QtWidgets import QDialog
 from qfluentwidgets import (
@@ -17,6 +17,8 @@ from qfluentwidgets import (
     InfoBarPosition,
     MSFluentWindow,
     Theme,
+    Flyout,
+    FlyoutAnimationType,
     qconfig,
     setTheme,
     setThemeColor,
@@ -42,6 +44,11 @@ from software.app.config import (
     STATUS_ENDPOINT,
     app_settings,
     get_bool_from_qsettings,
+)
+from software.ui.shell.startup_tutorial import (
+    STARTUP_TUTORIAL_HINT_SEEN_SETTING_KEY,
+    TUTORIAL_DOC_URL,
+    StartupTutorialFlyoutView,
 )
 from software.logging.action_logger import log_action
 from software.logging.log_utils import register_popup_handler
@@ -102,6 +109,10 @@ class MainWindow(
         self._startup_update_notification_timer = None
         self._startup_update_pending_info = None
         self._startup_post_init_done = False
+        self._startup_tutorial_hint_timer = None
+        self._startup_tutorial_flyout = None
+        self._startup_tutorial_view = None
+        self._startup_tutorial_hint_showing = False
         self._random_ip_quota_auto_sync_interval_ms = 90000
         self._random_ip_quota_auto_sync_timer = QTimer(self)
         self._random_ip_quota_auto_sync_timer.setInterval(
@@ -501,6 +512,120 @@ class MainWindow(
         self._start_random_ip_quota_auto_sync()
         self._check_preview_version()
         self._check_update_on_startup()
+        self._schedule_startup_tutorial_hint(1800)
+
+    def _has_seen_startup_tutorial_hint(self) -> bool:
+        settings = app_settings()
+        return get_bool_from_qsettings(
+            settings.value(STARTUP_TUTORIAL_HINT_SEEN_SETTING_KEY),
+            False,
+        )
+
+    def _mark_startup_tutorial_hint_seen(self) -> None:
+        settings = app_settings()
+        settings.setValue(STARTUP_TUTORIAL_HINT_SEEN_SETTING_KEY, True)
+
+    def _schedule_startup_tutorial_hint(self, delay_ms: int) -> None:
+        if (
+            self._import_check_mode
+            or self._has_seen_startup_tutorial_hint()
+            or self._startup_tutorial_hint_showing
+        ):
+            return
+        if self._startup_tutorial_hint_timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._show_startup_tutorial_hint)
+            self._startup_tutorial_hint_timer = timer
+        self._startup_tutorial_hint_timer.start(max(int(delay_ms), 0))
+
+    def _can_show_startup_tutorial_hint(self) -> bool:
+        if (
+            self._import_check_mode
+            or self._has_seen_startup_tutorial_hint()
+            or self._startup_tutorial_hint_showing
+            or self._startup_tutorial_flyout is not None
+        ):
+            return False
+        try:
+            if not self.isVisible() or self.isMinimized():
+                return False
+        except Exception:
+            return False
+        if self._is_boot_splash_visible():
+            return False
+        return True
+
+    def _startup_tutorial_hint_global_pos(self, hint_width: int, hint_height: int) -> QPoint:
+        margin = 28
+        local_pos = QPoint(
+            max(margin, self.width() - int(hint_width) - margin),
+            max(margin, self.height() - int(hint_height) - margin),
+        )
+        pos = self.mapToGlobal(local_pos)
+        try:
+            screen = self.screen() or QGuiApplication.screenAt(pos) or QGuiApplication.primaryScreen()
+            if screen is None:
+                return pos
+            available = screen.availableGeometry()
+            x = min(max(pos.x(), available.left() + margin), available.right() - int(hint_width) - margin + 1)
+            y = min(max(pos.y(), available.top() + margin), available.bottom() - int(hint_height) - margin + 1)
+            return QPoint(x, y)
+        except Exception:
+            logging.info("计算启动教程提示位置失败", exc_info=True)
+            return pos
+
+    def _show_startup_tutorial_hint(self) -> None:
+        if not self._can_show_startup_tutorial_hint():
+            if not self._import_check_mode and not self._has_seen_startup_tutorial_hint():
+                self._schedule_startup_tutorial_hint(800)
+            return
+
+        try:
+            view = StartupTutorialFlyoutView(self)
+            view.openRequested.connect(self._open_startup_tutorial_from_hint)
+            view.dismissed.connect(self._dismiss_startup_tutorial_hint)
+
+            flyout = Flyout(view, self, isDeleteOnClose=True)
+            flyout.closed.connect(self._on_startup_tutorial_hint_closed)
+            self._startup_tutorial_view = view
+            self._startup_tutorial_flyout = flyout
+            self._startup_tutorial_hint_showing = True
+
+            flyout.show()
+            size = flyout.sizeHint()
+            pos = self._startup_tutorial_hint_global_pos(size.width(), size.height())
+            flyout.exec(pos, FlyoutAnimationType.SLIDE_LEFT)
+        except Exception:
+            self._startup_tutorial_hint_showing = False
+            self._clear_startup_tutorial_refs()
+            logging.info("显示启动教程提示失败", exc_info=True)
+
+    def _dismiss_startup_tutorial_hint(self) -> None:
+        self._mark_startup_tutorial_hint_seen()
+        flyout = getattr(self, "_startup_tutorial_flyout", None)
+        if flyout is not None:
+            flyout.close()
+
+    def _open_startup_tutorial_from_hint(self) -> None:
+        self._mark_startup_tutorial_hint_seen()
+        try:
+            import webbrowser
+
+            webbrowser.open(TUTORIAL_DOC_URL)
+        finally:
+            flyout = getattr(self, "_startup_tutorial_flyout", None)
+            if flyout is not None:
+                flyout.close()
+
+    def _clear_startup_tutorial_refs(self) -> None:
+        self._startup_tutorial_flyout = None
+        self._startup_tutorial_view = None
+
+    def _on_startup_tutorial_hint_closed(self) -> None:
+        self._mark_startup_tutorial_hint_seen()
+        self._startup_tutorial_hint_showing = False
+        self._clear_startup_tutorial_refs()
 
     def apply_topmost_state(self, checked: bool, show: bool = False):
         """应用窗口置顶状态，并刷新无边框特效以保留圆角。"""

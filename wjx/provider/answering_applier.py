@@ -96,9 +96,18 @@ async def apply_answer_actions(driver: BrowserDriver, actions: Sequence[AnswerAc
                 if (!text) return true;
                 const optionRoots = Array.from(root.querySelectorAll('.ui-controlgroup > div'));
                 const optionRoot = optionRoots[optionIndex] || null;
-                const target = optionRoot
+                let target = optionRoot
                     ? Array.from(optionRoot.querySelectorAll('input, textarea')).find((el) => visible(el) && isTextInput(el))
                     : null;
+                if (!target) {
+                    const choiceInputs = Array.from(root.querySelectorAll('input[type="radio"], input[type="checkbox"]')).filter(visible);
+                    const choice = choiceInputs[optionIndex] || null;
+                    const anchors = [optionRoot, choice].filter(Boolean);
+                    const textInputs = Array.from(root.querySelectorAll('input, textarea')).filter((el) => visible(el) && isTextInput(el));
+                    target = textInputs.find((el) => anchors.some((anchor) => {
+                        try { return !!(anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING); } catch (e) { return false; }
+                    })) || null;
+                }
                 if (!target) return false;
                 setNativeValue(target, text);
                 return String(target.value || '') === text;
