@@ -14,9 +14,6 @@ import software.network.http as http_client
 from software.ui.dialogs.quota_redeem import load_shop_icon
 from software.app.config import DEFAULT_HTTP_HEADERS, IP_EXTRACT_ENDPOINT
 from software.logging.log_utils import log_suppressed_exception
-from software.ui.controller.run_controller_parts.runtime_constants import (
-    STARTUP_STATUS_TIMEOUT_SECONDS,
-)
 from software.ui.helpers.qfluent_compat import set_indeterminate_progress_ring_active
 from software.ui.helpers.proxy_access import (
     PROXY_SOURCE_BENEFIT,
@@ -27,6 +24,8 @@ from software.ui.helpers.proxy_access import (
     has_unknown_local_quota,
     is_quota_exhausted,
 )
+
+_RANDOM_IP_HEALTH_TIMEOUT_SECONDS = 5
 
 if TYPE_CHECKING:
     from qfluentwidgets import (
@@ -165,7 +164,7 @@ class DashboardRandomIPMixin:
         response = http_client.post(
             IP_EXTRACT_ENDPOINT,
             json={},
-            timeout=STARTUP_STATUS_TIMEOUT_SECONDS,
+            timeout=_RANDOM_IP_HEALTH_TIMEOUT_SECONDS,
             headers=headers,
         )
         elapsed_ms = max(1, int(round((time.perf_counter() - started) * 1000)))

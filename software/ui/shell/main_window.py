@@ -651,10 +651,6 @@ class MainWindow(
         self.controller.runFailed.connect(self._on_run_failed)
         self.controller.quickBugReportSuggested.connect(self._prompt_quick_bug_report)
         self.controller.freeAiUnstableSuggested.connect(self._notify_free_ai_unstable)
-        self.controller.startupHintEmitted.connect(
-            lambda message, level, duration: self._toast(str(message), str(level), int(duration)),
-            Qt.ConnectionType.QueuedConnection,
-        )
         self.controller.on_ip_counter = self._on_random_ip_counter_update
 
     def _register_popups(self):

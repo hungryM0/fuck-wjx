@@ -1,9 +1,9 @@
 from __future__ import annotations
-from threading import Event, Lock
+from threading import Event
 from software.core.task import ExecutionConfig
 from software.io.config import RuntimeConfig
 from software.providers.contracts import SurveyQuestionMeta
-from software.ui.controller.run_controller_parts.runtime_init_gate import RunControllerInitializationMixin, _extract_startup_service_warnings, _parse_status_page_monitor_names
+from software.ui.controller.run_controller_parts.runtime_init_gate import RunControllerInitializationMixin
 from software.ui.controller.run_controller_parts.runtime_preparation import PreparedExecutionArtifacts
 
 class _DummyInitGate(RunControllerInitializationMixin):
@@ -22,13 +22,9 @@ class _DummyInitGate(RunControllerInitializationMixin):
         self._init_gate_stop_event = Event()
         self._status_timer = _FakeTimer()
         self._prepared_execution_artifacts = None
-        self._startup_status_check_lock = Lock()
-        self._startup_status_check_active = False
-        self._startup_service_warnings: list[str] = []
         self.started_workers: list[tuple[RuntimeConfig, list, bool]] = []
         self.dispatched_callbacks: list[object] = []
         self.emit_status_calls = 0
-        self.startup_hint_events: list[tuple[str, str, int]] = []
         self.survey_title = '测试问卷'
         self.custom_confirm_dialog_handler = None
         self.confirm_dialog_handler = None
@@ -40,7 +36,6 @@ class _DummyInitGate(RunControllerInitializationMixin):
         self.statusUpdated = _FakeSignal(self.status_events)
         self.threadProgressUpdated = _FakeSignal(self.thread_progress_events)
         self.runFailed = _FakeSignal(self.run_failed_events)
-        self.startupHintEmitted = _FakeSignal(self.startup_hint_events)
 
     def _start_workers_with_proxy_pool(self, config: RuntimeConfig, proxy_pool: list, *, emit_run_state: bool=True) -> None:
         self.started_workers.append((config, list(proxy_pool), emit_run_state))
@@ -103,15 +98,6 @@ class RuntimeInitGateTests:
         assert self.mixin.run_state_events == [False]
         assert self.mixin.status_events == [('已取消启动', 0, 0)]
         assert self.mixin.thread_progress_events[-1] == {'threads': [], 'target': 0, 'num_threads': 0, 'per_thread_target': 0, 'initializing': False}
-
-    def test_parse_status_page_monitor_names_reads_public_group_monitors(self) -> None:
-        payload = {'publicGroupList': [{'monitorList': [{'id': 12, 'name': '随机ip提取'}, {'id': 13, 'name': '免费AI填空'}]}]}
-        assert _parse_status_page_monitor_names(payload) == {12: '随机ip提取', 13: '免费AI填空'}
-
-    def test_extract_startup_service_warnings_only_flags_non_ok_status(self) -> None:
-        payload = {'heartbeatList': {'12': [{'status': 0, 'msg': '接口超时', 'time': '2026-04-23 11:00:00'}], '13': [{'status': 1, 'msg': '', 'time': '2026-04-23 11:00:30'}]}}
-        warnings = _extract_startup_service_warnings(payload, {12: '随机IP提取', 13: '免费AI填空'}, {12: '随机ip提取', 13: '免费AI填空'})
-        assert warnings == ['随机ip提取 当前状态异常（接口超时；最近时间：2026-04-23 11:00:00）']
 
     def test_build_initialization_logs_marks_stage_and_completion(self) -> None:
         self.mixin._init_stage_text = '正在检查浏览器'

@@ -136,11 +136,6 @@ class RunControllerExecutionMixin:
         @_quick_feedback_prompt_emitted.setter
         def _quick_feedback_prompt_emitted(self, value: bool) -> None: ...
 
-        @property
-        def _startup_service_warnings(self) -> List[str]: ...
-        @_startup_service_warnings.setter
-        def _startup_service_warnings(self, value: List[str]) -> None: ...
-
         def _dispatch_to_ui_async(self, callback: Callable[[], Any]) -> None: ...
         def _enqueue_ui_callback(self, callback: Callable[[], Any]) -> bool: ...
         def collect_random_ip_background_threads(self) -> List[threading.Thread]: ...
@@ -161,7 +156,6 @@ class RunControllerExecutionMixin:
         def _start_with_initialization_gate(
             self, config: RuntimeConfig, proxy_pool: List[ProxyLease]
         ) -> None: ...
-        def _start_startup_status_check(self, config: RuntimeConfig) -> None: ...
         def _prepare_engine_state(
             self, proxy_pool: List[ProxyLease]
         ) -> tuple[ExecutionConfig, ExecutionState]: ...
@@ -293,9 +287,7 @@ class RunControllerExecutionMixin:
         self._init_completed_steps = set()
         self._init_current_step_key = ""
         self._init_gate_stop_event = None
-        self._startup_service_warnings = []
         self.runStateChanged.emit(True)
-        self._start_startup_status_check(config)
 
         self._start_with_initialization_gate(config, [])
 

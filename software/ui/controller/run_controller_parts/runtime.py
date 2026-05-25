@@ -38,7 +38,6 @@ class RunControllerRuntimeMixin(
         message_dialog_handler: Optional[Callable[[str, str, str], None]]
         confirm_dialog_handler: Optional[Callable[[str, str], bool]]
         custom_confirm_dialog_handler: Optional[Callable[[str, str, str, str], bool]]
-        startupHintEmitted: Any
 
         def _dispatch_to_ui_async(self, callback: Callable[[], Any]) -> None: ...
         def parent(self) -> QObject: ...

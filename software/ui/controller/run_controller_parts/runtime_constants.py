@@ -1,10 +1,4 @@
 """RunController runtime 拆分后的共享常量。"""
 
-STARTUP_STATUS_TIMEOUT_SECONDS = 5
-STARTUP_HINT_DURATION_MS = 4200
-STATUS_PAGE_BASE_URL = "https://status.hungrym0.top"
-STATUS_PAGE_SLUG = "surveycontroller"
-STATUS_MONITOR_RANDOM_IP = 12
-STATUS_MONITOR_FREE_AI = 13
 DEVICE_QUOTA_LIMIT_MESSAGE = "当前设备已达到该问卷填写次数上限，无法继续"
 PROXY_SOURCE_BENEFIT = "benefit"

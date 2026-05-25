@@ -52,7 +52,6 @@ class RunControllerRuntimeState:
     init_current_step_key: str = ""
     init_gate_stop_event: Optional[Any] = None
     prepared_execution_artifacts: Optional[Any] = None
-    startup_service_warnings: List[str] = field(default_factory=list)
 
 
 class RunController(
@@ -72,7 +71,6 @@ class RunController(
     freeAiUnstableSuggested = Signal()
     runtimeUiStateChanged = Signal(dict)
     randomIpLoadingChanged = Signal(bool, str)
-    startupHintEmitted = Signal(str, str, int)
     _uiCallbackQueued = Signal()
 
     def __init__(self, parent=None):
@@ -113,8 +111,6 @@ class RunController(
         self._random_ip_background_threads_lock = threading.Lock()
         self._close_shutdown_lock = threading.Lock()
         self._close_shutdown_thread: Optional[threading.Thread] = None
-        self._startup_status_check_lock = threading.Lock()
-        self._startup_status_check_active = False
         self._uiCallbackQueued.connect(self._drain_ui_callbacks)
         self.adapter = self._create_adapter(self.stop_event, random_ip_enabled=False)
 
@@ -231,14 +227,6 @@ class RunController(
     @_prepared_execution_artifacts.setter
     def _prepared_execution_artifacts(self, value: Optional[PreparedExecutionArtifacts]) -> None:
         self._runtime_state.prepared_execution_artifacts = value
-
-    @property
-    def _startup_service_warnings(self) -> List[str]:
-        return self._runtime_state.startup_service_warnings
-
-    @_startup_service_warnings.setter
-    def _startup_service_warnings(self, value: List[str]) -> None:
-        self._runtime_state.startup_service_warnings = list(value or [])
 
     def is_initializing(self) -> bool:
         return bool(self._initializing)

@@ -2,7 +2,6 @@
   <img src="assets/icon.png" alt="SurveyController" width="120" height="120" />
   <h1>SurveyController</h1>
   
-  [![Status](https://status.hungrym0.top/api/badge/12/status)](https://status.hungrym0.top/status/surveycontroller)
   [![GitHub Stars](https://img.shields.io/github/stars/SurveyController/SurveyController?style=flat&logo=github&color=yellow)](https://github.com/SurveyController/SurveyController/stargazers)
   [![Contributors](https://img.shields.io/github/contributors/SurveyController/SurveyController?style=flat&logo=github)](https://github.com/SurveyController/SurveyController/graphs/contributors)
   [![GitHub Release](https://img.shields.io/github/v/release/SurveyController/SurveyController?style=flat&logo=github&color=blue)](https://github.com/SurveyController/SurveyController/releases/latest)

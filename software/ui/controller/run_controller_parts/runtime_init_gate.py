@@ -3,97 +3,27 @@
 from __future__ import annotations
 
 import copy
-import logging
-import threading
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from software.app.config import DEFAULT_HTTP_HEADERS
 from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
-from software.integrations.ai.client import AI_MODE_FREE, get_ai_settings
 from software.io.config import RuntimeConfig
-import software.network.http as http_client
 from .runtime_preparation import PreparedExecutionArtifacts
-
-from .runtime_constants import (
-    STARTUP_HINT_DURATION_MS,
-    STARTUP_STATUS_TIMEOUT_SECONDS,
-    STATUS_MONITOR_FREE_AI,
-    STATUS_MONITOR_RANDOM_IP,
-    STATUS_PAGE_BASE_URL,
-    STATUS_PAGE_SLUG,
-)
-
-
-def _parse_status_page_monitor_names(
-    payload: Dict[str, Any],
-) -> Dict[int, str]:
-    names: Dict[int, str] = {}
-    for group in list(payload.get("publicGroupList") or []):
-        monitor_list = group.get("monitorList") or []
-        if not isinstance(monitor_list, list):
-            continue
-        for monitor in monitor_list:
-            try:
-                monitor_id = int(monitor.get("id"))
-            except Exception:
-                continue
-            monitor_name = str(monitor.get("name") or "").strip()
-            if monitor_name:
-                names[monitor_id] = monitor_name
-    return names
-
-
-def _extract_startup_service_warnings(
-    heartbeat_payload: Dict[str, Any],
-    monitor_targets: Dict[int, str],
-    monitor_names: Optional[Dict[int, str]] = None,
-) -> List[str]:
-    warnings: List[str] = []
-    heartbeat_map = heartbeat_payload.get("heartbeatList") or {}
-    names = dict(monitor_names or {})
-
-    for monitor_id, fallback_name in monitor_targets.items():
-        heartbeat_list = heartbeat_map.get(str(monitor_id)) or heartbeat_map.get(monitor_id) or []
-        latest = heartbeat_list[-1] if isinstance(heartbeat_list, list) and heartbeat_list else {}
-        try:
-            raw_status = latest.get("status")
-            status = int(0 if raw_status is None else raw_status)
-        except Exception:
-            status = 0
-        if status == 1:
-            continue
-        service_name = str(
-            names.get(int(monitor_id)) or fallback_name or f"服务 {monitor_id}"
-        ).strip()
-        detail = str(latest.get("msg") or "").strip()
-        time_text = str(latest.get("time") or "").strip()
-        suffix_parts: List[str] = []
-        if detail:
-            suffix_parts.append(detail)
-        if time_text:
-            suffix_parts.append(f"最近时间：{time_text}")
-        suffix = f"（{'；'.join(suffix_parts)}）" if suffix_parts else ""
-        warnings.append(f"{service_name} 当前状态异常{suffix}")
-    return warnings
 
 
 class RunControllerInitializationMixin:
     if TYPE_CHECKING:
-        stop_event: threading.Event
-        worker_threads: List[threading.Thread]
+        stop_event: Any
+        worker_threads: List[Any]
         adapter: Any
         config: RuntimeConfig
         running: bool
         _status_timer: Any
         _execution_state: Optional[ExecutionState]
-        _init_gate_thread: Optional[threading.Thread]
-        _startup_status_check_lock: threading.Lock
-        _startup_status_check_active: bool
+        _init_gate_thread: Optional[Any]
         survey_title: str
         runStateChanged: Any
         statusUpdated: Any
         threadProgressUpdated: Any
-        startupHintEmitted: Any
 
         @property
         def _starting(self) -> bool: ...
@@ -135,14 +65,9 @@ class RunControllerInitializationMixin:
         def _init_current_step_key(self, value: str) -> None: ...
 
         @property
-        def _init_gate_stop_event(self) -> Optional[threading.Event]: ...
+        def _init_gate_stop_event(self) -> Optional[Any]: ...
         @_init_gate_stop_event.setter
-        def _init_gate_stop_event(self, value: Optional[threading.Event]) -> None: ...
-
-        @property
-        def _startup_service_warnings(self) -> List[str]: ...
-        @_startup_service_warnings.setter
-        def _startup_service_warnings(self, value: List[str]) -> None: ...
+        def _init_gate_stop_event(self, value: Optional[Any]) -> None: ...
 
         def _start_workers_with_proxy_pool(
             self,
@@ -186,83 +111,6 @@ class RunControllerInitializationMixin:
             elif key and key == current:
                 lines.append(f"[>] {label}")
         return lines
-
-    def _start_startup_status_check(self, config: RuntimeConfig) -> None:
-        monitor_targets = self._resolve_startup_status_targets(config)
-        with self._startup_status_check_lock:
-            self._startup_service_warnings = []
-            if not monitor_targets:
-                self._startup_status_check_active = False
-                return
-            if self._startup_status_check_active:
-                return
-            self._startup_status_check_active = True
-
-        threading.Thread(
-            target=self._run_startup_status_check,
-            args=(monitor_targets,),
-            daemon=True,
-            name="StartupStatusHint",
-        ).start()
-
-    def _resolve_startup_status_targets(self, config: RuntimeConfig) -> Dict[int, str]:
-        targets: Dict[int, str] = {}
-        if bool(getattr(config, "random_ip_enabled", False)):
-            targets[STATUS_MONITOR_RANDOM_IP] = "随机IP提取"
-        try:
-            ai_mode = str(get_ai_settings().get("ai_mode") or "").strip().lower()
-        except Exception:
-            ai_mode = ""
-        if ai_mode == AI_MODE_FREE:
-            targets[STATUS_MONITOR_FREE_AI] = "免费AI填空"
-        return targets
-
-    def _run_startup_status_check(self, monitor_targets: Dict[int, str]) -> None:
-        warnings: List[str] = []
-        try:
-            warnings = self._fetch_startup_service_warnings(monitor_targets)
-        except Exception:
-            logging.info("启动服务提示检查失败，已忽略", exc_info=True)
-        finally:
-            with self._startup_status_check_lock:
-                self._startup_service_warnings = list(warnings)
-                self._startup_status_check_active = False
-
-        for warning in warnings:
-            self.startupHintEmitted.emit(str(warning), "warning", int(STARTUP_HINT_DURATION_MS))
-
-    def _fetch_startup_service_warnings(self, monitor_targets: Dict[int, str]) -> List[str]:
-        page_url = f"{STATUS_PAGE_BASE_URL}/api/status-page/{STATUS_PAGE_SLUG}"
-        heartbeat_url = f"{STATUS_PAGE_BASE_URL}/api/status-page/heartbeat/{STATUS_PAGE_SLUG}"
-        monitor_names: Dict[int, str] = {}
-        try:
-            response = http_client.get(
-                page_url,
-                timeout=STARTUP_STATUS_TIMEOUT_SECONDS,
-                headers=DEFAULT_HTTP_HEADERS,
-                proxies={},
-            )
-            monitor_names = _parse_status_page_monitor_names(response.json())
-        except Exception:
-            logging.info("读取状态页配置失败，启动时忽略服务提示", exc_info=True)
-
-        try:
-            response = http_client.get(
-                heartbeat_url,
-                timeout=STARTUP_STATUS_TIMEOUT_SECONDS,
-                headers=DEFAULT_HTTP_HEADERS,
-                proxies={},
-            )
-            return _extract_startup_service_warnings(
-                response.json(), monitor_targets, monitor_names
-            )
-        except Exception:
-            logging.info("读取状态页心跳失败，启动时忽略服务提示", exc_info=True)
-            return []
-
-    def _snapshot_startup_service_warnings(self) -> List[str]:
-        with self._startup_status_check_lock:
-            return list(self._startup_service_warnings or [])
 
     def _start_with_initialization_gate(
         self, config: RuntimeConfig, proxy_pool: List[ProxyLease]

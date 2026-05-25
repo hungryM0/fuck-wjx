@@ -223,7 +223,6 @@ class _DummyExecutionController(RunControllerExecutionMixin):
         self._init_gate_stop_event = None
         self._prepared_execution_artifacts = None
         self._quick_feedback_prompt_emitted = False
-        self._startup_service_warnings = []
         self.dispatched_async = []
         self.enqueued_callbacks = []
         self.synced_adapters = []
@@ -231,7 +230,6 @@ class _DummyExecutionController(RunControllerExecutionMixin):
         self.refresh_counter_calls = []
         self.toggle_calls = []
         self.random_ip_submission_calls = []
-        self.startup_status_checks = []
         self.start_init_gate_calls = []
         self.finish_initialization_calls = []
         self.build_logs = ["init-log"]
@@ -271,9 +269,6 @@ class _DummyExecutionController(RunControllerExecutionMixin):
 
     def _start_with_initialization_gate(self, config: RuntimeConfig, proxy_pool) -> None:
         self.start_init_gate_calls.append((config, list(proxy_pool)))
-
-    def _start_startup_status_check(self, config: RuntimeConfig) -> None:
-        self.startup_status_checks.append(config)
 
     def _prepare_engine_state(self, proxy_pool):
         execution_config = SimpleNamespace(
@@ -359,8 +354,6 @@ class RunControllerExecutionTests:
         assert controller._prepared_execution_artifacts is prepared
         assert controller._starting is True
         assert controller._initializing is False
-        assert controller._startup_service_warnings == []
-        assert controller.startup_status_checks == [cfg]
         assert controller.start_init_gate_calls == [(cfg, [])]
 
     def test_start_workers_with_proxy_pool_starts_engine_and_monitor(self, monkeypatch) -> None:
