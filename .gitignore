@@ -26,6 +26,7 @@ CLAUDE.md
 __pycache__/
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp_async_runtime_loop_large/
 .uv-cache/
 *.pyc
 %SystemDrive%/

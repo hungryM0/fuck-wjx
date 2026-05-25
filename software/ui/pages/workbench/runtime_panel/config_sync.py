@@ -213,11 +213,13 @@ class RuntimeConfigSyncMixin:
 
         proxy_source = state.get("proxy_source")
         if proxy_source is not None:
-            page.set_proxy_source(
-                str(proxy_source),
-                emit_state=False,
-                show_tip=False,
-            )
+            normalized_proxy_source = normalize_proxy_source(str(proxy_source))
+            if page.selected_proxy_source() != normalized_proxy_source:
+                page.set_proxy_source(
+                    normalized_proxy_source,
+                    emit_state=False,
+                    show_tip=False,
+                )
 
     @staticmethod
     def _card_value_as_range(card: TimeRangeSettingCard) -> tuple[int, int]:
