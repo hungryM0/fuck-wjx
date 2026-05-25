@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 import uuid
 from datetime import datetime
@@ -89,9 +90,13 @@ def _submitdata_answer(action: AnswerAction) -> str:
             option_fill_texts=action.option_fill_texts,
         )
     if action.kind == "text":
-        return "||".join(str(item or "").strip() for item in action.text_values)
+        separator = "^" if len(action.text_values) > 1 else ""
+        return separator.join(str(item or "").strip() for item in action.text_values)
     if action.kind == "matrix":
-        return ",".join(str(int(item) + 1) for item in action.matrix_indices)
+        return ",".join(
+            f"{row_index + 1}!{int(item) + 1}"
+            for row_index, item in enumerate(action.matrix_indices)
+        )
     if action.kind == "slider":
         return str(action.slider_value if action.slider_value is not None else "")
     if action.kind == "order":
@@ -123,6 +128,35 @@ def _record_action(ctx: ExecutionState, action: AnswerAction) -> None:
     )
 
 
+def _question_error_label(config: ExecutionConfig, question_num: int) -> str:
+    try:
+        question = (config.questions_metadata or {}).get(int(question_num))
+    except Exception:
+        question = None
+    if question is None:
+        return f"第{int(question_num)}题"
+    try:
+        display_num = int(getattr(question, "display_num", 0) or 0)
+    except Exception:
+        display_num = 0
+    title = str(getattr(question, "title", "") or "").strip()
+    prefix = f"第{display_num if display_num > 0 else int(question_num)}题"
+    return f"{prefix}（{title}）" if title else prefix
+
+
+def _raise_submit_rejected(config: ExecutionConfig, response_text: str) -> None:
+    text = str(response_text or "").strip()
+    match = re.match(r"^\s*(\d+)〒(\d+)〒(.+)$", text)
+    if not match:
+        raise RuntimeError(f"问卷星提交被拒绝：{text[:200]}")
+    question_num = int(match.group(2) or 0)
+    reason = str(match.group(3) or "").strip() or text
+    if question_num > 0:
+        label = _question_error_label(config, question_num)
+        raise RuntimeError(f"问卷星提交被拒绝：{label}，{reason}")
+    raise RuntimeError(f"问卷星提交被拒绝：{reason}")
+
+
 async def _load_wjx_page(url: str, *, headers: dict[str, str], proxies: Any) -> None:
     response = await http_client.aget(url, timeout=15, headers=headers, proxies=proxies)
     response.raise_for_status()
@@ -151,6 +185,7 @@ async def _build_actions(
     plan = await build_http_logic_plan(
         questions,
         build_action=_build_action,
+        respect_jump_logic=False,
     )
     return list(plan.actions)
 
@@ -253,7 +288,7 @@ async def brush_wjx_http(
     )
     failure = any(token in response_text for token in ("抱歉", "不符合", "错误", "重新提交", "验证码"))
     if not success or failure:
-        raise RuntimeError(f"问卷星提交被拒绝：{response_text[:200]}")
+        _raise_submit_rejected(config, response_text)
     return True
 
 

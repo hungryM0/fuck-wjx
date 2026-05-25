@@ -183,6 +183,21 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
     _ = question_number
     has_jump_attr = str(question_div.get("hasjump") or "").strip() == "1"
     jump_rules: List[Dict[str, Any]] = []
+
+    def _parse_jump_target(raw_value: Any) -> Optional[int]:
+        text_value = str(raw_value or "").strip()
+        if not text_value:
+            return None
+        if text_value.isdigit():
+            return int(text_value)
+        match = re.search(r"(\d+)", text_value)
+        if not match:
+            return None
+        try:
+            return int(match.group(1))
+        except Exception:
+            return None
+
     selectable_nodes = []
     for input_el in question_div.find_all("input"):
         input_type = (input_el.get("type") or "").lower()
@@ -203,17 +218,7 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
         if not jumpto_raw:
             option_idx += 1
             continue
-        text_value = str(jumpto_raw).strip()
-        jumpto_num: Optional[int] = None
-        if text_value.isdigit():
-            jumpto_num = int(text_value)
-        else:
-            match = re.search(r"(\d+)", text_value)
-            if match:
-                try:
-                    jumpto_num = int(match.group(1))
-                except Exception:
-                    jumpto_num = None
+        jumpto_num = _parse_jump_target(jumpto_raw)
         if jumpto_num:
             jump_rules.append({
                 "option_index": option_idx,
@@ -221,6 +226,23 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
                 "option_text": option_texts[option_idx] if option_idx < len(option_texts) else None,
             })
         option_idx += 1
+
+    if has_jump_attr:
+        unconditional_target = None
+        for attr_name in ("jumpto", "data-jumpto", "goto", "data-goto", "anyjump", "data-anyjump"):
+            unconditional_target = _parse_jump_target(question_div.get(attr_name))
+            if unconditional_target:
+                break
+        if unconditional_target and not any(
+            int(rule.get("option_index") or 0) < 0 and int(rule.get("jumpto") or 0) == unconditional_target
+            for rule in jump_rules
+            if isinstance(rule, dict)
+        ):
+            jump_rules.append({
+                "option_index": -1,
+                "jumpto": unconditional_target,
+                "option_text": None,
+            })
     return has_jump_attr or bool(jump_rules), jump_rules
 
 def _extract_display_conditions_from_html(question_div, question_number: int) -> Tuple[bool, List[Dict[str, Any]]]:

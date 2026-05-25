@@ -412,7 +412,7 @@ class AsyncRuntimeLoopLargeTests:
             2: SurveyQuestionMeta(num=2, title="Q2"),
         }
 
-        assert runner._uses_http_runtime() is False
+        assert runner._uses_http_runtime() is True
 
     @pytest.mark.asyncio
     async def test_run_marks_thread_completed_when_target_reached(self) -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from software.providers.answering import AnswerAction
-from software.providers.contracts import LOGIC_PARSE_STATUS_COMPLETE, SurveyQuestionMeta
+from software.providers.contracts import SurveyQuestionMeta
 
 BuildHttpAnswerAction = Callable[[SurveyQuestionMeta], Awaitable[Optional[AnswerAction]]]
 _SUPPORTED_CONDITION_MODES = {"selected", "not_selected"}
@@ -41,10 +41,6 @@ def get_http_logic_fallback_reason(questions: Sequence[SurveyQuestionMeta]) -> s
         question_num = int(getattr(question, "num", 0) or 0)
         if question_num <= 0 or not question_has_survey_logic(question):
             continue
-
-        logic_status = str(getattr(question, "logic_parse_status", "") or "").strip().lower()
-        if logic_status != LOGIC_PARSE_STATUS_COMPLETE:
-            return f"第{question_num}题逻辑解析不完整"
 
         for condition in list(getattr(question, "display_conditions", []) or []):
             if not isinstance(condition, dict):
@@ -134,7 +130,26 @@ def _question_is_visible(
     conditions = list(getattr(question, "display_conditions", []) or [])
     if not conditions:
         return not bool(getattr(question, "has_display_condition", False))
-    return any(_condition_is_met(action_by_question_num, condition) for condition in conditions if isinstance(condition, dict))
+
+    grouped_conditions: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            continue
+        try:
+            source_question_num = int(condition.get("condition_question_num") or 0)
+        except Exception:
+            source_question_num = 0
+        if source_question_num <= 0:
+            continue
+        condition_mode = str(condition.get("condition_mode") or "selected").strip() or "selected"
+        grouped_conditions.setdefault((source_question_num, condition_mode), []).append(condition)
+    if not grouped_conditions:
+        return not bool(getattr(question, "has_display_condition", False))
+
+    for grouped in grouped_conditions.values():
+        if not any(_condition_is_met(action_by_question_num, condition) for condition in grouped):
+            return False
+    return True
 
 
 def _resolve_jump_target(
@@ -169,6 +184,7 @@ async def build_http_logic_plan(
     questions: Sequence[SurveyQuestionMeta],
     *,
     build_action: BuildHttpAnswerAction,
+    respect_jump_logic: bool = True,
 ) -> HttpLogicPlan:
     ordered_questions = _ordered_questions(questions)
     fallback_reason = get_http_logic_fallback_reason(ordered_questions)
@@ -202,16 +218,17 @@ async def build_http_logic_plan(
         action_by_question_num[question_num] = action
         actions.append(action)
 
-        jump_target = _resolve_jump_target(question, action)
-        if jump_target is None:
-            continue
-        if jump_target > max_question_num:
-            return HttpLogicPlan(
-                actions=tuple(actions),
-                skipped_question_nums=tuple(skipped_question_nums),
-                terminated_early=True,
-            )
-        jump_target_num = jump_target
+        if respect_jump_logic:
+            jump_target = _resolve_jump_target(question, action)
+            if jump_target is None:
+                continue
+            if jump_target > max_question_num:
+                return HttpLogicPlan(
+                    actions=tuple(actions),
+                    skipped_question_nums=tuple(skipped_question_nums),
+                    terminated_early=True,
+                )
+            jump_target_num = jump_target
 
     return HttpLogicPlan(
         actions=tuple(actions),

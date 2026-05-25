@@ -36,7 +36,7 @@ def test_wjx_submitdata_formats_common_actions() -> None:
         ]
     )
 
-    assert submitdata == "1$1}2$1|3}3$甲||乙}4$2,3}5$66.0"
+    assert submitdata == "1$1}2$1|3}3$甲^乙}4$1!2,2!3}5$66.0"
 
 
 def test_qq_question_answer_builders_cover_choice_text_and_matrix() -> None:
@@ -149,6 +149,99 @@ async def test_wjx_http_runtime_builds_only_visible_questions_after_logic(monkey
 
     assert built_questions == [1, 3]
     assert [action.question_num for action in actions] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_wjx_http_runtime_keeps_jump_skipped_questions_in_final_submit(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://www.wjx.cn/vm/demo.aspx",
+        survey_provider="wjx",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(
+            num=1,
+            title="Q1",
+            type_code="3",
+            has_jump=True,
+            logic_parse_status="complete",
+            jump_rules=[{"option_index": 1, "jumpto": 3}],
+            option_texts=["A", "B"],
+            options=2,
+        ),
+        2: SurveyQuestionMeta(
+            num=2,
+            title="Q2",
+            type_code="3",
+            option_texts=["C", "D"],
+            options=2,
+        ),
+        3: SurveyQuestionMeta(
+            num=3,
+            title="Q3",
+            type_code="3",
+            option_texts=["E", "F"],
+            options=2,
+        ),
+    }
+    state = ExecutionState(config=config)
+    built_questions: list[int] = []
+
+    async def fake_build_action(_driver, question, _ctx, **_kwargs):
+        built_questions.append(int(question.num))
+        if int(question.num) == 1:
+            return AnswerAction(question_num=1, kind="choice", selected_indices=(1,), record_type="single")
+        return AnswerAction(question_num=int(question.num), kind="choice", selected_indices=(0,), record_type="single")
+
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+
+    actions = await wjx_http._build_actions(config, state, psycho_plan=None, stop_signal=None)
+
+    assert built_questions == [1, 2, 3]
+    assert [action.question_num for action in actions] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_wjx_http_runtime_requires_all_distinct_display_sources(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://www.wjx.cn/vm/demo.aspx",
+        survey_provider="wjx",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", option_texts=["A", "B"], options=2),
+        2: SurveyQuestionMeta(num=2, title="Q2", type_code="3", option_texts=["C", "D"], options=2),
+        3: SurveyQuestionMeta(
+            num=3,
+            title="Q3",
+            type_code="3",
+            has_display_condition=True,
+            logic_parse_status="complete",
+            display_conditions=[
+                {"condition_question_num": 1, "condition_mode": "selected", "condition_option_indices": [0]},
+                {"condition_question_num": 2, "condition_mode": "selected", "condition_option_indices": [1]},
+            ],
+            option_texts=["E", "F"],
+            options=2,
+        ),
+    }
+    state = ExecutionState(config=config)
+    built_questions: list[int] = []
+
+    async def fake_build_action(_driver, question, _ctx, **_kwargs):
+        built_questions.append(int(question.num))
+        if int(question.num) == 1:
+            return AnswerAction(question_num=1, kind="choice", selected_indices=(0,), record_type="single")
+        if int(question.num) == 2:
+            return AnswerAction(question_num=2, kind="choice", selected_indices=(0,), record_type="single")
+        raise AssertionError("Q3 不该可见")
+
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+
+    actions = await wjx_http._build_actions(config, state, psycho_plan=None, stop_signal=None)
+
+    assert built_questions == [1, 2]
+    assert [action.question_num for action in actions] == [1, 2]
 
 
 @pytest.mark.asyncio
@@ -344,6 +437,16 @@ async def test_qq_builder_supports_dropdown_and_matrix_star_for_http(monkeypatch
     assert matrix_action is not None
     assert matrix_action.kind == "matrix"
     assert matrix_action.matrix_indices == (2,)
+
+
+def test_wjx_submit_rejected_message_includes_question_title_and_display_num() -> None:
+    config = ExecutionConfig(url="https://www.wjx.cn/vm/demo.aspx", survey_provider="wjx")
+    config.questions_metadata = {
+        10: SurveyQuestionMeta(num=10, display_num=8, title="年龄", type_code="1"),
+    }
+
+    with pytest.raises(RuntimeError, match=r"第8题（年龄）.*答案不符合要求"):
+        wjx_http._raise_submit_rejected(config, "9〒10〒您提交的答案不符合要求，请检查并修改后重新提交！")
 
 
 def _async_result(value):

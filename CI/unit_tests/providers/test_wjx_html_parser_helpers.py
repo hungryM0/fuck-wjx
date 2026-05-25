@@ -413,6 +413,21 @@ class WjxHtmlParserHelperTests:
             [{"option_index": 0, "jumpto": 9, "option_text": "北京"}],
         )
 
+    def test_jump_rule_helper_supports_unconditional_question_jump(self) -> None:
+        question_div = _soup(
+            """
+            <div hasjump="1" jumpto="11" type="3">
+              <input type="radio" />
+              <input type="radio" />
+            </div>
+            """
+        ).div
+
+        assert html_parser_rules._extract_jump_rules_from_html(question_div, 10, ["A", "B"]) == (
+            True,
+            [{"option_index": -1, "jumpto": 11, "option_text": None}],
+        )
+
     def test_attach_display_condition_metadata_dedupes_and_clears_empty_targets(self) -> None:
         questions = [
             {"num": 1, "display_conditions": [], "controls_display_targets": []},
