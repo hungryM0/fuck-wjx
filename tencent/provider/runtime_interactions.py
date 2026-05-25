@@ -698,11 +698,90 @@ async def _select_dropdown_option(driver: BrowserDriver, provider_question_id: s
             return True
     return False
 
+async def _click_matrix_cell_via_script(
+    page: Any,
+    provider_question_id: str,
+    row_index: int,
+    column_index: int,
+) -> bool:
+    return bool(
+        await page.evaluate(
+            """async ({ questionId, rowIndex, columnIndex }) => {
+                const section = document.querySelector(`section.question[data-question-id="${questionId}"]`);
+                if (!section || rowIndex < 0 || columnIndex < 0) return false;
+                const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+                const tableRows = Array.from(section.querySelectorAll('tbody tr')).filter((row) => {
+                    return row && row.querySelector('input[type="radio"]');
+                });
+                const blockRows = Array.from(section.querySelectorAll('.question-item')).filter((row) => {
+                    return row && row.querySelector('input[type="radio"]');
+                });
+                const rows = tableRows.length > rowIndex ? tableRows : blockRows;
+                const row = rows[rowIndex];
+                if (!row) return false;
+                const inputs = Array.from(row.querySelectorAll('input[type="radio"]'));
+                const target = inputs[columnIndex];
+                if (!target) return false;
+                const currentCheckedIndex = () => Array.from(row.querySelectorAll('input[type="radio"]')).findIndex((input) => input.checked);
+                const isConfirmed = () => currentCheckedIndex() === columnIndex;
+                if (isConfirmed()) return true;
+                try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                await wait(40);
+                const targetId = String(target.id || '');
+                const labelByFor = targetId
+                    ? (row.querySelector(`label.clickBlock[for="${targetId}"]`) || row.querySelector(`label[for="${targetId}"]`))
+                    : null;
+                const clickCandidates = [
+                    labelByFor,
+                    target.closest('label.clickBlock'),
+                    target.closest('label.checkbtn-label'),
+                    target.closest('.checkbtn'),
+                    target.closest('.matrix-option'),
+                    target.closest('.ui-radio'),
+                    target.closest('td'),
+                    target.closest('label'),
+                    target.parentElement,
+                    target,
+                ].filter(Boolean);
+                for (const node of clickCandidates) {
+                    if (!node || !node.isConnected) continue;
+                    try { node.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
+                    await wait(40);
+                    try { node.click(); } catch (e) {}
+                    await wait(100);
+                    if (isConfirmed()) return true;
+                    try {
+                        node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    } catch (e) {}
+                    await wait(100);
+                    if (isConfirmed()) return true;
+                }
+                try { target.checked = true; } catch (e) {}
+                ['input', 'change', 'click'].forEach((name) => {
+                    try { target.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+                });
+                await wait(80);
+                return isConfirmed();
+            }""",
+            {
+                "questionId": provider_question_id,
+                "rowIndex": int(row_index),
+                "columnIndex": int(column_index),
+            },
+        )
+    )
+
 async def _click_matrix_cell(driver: BrowserDriver, provider_question_id: str, row_index: int, column_index: int) -> bool:
     if not provider_question_id or row_index < 0 or column_index < 0:
         return False
     page = await _page(driver)
     base_selector = f'section.question[data-question-id="{provider_question_id}"]'
+
+    try:
+        if await _click_matrix_cell_via_script(page, provider_question_id, row_index, column_index):
+            return True
+    except Exception:
+        pass
 
     async def _checked_index() -> int:
         try:
@@ -786,68 +865,7 @@ async def _click_matrix_cell(driver: BrowserDriver, provider_question_id: str, r
         pass
 
     return bool(
-        await page.evaluate(
-            """async ({ questionId, rowIndex, columnIndex }) => {
-                const section = document.querySelector(`section.question[data-question-id="${questionId}"]`);
-                if (!section || rowIndex < 0 || columnIndex < 0) return false;
-                const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
-                const tableRows = Array.from(section.querySelectorAll('tbody tr')).filter((row) => {
-                    return row && row.querySelector('input[type="radio"]');
-                });
-                const blockRows = Array.from(section.querySelectorAll('.question-item')).filter((row) => {
-                    return row && row.querySelector('input[type="radio"]');
-                });
-                const rows = tableRows.length > rowIndex ? tableRows : blockRows;
-                const row = rows[rowIndex];
-                if (!row) return false;
-                try { row.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
-                await wait(100);
-                const inputs = Array.from(row.querySelectorAll('input[type="radio"]'));
-                const target = inputs[columnIndex];
-                if (!target) return false;
-                const currentCheckedIndex = () => Array.from(row.querySelectorAll('input[type="radio"]')).findIndex((input) => input.checked);
-                const isConfirmed = () => currentCheckedIndex() === columnIndex;
-                if (isConfirmed()) return true;
-                const targetId = String(target.id || '');
-                const labelByFor = targetId
-                    ? (row.querySelector(`label.clickBlock[for="${targetId}"]`) || row.querySelector(`label[for="${targetId}"]`))
-                    : null;
-                const clickCandidates = [
-                    labelByFor,
-                    target.closest('label.clickBlock'),
-                    target.closest('.checkbtn'),
-                    target.closest('.matrix-option'),
-                    target.closest('.ui-radio'),
-                    target.closest('td'),
-                    target.closest('label'),
-                    target.parentElement,
-                    target,
-                ].filter(Boolean);
-                for (const node of clickCandidates) {
-                    try { node.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) {}
-                    await wait(80);
-                    try { node.click(); } catch (e) {}
-                    await wait(180);
-                    if (isConfirmed()) return true;
-                    try {
-                        node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                    } catch (e) {}
-                    await wait(180);
-                    if (isConfirmed()) return true;
-                }
-                try { target.checked = true; } catch (e) {}
-                ['input', 'change', 'click'].forEach((name) => {
-                    try { target.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
-                });
-                await wait(180);
-                return isConfirmed();
-            }""",
-            {
-                "questionId": provider_question_id,
-                "rowIndex": int(row_index),
-                "columnIndex": int(column_index),
-            },
-        )
+        await _click_matrix_cell_via_script(page, provider_question_id, row_index, column_index)
     )
 
 async def _click_star_cell(driver: BrowserDriver, provider_question_id: str, row_index: int, star_index: int) -> bool:
@@ -858,6 +876,11 @@ async def _click_star_cell(driver: BrowserDriver, provider_question_id: str, row
     """
     if not provider_question_id or row_index < 0 or star_index < 0:
         return False
+    try:
+        if await _click_matrix_cell(driver, provider_question_id, row_index, star_index):
+            return True
+    except Exception:
+        pass
     page = await _page(driver)
     return bool(
         await page.evaluate(
@@ -915,18 +938,25 @@ async def _click_star_cell(driver: BrowserDriver, provider_question_id: str, row
                 const target = stars[starIndex];
                 if (!target) return false;
 
-                // ── 3. 判断是否已选中 ──────────────────────────────────────
-                // TDesign 选中后：前 N 个 star 会带上 t-rate__star--full / t-is-active 等
-                const isSelected = () => {
-                    if (stars.length === 0) return false;
-                    const cls0 = String(stars[0].className || '');
-                    // 若第一个 star 携带 "full" 或 "active"，说明已有评分
-                    const hasActive = stars.slice(0, starIndex + 1).some((s) => {
-                        const c = String(s.className || '');
-                        return c.includes('full') || c.includes('active') || c.includes('selected') || c.includes('filled');
-                    });
-                    return hasActive;
+                // ── 3. 判断是否已精确选中目标星级 ───────────────────────────
+                const isActiveStar = (node) => {
+                    const c = String(node?.className || '');
+                    return c.includes('full') || c.includes('active') || c.includes('selected') || c.includes('filled');
                 };
+                const resolveSelectedIndex = () => {
+                    if (stars.length === 0) return false;
+                    const slider = row.querySelector('[aria-valuenow]') || row.closest('[aria-valuenow]') || section.querySelector('[aria-valuenow]');
+                    const ariaValue = Number.parseInt(String(slider?.getAttribute?.('aria-valuenow') || ''), 10);
+                    if (Number.isFinite(ariaValue) && ariaValue > 0) return ariaValue - 1;
+                    const checkedRadioIndex = Array.from(row.querySelectorAll('input[type="radio"]')).findIndex((input) => input.checked);
+                    if (checkedRadioIndex >= 0) return checkedRadioIndex;
+                    const activeCount = stars.filter((node) => isActiveStar(node)).length;
+                    if (activeCount > 0 && isActiveStar(stars[Math.min(starIndex, activeCount - 1)])) {
+                        return activeCount - 1;
+                    }
+                    return -1;
+                };
+                const isSelected = () => resolveSelectedIndex() === starIndex;
 
                 // ── 4. 尝试点击 ────────────────────────────────────────────
                 // 部分 TDesign 版本需要先 mouseover/mousemove 再 click 才能触发 Vue 响应
@@ -935,12 +965,12 @@ async def _click_star_cell(driver: BrowserDriver, provider_question_id: str, row
                     ['mouseover', 'mouseenter', 'mousemove'].forEach((name) => {
                         try { node.dispatchEvent(new MouseEvent(name, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
                     });
-                    await wait(60);
+                    await wait(40);
                     try { node.click(); } catch (e) {}
-                    await wait(200);
+                    await wait(120);
                     if (isSelected()) return true;
                     try { node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch (e) {}
-                    await wait(200);
+                    await wait(120);
                     return isSelected();
                 };
 
@@ -956,7 +986,7 @@ async def _click_star_cell(driver: BrowserDriver, provider_question_id: str, row
                         const emit = vnode.emit || (vnode.proxy && vnode.proxy.$emit);
                         if (emit) {
                             emit.call(vnode.proxy || vnode, 'change', starIndex + 1);
-                            await wait(200);
+                            await wait(120);
                             return isSelected();
                         }
                     }

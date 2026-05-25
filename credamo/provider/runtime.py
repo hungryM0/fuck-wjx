@@ -30,8 +30,6 @@ _ANSWER_ORDER = _runtime_answerers._answer_order
 _ANSWER_SCALE = _runtime_answerers._answer_scale
 _ANSWER_SINGLE_LIKE = _runtime_answerers._answer_single_like
 _ANSWER_TEXT = _runtime_answerers._answer_text
-_APPLY_BATCH_ANSWER_ACTIONS = _runtime_answerers.apply_answer_actions
-_BUILD_BATCH_ANSWER_ACTION = _runtime_answerers.build_answer_action
 
 _abort_requested = _runtime_dom._abort_requested
 _click_element = _runtime_dom._click_element
@@ -62,8 +60,6 @@ _DEFAULT_DOM_CLICK_SUBMIT = _runtime_dom._click_submit
 _DEFAULT_DOM_WAIT_FOR_DYNAMIC_QUESTION_ROOTS = _runtime_dom._wait_for_dynamic_question_roots
 _DEFAULT_DOM_WAIT_FOR_PAGE_CHANGE = _runtime_dom._wait_for_page_change
 _DEFAULT_DOM_WAIT_FOR_QUESTION_ROOTS = _runtime_dom._wait_for_question_roots
-
-_CREDAMO_BATCH_ENTRY_TYPES = {"single", "multiple", "scale", "score", "matrix", "text", "multi_text"}
 
 
 async def _provider_page_id_from_root(page: Any, root: Any, fallback_page_id: Any = None) -> str:
@@ -428,60 +424,6 @@ async def _attempt_answer_current_root(
     return action_attempted
 
 
-async def _answer_pending_roots_batch(
-    page: Any,
-    roots: list[Any],
-    pending_roots: list[tuple[Any, int, str]],
-    config: ExecutionConfig,
-    *,
-    page_index: int,
-    psycho_plan: Optional[Any] = None,
-) -> set[str]:
-    if not pending_roots:
-        return set()
-    root_index_by_id = {id(root): index for index, root in enumerate(roots)}
-    actions: list[Any] = []
-    action_key_by_num: dict[int, str] = {}
-    for root, question_num, question_key in pending_roots:
-        root_index = root_index_by_id.get(id(root))
-        if root_index is None:
-            continue
-        resolved_question_num, config_entry, question_meta = await _resolve_config_binding(
-            page,
-            root,
-            question_num,
-            config,
-            fallback_page_id=page_index,
-        )
-        if config_entry is None:
-            continue
-        entry_type, config_index = config_entry
-        if str(entry_type or "").strip() not in _CREDAMO_BATCH_ENTRY_TYPES:
-            continue
-        action = _BUILD_BATCH_ANSWER_ACTION(
-            root_index=root_index,
-            question_num=resolved_question_num,
-            entry_type=entry_type,
-            config_index=config_index,
-            config=config,
-            question_meta=question_meta,
-            psycho_plan=psycho_plan,
-        )
-        if action is None:
-            continue
-        actions.append(action)
-        action_key_by_num[int(resolved_question_num)] = question_key
-    if not actions:
-        return set()
-    result = await _APPLY_BATCH_ANSWER_ACTIONS(page, actions)
-    answered_keys: set[str] = set()
-    for question_num in result.applied:
-        question_key = action_key_by_num.get(int(question_num))
-        if question_key:
-            answered_keys.add(question_key)
-    return answered_keys
-
-
 async def _attempt_answer_current_root_with_optional_plan(
     page: Any,
     root: Any,
@@ -620,22 +562,7 @@ async def brush_credamo(
             if not pending_roots:
                 break
 
-            batch_answered_keys = await _answer_pending_roots_batch(
-                page,
-                roots,
-                pending_roots,
-                config,
-                page_index=page_index,
-                psycho_plan=psycho_plan,
-            )
-            if batch_answered_keys:
-                answered_keys.update(batch_answered_keys)
-                runtime_state.answered_question_keys = list(answered_keys)
-                answered_steps = min(total_steps, answered_steps + len(batch_answered_keys))
-
             for root, question_num, question_key in pending_roots:
-                if question_key in batch_answered_keys:
-                    continue
                 if _abort_requested(active_stop):
                     try:
                         state.update_thread_status(thread_name, "已中断", running=False)

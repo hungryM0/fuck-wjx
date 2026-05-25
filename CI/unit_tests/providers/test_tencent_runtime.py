@@ -272,6 +272,65 @@ class TencentRuntimeTests:
         assert calls == ["answer", "answer", "submit"]
 
     @pytest.mark.asyncio
+    async def test_brush_qq_static_page_still_uses_sequential_answering_for_visible_questions(self, make_runtime_state, patch_attrs) -> None:
+        class _FakePage:
+            async def evaluate(self, *_args, **_kwargs):
+                return {"applied": [1, 2], "failed": []}
+
+        class _FakeDriver:
+            async def page(self):
+                return _FakePage()
+
+        ctx = make_runtime_state(
+            {
+                1: _meta(1, page=1, provider_question_id="page1-q1"),
+                2: _meta(2, page=1, provider_question_id="page1-q2"),
+            },
+            {1: ("scale", 0), 2: ("matrix", 1)},
+        )
+        calls: list[str] = []
+
+        async def _answer_question_by_meta(_driver, question, _ctx, *, psycho_plan):
+            assert psycho_plan == "plan"
+            calls.append(str(question.provider_question_id))
+            return True
+
+        patch_attrs(
+            (runtime, "_supports_page_snapshot", _async_return(True)),
+            (
+                runtime,
+                "_wait_for_question_visibility_map",
+                _async_return(
+                    {
+                        "page1-q1": {"attached": True, "visible": True},
+                        "page1-q2": {"attached": True, "visible": True},
+                    }
+                ),
+            ),
+            (runtime, "_wait_for_question_visible", _async_return(True)),
+            (runtime, "_human_scroll_after_question", _async_return(None)),
+            (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
+            (runtime, "_is_headless_mode", lambda _ctx: True),
+            (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
+            (runtime, "has_configured_answer_duration", lambda _value: False),
+            (runtime, "simulate_answer_duration_delay", _async_return(False)),
+            (runtime, "_answer_question_by_meta", _answer_question_by_meta),
+            (runtime, "submit", _async_append(calls, "submit")),
+        )
+
+        result = await runtime.brush_qq(
+            _FakeDriver(),
+            object(),
+            ctx,
+            stop_signal=threading.Event(),
+            thread_name="Worker-1",
+            psycho_plan="plan",
+        )
+
+        assert result
+        assert calls == ["page1-q1", "page1-q2", "submit"]
+
+    @pytest.mark.asyncio
     async def test_brush_qq_aborts_during_final_duration_wait_before_submit(self, make_runtime_state, patch_attrs) -> None:
         ctx = make_runtime_state({1: _meta(1)}, {1: ("single", 0)})
         calls: list[str] = []

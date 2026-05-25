@@ -172,6 +172,36 @@ class TencentRuntimeInteractionsTests:
         assert await runtime_interactions._select_dropdown_option(driver, "q8", "目标") is True
         assert waits == [("wait", "q8", 1200)]
 
+    @pytest.mark.asyncio
+    async def test_click_matrix_cell_prefers_script_fast_path(self) -> None:
+        page = _Page()
+        page.evaluate_results = [True]
+        driver = _Driver(page)
+
+        assert await runtime_interactions._click_matrix_cell(driver, "q9", 1, 2) is True
+
+    @pytest.mark.asyncio
+    async def test_click_star_cell_prefers_matrix_fast_path(self, monkeypatch) -> None:
+        calls: list[tuple[str, int, int]] = []
+
+        async def _matrix_click(_driver, provider_question_id: str, row_index: int, column_index: int) -> bool:
+            calls.append((provider_question_id, row_index, column_index))
+            return True
+
+        monkeypatch.setattr(runtime_interactions, "_click_matrix_cell", _matrix_click)
+
+        assert await runtime_interactions._click_star_cell(_Driver(_Page()), "q13", 2, 3) is True
+        assert calls == [("q13", 2, 3)]
+
+    @pytest.mark.asyncio
+    async def test_click_star_cell_falls_back_to_star_script_when_matrix_path_fails(self, monkeypatch) -> None:
+        page = _Page()
+        page.evaluate_results = [True]
+
+        monkeypatch.setattr(runtime_interactions, "_click_matrix_cell", _async_result(False))
+
+        assert await runtime_interactions._click_star_cell(_Driver(page), "q13", 0, 1) is True
+
 
 def _async_result(value):
     async def _runner(*_args, **_kwargs):

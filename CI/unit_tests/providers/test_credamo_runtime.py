@@ -261,6 +261,54 @@ class CredamoRuntimeTests:
         assert calls == ["single", "scale", "next", "matrix", "next", "multiple", "submit"]
 
     @pytest.mark.asyncio
+    async def test_brush_credamo_scale_does_not_use_batch_shortcut(self, restore_credamo_runtime_patchpoints, patch_attrs) -> None:
+        _ = restore_credamo_runtime_patchpoints
+
+        class _FakePage:
+            async def evaluate(self, *_args, **_kwargs):
+                return {"applied": [9], "failed": []}
+
+        stop_signal = threading.Event()
+        state = SimpleNamespace(
+            stop_event=stop_signal,
+            update_thread_step=lambda *args, **kwargs: None,
+            update_thread_status=lambda *args, **kwargs: None,
+        )
+        root = self._FakeQuestionRoot(9)
+        calls: list[str] = []
+        config = SimpleNamespace(
+            question_config_index_map={9: ("scale", 0)},
+            scale_prob=[[100.0, 0.0, 0.0]],
+            single_prob=[],
+            droplist_prob=[],
+            multiple_prob=[],
+            texts=[],
+            answer_duration_range_seconds=[0, 0],
+        )
+        pending_iter = iter([[(root, 9, "k9")], []])
+
+        async def _pending(*_args, **_kwargs):
+            return next(pending_iter)
+
+        patch_attrs(
+            (runtime, "_page", _async_return(_FakePage())),
+            (runtime, "_wait_for_question_roots", _async_return([root])),
+            (runtime, "_has_answerable_question_roots", _async_return(True)),
+            (runtime, "_unanswered_question_roots", _pending),
+            (runtime, "_wait_for_dynamic_question_roots", _async_return([])),
+            (runtime, "_navigation_action", _async_return("submit")),
+            (runtime, "_question_answer_state", _async_return(True)),
+            (runtime, "_answer_scale", _async_append(calls, "scale", result=True)),
+            (runtime, "_click_submit", _async_append(calls, "submit", result=True)),
+            (runtime, "simulate_answer_duration_delay", _async_return(False)),
+        )
+
+        result = await runtime.brush_credamo(object(), config, state, stop_signal=stop_signal, thread_name="Worker-1")
+
+        assert result
+        assert calls == ["scale", "submit"]
+
+    @pytest.mark.asyncio
     async def test_brush_credamo_missing_config_does_not_advance_progress(self, restore_credamo_runtime_patchpoints, patch_attrs) -> None:
         _ = restore_credamo_runtime_patchpoints
         stop_signal = threading.Event()

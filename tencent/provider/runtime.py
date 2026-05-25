@@ -26,7 +26,6 @@ from .runtime_answerers import (
     _answer_qq_score_like,
     _answer_qq_single,
     _answer_qq_text,
-    answer_page_batch,
 )
 from .runtime_flow import (
     _group_questions_by_page,
@@ -179,29 +178,6 @@ async def brush_qq(
         runtime_state.page_index = page_index + 1
         runtime_state.page_question_ids = list(page_question_ids)
         runtime_state.visibility_snapshot = dict(page_snapshot or {})
-        batch_applied: set[int] = set()
-        page_has_dynamic_logic = any(
-            bool(getattr(item, "has_jump", False)) or bool(getattr(item, "has_dependent_display_logic", False))
-            for item in questions
-        )
-        if not page_has_dynamic_logic:
-            batch_candidates: list[Any] = []
-            for candidate in questions:
-                candidate_num = int(getattr(candidate, "num", 0) or 0)
-                candidate_id = str(getattr(candidate, "provider_question_id", "") or "")
-                if candidate_num <= 0 or not candidate_id:
-                    continue
-                snapshot_item = page_snapshot.get(candidate_id) if isinstance(page_snapshot, dict) else None
-                if bool((snapshot_item or {}).get("visible")):
-                    batch_candidates.append(candidate)
-            if batch_candidates:
-                batch_result = await answer_page_batch(
-                    driver,
-                    batch_candidates,
-                    ctx,
-                    psycho_plan=psycho_plan,
-                )
-                batch_applied = {int(item) for item in batch_result.applied}
         for question in questions:
             if _abort_requested():
                 try:
@@ -242,9 +218,6 @@ async def brush_qq(
                     )
                 except Exception:
                     logging.info("更新腾讯问卷线程步骤失败", exc_info=True)
-
-            if question_num in batch_applied:
-                continue
 
             await _answer_question_by_meta(driver, question, ctx, psycho_plan=psycho_plan)
 
