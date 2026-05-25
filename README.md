@@ -131,6 +131,9 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
   <a href="https://github.com/zioug">
     <img src="https://github.com/zioug.png" width="50" height="50" alt="zioug" style="border-radius: 50%;" />
   </a>
+  <a href="https://github.com/qintaiyang">
+    <img src="https://github.com/qintaiyang.png" width="50" height="50" alt="qintaiyang" style="border-radius: 50%;" />
+  </a>
 </div>
 
 ---
