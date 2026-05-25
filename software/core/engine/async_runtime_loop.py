@@ -28,6 +28,7 @@ from software.network.browser import ProxyConnectionError
 from software.network.browser.async_owner_pool import AsyncBrowserOwnerPool, AsyncBrowserSession
 from software.network.browser.runtime_async import BrowserDriver as AsyncBrowserDriver
 from software.network.browser.startup import BrowserStartupRuntimeError
+import software.network.http as http_client
 from software.network.proxy.pool import is_proxy_responsive_async
 from software.network.session_policy import (
     _discard_unresponsive_proxy,
@@ -36,7 +37,8 @@ from software.network.session_policy import (
     _select_proxy_for_session_async,
     _select_user_agent_for_session,
 )
-from software.providers.registry import fill_survey
+from software.providers.common import SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX, normalize_survey_provider
+from software.providers.registry import fill_survey, fill_survey_http
 from software.providers.registry import is_device_quota_limit_page as _provider_is_device_quota_limit_page
 
 JOINT_PRE_ANSWER_RESERVATION_LEASE_SECONDS = 45.0
@@ -492,6 +494,145 @@ class AsyncSlotRunner:
             state=self.state,
         )
 
+    def _uses_http_runtime(self) -> bool:
+        provider = normalize_survey_provider(self.config.survey_provider)
+        return bool(str(self.config.url or "").strip()) and provider in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}
+
+    def _mark_http_submit_success(self) -> bool:
+        if self.proxy_address:
+            try:
+                self.state.mark_successful_proxy_address(self.proxy_address)
+            except Exception:
+                logging.info("记录成功代理失败：%s", self.proxy_address, exc_info=True)
+        return self.stop_policy.record_success(self.stop_proxy, thread_name=self.slot_label)
+
+    def _handle_http_transport_error(self, exc: BaseException) -> bool:
+        if self.proxy_address:
+            try:
+                _mark_proxy_temporarily_bad(self.state, self.proxy_address)
+            except Exception:
+                logging.info("标记 HTTP 代理异常失败", exc_info=True)
+        return self._handle_proxy_unavailable(
+            status_text="代理连接失败" if self.proxy_address else "网络请求失败",
+            log_message=f"HTTP 请求失败，本轮按失败处理：{exc}",
+        )
+
+    async def _run_http_runtime(self) -> None:
+        self._update_status("HTTP 会话启动", running=True)
+        while True:
+            if await self._should_stop_loop():
+                break
+            token_id = await self.scheduler.acquire()
+            if token_id is None:
+                break
+            should_requeue_dispatch = True
+            dispatch_delay_seconds = 0.0
+            try:
+                self._joint_pre_answer_timed_out = False
+                if not await self._prepare_round_context():
+                    should_requeue_dispatch = False
+                    break
+
+                proxy_result = await self._run_pre_answer_step_with_joint_lease(
+                    "获取代理",
+                    self._select_session_proxy_and_ua,
+                )
+                if proxy_result is _JOINT_PRE_ANSWER_TIMEOUT:
+                    dispatch_delay_seconds = JOINT_PRE_ANSWER_ATTEMPT_REQUEUE_DELAY_SECONDS
+                    continue
+                proxy_address, ua_value = proxy_result
+                if self.run_context.stop_requested():
+                    should_requeue_dispatch = False
+                    break
+                if self.config.random_proxy_ip_enabled and not proxy_address:
+                    self._release_round_resources(requeue_reverse_fill=True)
+                    continue
+                self.proxy_address = proxy_address
+
+                try:
+                    marked_answering = self.state.mark_joint_sample_answering(self.slot_label)
+                except Exception:
+                    logging.info("标记联合信效度槽位进入答题失败", exc_info=True)
+                    marked_answering = False
+                if self._requires_joint_sample() and not marked_answering:
+                    logging.warning("会话[%s]进入 HTTP 答题前发现联合信效度槽位已释放，本轮放弃并重试", self.slot_label)
+                    self._release_round_resources(requeue_reverse_fill=True)
+                    dispatch_delay_seconds = JOINT_PRE_ANSWER_ATTEMPT_REQUEUE_DELAY_SECONDS
+                    continue
+
+                finished = await fill_survey_http(
+                    self.config,
+                    self.state,
+                    stop_signal=self.stop_proxy,
+                    thread_name=self.slot_label,
+                    provider=self.config.survey_provider,
+                    proxy_address=proxy_address,
+                    user_agent=ua_value,
+                )
+                if self.run_context.stop_requested() or not finished:
+                    self._release_round_resources(requeue_reverse_fill=True)
+                    if self.run_context.stop_requested():
+                        should_requeue_dispatch = False
+                        break
+                    continue
+
+                if bool(getattr(self.config, "submit_enabled", True)):
+                    should_stop = self._mark_http_submit_success()
+                    if should_stop:
+                        should_requeue_dispatch = False
+                        break
+                else:
+                    outcome = self._finalize_without_submit()
+                    if outcome.should_stop:
+                        should_requeue_dispatch = False
+                        break
+                dispatch_delay_seconds = self._resolve_dispatch_delay_seconds()
+                if dispatch_delay_seconds > 0:
+                    self._update_step("等待提交间隔")
+            except AIRuntimeError as exc:
+                if await self._handle_ai_runtime_error(exc):
+                    should_requeue_dispatch = False
+                    break
+                self._release_round_resources(requeue_reverse_fill=True)
+            except (
+                http_client.ConnectTimeout,
+                http_client.ReadTimeout,
+                http_client.ConnectionError,
+                http_client.Timeout,
+            ) as exc:
+                if self._handle_http_transport_error(exc):
+                    should_requeue_dispatch = False
+                    break
+                self._release_round_resources(requeue_reverse_fill=True)
+            except Exception as exc:
+                if self.run_context.stop_requested():
+                    should_requeue_dispatch = False
+                    break
+                logging.exception("HTTP 会话[%s]运行异常", self.slot_label)
+                if self.stop_policy.record_failure(
+                    self.stop_proxy,
+                    thread_name=self.slot_label,
+                    failure_reason=FailureReason.FILL_FAILED,
+                    log_message=f"HTTP 提交失败，本轮按失败处理：{exc}",
+                    consume_reverse_fill_attempt=False,
+                ):
+                    should_requeue_dispatch = False
+                    break
+                self._release_round_resources(requeue_reverse_fill=True)
+            finally:
+                self._release_session_proxy()
+                await self.scheduler.release(
+                    int(token_id),
+                    requeue=bool(should_requeue_dispatch and not self.run_context.stop_requested()),
+                    delay_seconds=dispatch_delay_seconds,
+                )
+        try:
+            self.state.release_joint_sample(self.slot_label)
+            self.state.release_reverse_fill_sample(self.slot_label, requeue=True)
+            self.state.mark_thread_finished(self.slot_label, status_text=self._resolve_finished_status_text())
+        except Exception:
+            logging.info("HTTP slot 收尾状态更新失败", exc_info=True)
+
     def _handle_browser_startup_error(self, exc: BrowserStartupRuntimeError) -> bool:
         message = str(exc or "").strip() or "浏览器底座启动失败"
         logging.error("异步浏览器底座启动失败，已停止本次运行，避免继续消耗随机IP：%s", message)
@@ -514,6 +655,10 @@ class AsyncSlotRunner:
         return True
 
     async def run(self) -> None:
+        if self._uses_http_runtime():
+            await self._run_http_runtime()
+            return
+
         self._update_status("会话启动", running=True)
         while True:
             if await self._should_stop_loop():

@@ -11,6 +11,7 @@ from software.providers.contracts import SurveyDefinition
 
 ParseSurveyHook = Callable[[str], Awaitable[SurveyDefinition]]
 FillSurveyHook = Callable[..., Awaitable[bool]]
+FillSurveyHttpHook = Callable[..., Awaitable[bool]]
 PagePredicateHook = Callable[[Any], Awaitable[bool]]
 ValidationMessageHook = Callable[[Any], Awaitable[str]]
 WaitVerificationHook = Callable[..., Awaitable[bool]]
@@ -34,6 +35,7 @@ async def _noop_action_result(*_args: Any, **_kwargs: Any) -> RuntimeActionResul
 class ProviderAdapterHooks:
     parse_survey: ParseSurveyHook
     fill_survey: FillSurveyHook
+    fill_survey_http: FillSurveyHttpHook = _return_false
     is_completion_page: PagePredicateHook = _return_false
     submission_requires_verification: PagePredicateHook = _return_false
     submission_validation_message: ValidationMessageHook = _return_empty_text
@@ -70,6 +72,29 @@ class CallableProviderAdapter:
                 stop_signal=stop_signal,
                 thread_name=thread_name,
                 psycho_plan=psycho_plan,
+            )
+        )
+
+    async def fill_survey_http_async(
+        self,
+        config: ExecutionConfig,
+        state: ExecutionState,
+        *,
+        stop_signal: Any = None,
+        thread_name: str = "",
+        psycho_plan: Any = None,
+        proxy_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> bool:
+        return bool(
+            await self._hooks.fill_survey_http(
+                config,
+                state,
+                stop_signal=stop_signal,
+                thread_name=thread_name,
+                psycho_plan=psycho_plan,
+                proxy_address=proxy_address,
+                user_agent=user_agent,
             )
         )
 

@@ -19,6 +19,7 @@ from software.providers.contracts import SurveyDefinition
 from software.providers.hooks import (
     HookTarget,
     build_action_hook,
+    build_fill_http_hook,
     build_fill_hook,
     build_parse_hook,
     build_predicate_hook,
@@ -47,6 +48,8 @@ _CREDAMO_PARSE: HookTarget = ("credamo.provider.parser", "parse_credamo_survey")
 _WJX_FILL: HookTarget = ("wjx.provider.runtime", "brush_wjx")
 _QQ_FILL: HookTarget = ("tencent.provider.runtime", "brush_qq")
 _CREDAMO_FILL: HookTarget = ("credamo.provider.runtime", "brush_credamo")
+_WJX_FILL_HTTP: HookTarget = ("wjx.provider.http_runtime", "brush_wjx_http")
+_QQ_FILL_HTTP: HookTarget = ("tencent.provider.http_runtime", "brush_qq_http")
 
 _WJX_IS_COMPLETION_PAGE: HookTarget = ("wjx.provider.submission_pages", "is_completion_page")
 _WJX_SUBMISSION_REQUIRES_VERIFICATION: HookTarget = ("wjx.provider.submission", "submission_requires_verification")
@@ -79,6 +82,7 @@ _PROVIDER_REGISTRY = {
         ProviderAdapterHooks(
             parse_survey=build_parse_hook(SURVEY_PROVIDER_WJX, _WJX_PARSE),
             fill_survey=build_fill_hook(_WJX_FILL),
+            fill_survey_http=build_fill_http_hook(_WJX_FILL_HTTP),
             is_completion_page=build_predicate_hook(_WJX_IS_COMPLETION_PAGE),
             submission_requires_verification=build_predicate_hook(_WJX_SUBMISSION_REQUIRES_VERIFICATION),
             submission_validation_message=build_text_hook(_WJX_SUBMISSION_VALIDATION_MESSAGE),
@@ -93,6 +97,7 @@ _PROVIDER_REGISTRY = {
         ProviderAdapterHooks(
             parse_survey=build_parse_hook(SURVEY_PROVIDER_QQ, _QQ_PARSE),
             fill_survey=build_fill_hook(_QQ_FILL),
+            fill_survey_http=build_fill_http_hook(_QQ_FILL_HTTP),
             is_completion_page=build_predicate_hook(_QQ_IS_COMPLETION_PAGE),
             submission_requires_verification=build_predicate_hook(_QQ_SUBMISSION_REQUIRES_VERIFICATION),
             submission_validation_message=build_text_hook(_QQ_SUBMISSION_VALIDATION_MESSAGE),
@@ -168,6 +173,42 @@ async def fill_survey(
                 stop_signal=stop_signal,
                 thread_name=thread_name,
                 psycho_plan=resolved_plan,
+            )
+        )
+
+
+async def fill_survey_http(
+    config: ExecutionConfig,
+    state: ExecutionState,
+    *,
+    stop_signal: Any = None,
+    thread_name: str = "",
+    psycho_plan: Any = None,
+    provider: Optional[str] = None,
+    proxy_address: str | None = None,
+    user_agent: str | None = None,
+) -> bool:
+    """Provider 原生 HTTP 答题提交分发。"""
+    adapter = _get_provider_adapter(provider=provider, ctx=state)
+    try:
+        state.update_thread_status(thread_name, "构造答案", running=True)
+    except Exception:
+        pass
+    with provider_run_context(
+        config,
+        state=state,
+        thread_name=thread_name,
+        psycho_plan=psycho_plan,
+    ) as resolved_plan:
+        return bool(
+            await adapter.fill_survey_http_async(
+                config,
+                state,
+                stop_signal=stop_signal,
+                thread_name=thread_name,
+                psycho_plan=resolved_plan,
+                proxy_address=proxy_address,
+                user_agent=user_agent,
             )
         )
 
@@ -257,6 +298,7 @@ __all__ = [
     "parse_survey",
     "attempt_submission_recovery",
     "fill_survey",
+    "fill_survey_http",
     "is_completion_page",
     "is_device_quota_limit_page",
     "handle_submission_verification_detected",

@@ -405,46 +405,23 @@ class TencentParserTests:
         ]
 
     @pytest.mark.asyncio
-    async def test_browser_media_merges_into_http_result(self, patch_attrs) -> None:
-        browser_payload = {
-            "ok": True,
-            "payload": {
-                "code": "OK",
-                "data": {
-                    "questions": [
-                        {"id": "q1", "type": "radio", "title": "题目1", "options": [{"text": "选项A"}], "page_id": "p1", "page": 1}
-                    ]
-                },
-            },
-            "metaPayload": {"code": "OK", "data": {"title": "浏览器标题 - 腾讯问卷"}},
-            "title": "",
-            "pageUrl": "https://wj.qq.com/s2/123/hash/",
-            "status": 200,
-        }
-        page = _FakeQQPage(payload=browser_payload, wait_selector_error=RuntimeError("wait failed"))
-        page.evaluate = AsyncMock(side_effect=[browser_payload, {"q1": [{"kind": "image", "scope": "title", "index": None, "source_url": "https://example.com/q1.png", "label": "题干图"}]}])
-        driver = _FakeQQDriver(page, title="备用浏览器标题")
+    async def test_parse_qq_survey_does_not_fall_back_to_browser_when_http_fails(self, patch_attrs) -> None:
+        browser_used = {"value": False}
 
         @asynccontextmanager
         async def fake_pool():
-            yield driver
+            browser_used["value"] = True
+            yield _FakeQQDriver(_FakeQQPage())
 
         patch_attrs(
             (qq_parser, "_fetch_qq_survey_via_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("http failed"))),
             (qq_parser, "acquire_parse_browser_session", fake_pool),
         )
 
-        info, _title = await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
+        with pytest.raises(RuntimeError, match="腾讯问卷 HTTP 解析失败：http failed"):
+            await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
 
-        assert info[0]["question_media"] == [
-            {
-                "kind": "image",
-                "scope": "title",
-                "index": None,
-                "source_url": "https://example.com/q1.png",
-                "label": "题干图",
-            }
-        ]
+        assert not browser_used["value"]
 
     @pytest.mark.asyncio
     async def test_extract_qq_media_via_browser_collects_title_image_outside_title_node(self) -> None:
@@ -599,42 +576,16 @@ class TencentParserTests:
         assert not browser_used["value"]
 
     @pytest.mark.asyncio
-    async def test_parse_qq_survey_rejects_login_url_and_supports_browser_fallback(self, patch_attrs) -> None:
+    async def test_parse_qq_survey_rejects_login_url_and_http_failure_without_browser_fallback(self, patch_attrs) -> None:
         with pytest.raises(RuntimeError, match="需要登录"):
             await qq_parser.parse_qq_survey("https://wj.qq.com/r/login.html")
 
-        browser_payload = {
-            "ok": True,
-            "payload": {
-                "code": "OK",
-                "data": {
-                    "questions": [
-                        {"id": "q1", "type": "radio", "title": "题目1", "options": [{"text": "选项A"}], "page_id": "p1", "page": 1}
-                    ]
-                },
-            },
-            "metaPayload": {"code": "OK", "data": {"title": "浏览器标题 - 腾讯问卷"}},
-            "title": "",
-            "pageUrl": "https://wj.qq.com/s2/123/hash/",
-            "status": 200,
-        }
-        page = _FakeQQPage(payload=browser_payload, wait_selector_error=RuntimeError("wait failed"))
-        driver = _FakeQQDriver(page, title="备用浏览器标题")
-
-        @asynccontextmanager
-        async def fake_pool():
-            yield driver
-
         patch_attrs(
             (qq_parser, "_fetch_qq_survey_via_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("http failed"))),
-            (qq_parser, "acquire_parse_browser_session", fake_pool),
         )
 
-        info, title = await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
-
-        assert driver.get_calls == ["https://wj.qq.com/s2/123/hash/"]
-        assert info[0]["title"] == "题目1"
-        assert title == "浏览器标题"
+        with pytest.raises(RuntimeError, match="腾讯问卷 HTTP 解析失败：http failed"):
+            await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
 
     @pytest.mark.asyncio
     async def test_parse_qq_survey_skips_browser_fallback_for_login_required_http_error(self, patch_attrs) -> None:
@@ -656,28 +607,10 @@ class TencentParserTests:
         assert not browser_used["value"]
 
     @pytest.mark.asyncio
-    async def test_parse_qq_survey_browser_fallback_rejects_missing_page_and_bad_status(self, patch_attrs) -> None:
-        missing_page_driver = _FakeQQDriver(None)
-
-        @asynccontextmanager
-        async def fake_pool_missing():
-            yield missing_page_driver
-
+    async def test_parse_qq_survey_http_failure_is_terminal(self, patch_attrs) -> None:
         patch_attrs(
             (qq_parser, "_fetch_qq_survey_via_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("http failed"))),
-            (qq_parser, "acquire_parse_browser_session", fake_pool_missing),
         )
 
-        with pytest.raises(RuntimeError, match="不支持腾讯问卷解析"):
-            await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
-
-        bad_payload_driver = _FakeQQDriver(_FakeQQPage(payload={"ok": False, "status": 403}))
-
-        @asynccontextmanager
-        async def fake_pool_bad():
-            yield bad_payload_driver
-
-        patch_attrs((qq_parser, "acquire_parse_browser_session", fake_pool_bad))
-
-        with pytest.raises(RuntimeError, match="HTTP 403"):
+        with pytest.raises(RuntimeError, match="腾讯问卷 HTTP 解析失败：http failed"):
             await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")

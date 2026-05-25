@@ -63,6 +63,33 @@ def build_fill_hook(target: HookTarget):
     return _fill
 
 
+def build_fill_http_hook(target: HookTarget):
+    async def _fill_http(
+        config: Any,
+        state: Any,
+        *,
+        stop_signal: Any = None,
+        thread_name: str = "",
+        psycho_plan: Any = None,
+        proxy_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> bool:
+        return bool(
+            await _invoke(
+                target,
+                config,
+                state,
+                stop_signal=stop_signal,
+                thread_name=thread_name,
+                psycho_plan=psycho_plan,
+                proxy_address=proxy_address,
+                user_agent=user_agent,
+            )
+        )
+
+    return _fill_http
+
+
 def build_predicate_hook(target: HookTarget):
     async def _predicate(driver: Any) -> bool:
         return bool(await _invoke(target, driver))

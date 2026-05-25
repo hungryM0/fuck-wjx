@@ -12,7 +12,6 @@ import software.network.http as http_client
 from software.app.config import DEFAULT_HTTP_HEADERS, _HTML_SPACE_RE
 from software.providers.common import SURVEY_PROVIDER_QQ
 from software.providers.contracts import LOGIC_PARSE_STATUS_UNKNOWN
-from software.network.browser.parse_pool import acquire_parse_browser_session
 
 QQ_SUPPORTED_PROVIDER_TYPES = {
     "radio",
@@ -58,6 +57,8 @@ _QQ_LOGIN_REQUIRED_TOKENS = (
     "需登录",
     "需要登录",
 )
+
+acquire_parse_browser_session = None
 
 
 def _extract_markdown_image_urls(text: Any) -> List[str]:
@@ -255,6 +256,7 @@ async def _request_qq_api(
     hash_value: str,
     headers: Dict[str, str],
     extra_params: Optional[Dict[str, Any]] = None,
+    proxies: Any = None,
 ) -> Dict[str, Any]:
     url = f"https://wj.qq.com/api/v2/respondent/surveys/{survey_id}/{endpoint}"
     params: Dict[str, Any] = {
@@ -268,7 +270,7 @@ async def _request_qq_api(
         params=params,
         headers=headers,
         timeout=15,
-        proxies={},
+        proxies={} if proxies is None else proxies,
     )
     if _is_qq_login_required_response(response):
         _raise_qq_login_required()
@@ -797,27 +799,8 @@ def _extract_qq_browser_questions(payload: Dict[str, Any]) -> Tuple[Dict[str, An
 
 
 async def _fetch_qq_survey_via_browser(url: str, survey_id: str, hash_value: str) -> Tuple[List[Dict[str, Any]], str]:
-    async with acquire_parse_browser_session() as driver:
-        await driver.get(url)
-        page = await driver.page()
-        if page is None:
-            raise RuntimeError("当前浏览器驱动不支持腾讯问卷解析")
-        await _ensure_qq_browser_ready(driver, page)
-
-        payload = await _fetch_qq_browser_payload(page, survey_id, hash_value)
-        meta_data, questions = _extract_qq_browser_questions(payload)
-
-        try:
-            browser_media = await _extract_qq_media_via_browser(page)
-        except Exception:
-            browser_media = {}
-
-        return _build_qq_parse_result(
-            questions,
-            raw_title=meta_data.get("title") or payload.get("title") or await driver.title() or "",
-            empty_error_message="腾讯问卷解析结果为空，请确认链接有效且公开可访问",
-            browser_media=browser_media,
-        )
+    del url, survey_id, hash_value
+    raise RuntimeError("腾讯问卷解析已禁用浏览器兜底")
 
 
 def _merge_browser_media(
@@ -862,13 +845,8 @@ async def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
         return await _fetch_qq_survey_via_http(survey_id, hash_value)
     except Exception as exc:
         _raise_if_qq_login_required(exc)
-        logging.exception("腾讯问卷 HTTP 解析失败，准备回退 Playwright，url=%r", url)
-
-    try:
-        return await _fetch_qq_survey_via_browser(url, survey_id, hash_value)
-    except Exception:
-        logging.exception("解析腾讯问卷失败，url=%r", url)
-        raise
+        logging.exception("腾讯问卷 HTTP 解析失败，url=%r", url)
+        raise RuntimeError(f"腾讯问卷 HTTP 解析失败：{exc}") from exc
 
 
 __all__ = [
