@@ -170,7 +170,7 @@ async def _answer_qq_matrix_star(
 
 
 async def _build_qq_single_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -182,7 +182,7 @@ async def _build_qq_single_action(
 
 
 async def _build_qq_text_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -209,7 +209,7 @@ async def _build_qq_score_like_action(
 
 
 async def _build_qq_multiple_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -235,7 +235,7 @@ async def _build_qq_matrix_action(
 
 
 async def build_answer_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     ctx: ExecutionState,
     *,

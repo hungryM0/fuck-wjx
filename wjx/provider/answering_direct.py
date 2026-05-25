@@ -62,12 +62,14 @@ from .runtime_interactions import (
 )
 
 async def _resolve_runtime_option_texts(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
 ) -> list[str]:
     option_texts = [str(item or "").strip() for item in list(question.option_texts or []) if str(item or "").strip()]
     if option_texts:
         return option_texts
+    if driver is None:
+        return []
     return await _question_option_texts(driver, int(question.num or 0))
 
 

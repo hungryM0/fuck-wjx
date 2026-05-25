@@ -14,6 +14,7 @@ import software.core.engine.async_runtime_loop as runtime_loop
 from software.network.browser import ProxyConnectionError
 from software.network.browser.async_owner_pool import _route_runtime_resource
 from software.network.browser.startup import BrowserStartupErrorInfo, BrowserStartupRuntimeError
+from software.providers.contracts import SurveyQuestionMeta
 
 
 class _FakeScheduler:
@@ -387,6 +388,31 @@ class AsyncRuntimeLoopLargeTests:
 
         assert scheduler.release_calls == []
         assert finished == [("Slot-1", "已停止")]
+
+    @pytest.mark.asyncio
+    async def test_uses_http_runtime_respects_logic_parse_status(self) -> None:
+        config = ExecutionConfig(url="https://www.wjx.cn/vm/demo.aspx", survey_provider="wjx")
+        config.questions_metadata = {
+            1: SurveyQuestionMeta(
+                num=1,
+                title="Q1",
+                has_jump=True,
+                logic_parse_status="complete",
+                jump_rules=[{"option_index": 0, "jumpto": 2}],
+            ),
+            2: SurveyQuestionMeta(num=2, title="Q2"),
+        }
+        state = ExecutionState(config=config)
+        runner, _state, _ctx, _loop, _scheduler = _build_runner(config=config, state=state)
+
+        assert runner._uses_http_runtime() is True
+
+        config.questions_metadata = {
+            1: SurveyQuestionMeta(num=1, title="Q1", has_jump=True, logic_parse_status="unknown"),
+            2: SurveyQuestionMeta(num=2, title="Q2"),
+        }
+
+        assert runner._uses_http_runtime() is False
 
     @pytest.mark.asyncio
     async def test_run_marks_thread_completed_when_target_reached(self) -> None:

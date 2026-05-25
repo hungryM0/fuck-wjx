@@ -12,7 +12,7 @@ from .html_parser_choice import (
     _collect_select_option_texts,
     _question_div_has_shared_text_input,
 )
-from .html_parser_common import _cleanup_question_title, _normalize_html_text
+from .html_parser_common import _cleanup_question_title, _is_select_placeholder_option, _normalize_html_text
 from .html_parser_matrix import _collect_matrix_option_texts, _collect_slider_matrix_metadata, _question_div_looks_like_slider_matrix
 
 
@@ -183,13 +183,23 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
     _ = question_number
     has_jump_attr = str(question_div.get("hasjump") or "").strip() == "1"
     jump_rules: List[Dict[str, Any]] = []
-    option_idx = 0
-    inputs = question_div.find_all("input")
-    for input_el in inputs:
+    selectable_nodes = []
+    for input_el in question_div.find_all("input"):
         input_type = (input_el.get("type") or "").lower()
-        if input_type not in ("radio", "checkbox"):
-            continue
-        jumpto_raw = input_el.get("jumpto") or input_el.get("data-jumpto")
+        if input_type in ("radio", "checkbox"):
+            selectable_nodes.append(input_el)
+
+    if not selectable_nodes:
+        for option_index, option_el in enumerate(question_div.find_all("option")):
+            option_text = _normalize_html_text(option_el.get_text(" ", strip=True))
+            option_value = option_el.get("value")
+            if _is_select_placeholder_option(option_index, option_value, option_text):
+                continue
+            selectable_nodes.append(option_el)
+
+    option_idx = 0
+    for selectable_node in selectable_nodes:
+        jumpto_raw = selectable_node.get("jumpto") or selectable_node.get("data-jumpto")
         if not jumpto_raw:
             option_idx += 1
             continue

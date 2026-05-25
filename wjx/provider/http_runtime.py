@@ -18,6 +18,7 @@ from software.core.questions.distribution import record_pending_distribution_cho
 from software.core.task import ExecutionConfig, ExecutionState
 from software.providers.answering import AnswerAction
 from software.providers.answering.recording import record_answer_action
+from software.providers.http_logic import build_http_logic_plan
 from software.providers.contracts import SurveyQuestionMeta
 from wjx.provider.answering_builders import build_answer_action
 from wjx.provider.parser import _parse_wjx_html
@@ -135,19 +136,23 @@ async def _build_actions(
     psycho_plan: Any,
     stop_signal: Any,
 ) -> list[AnswerAction]:
-    actions: list[AnswerAction] = []
-    for question in _question_items(config):
+    questions = _question_items(config)
+    for question in questions:
         if stop_signal is not None and stop_signal.is_set():
             return []
         if bool(getattr(question, "unsupported", False)):
             raise RuntimeError(f"问卷星第{question.num}题暂不支持：{question.unsupported_reason or question.type_code}")
-        if bool(getattr(question, "has_jump", False)) or bool(getattr(question, "has_dependent_display_logic", False)):
-            raise RuntimeError(f"问卷星第{question.num}题包含跳题/显隐逻辑，不能纯 HTTP 提交")
-        action = await build_answer_action(None, question, ctx, psycho_plan=psycho_plan)
-        if action is None:
-            raise RuntimeError(f"问卷星第{question.num}题暂不支持纯 HTTP 提交")
-        actions.append(action)
-    return actions
+
+    async def _build_action(question: SurveyQuestionMeta) -> AnswerAction | None:
+        if stop_signal is not None and stop_signal.is_set():
+            return None
+        return await build_answer_action(None, question, ctx, psycho_plan=psycho_plan)
+
+    plan = await build_http_logic_plan(
+        questions,
+        build_action=_build_action,
+    )
+    return list(plan.actions)
 
 
 def _sample_ktimes(config: ExecutionConfig) -> int:

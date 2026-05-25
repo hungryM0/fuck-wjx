@@ -40,11 +40,22 @@ QQ_PROVIDER_TYPE_TO_INTERNAL = {
 }
 _QQ_TITLE_SUFFIX_RE = re.compile(r"(?:[-|｜]\s*)?腾讯问卷.*$", re.IGNORECASE)
 _QQ_URL_RE = re.compile(r"/s\d+/(\d+)/([A-Za-z0-9_-]+)/?$", re.IGNORECASE)
+_QQ_QUESTION_ID_TOKEN_RE = re.compile(r"\bq-[A-Za-z0-9_-]+\b", re.IGNORECASE)
+_QQ_PAGE_ID_TOKEN_RE = re.compile(r"\bp-[A-Za-z0-9_-]+\b", re.IGNORECASE)
 _QQ_HTTP_LOCALES = ("zhs", "zht", "zh", "en")
 _QQ_LOGIN_PATH_RE = re.compile(r"^/r/login\.html(?:/)?$", re.IGNORECASE)
 _QQ_FILLBLANK_TOKEN_RE = re.compile(r"\{fillblank-[^{}]+\}", re.IGNORECASE)
 _QQ_FILLBLANK_SUFFIX_RE = re.compile(r"\s*[_＿]*\s*\{fillblank-[^{}]+\}", re.IGNORECASE)
 _QQ_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*]\(([^)\s]+)\)(?:\{[^}]*\})?", re.IGNORECASE)
+_QQ_LOGIC_END_TOKENS = (
+    "submit",
+    "finish",
+    "complete",
+    "end",
+    "结束",
+    "提交",
+    "完成",
+)
 _QQ_LOGIN_REQUIRED_MESSAGE = "作答该问卷需要登录，请自行在后台开放访问权限"
 _QQ_LOGIN_REQUIRED_TOKENS = (
     "open.weixin.qq.com/connect/confirm",
@@ -569,6 +580,307 @@ def _assign_visible_display_numbers(items: List[Dict[str, Any]]) -> List[Dict[st
     return items
 
 
+def _collect_token_refs(value: Any, pattern: re.Pattern[str], *, depth: int = 0) -> List[str]:
+    if depth > 5 or value is None:
+        return []
+    if isinstance(value, dict):
+        collected: List[str] = []
+        for key, item in value.items():
+            collected.extend(_collect_token_refs(key, pattern, depth=depth + 1))
+            collected.extend(_collect_token_refs(item, pattern, depth=depth + 1))
+        return collected
+    if isinstance(value, (list, tuple, set)):
+        collected: List[str] = []
+        for item in value:
+            collected.extend(_collect_token_refs(item, pattern, depth=depth + 1))
+        return collected
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [str(match.group(0) or "").strip() for match in pattern.finditer(text)]
+
+
+def _unique_text_list(values: List[str]) -> List[str]:
+    normalized: List[str] = []
+    seen = set()
+    for raw in values:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _extract_qq_question_refs(value: Any) -> List[str]:
+    return _unique_text_list(_collect_token_refs(value, _QQ_QUESTION_ID_TOKEN_RE))
+
+
+def _extract_qq_page_refs(value: Any) -> List[str]:
+    return _unique_text_list(_collect_token_refs(value, _QQ_PAGE_ID_TOKEN_RE))
+
+
+def _normalize_option_index_list(raw_values: Any) -> List[int]:
+    if not isinstance(raw_values, list):
+        return []
+    normalized: List[int] = []
+    seen = set()
+    for raw in raw_values:
+        try:
+            option_index = int(raw)
+        except Exception:
+            continue
+        if option_index < 0 or option_index in seen:
+            continue
+        seen.add(option_index)
+        normalized.append(option_index)
+    return normalized
+
+
+def _dedupe_dict_list(items: List[Dict[str, Any]], *, key_fields: tuple[str, ...]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        marker_parts: List[Any] = []
+        for field_name in key_fields:
+            value = item.get(field_name)
+            if isinstance(value, list):
+                marker_parts.append(tuple(value))
+            else:
+                marker_parts.append(value)
+        marker = tuple(marker_parts)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        normalized.append(item)
+    return normalized
+
+
+def _resolve_qq_jump_target_num(
+    raw_target: Any,
+    *,
+    question_num_by_provider_id: Dict[str, int],
+    first_question_num_by_page_id: Dict[str, int],
+    max_question_num: int,
+) -> Optional[int]:
+    if raw_target in (None, "", [], {}, False):
+        return None
+
+    try:
+        numeric_value = int(raw_target)
+    except Exception:
+        numeric_value = 0
+    if numeric_value > 0:
+        return numeric_value
+
+    for question_id in _extract_qq_question_refs(raw_target):
+        target_num = question_num_by_provider_id.get(question_id)
+        if target_num:
+            return target_num
+
+    for page_id in _extract_qq_page_refs(raw_target):
+        target_num = first_question_num_by_page_id.get(page_id)
+        if target_num:
+            return target_num
+
+    lowered = str(raw_target or "").strip().lower()
+    if lowered and any(token in lowered for token in _QQ_LOGIC_END_TOKENS):
+        return max_question_num + 1
+    return None
+
+
+def _attach_qq_logic_metadata(
+    raw_questions: List[Dict[str, Any]],
+    normalized_questions: List[Dict[str, Any]],
+) -> None:
+    if not raw_questions or not normalized_questions:
+        return
+
+    normalized_by_provider_id: Dict[str, Dict[str, Any]] = {}
+    question_num_by_provider_id: Dict[str, int] = {}
+    first_question_num_by_page_id: Dict[str, int] = {}
+    max_question_num = 0
+
+    for item in normalized_questions:
+        provider_question_id = str(item.get("provider_question_id") or "").strip()
+        provider_page_id = str(item.get("provider_page_id") or "").strip()
+        try:
+            question_num = int(item.get("num") or 0)
+        except Exception:
+            question_num = 0
+        if not provider_question_id or question_num <= 0:
+            continue
+        normalized_by_provider_id[provider_question_id] = item
+        question_num_by_provider_id[provider_question_id] = question_num
+        max_question_num = max(max_question_num, question_num)
+        if provider_page_id and provider_page_id not in first_question_num_by_page_id:
+            first_question_num_by_page_id[provider_page_id] = question_num
+
+    source_targets: Dict[str, List[Dict[str, Any]]] = {}
+    inbound_conditions: Dict[str, List[Dict[str, Any]]] = {}
+
+    for raw_question in raw_questions:
+        provider_question_id = str(raw_question.get("id") or "").strip()
+        normalized_question = normalized_by_provider_id.get(provider_question_id)
+        if normalized_question is None:
+            continue
+
+        raw_options = raw_question.get("options")
+        options = raw_options if isinstance(raw_options, list) else []
+        jump_rules: List[Dict[str, Any]] = []
+        has_jump = False
+        has_source_display_logic = False
+        exact_logic_parsed = False
+
+        question_jump_target = _resolve_qq_jump_target_num(
+            raw_question.get("goto"),
+            question_num_by_provider_id=question_num_by_provider_id,
+            first_question_num_by_page_id=first_question_num_by_page_id,
+            max_question_num=max_question_num,
+        )
+        if question_jump_target is not None:
+            jump_rules.append(
+                {
+                    "option_index": -1,
+                    "jumpto": question_jump_target,
+                    "option_text": None,
+                }
+            )
+            has_jump = True
+            exact_logic_parsed = True
+        elif raw_question.get("goto") not in (None, "", [], {}, False):
+            has_jump = True
+
+        for option_index, option in enumerate(options):
+            if not isinstance(option, dict):
+                continue
+
+            option_jump_target = _resolve_qq_jump_target_num(
+                option.get("goto"),
+                question_num_by_provider_id=question_num_by_provider_id,
+                first_question_num_by_page_id=first_question_num_by_page_id,
+                max_question_num=max_question_num,
+            )
+            if option_jump_target is not None:
+                jump_rules.append(
+                    {
+                        "option_index": option_index,
+                        "jumpto": option_jump_target,
+                        "option_text": _normalize_qq_option_text(option.get("text") or ""),
+                    }
+                )
+                has_jump = True
+                exact_logic_parsed = True
+            elif option.get("goto") not in (None, "", [], {}, False):
+                has_jump = True
+
+            display_payload = option.get("display")
+            if display_payload in (None, "", [], {}, False):
+                continue
+            has_source_display_logic = True
+            target_question_ids = _extract_qq_question_refs(display_payload)
+            if not target_question_ids:
+                continue
+            exact_logic_parsed = True
+            for target_question_id in target_question_ids:
+                target_question_num = question_num_by_provider_id.get(target_question_id)
+                if not target_question_num:
+                    continue
+                source_targets.setdefault(provider_question_id, []).append(
+                    {
+                        "target_question_num": target_question_num,
+                        "condition_option_indices": [option_index],
+                        "condition_mode": "selected",
+                    }
+                )
+                inbound_conditions.setdefault(target_question_id, []).append(
+                    {
+                        "condition_question_num": int(normalized_question.get("num") or 0),
+                        "condition_mode": "selected",
+                        "condition_option_indices": [option_index],
+                    }
+                )
+
+        refer_question_ids = _extract_qq_question_refs(raw_question.get("refer"))
+        if refer_question_ids and provider_question_id not in inbound_conditions:
+            fallback_conditions: List[Dict[str, Any]] = []
+            for refer_question_id in refer_question_ids:
+                source_question_num = question_num_by_provider_id.get(refer_question_id)
+                if not source_question_num:
+                    continue
+                fallback_conditions.append(
+                    {
+                        "condition_question_num": source_question_num,
+                        "condition_mode": "selected",
+                        "condition_option_indices": [],
+                    }
+                )
+                source_targets.setdefault(refer_question_id, []).append(
+                    {
+                        "target_question_num": int(normalized_question.get("num") or 0),
+                        "condition_option_indices": [],
+                        "condition_mode": "selected",
+                    }
+                )
+            if fallback_conditions:
+                inbound_conditions[provider_question_id] = fallback_conditions
+
+        normalized_question["jump_rules"] = _dedupe_dict_list(
+            jump_rules,
+            key_fields=("option_index", "jumpto"),
+        )
+        normalized_question["has_jump"] = bool(has_jump or normalized_question["jump_rules"])
+        controls_display_targets = _dedupe_dict_list(
+            [
+                {
+                    "target_question_num": int(item.get("target_question_num") or 0),
+                    "condition_option_indices": _normalize_option_index_list(item.get("condition_option_indices")),
+                    "condition_mode": str(item.get("condition_mode") or "selected").strip() or "selected",
+                }
+                for item in list(source_targets.get(provider_question_id) or [])
+            ],
+            key_fields=("target_question_num", "condition_option_indices", "condition_mode"),
+        )
+        if controls_display_targets or has_source_display_logic:
+            normalized_question["has_dependent_display_logic"] = True
+        if controls_display_targets:
+            normalized_question["controls_display_targets"] = controls_display_targets
+
+        raw_hidden = raw_question.get("hidden")
+        if raw_hidden not in (None, "", [], {}, False) or refer_question_ids or provider_question_id in inbound_conditions:
+            normalized_question["has_display_condition"] = True
+        display_conditions = _dedupe_dict_list(
+            [
+                {
+                    "condition_question_num": int(item.get("condition_question_num") or 0),
+                    "condition_mode": str(item.get("condition_mode") or "selected").strip() or "selected",
+                    "condition_option_indices": _normalize_option_index_list(item.get("condition_option_indices")),
+                }
+                for item in list(inbound_conditions.get(provider_question_id) or [])
+                if int(item.get("condition_question_num") or 0) > 0
+            ],
+            key_fields=("condition_question_num", "condition_option_indices", "condition_mode"),
+        )
+        if display_conditions:
+            normalized_question["display_conditions"] = display_conditions
+            if any(_normalize_option_index_list(item.get("condition_option_indices")) for item in display_conditions):
+                exact_logic_parsed = True
+
+        has_any_logic = bool(
+            normalized_question.get("has_jump")
+            or normalized_question.get("has_display_condition")
+            or normalized_question.get("has_dependent_display_logic")
+        )
+        if has_any_logic and exact_logic_parsed:
+            normalized_question["logic_parse_status"] = "complete"
+        elif has_any_logic:
+            normalized_question["logic_parse_status"] = LOGIC_PARSE_STATUS_UNKNOWN
+
+
 def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     page_map = _build_page_number_map(questions)
     normalized: List[Dict[str, Any]] = []
@@ -637,6 +949,7 @@ def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str,
             "unsupported_reason": unsupported_reason,
             "required": bool(question.get("required", False)),
         })
+    _attach_qq_logic_metadata(questions, normalized)
     return _assign_visible_display_numbers(_merge_same_page_descriptions_into_questions(normalized))
 
 

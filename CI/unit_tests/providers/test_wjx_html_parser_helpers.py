@@ -395,6 +395,24 @@ class WjxHtmlParserHelperTests:
             }
         ]
 
+    def test_jump_rule_helper_supports_select_option_jumps(self) -> None:
+        question_div = _soup(
+            """
+            <div hasjump="1" type="7">
+              <select>
+                <option value="">请选择</option>
+                <option value="1" jumpto="9">北京</option>
+                <option value="2">上海</option>
+              </select>
+            </div>
+            """
+        ).div
+
+        assert html_parser_rules._extract_jump_rules_from_html(question_div, 7, ["北京", "上海"]) == (
+            True,
+            [{"option_index": 0, "jumpto": 9, "option_text": "北京"}],
+        )
+
     def test_attach_display_condition_metadata_dedupes_and_clears_empty_targets(self) -> None:
         questions = [
             {"num": 1, "display_conditions": [], "controls_display_targets": []},

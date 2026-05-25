@@ -45,7 +45,7 @@ def _sync_patch_targets() -> None:
 
 
 async def _resolve_runtime_option_texts(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
 ) -> list[str]:
     _sync_patch_targets()
@@ -153,7 +153,7 @@ async def _answer_wjx_order(driver: BrowserDriver, question: SurveyQuestionMeta)
 
 
 async def _build_wjx_single_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -165,7 +165,7 @@ async def _build_wjx_single_action(
 
 
 async def _build_wjx_dropdown_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -183,7 +183,7 @@ async def _build_wjx_dropdown_action(
 
 
 async def _build_wjx_text_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -193,7 +193,7 @@ async def _build_wjx_text_action(
 
 
 async def _build_wjx_score_like_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -213,7 +213,7 @@ async def _build_wjx_score_like_action(
 
 
 async def _build_wjx_multiple_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -248,7 +248,7 @@ async def _build_wjx_slider_action(
 
 
 async def _build_wjx_order_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
 ) -> AnswerAction:
     _sync_patch_targets()
@@ -256,7 +256,7 @@ async def _build_wjx_order_action(
 
 
 async def build_answer_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     ctx: ExecutionState,
     *,

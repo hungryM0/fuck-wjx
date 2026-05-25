@@ -53,7 +53,7 @@ from wjx.provider.questions.multiple_rules import _normalize_selected_indices
 from .answering_direct import _resolve_runtime_option_texts
 
 async def _build_wjx_single_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -129,7 +129,7 @@ async def _build_wjx_single_action(
 
 
 async def _build_wjx_dropdown_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -203,7 +203,7 @@ async def _build_wjx_dropdown_action(
 
 
 async def _build_wjx_text_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -260,7 +260,7 @@ async def _build_wjx_text_action(
 
 
 async def _build_wjx_score_like_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -311,7 +311,7 @@ async def _build_wjx_score_like_action(
 
 
 async def _build_wjx_multiple_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -547,7 +547,7 @@ async def _build_wjx_slider_action(
 
 
 async def _build_wjx_order_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
 ) -> AnswerAction:
     option_texts = await _resolve_runtime_option_texts(driver, question)
@@ -564,14 +564,12 @@ async def _build_wjx_order_action(
 
 
 async def build_answer_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
 ) -> Optional[AnswerAction]:
-    if bool(getattr(question, "has_jump", False)) or bool(getattr(question, "has_dependent_display_logic", False)):
-        return None
     config_entry = ctx.config.question_config_index_map.get(int(question.num or 0))
     if not config_entry:
         return None

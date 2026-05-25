@@ -252,6 +252,94 @@ class TencentParserTests:
         assert second["title"] == "模特A：无眼镜 请根据您对模特的第一印象进行评价"
         assert second["description"] == "请观察以下模特照片"
 
+    def test_standardize_questions_extracts_option_level_jump_and_display_logic(self) -> None:
+        questions = [
+            {
+                "id": "q-1",
+                "type": "radio",
+                "title": "来源题",
+                "page_id": "p-1",
+                "page": 1,
+                "options": [
+                    {"text": "显示后续题", "display": {"targets": ["q-2", "q-3"]}},
+                    {"text": "跳到第二页", "goto": {"page": "p-2"}},
+                ],
+            },
+            {
+                "id": "q-2",
+                "type": "text",
+                "title": "条件题一",
+                "page_id": "p-1",
+                "page": 1,
+                "hidden": True,
+                "refer": {"source": "q-1"},
+            },
+            {
+                "id": "q-3",
+                "type": "text",
+                "title": "条件题二",
+                "page_id": "p-1",
+                "page": 1,
+                "hidden": True,
+                "refer": "q-1",
+            },
+            {
+                "id": "q-4",
+                "type": "text",
+                "title": "第二页首题",
+                "page_id": "p-2",
+                "page": 2,
+            },
+        ]
+
+        normalized = qq_parser._standardize_qq_questions(questions)
+
+        source = normalized[0]
+        assert source["has_dependent_display_logic"] is True
+        assert source["controls_display_targets"] == [
+            {
+                "target_question_num": 2,
+                "condition_option_indices": [0],
+                "condition_mode": "selected",
+            },
+            {
+                "target_question_num": 3,
+                "condition_option_indices": [0],
+                "condition_mode": "selected",
+            },
+        ]
+        assert source["has_jump"] is True
+        assert source["jump_rules"] == [
+            {
+                "option_index": 1,
+                "jumpto": 4,
+                "option_text": "跳到第二页",
+            }
+        ]
+        assert source["logic_parse_status"] == "complete"
+
+        target_one = normalized[1]
+        assert target_one["has_display_condition"] is True
+        assert target_one["display_conditions"] == [
+            {
+                "condition_question_num": 1,
+                "condition_mode": "selected",
+                "condition_option_indices": [0],
+            }
+        ]
+        assert target_one["logic_parse_status"] == "complete"
+
+        target_two = normalized[2]
+        assert target_two["has_display_condition"] is True
+        assert target_two["display_conditions"] == [
+            {
+                "condition_question_num": 1,
+                "condition_mode": "selected",
+                "condition_option_indices": [0],
+            }
+        ]
+        assert target_two["logic_parse_status"] == "complete"
+
     def test_build_question_media_from_payload_normalizes_protocol_relative_urls_and_deduplicates(self) -> None:
         media = qq_parser._build_question_media_from_payload(
             {

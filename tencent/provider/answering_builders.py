@@ -43,7 +43,7 @@ from .runtime_interactions import (
 
 
 async def _build_qq_single_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -157,6 +157,73 @@ async def _build_qq_text_action(
     )
 
 
+async def _build_qq_dropdown_action(
+    driver: BrowserDriver | None,
+    question: SurveyQuestionMeta,
+    config_index: int,
+    ctx: ExecutionState,
+    *,
+    psycho_plan: Optional[Any],
+) -> Optional[AnswerAction]:
+    config = ctx.config
+    current = int(question.num or 0)
+    question_id = str(question.provider_question_id or "")
+    option_texts = list(question.option_texts or [])
+    raw_option_count = len(option_texts) or int(question.options or 0)
+    if raw_option_count <= 0:
+        return None
+    option_count = max(1, raw_option_count)
+    probabilities = config.droplist_prob[config_index] if config_index < len(config.droplist_prob) else -1
+    probabilities = normalize_droplist_probs(probabilities, option_count)
+    strict_ratio = is_strict_ratio_question(ctx, current)
+    dimension = config.question_dimension_map.get(current)
+    has_reliability_dimension = isinstance(dimension, str) and bool(str(dimension).strip())
+    if not strict_ratio:
+        probabilities = apply_persona_boost(option_texts, probabilities)
+    if strict_ratio or has_reliability_dimension:
+        strict_reference = list(probabilities)
+        probabilities = resolve_distribution_probabilities(
+            probabilities,
+            option_count,
+            ctx,
+            current,
+            psycho_plan=psycho_plan,
+        )
+        if strict_ratio:
+            probabilities = enforce_reference_rank_order(probabilities, strict_reference)
+    selected_index = (
+        get_tendency_index(
+            option_count,
+            probabilities,
+            dimension=dimension,
+            psycho_plan=psycho_plan,
+            question_index=current,
+        )
+        if has_reliability_dimension
+        else weighted_index(probabilities)
+    )
+    selected_text = option_texts[selected_index] if selected_index < len(option_texts) else ""
+    fill_entries = config.droplist_option_fill_texts[config_index] if config_index < len(config.droplist_option_fill_texts) else None
+    fill_value = await resolve_runtime_option_fill_text_from_config(
+        fill_entries,
+        selected_index,
+        driver=driver,
+        question_number=current,
+        option_text=selected_text,
+    )
+    selected_texts = [f"{selected_text} / {fill_value}" if selected_text and fill_value else (fill_value or selected_text)]
+    return AnswerAction(
+        question_num=current,
+        question_id=question_id,
+        kind="select",
+        selected_indices=(selected_index,),
+        option_fill_texts=((selected_index, fill_value),) if fill_value else (),
+        selected_texts=tuple(selected_texts),
+        record_type="dropdown",
+        pending_distribution_choices=((selected_index, option_count, None),) if strict_ratio or has_reliability_dimension else (),
+    )
+
+
 async def _build_qq_score_like_action(
     question: SurveyQuestionMeta,
     config_index: int,
@@ -199,7 +266,7 @@ async def _build_qq_score_like_action(
 
 
 async def _build_qq_multiple_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -429,14 +496,12 @@ async def _build_qq_matrix_action(
 
 
 async def build_answer_action(
-    driver: BrowserDriver,
+    driver: BrowserDriver | None,
     question: SurveyQuestionMeta,
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
 ) -> Optional[AnswerAction]:
-    if bool(getattr(question, "has_jump", False)) or bool(getattr(question, "has_dependent_display_logic", False)):
-        return None
     question_id = str(getattr(question, "provider_question_id", "") or "").strip()
     if not question_id:
         return None
@@ -447,6 +512,7 @@ async def build_answer_action(
     required_config_fields = {
         "single": ("single_prob", "single_option_fill_texts"),
         "multiple": ("multiple_prob", "multiple_option_fill_texts"),
+        "dropdown": ("droplist_prob", "droplist_option_fill_texts"),
         "text": ("texts", "texts_prob", "text_ai_flags"),
         "multi_text": ("texts", "texts_prob", "text_ai_flags"),
         "scale": ("scale_prob",),
@@ -459,11 +525,13 @@ async def build_answer_action(
         return await _build_qq_single_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
     if entry_type == "multiple":
         return await _build_qq_multiple_action(driver, question, config_index, ctx)
+    if entry_type == "dropdown":
+        return await _build_qq_dropdown_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
     if entry_type in {"text", "multi_text"}:
         return await _build_qq_text_action(question, config_index, ctx)
     if entry_type in {"scale", "score"}:
         return await _build_qq_score_like_action(question, config_index, ctx, psycho_plan=psycho_plan)
-    if entry_type == "matrix" and getattr(question, "provider_type", "") != "matrix_star":
+    if entry_type == "matrix":
         return await _build_qq_matrix_action(question, config_index, ctx, psycho_plan=psycho_plan)
     return None
 

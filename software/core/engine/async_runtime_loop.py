@@ -38,6 +38,7 @@ from software.network.session_policy import (
     _select_user_agent_for_session,
 )
 from software.providers.common import SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX, normalize_survey_provider
+from software.providers.http_logic import get_http_logic_fallback_reason
 from software.providers.registry import fill_survey, fill_survey_http
 from software.providers.registry import is_device_quota_limit_page as _provider_is_device_quota_limit_page
 
@@ -496,7 +497,10 @@ class AsyncSlotRunner:
 
     def _uses_http_runtime(self) -> bool:
         provider = normalize_survey_provider(self.config.survey_provider)
-        return bool(str(self.config.url or "").strip()) and provider in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}
+        if not bool(str(self.config.url or "").strip()) or provider not in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}:
+            return False
+        questions = list((self.config.questions_metadata or {}).values())
+        return not bool(get_http_logic_fallback_reason(questions))
 
     def _mark_http_submit_success(self) -> bool:
         if self.proxy_address:

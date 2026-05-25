@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from typing import Any, Mapping
 
 import software.network.http as http_client
@@ -15,6 +16,7 @@ from software.core.questions.distribution import record_pending_distribution_cho
 from software.core.task import ExecutionConfig, ExecutionState
 from software.providers.answering import AnswerAction
 from software.providers.answering.recording import record_answer_action
+from software.providers.http_logic import build_http_logic_plan
 from software.providers.contracts import SurveyQuestionMeta
 from tencent.provider.answering_builders import build_answer_action
 from tencent.provider.parser import (
@@ -194,23 +196,53 @@ async def brush_qq_http(
 
     metadata = _metadata_by_provider_id(config)
     raw_by_id = _raw_questions_by_id(raw_questions)
-    actions: list[AnswerAction] = []
-    question_answers: list[dict[str, Any]] = []
+    questions = [
+        question
+        for raw_question in raw_questions
+        for question_id in [str(raw_question.get("id") or "").strip() if isinstance(raw_question, Mapping) else ""]
+        for question in [metadata.get(question_id)]
+        if question is not None
+    ]
+
+    for question in questions:
+        if stop_signal is not None and stop_signal.is_set():
+            return False
+        if bool(getattr(question, "unsupported", False)):
+            raise RuntimeError(f"腾讯问卷第{question.num}题暂不支持：{question.unsupported_reason or question.type_code}")
+
+    async def _build_action(question: SurveyQuestionMeta) -> AnswerAction | None:
+        if stop_signal is not None and stop_signal.is_set():
+            return None
+        return await build_answer_action(None, question, ctx, psycho_plan=psycho_plan)
+
+    plan = await build_http_logic_plan(
+        questions,
+        build_action=_build_action,
+    )
+    actions = list(plan.actions)
+    action_by_question_id = {
+        str(action.question_id or "").strip(): action
+        for action in actions
+        if str(action.question_id or "").strip()
+    }
+    if not action_by_question_id:
+        raise RuntimeError("腾讯问卷没有生成可提交答案")
+
+    page_questions: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
     for raw_question in raw_questions:
         if stop_signal is not None and stop_signal.is_set():
             return False
         question_id = str(raw_question.get("id") or "").strip() if isinstance(raw_question, Mapping) else ""
-        question = metadata.get(question_id)
-        if question is None:
+        if not question_id:
             continue
-        action = await build_answer_action(None, question, ctx, psycho_plan=psycho_plan)
+        action = action_by_question_id.get(question_id)
         if action is None:
-            raise RuntimeError(f"腾讯问卷第{question.num}题暂不支持纯 HTTP 提交")
+            continue
         raw_source = raw_by_id.get(question_id, raw_question)
-        question_answers.append(_question_answer(raw_source, action))
-        actions.append(action)
+        page_id = str((raw_source.get("page_id") if isinstance(raw_source, Mapping) else "") or "").strip() or "p-1-abcd"
+        page_questions.setdefault(page_id, []).append(_question_answer(raw_source, action))
 
-    if not question_answers:
+    if not page_questions:
         raise RuntimeError("腾讯问卷没有生成可提交答案")
 
     for action in actions:
@@ -238,9 +270,10 @@ async def brush_qq_http(
             "locale": "zhs",
             "pages": [
                 {
-                    "id": str((raw_questions[0] or {}).get("page_id") or "p-1-abcd") if isinstance(raw_questions[0], Mapping) else "p-1-abcd",
-                    "questions": question_answers,
+                    "id": page_id,
+                    "questions": questions_on_page,
                 }
+                for page_id, questions_on_page in page_questions.items()
             ],
         },
     }
