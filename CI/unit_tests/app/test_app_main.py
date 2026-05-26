@@ -20,3 +20,12 @@ def test_should_run_update_test_probe_requires_result_path(monkeypatch) -> None:
     monkeypatch.setattr(app_main.sys, "argv", ["SurveyController.exe", "--ci-update-probe"])
 
     assert app_main._should_run_update_test_probe() is False
+
+
+def test_should_run_update_test_probe_requires_test_mode(monkeypatch, tmp_path: Path) -> None:
+    result_path = tmp_path / "result.json"
+    monkeypatch.delenv("SURVEYCONTROLLER_UPDATE_TEST_MODE", raising=False)
+    monkeypatch.setenv("SURVEYCONTROLLER_UPDATE_TEST_RESULT", str(result_path))
+    monkeypatch.setattr(app_main.sys, "argv", ["SurveyController.exe", "--ci-update-probe"])
+
+    assert app_main._should_run_update_test_probe() is False

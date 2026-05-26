@@ -15,6 +15,20 @@ def _write_result(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _summarize_update_info(update_info: dict[str, Any]) -> dict[str, Any]:
+    allowed_keys = (
+        "has_update",
+        "status",
+        "version",
+        "latest_version",
+        "current_version",
+        "package_size",
+        "manual_only",
+        "manual_release_url",
+    )
+    return {key: update_info[key] for key in allowed_keys if key in update_info}
+
+
 def run() -> int:
     result_path_raw = str(os.environ.get("SURVEYCONTROLLER_UPDATE_TEST_RESULT", "") or "").strip()
     if not result_path_raw:
@@ -47,7 +61,7 @@ def run() -> int:
         payload = {
             "status": "checked",
             "current_version": str(__VERSION__ or "").strip(),
-            "update_info": update_info,
+            "update_info": _summarize_update_info(update_info),
             "timestamp": start_time,
             "pid": os.getpid(),
         }
@@ -80,4 +94,3 @@ def run() -> int:
             },
         )
         return 1
-

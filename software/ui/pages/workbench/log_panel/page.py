@@ -94,7 +94,7 @@ class LogPage(QWidget):
         self.bug_report_tip_bar = InfoBar(
             icon=InfoBarIcon.WARNING,
             title="",
-            content="遇到问题请提交完整的日志文件，而不是🤳💻或发送这个页面的截图；报错反馈会自动附带诊断日志。不要一上来就问是不是自己设置有问题，你啥都不给我看那我只能给你算一卦",
+            content="遇到问题请提交完整的日志文件，而不是🤳💻或发送这个页面的截图；报错反馈会自动附带诊断日志",
             orient=Qt.Orientation.Horizontal,
             isClosable=False,
             position=InfoBarPosition.NONE,

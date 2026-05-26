@@ -61,6 +61,8 @@ def _run_velopack_startup() -> None:
 def _should_run_update_test_probe() -> bool:
     if "--ci-update-probe" not in sys.argv[1:]:
         return False
+    if str(os.environ.get("SURVEYCONTROLLER_UPDATE_TEST_MODE", "") or "").strip() != "1":
+        return False
     return bool(str(os.environ.get("SURVEYCONTROLLER_UPDATE_TEST_RESULT", "") or "").strip())
 
 
