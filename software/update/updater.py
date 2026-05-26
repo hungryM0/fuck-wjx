@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import webbrowser
 from threading import Thread
@@ -364,6 +365,11 @@ class UpdateManager:
         manager = _safe_create_update_manager()
         if manager is None:
             raise RuntimeError("当前运行环境不支持 Velopack 更新")
+        if str(os.environ.get("SURVEYCONTROLLER_UPDATE_TEST_MODE", "") or "").strip() == "1":
+            restart_args = ["--ci-update-probe"]
+            os.environ["SURVEYCONTROLLER_UPDATE_TEST_RESTARTED"] = "1"
+            manager.wait_exit_then_apply_updates(update_info, silent=True, restart=True, restart_args=restart_args)
+            return
         manager.apply_updates_and_exit(update_info)
 
 

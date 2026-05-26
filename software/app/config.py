@@ -424,5 +424,8 @@ _ENGLISH_MULTI_MIN_PATTERNS = (
 )
 
 # ==================== 更新配置 ====================
-VELOPACK_FEED_URL = "https://dl.hungrym0.top/surveycontroller/win/stable/"
-VELOPACK_CHANNEL = "stable"
+VELOPACK_FEED_URL = _resolve_env_value(
+    "SURVEYCONTROLLER_VELOPACK_FEED_URL",
+    "https://dl.hungrym0.top/surveycontroller/win/stable/",
+)
+VELOPACK_CHANNEL = _resolve_env_value("SURVEYCONTROLLER_VELOPACK_CHANNEL", "stable")

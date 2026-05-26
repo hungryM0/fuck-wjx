@@ -1,0 +1,49 @@
+name: Velopack E2E Update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 16 * * 4"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: velopack-e2e-update-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  velopack-e2e:
+    name: Velopack E2E Update
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install Python dependencies
+        run: uv sync --locked --group build
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Velopack CLI
+        shell: powershell
+        run: dotnet tool install -g vpk
+
+      - name: Run Velopack E2E update test
+        run: uv run pytest CI/live_tests/test_velopack_e2e.py -ra -vv --tb=short --color=yes

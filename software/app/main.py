@@ -58,6 +58,18 @@ def _run_velopack_startup() -> None:
         return
 
 
+def _should_run_update_test_probe() -> bool:
+    if "--ci-update-probe" not in sys.argv[1:]:
+        return False
+    return bool(str(os.environ.get("SURVEYCONTROLLER_UPDATE_TEST_RESULT", "") or "").strip())
+
+
+def _run_update_test_probe() -> int:
+    from software.update.ci_probe import run as run_probe
+
+    return int(run_probe())
+
+
 def _enable_fault_handler() -> None:
     """为原生崩溃保留最基本的线程栈信息。"""
     global _FAULT_HANDLER_STREAM
@@ -113,6 +125,8 @@ def main():
     _run_velopack_startup()
     if _is_velopack_lifecycle_hook(sys.argv):
         return
+    if _should_run_update_test_probe():
+        raise SystemExit(_run_update_test_probe())
 
     ensure_user_data_directories()
     _enable_fault_handler()

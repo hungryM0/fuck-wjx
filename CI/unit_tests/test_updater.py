@@ -179,6 +179,21 @@ class UpdateHelperTests:
             updater.UpdateManager.apply_downloaded_update(update_info)
         manager.apply_updates_and_exit.assert_called_once_with(update_info)
 
+    def test_apply_downloaded_update_uses_wait_exit_then_apply_updates_in_ci_probe_mode(self) -> None:
+        manager = MagicMock()
+        update_info = object()
+        with (
+            patch.object(updater, "_safe_create_update_manager", return_value=manager),
+            patch.dict(updater.os.environ, {"SURVEYCONTROLLER_UPDATE_TEST_MODE": "1"}, clear=False),
+        ):
+            updater.UpdateManager.apply_downloaded_update(update_info)
+        manager.wait_exit_then_apply_updates.assert_called_once_with(
+            update_info,
+            silent=True,
+            restart=True,
+            restart_args=["--ci-update-probe"],
+        )
+
     def test_build_github_update_result_returns_unknown_when_version_cannot_be_parsed(self) -> None:
         with (
             patch.object(updater, "__VERSION__", "3.1.2"),
