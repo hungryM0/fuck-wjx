@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
-import sys
 from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QFileDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
 from qfluentwidgets import (
     FluentIcon,
     MessageBox,
@@ -71,7 +69,6 @@ class SettingsPage(ScrollArea):
     auto_update_card: SwitchSettingCard
     auto_save_logs_card: ExpandComboSwitchSettingCard
     auto_save_logs_combo: "ComboBox"
-    restart_card: PushSettingCard
     reset_ui_card: PrimaryPushSettingCard
     config_directory_card: PushSettingCard
     clear_survey_cache_card: PushSettingCard
@@ -116,13 +113,6 @@ class SettingsPage(ScrollArea):
         layout.addWidget(self.update_group)
 
         self.tools_group = SettingCardGroup("系统工具", self.view)
-        self.restart_card = PushSettingCard(
-            "重启",
-            FluentIcon.SYNC,
-            "重新启动程序",
-            "重启程序以应用某些设置更改",
-            self.tools_group,
-        )
         self.reset_ui_card = PrimaryPushSettingCard(
             "恢复默认",
             FluentIcon.BROOM,
@@ -146,7 +136,6 @@ class SettingsPage(ScrollArea):
             self.tools_group,
         )
         for card in (
-            self.restart_card,
             self.reset_ui_card,
             self.config_directory_card,
             self.clear_survey_cache_card,
@@ -243,15 +232,6 @@ class SettingsPage(ScrollArea):
         )
 
     def _bind_static_actions(self) -> None:
-        bind_logged_action(
-            self.restart_card.clicked,
-            self._restart_program,
-            scope="UI",
-            event="restart_program",
-            target="restart_card",
-            page="settings",
-            forward_signal_args=False,
-        )
         bind_logged_action(
             self.reset_ui_card.clicked,
             self._on_reset_ui_settings,
@@ -505,38 +485,6 @@ class SettingsPage(ScrollArea):
 
         normalized = self._apply_config_directory_state(selected_directory)
         self._show_bar(f"配置文件目录已更新：{normalized}", "success", 2500)
-
-    def _restart_program(self):
-        box = MessageBox(
-            "重启程序",
-            "确定要重新启动程序吗？\n未保存的配置将会丢失。",
-            self._window_parent(),
-        )
-        box.yesButton.setText("确定")
-        box.cancelButton.setText("取消")
-        if not box.exec():
-            log_action("UI", "restart_program", "restart_card", "settings", result="cancelled")
-            return
-
-        log_action("UI", "restart_program", "restart_card", "settings", result="confirmed")
-        try:
-            win = self.window()
-            if hasattr(win, "_skip_save_on_close"):
-                setattr(win, "_skip_save_on_close", True)
-            subprocess.Popen([sys.executable, *sys.argv])
-            log_action("UI", "restart_program", "restart_card", "settings", result="started")
-            QApplication.quit()
-        except Exception as exc:
-            log_action(
-                "UI",
-                "restart_program",
-                "restart_card",
-                "settings",
-                result="failed",
-                level=logging.ERROR,
-                detail=exc,
-            )
-            self._show_bar(f"重启失败：{exc}", "error", 3000)
 
     def _reset_all_settings(self) -> None:
         self._settings.clear()
