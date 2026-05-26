@@ -14,7 +14,6 @@ from software.providers.common import (
     normalize_survey_provider,
 )
 from software.providers.registry import is_device_quota_limit_page as _provider_is_device_quota_limit_page
-from wjx.provider.submission_pages import _page_looks_like_wjx_questionnaire
 
 PAGE_LOAD_PROBE_ANSWERABLE = "answerable"
 PAGE_LOAD_PROBE_BUSINESS_PAGE = "business_page"
@@ -122,9 +121,6 @@ async def _generic_probe_snapshot(driver: Any) -> dict[str, Any]:
 
 
 async def _probe_wjx_page(driver: Any) -> PageLoadProbeResult:
-    if await _page_looks_like_wjx_questionnaire(driver):
-        return PageLoadProbeResult(PAGE_LOAD_PROBE_ANSWERABLE, detail="wjx_questionnaire")
-
     snapshot = await _generic_probe_snapshot(driver)
     title = _normalize_text(snapshot.get("title"))
     body_text = _normalize_text(snapshot.get("bodyText"))

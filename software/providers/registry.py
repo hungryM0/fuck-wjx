@@ -25,7 +25,6 @@ from software.providers.hooks import (
     build_predicate_hook,
     build_submission_recovery_hook,
     build_text_hook,
-    build_wait_from_predicate_hook,
     build_wait_hook,
 )
 from software.providers.survey_cache import parse_survey_with_cache
@@ -45,26 +44,10 @@ _WJX_PARSE: HookTarget = ("wjx.provider.parser", "parse_wjx_survey")
 _QQ_PARSE: HookTarget = ("tencent.provider.parser", "parse_qq_survey")
 _CREDAMO_PARSE: HookTarget = ("credamo.provider.parser", "parse_credamo_survey")
 
-_WJX_FILL: HookTarget = ("wjx.provider.runtime", "brush_wjx")
-_QQ_FILL: HookTarget = ("tencent.provider.runtime", "brush_qq")
 _CREDAMO_FILL: HookTarget = ("credamo.provider.runtime", "brush_credamo")
 _WJX_FILL_HTTP: HookTarget = ("wjx.provider.http_runtime", "brush_wjx_http")
 _QQ_FILL_HTTP: HookTarget = ("tencent.provider.http_runtime", "brush_qq_http")
-
-_WJX_IS_COMPLETION_PAGE: HookTarget = ("wjx.provider.submission_pages", "is_completion_page")
-_WJX_SUBMISSION_REQUIRES_VERIFICATION: HookTarget = ("wjx.provider.submission", "submission_requires_verification")
-_WJX_SUBMISSION_VALIDATION_MESSAGE: HookTarget = ("wjx.provider.submission", "submission_validation_message")
-_WJX_WAIT_FOR_SUBMISSION_VERIFICATION: HookTarget = ("wjx.provider.submission", "wait_for_submission_verification")
-_WJX_HANDLE_SUBMISSION_VERIFICATION_DETECTED: HookTarget = ("wjx.provider.submission", "handle_submission_verification_detected")
-_WJX_ATTEMPT_SUBMISSION_RECOVERY: HookTarget = ("wjx.provider.submission", "attempt_submission_recovery")
-_WJX_IS_DEVICE_QUOTA_LIMIT_PAGE: HookTarget = ("wjx.provider.submission", "is_device_quota_limit_page")
-
-_QQ_IS_COMPLETION_PAGE: HookTarget = ("tencent.provider.runtime_flow", "qq_is_completion_page")
-_QQ_SUBMISSION_REQUIRES_VERIFICATION: HookTarget = ("tencent.provider.runtime_flow", "qq_submission_requires_verification")
-_QQ_SUBMISSION_VALIDATION_MESSAGE: HookTarget = ("tencent.provider.runtime_flow", "qq_submission_validation_message")
-_QQ_CONSUME_SUBMISSION_SUCCESS_SIGNAL: HookTarget = ("tencent.provider.submission", "consume_submission_success_signal")
-_QQ_ATTEMPT_SUBMISSION_RECOVERY: HookTarget = ("tencent.provider.submission", "attempt_submission_recovery")
-_QQ_IS_DEVICE_QUOTA_LIMIT_PAGE: HookTarget = ("tencent.provider.submission", "is_device_quota_limit_page")
+_CREDAMO_FILL_HTTP: HookTarget = ("credamo.provider.http_runtime", "brush_credamo_http")
 
 _CREDAMO_IS_COMPLETION_PAGE: HookTarget = ("credamo.provider.submission", "is_completion_page")
 _CREDAMO_SUBMISSION_REQUIRES_VERIFICATION: HookTarget = ("credamo.provider.submission", "submission_requires_verification")
@@ -76,35 +59,29 @@ _CREDAMO_ATTEMPT_SUBMISSION_RECOVERY: HookTarget = ("credamo.provider.submission
 _CREDAMO_IS_DEVICE_QUOTA_LIMIT_PAGE: HookTarget = ("credamo.provider.submission", "is_device_quota_limit_page")
 
 
+async def _wjx_browser_runtime_removed(*_args: Any, **_kwargs: Any) -> bool:
+    raise RuntimeError("问卷星已固化为纯 HTTP 提交链路，不再支持 Playwright 填答兜底")
+
+
+async def _qq_browser_runtime_removed(*_args: Any, **_kwargs: Any) -> bool:
+    raise RuntimeError("腾讯问卷已固化为纯 HTTP 提交链路，不再支持 Playwright 填答兜底")
+
+
 _PROVIDER_REGISTRY = {
     SURVEY_PROVIDER_WJX: CallableProviderAdapter(
         SURVEY_PROVIDER_WJX,
         ProviderAdapterHooks(
             parse_survey=build_parse_hook(SURVEY_PROVIDER_WJX, _WJX_PARSE),
-            fill_survey=build_fill_hook(_WJX_FILL),
             fill_survey_http=build_fill_http_hook(_WJX_FILL_HTTP),
-            is_completion_page=build_predicate_hook(_WJX_IS_COMPLETION_PAGE),
-            submission_requires_verification=build_predicate_hook(_WJX_SUBMISSION_REQUIRES_VERIFICATION),
-            submission_validation_message=build_text_hook(_WJX_SUBMISSION_VALIDATION_MESSAGE),
-            wait_for_submission_verification=build_wait_hook(_WJX_WAIT_FOR_SUBMISSION_VERIFICATION),
-            handle_submission_verification_detected=build_action_hook(_WJX_HANDLE_SUBMISSION_VERIFICATION_DETECTED),
-            attempt_submission_recovery=build_submission_recovery_hook(_WJX_ATTEMPT_SUBMISSION_RECOVERY),
-            is_device_quota_limit_page=build_predicate_hook(_WJX_IS_DEVICE_QUOTA_LIMIT_PAGE),
+            fill_survey=_wjx_browser_runtime_removed,
         ),
     ),
     SURVEY_PROVIDER_QQ: CallableProviderAdapter(
         SURVEY_PROVIDER_QQ,
         ProviderAdapterHooks(
             parse_survey=build_parse_hook(SURVEY_PROVIDER_QQ, _QQ_PARSE),
-            fill_survey=build_fill_hook(_QQ_FILL),
+            fill_survey=_qq_browser_runtime_removed,
             fill_survey_http=build_fill_http_hook(_QQ_FILL_HTTP),
-            is_completion_page=build_predicate_hook(_QQ_IS_COMPLETION_PAGE),
-            submission_requires_verification=build_predicate_hook(_QQ_SUBMISSION_REQUIRES_VERIFICATION),
-            submission_validation_message=build_text_hook(_QQ_SUBMISSION_VALIDATION_MESSAGE),
-            wait_for_submission_verification=build_wait_from_predicate_hook(_QQ_SUBMISSION_REQUIRES_VERIFICATION),
-            attempt_submission_recovery=build_submission_recovery_hook(_QQ_ATTEMPT_SUBMISSION_RECOVERY),
-            consume_submission_success_signal=build_predicate_hook(_QQ_CONSUME_SUBMISSION_SUCCESS_SIGNAL),
-            is_device_quota_limit_page=build_predicate_hook(_QQ_IS_DEVICE_QUOTA_LIMIT_PAGE),
         ),
     ),
     SURVEY_PROVIDER_CREDAMO: CallableProviderAdapter(
@@ -112,6 +89,7 @@ _PROVIDER_REGISTRY = {
         ProviderAdapterHooks(
             parse_survey=build_parse_hook(SURVEY_PROVIDER_CREDAMO, _CREDAMO_PARSE),
             fill_survey=build_fill_hook(_CREDAMO_FILL),
+            fill_survey_http=build_fill_http_hook(_CREDAMO_FILL_HTTP),
             is_completion_page=build_predicate_hook(_CREDAMO_IS_COMPLETION_PAGE),
             submission_requires_verification=build_predicate_hook(_CREDAMO_SUBMISSION_REQUIRES_VERIFICATION),
             submission_validation_message=build_text_hook(_CREDAMO_SUBMISSION_VALIDATION_MESSAGE),

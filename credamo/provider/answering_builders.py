@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from typing import Any, Optional
 
 from software.app.config import DEFAULT_FILL_TEXT
@@ -46,6 +47,22 @@ def build_answer_action(
         if not selected:
             return None
         return AnswerAction(root_index=int(root_index), question_num=int(question_num), kind="multiple", selected_indices=tuple(selected))
+    if kind == "dropdown":
+        raw_option_count = int(getattr(question_meta, "options", 0) or 0)
+        if raw_option_count <= 0:
+            return None
+        option_count = max(1, raw_option_count)
+        selected_index = _resolve_plan_choice(psycho_plan, question_num, option_count)
+        if selected_index is None:
+            weights = config.droplist_prob[config_index] if config_index < len(config.droplist_prob) else -1
+            selected_index = weighted_index(normalize_droplist_probs(weights, option_count))
+        return AnswerAction(
+            root_index=int(root_index),
+            question_num=int(question_num),
+            kind="select",
+            selected_indices=(selected_index,),
+            record_type="dropdown",
+        )
     if kind in {"scale", "score"}:
         raw_option_count = int(getattr(question_meta, "options", 0) or 0)
         if raw_option_count <= 0:
@@ -72,6 +89,19 @@ def build_answer_action(
             weights = config.matrix_prob[matrix_index] if matrix_index < len(config.matrix_prob) else -1
             selected.append(weighted_index(normalize_droplist_probs(weights, option_count)))
         return AnswerAction(root_index=int(root_index), question_num=int(question_num), kind="matrix", matrix_indices=tuple(selected))
+    if kind == "order":
+        raw_option_count = int(getattr(question_meta, "options", 0) or 0)
+        if raw_option_count <= 0:
+            return None
+        selected = list(range(max(1, raw_option_count)))
+        random.shuffle(selected)
+        return AnswerAction(
+            root_index=int(root_index),
+            question_num=int(question_num),
+            kind="order",
+            selected_indices=tuple(selected),
+            record_type="order",
+        )
     if kind in {"text", "multi_text"}:
         text_config = config.texts[config_index] if config_index < len(config.texts) else [DEFAULT_FILL_TEXT]
         texts_prob = list(getattr(config, "texts_prob", []) or [])

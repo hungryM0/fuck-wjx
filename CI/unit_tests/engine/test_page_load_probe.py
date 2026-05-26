@@ -24,22 +24,18 @@ class _ProbeDriver:
 class PageLoadProbeTests:
 
     @pytest.mark.asyncio
-    async def test_probe_loaded_page_marks_wjx_questionnaire_as_answerable(self, patch_attrs) -> None:
-        driver = _ProbeDriver()
+    async def test_probe_loaded_page_marks_wjx_dom_ready_as_answerable(self, patch_attrs) -> None:
+        driver = _ProbeDriver(script_results={'generic': {'title': '问卷星', 'bodyText': '开始填写', 'readyState': 'complete', 'hasQuestionBlock': True, 'hasInputs': False, 'hasActions': True}})
 
         async def _not_quota(*_args, **_kwargs) -> bool:
             return False
 
-        async def _looks_like_wjx(*_args, **_kwargs) -> bool:
-            return True
-
         patch_attrs(
             (probe_module, '_provider_is_device_quota_limit_page', _not_quota),
-            (probe_module, '_page_looks_like_wjx_questionnaire', _looks_like_wjx),
         )
         result = await probe_loaded_page(driver, provider='wjx')
         assert result.status == PAGE_LOAD_PROBE_ANSWERABLE
-        assert result.detail == 'wjx_questionnaire'
+        assert result.detail == 'wjx_dom_ready'
 
     @pytest.mark.asyncio
     async def test_probe_loaded_page_marks_qq_questionnaire_as_answerable(self, patch_attrs) -> None:
@@ -80,15 +76,11 @@ class PageLoadProbeTests:
         async def _not_quota(*_args, **_kwargs) -> bool:
             return False
 
-        async def _not_wjx(*_args, **_kwargs) -> bool:
-            return False
-
         async def _page_status(*_args, **_kwargs):
             return False, False, False, ''
 
         patch_attrs(
             (probe_module, '_provider_is_device_quota_limit_page', _not_quota),
-            (probe_module, '_page_looks_like_wjx_questionnaire', _not_wjx),
             (probe_module.timed_mode, '_page_status', _page_status),
         )
         result = await probe_loaded_page(driver, provider='wjx')

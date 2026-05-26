@@ -420,7 +420,24 @@ class AsyncRuntimeLoopLargeTests:
         assert runner._uses_http_runtime() is True
 
     @pytest.mark.asyncio
-    async def test_run_blocks_playwright_fallback_for_wjx_when_http_logic_is_unsupported(self) -> None:
+    async def test_qq_always_uses_http_runtime_without_playwright_fallback(self) -> None:
+        config = ExecutionConfig(url="https://wj.qq.com/s2/123/hash/", survey_provider="qq")
+        config.questions_metadata = {
+            1: SurveyQuestionMeta(
+                num=1,
+                title="Q1",
+                provider="qq",
+                provider_question_id="q1",
+                has_jump=True,
+                logic_parse_status="unknown",
+            ),
+        }
+        runner, _state, _ctx, _loop, _scheduler = _build_runner(config=config)
+
+        assert runner._uses_http_runtime() is True
+
+    @pytest.mark.asyncio
+    async def test_run_blocks_wjx_http_runtime_when_http_logic_is_unsupported(self) -> None:
         config = ExecutionConfig(url="https://www.wjx.cn/vm/demo.aspx", survey_provider="wjx")
         config.questions_metadata = {
             1: SurveyQuestionMeta(
@@ -443,28 +460,20 @@ class AsyncRuntimeLoopLargeTests:
         assert runner.browser_pool.open_calls == []
         assert finished == [("Slot-1", "已停止")]
         assert runner.stop_policy.failure_calls[0]["status_text"] == "纯 HTTP 不支持"
-        assert "已禁用 Playwright 兜底" in str(runner.stop_policy.failure_calls[0]["log_message"])
+        assert "第1题" in str(runner.stop_policy.failure_calls[0]["log_message"])
         assert state.get_terminal_stop_snapshot()[0] == "http_runtime_only"
 
     @pytest.mark.asyncio
-    async def test_run_keeps_browser_runtime_for_credamo(self, monkeypatch) -> None:
+    async def test_run_uses_http_runtime_for_credamo(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [6, None]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
         state.mark_thread_finished = lambda *_args, **_kwargs: None
-        monkeypatch.setattr(runtime_loop, "fill_survey", lambda *_args, **_kwargs: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runtime_loop, "fill_survey_http", lambda *_args, **_kwargs: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
-        session = _FakeSession(driver=SimpleNamespace())
-        monkeypatch.setattr(runner, "_open_session", lambda: asyncio.sleep(0, result=session))
-        monkeypatch.setattr(runner, "_load_survey_or_record_failure", lambda _session: asyncio.sleep(0, result=True))
-        monkeypatch.setattr(runner, "_handle_device_quota_limit", lambda _session: asyncio.sleep(0, result=False))
-        monkeypatch.setattr(
-            runner,
-            "_finalize_after_submit",
-            lambda _session: asyncio.sleep(0, result=SimpleNamespace(status="success", should_rotate_proxy=False, should_stop=True)),
-        )
+        monkeypatch.setattr(runner, "_mark_http_submit_success", lambda: True)
 
         await runner.run()
 
@@ -491,6 +500,8 @@ class AsyncRuntimeLoopLargeTests:
     async def test_run_requeues_when_joint_pre_answer_step_times_out(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
+        monkeypatch.setattr(runner, "_uses_http_runtime", lambda: False)
+        monkeypatch.setattr(runner, "_resolve_http_runtime_block_reason", lambda: "")
         scheduler.acquire_values = [8, None]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
@@ -513,6 +524,8 @@ class AsyncRuntimeLoopLargeTests:
     async def test_run_success_path_requeues_scheduler_with_delay(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
+        monkeypatch.setattr(runner, "_uses_http_runtime", lambda: False)
+        monkeypatch.setattr(runner, "_resolve_http_runtime_block_reason", lambda: "")
         scheduler.acquire_values = [7, None]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
@@ -542,6 +555,8 @@ class AsyncRuntimeLoopLargeTests:
             url="https://www.credamo.com/answer.html#/s/demo",
         )
         runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
+        monkeypatch.setattr(runner, "_uses_http_runtime", lambda: False)
+        monkeypatch.setattr(runner, "_resolve_http_runtime_block_reason", lambda: "")
         scheduler.acquire_values = [7]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
@@ -570,6 +585,8 @@ class AsyncRuntimeLoopLargeTests:
     async def test_run_aborted_finalize_breaks_without_requeue(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
+        monkeypatch.setattr(runner, "_uses_http_runtime", lambda: False)
+        monkeypatch.setattr(runner, "_resolve_http_runtime_block_reason", lambda: "")
         scheduler.acquire_values = [3]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
@@ -614,6 +631,8 @@ class AsyncRuntimeLoopLargeTests:
     async def test_run_proxy_connection_error_breaks_when_handler_requests_stop(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
+        monkeypatch.setattr(runner, "_uses_http_runtime", lambda: False)
+        monkeypatch.setattr(runner, "_resolve_http_runtime_block_reason", lambda: "")
         scheduler.acquire_values = [9]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
@@ -631,6 +650,8 @@ class AsyncRuntimeLoopLargeTests:
     async def test_run_browser_startup_error_stops_without_requeue(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, ctx, _loop, scheduler = _build_runner(config=config)
+        monkeypatch.setattr(runner, "_uses_http_runtime", lambda: False)
+        monkeypatch.setattr(runner, "_resolve_http_runtime_block_reason", lambda: "")
         scheduler.acquire_values = [12]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None
@@ -655,6 +676,8 @@ class AsyncRuntimeLoopLargeTests:
     async def test_run_generic_exception_records_failure_and_requeues(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, _ctx, _loop, scheduler = _build_runner(config=config)
+        monkeypatch.setattr(runner, "_uses_http_runtime", lambda: False)
+        monkeypatch.setattr(runner, "_resolve_http_runtime_block_reason", lambda: "")
         scheduler.acquire_values = [11, None]
         state.release_joint_sample = lambda *_args, **_kwargs: None
         state.release_reverse_fill_sample = lambda *_args, **_kwargs: None

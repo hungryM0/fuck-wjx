@@ -32,18 +32,14 @@ from software.core.questions.utils import (
     weighted_index,
 )
 from software.core.task import ExecutionState
-from software.network.browser.runtime_async import BrowserDriver
 from software.providers.answering import AnswerAction
 from software.providers.contracts import SurveyQuestionMeta
 
-from .runtime_interactions import (
-    _apply_multiple_constraints,
-    _normalize_selected_indices,
-)
+from .answering_rules import apply_multiple_constraints, normalize_selected_indices
 
 
 async def _build_qq_single_action(
-    driver: BrowserDriver | None,
+    driver: Any | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -158,7 +154,7 @@ async def _build_qq_text_action(
 
 
 async def _build_qq_dropdown_action(
-    driver: BrowserDriver | None,
+    driver: Any | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -266,7 +262,7 @@ async def _build_qq_score_like_action(
 
 
 async def _build_qq_multiple_action(
-    driver: BrowserDriver | None,
+    driver: Any | None,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -286,11 +282,11 @@ async def _build_qq_multiple_action(
         min_required = max_allowed
 
     must_select_indices, must_not_select_indices, _ = get_multiple_rule_constraint(current, option_count)
-    required_indices = _normalize_selected_indices(sorted(must_select_indices or []), option_count)
-    blocked_indices = _normalize_selected_indices(sorted(must_not_select_indices or []), option_count)
+    required_indices = normalize_selected_indices(sorted(must_select_indices or []), option_count)
+    blocked_indices = normalize_selected_indices(sorted(must_not_select_indices or []), option_count)
 
     async def _finalize(selected_indices: Sequence[int]) -> Optional[AnswerAction]:
-        selected = _normalize_selected_indices(selected_indices, option_count)
+        selected = normalize_selected_indices(selected_indices, option_count)
         if not selected:
             return None
         fill_entries = config.multiple_option_fill_texts[config_index] if config_index < len(config.multiple_option_fill_texts) else None
@@ -335,7 +331,7 @@ async def _build_qq_multiple_action(
         extra_max = max(0, max_total - len(required_indices))
         extra_count = random.randint(extra_min, extra_max) if extra_max >= extra_min else 0
         sampled = random.sample(available_pool, extra_count) if extra_count > 0 else []
-        selected = _apply_multiple_constraints(
+        selected = apply_multiple_constraints(
             list(required_indices) + sampled,
             option_count,
             min_required,
@@ -372,7 +368,7 @@ async def _build_qq_multiple_action(
             idx for idx, prob in enumerate(sanitized_probabilities)
             if prob > 0 and idx not in blocked_indices and idx not in required_indices
         ]
-        required_selected = _normalize_selected_indices(required_indices, option_count)
+        required_selected = normalize_selected_indices(required_indices, option_count)
         if len(required_selected) > max_allowed:
             required_selected = required_selected[:max_allowed]
         min_total = max(min_required, len(required_selected))
@@ -407,7 +403,7 @@ async def _build_qq_multiple_action(
         idx for idx, selected_flag in enumerate(selection_mask)
         if selected_flag == 1 and sanitized_probabilities[idx] > 0
     ]
-    selected = _apply_multiple_constraints(
+    selected = apply_multiple_constraints(
         selected,
         option_count,
         min_required,
@@ -496,7 +492,7 @@ async def _build_qq_matrix_action(
 
 
 async def build_answer_action(
-    driver: BrowserDriver | None,
+    driver: Any | None,
     question: SurveyQuestionMeta,
     ctx: ExecutionState,
     *,

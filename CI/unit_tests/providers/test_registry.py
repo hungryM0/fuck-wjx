@@ -65,6 +65,67 @@ async def test_fill_survey_uses_provider_run_context_and_selected_adapter() -> N
     assert fill_mock.await_args.kwargs["psycho_plan"] == "resolved-plan"
 
 
+async def test_fill_survey_http_routes_credamo_adapter() -> None:
+    state = ExecutionState(config=ExecutionConfig(survey_provider=SURVEY_PROVIDER_CREDAMO))
+    adapter = registry._PROVIDER_REGISTRY[SURVEY_PROVIDER_CREDAMO]
+
+    @contextmanager
+    def fake_provider_run_context(*_args, **_kwargs):
+        yield "resolved-plan"
+
+    with (
+        patch.object(adapter, "fill_survey_http_async", new=AsyncMock(return_value=True)) as fill_mock,
+        patch.object(registry, "provider_run_context", fake_provider_run_context),
+    ):
+        result = await registry.fill_survey_http(
+            ExecutionConfig(survey_provider=SURVEY_PROVIDER_CREDAMO),
+            state,
+            stop_signal="stop",
+            thread_name="Worker-1",
+            psycho_plan="ignored-plan",
+            provider=SURVEY_PROVIDER_CREDAMO,
+            proxy_address="http://1.1.1.1:80",
+            user_agent="UA",
+        )
+
+    assert result is True
+    assert fill_mock.await_args.kwargs["psycho_plan"] == "resolved-plan"
+    assert fill_mock.await_args.kwargs["proxy_address"] == "http://1.1.1.1:80"
+    assert fill_mock.await_args.kwargs["user_agent"] == "UA"
+
+
+async def test_wjx_fill_survey_browser_entry_is_removed() -> None:
+    state = ExecutionState(config=ExecutionConfig(survey_provider=SURVEY_PROVIDER_WJX))
+
+    try:
+        await registry.fill_survey(
+            object(),
+            ExecutionConfig(survey_provider=SURVEY_PROVIDER_WJX),
+            state,
+            provider=SURVEY_PROVIDER_WJX,
+        )
+    except RuntimeError as exc:
+        assert "纯 HTTP 提交链路" in str(exc)
+    else:
+        raise AssertionError("问卷星不应继续暴露 Playwright 填答入口")
+
+
+async def test_qq_fill_survey_browser_entry_is_removed() -> None:
+    state = ExecutionState(config=ExecutionConfig(survey_provider=SURVEY_PROVIDER_QQ))
+
+    try:
+        await registry.fill_survey(
+            object(),
+            ExecutionConfig(survey_provider=SURVEY_PROVIDER_QQ),
+            state,
+            provider=SURVEY_PROVIDER_QQ,
+        )
+    except RuntimeError as exc:
+        assert "纯 HTTP 提交链路" in str(exc)
+    else:
+        raise AssertionError("腾讯问卷不应继续暴露 Playwright 填答入口")
+
+
 async def test_handle_submission_verification_detected_uses_ctx_config_provider() -> None:
     ctx = SimpleNamespace(config=SimpleNamespace(survey_provider=SURVEY_PROVIDER_CREDAMO))
     adapter = registry._PROVIDER_REGISTRY[SURVEY_PROVIDER_CREDAMO]

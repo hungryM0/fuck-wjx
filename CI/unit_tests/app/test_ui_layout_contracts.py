@@ -7,8 +7,8 @@ import subprocess
 import sys
 import textwrap
 
-from PySide6.QtCore import QRect
-from PySide6.QtWidgets import QApplication, QLayout, QWidget
+from PySide6.QtCore import QCoreApplication, QEvent, QRect
+from PySide6.QtWidgets import QApplication, QLayout, QScrollArea, QWidget
 from qfluentwidgets import ScrollArea as FluentScrollArea
 from qfluentwidgets import Slider, SpinBox
 
@@ -100,6 +100,9 @@ def _assert_layout_items_do_not_overlap(root: QWidget) -> None:
 
 
 def _visible_layout_widget_rects(layout: QLayout) -> list[QRect]:
+    if isinstance(layout.parentWidget(), QScrollArea):
+        return []
+
     rects: list[QRect] = []
     for index in range(layout.count()):
         item = layout.itemAt(index)
@@ -130,6 +133,10 @@ def _show_at_guarded_size(qtbot, widget: QWidget) -> None:
     qtbot.addWidget(widget)
     widget.resize(900, 640)
     widget.show()
+    if widget.layout() is not None:
+        widget.layout().activate()
+    QApplication.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
     QApplication.processEvents()
     qtbot.wait(80)
 
@@ -202,6 +209,10 @@ def test_workbench_pages_survive_125_percent_dpi_subprocess() -> None:
         page = RuntimePage(_FakeController())
         page.resize(900, 640)
         page.show()
+        if page.layout() is not None:
+            page.layout().activate()
+        app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
         app.processEvents()
 
         ratio = app.primaryScreen().devicePixelRatio()

@@ -40,7 +40,6 @@ from software.core.reverse_fill.schema import (
     REVERSE_FILL_KIND_TEXT,
 )
 from software.core.task import ExecutionState
-from software.network.browser.runtime_async import BrowserDriver
 from software.providers.answering import AnswerAction
 from software.providers.answering.selection import (
     coerce_positive_int as _coerce_positive_int,
@@ -50,10 +49,14 @@ from software.providers.contracts import SurveyQuestionMeta
 from wjx.provider.questions.multiple_rules import _normalize_selected_indices
 
 
-from .answering_direct import _resolve_runtime_option_texts
+async def _resolve_runtime_option_texts(
+    _driver: Any,
+    question: SurveyQuestionMeta,
+) -> list[str]:
+    return [str(item or "").strip() for item in list(question.option_texts or []) if str(item or "").strip()]
 
 async def _build_wjx_single_action(
-    driver: BrowserDriver | None,
+    driver: Any,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -129,7 +132,7 @@ async def _build_wjx_single_action(
 
 
 async def _build_wjx_dropdown_action(
-    driver: BrowserDriver | None,
+    driver: Any,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -203,7 +206,7 @@ async def _build_wjx_dropdown_action(
 
 
 async def _build_wjx_text_action(
-    driver: BrowserDriver | None,
+    driver: Any,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -260,7 +263,7 @@ async def _build_wjx_text_action(
 
 
 async def _build_wjx_score_like_action(
-    driver: BrowserDriver | None,
+    driver: Any,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -311,7 +314,7 @@ async def _build_wjx_score_like_action(
 
 
 async def _build_wjx_multiple_action(
-    driver: BrowserDriver | None,
+    driver: Any,
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
@@ -547,7 +550,7 @@ async def _build_wjx_slider_action(
 
 
 async def _build_wjx_order_action(
-    driver: BrowserDriver | None,
+    driver: Any,
     question: SurveyQuestionMeta,
 ) -> AnswerAction:
     option_texts = await _resolve_runtime_option_texts(driver, question)
@@ -564,7 +567,7 @@ async def _build_wjx_order_action(
 
 
 async def build_answer_action(
-    driver: BrowserDriver | None,
+    driver: Any,
     question: SurveyQuestionMeta,
     ctx: ExecutionState,
     *,

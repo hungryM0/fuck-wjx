@@ -16,11 +16,7 @@
 </div>
 
 > [!WARNING]
-> **该项目仅供 Playwright 的学习与测试使用。** 请确保拥有目标测试问卷的授权再使用，**严禁污染他人问卷数据！**
-
-> [!NOTE]
-> 我们正计划用 Go 重写该项目，以便部署在无图形化界面的服务器环境中。
-> 感兴趣的开发者可以查看 [SurveyController/SurveyConsole](https://github.com/SurveyController/SurveyConsole) 仓库，欢迎参与贡献！
+> **该项目仅供 HTTP 接口自动化学习与测试使用。** 请确保拥有目标测试问卷的授权再使用，**严禁污染他人问卷数据！**
 
 <img width="689" height="626" alt="gui" src="/assets/gui.png" />
 
@@ -60,14 +56,14 @@ uv run python SurveyController.py
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-**环境要求：** Windows 10/11，Python 3.11+，Git，Microsoft Edge
+**环境要求：** Windows 10/11，Python 3.11+，Git
 
 ## 使用方法
 
 1. **输入问卷** - 粘贴问卷链接或上传/拖入二维码图片（支持问卷星和腾讯问卷）
 2. **自动解析** - 点击「自动配置问卷」，系统自动识别平台和题目结构
 3. **调整配置** - 在配置向导中针对各题设置答案权重和概率分布
-4. **设置运行参数** - 指定目标提交份数、并发浏览器数、随机IP等选项
+4. **设置运行参数** - 指定目标提交份数、并发数、随机IP等选项
 5. **启动任务** - 点击「开始执行」并等待任务完成（可在日志中查看进度）
 
 ---
@@ -77,9 +73,9 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 | 配置项 | 说明 |
 |--------|------|
 | **目标份数** | 计划提交的问卷总数。建议先测试 3~5 份验证配置是否正确 |
-| **并发浏览器数** | 同时运行的浏览器窗口数。过高可能导致电脑卡顿 |
+| **并发数** | 同时发起的提交任务数。 |
 | **随机IP** | 是否使用随机IP或指定地区IP。使用代理IP时可能产生额外费用，请确认配额 |
-| **User-Agent** | 浏览器标识字符串，影响问卷后台显示的来源信息 |
+| **User-Agent** | HTTP 请求标识字符串，影响问卷后台显示的提交来源信息 |
 | **答题时长** | 每份问卷的作答时间。如无特殊需求建议不做设置 |
 
 ---
@@ -88,9 +84,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 如果你需要查看支持 macOS 系统的源码，请切换到 [mac 分支](https://github.com/SurveyController/SurveyController/tree/mac)。
 
-**分支由社区维护，不受长期支持**
-
-> 顺带一提：我们**不会**打算为了某些用户的特殊需求而转向 Android/iOS 平台的开发
+**该分支由社区维护。**
 
 ---
 
