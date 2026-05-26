@@ -314,6 +314,7 @@ def _build_qq_parse_result(
     info = _standardize_qq_questions(questions)
     if browser_media:
         _merge_browser_media(info, browser_media)
+        _inherit_description_browser_media(info)
     if not info:
         raise RuntimeError(empty_error_message)
     return info, title
@@ -533,6 +534,26 @@ def _merge_same_page_descriptions_into_questions(items: List[Dict[str, Any]]) ->
         pending = []
 
     return items
+
+
+def _inherit_description_browser_media(items: List[Dict[str, Any]]) -> None:
+    pending: List[Dict[str, Any]] = []
+    for item in items:
+        if bool(item.get("is_description")):
+            pending.append(item)
+            continue
+        if pending:
+            current_page = int(item.get("page") or 1)
+            mergeable = [desc for desc in pending if int(desc.get("page") or 1) == current_page]
+            if mergeable:
+                inherited_media: List[Dict[str, Any]] = []
+                for desc in mergeable:
+                    inherited_media.extend(list(desc.get("question_media") or []))
+                item["question_media"] = _merge_question_media_lists(
+                    inherited_media,
+                    list(item.get("question_media") or []),
+                )
+        pending = []
 
 
 def _assign_visible_display_numbers(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

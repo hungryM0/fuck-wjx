@@ -424,7 +424,20 @@ class SettingsPage(ScrollArea):
 
     def _apply_config_directory_state(self, directory: str, persist: bool = True) -> str:
         normalized = os.path.abspath(os.path.expanduser(directory))
-        os.makedirs(normalized, exist_ok=True)
+        try:
+            os.makedirs(normalized, exist_ok=True)
+        except OSError as exc:
+            log_action(
+                "CONFIG",
+                "change_config_directory",
+                "config_directory_card",
+                "settings",
+                result="failed",
+                level=logging.ERROR,
+                detail=exc,
+                payload={"path": normalized, "persist": persist},
+            )
+            raise RuntimeError(f"无法创建配置文件目录：{exc}") from exc
         if persist:
             self._settings.setValue(CONFIG_DIRECTORY_SETTING_KEY, normalized)
             self._settings.sync()
@@ -483,7 +496,11 @@ class SettingsPage(ScrollArea):
             )
             return
 
-        normalized = self._apply_config_directory_state(selected_directory)
+        try:
+            normalized = self._apply_config_directory_state(selected_directory)
+        except RuntimeError as exc:
+            self._show_bar(str(exc), "error", 3500)
+            return
         self._show_bar(f"配置文件目录已更新：{normalized}", "success", 2500)
 
     def _reset_all_settings(self) -> None:

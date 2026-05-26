@@ -148,7 +148,7 @@ async def brush_qq(
         raise RuntimeError("当前腾讯问卷仍包含未支持题型，已阻止启动")
 
     page_groups = _group_questions_by_page(ctx)
-    total_steps = sum(len(group) for group in page_groups)
+    total_steps = sum(len(group.questions) for group in page_groups)
     try:
         ctx.update_thread_step(thread_name, 0, total_steps, status_text="答题中", running=True)
     except Exception:
@@ -165,7 +165,8 @@ async def brush_qq(
     def _abort_requested() -> bool:
         return bool(active_stop and active_stop.is_set())
 
-    for page_index, questions in enumerate(page_groups):
+    for page_index, group in enumerate(page_groups):
+        questions = list(group.questions or [])
         page_question_ids = [str(question.provider_question_id or "").strip() for question in questions if str(question.provider_question_id or "").strip()]
         page_snapshot = {}
         if await _supports_page_snapshot(driver):
@@ -257,8 +258,10 @@ async def brush_qq(
                 return False
             break
 
-        current_first = str(questions[0].provider_question_id or "")
-        next_first = str(page_groups[page_index + 1][0].provider_question_id or "")
+        current_first = str(group.anchor_question_id or "")
+        next_first = str(page_groups[page_index + 1].anchor_question_id or "")
+        if not current_first or not next_first:
+            raise NoSuchElementException("腾讯问卷分页锚点缺失，无法继续翻页")
         clicked = await _click_next_page_button(driver)
         if not clicked:
             raise NoSuchElementException("腾讯问卷下一页按钮未找到")

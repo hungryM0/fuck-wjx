@@ -1,6 +1,7 @@
 """腾讯问卷流程判断与翻页辅助。"""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Dict, List
 
 from software.core.task import ExecutionState
@@ -36,6 +37,13 @@ QQ_VALIDATION_MARKERS = (
 
 
 from .runtime_interactions import _page
+
+
+@dataclass
+class QQPageQuestionGroup:
+    page_number: int
+    anchor_question_id: str
+    questions: List[SurveyQuestionMeta]
 
 async def qq_submission_requires_verification(driver: BrowserDriver) -> bool:
     try:
@@ -149,16 +157,29 @@ async def qq_is_completion_page(driver: BrowserDriver) -> bool:
     except Exception:
         return False
 
-def _group_questions_by_page(ctx: ExecutionState) -> List[List[SurveyQuestionMeta]]:
+def _group_questions_by_page(ctx: ExecutionState) -> List[QQPageQuestionGroup]:
     grouped: Dict[int, List[SurveyQuestionMeta]] = {}
+    anchors: Dict[int, str] = {}
     metadata = ctx.config.questions_metadata
     for question_num in sorted(metadata.keys()):
         item = metadata.get(question_num)
-        if not item or bool(item.is_description):
+        if not item:
             continue
         page_number = max(1, int(item.page or 1))
+        question_id = str(item.provider_question_id or "").strip()
+        if question_id and page_number not in anchors:
+            anchors[page_number] = question_id
+        if bool(item.is_description):
+            continue
         grouped.setdefault(page_number, []).append(item)
-    return [grouped[key] for key in sorted(grouped.keys())]
+    return [
+        QQPageQuestionGroup(
+            page_number=page_number,
+            anchor_question_id=anchors.get(page_number, ""),
+            questions=grouped.get(page_number, []),
+        )
+        for page_number in sorted(anchors.keys())
+    ]
 
 async def _wait_for_page_transition(
     driver: BrowserDriver,

@@ -188,6 +188,63 @@ class TencentRuntimeTests:
         assert ("提交中", True) in ctx.status_updates
 
     @pytest.mark.asyncio
+    async def test_brush_qq_uses_description_page_anchor_when_transitioning(self, make_runtime_state, patch_attrs) -> None:
+        ctx = make_runtime_state(
+            {
+                1: SurveyQuestionMeta(
+                    num=1,
+                    title="说明页",
+                    page=1,
+                    provider="qq",
+                    type_code="0",
+                    provider_question_id="desc-page-1",
+                    is_description=True,
+                ),
+                2: _meta(2, page=2, provider_question_id="page2-q1"),
+            },
+            {2: ("single", 0)},
+        )
+        calls: list[object] = []
+
+        async def _wait_snapshot(_driver, question_ids, *, timeout_ms, require_any_visible):
+            calls.append(("snapshot", list(question_ids), timeout_ms, require_any_visible))
+            return {}
+
+        async def _wait_transition(*_args, **_kwargs):
+            calls.append(("transition", _args[1], _args[2]))
+            return None
+
+        patch_attrs(
+            (runtime, "_supports_page_snapshot", _async_return(True)),
+            (runtime, "_wait_for_question_visibility_map", _wait_snapshot),
+            (runtime, "_wait_for_question_visible", _async_return(True)),
+            (runtime, "_is_question_visible", _async_return(True)),
+            (runtime, "_human_scroll_after_question", _async_append(calls, "scroll")),
+            (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
+            (runtime, "_is_headless_mode", lambda _ctx: True),
+            (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
+            (runtime, "HEADLESS_PAGE_CLICK_DELAY", 0.0),
+            (runtime, "has_configured_answer_duration", lambda _value: False),
+            (runtime, "simulate_answer_duration_delay", _async_return(False)),
+            (runtime, "_answer_qq_single", _async_append(calls, "single")),
+            (runtime, "_click_next_page_button", _async_append(calls, "next", result=True)),
+            (runtime, "_wait_for_page_transition", _wait_transition),
+            (runtime, "submit", _async_append(calls, "submit")),
+        )
+
+        result = await runtime.brush_qq(
+            object(),
+            object(),
+            ctx,
+            stop_signal=threading.Event(),
+            thread_name="Worker-1",
+            psycho_plan=None,
+        )
+
+        assert result
+        assert ("transition", "desc-page-1", "page2-q1") in calls
+
+    @pytest.mark.asyncio
     async def test_brush_qq_no_submit_test_answers_without_submit(self, make_runtime_state, patch_attrs) -> None:
         ctx = make_runtime_state({1: _meta(1)}, {1: ("single", 0)})
         ctx.config.submit_enabled = False

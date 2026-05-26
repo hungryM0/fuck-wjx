@@ -519,6 +519,61 @@ class TencentParserTests:
             }
         ]
 
+    def test_inherit_description_browser_media_merges_late_browser_images_into_next_question(self) -> None:
+        items = [
+            {
+                "num": 5,
+                "page": 2,
+                "title": "模特A",
+                "description": "",
+                "is_description": True,
+                "question_media": [
+                    {
+                        "kind": "image",
+                        "scope": "title",
+                        "index": None,
+                        "source_url": "https://example.com/model-a.jpg",
+                        "label": "题干图",
+                    }
+                ],
+            },
+            {
+                "num": 6,
+                "page": 2,
+                "title": "请评分",
+                "description": "",
+                "is_description": False,
+                "question_media": [
+                    {
+                        "kind": "image",
+                        "scope": "option",
+                        "index": 0,
+                        "source_url": "https://example.com/option-a.jpg",
+                        "label": "选项A",
+                    }
+                ],
+            },
+        ]
+
+        qq_parser._inherit_description_browser_media(items)
+
+        assert items[1]["question_media"] == [
+            {
+                "kind": "image",
+                "scope": "title",
+                "index": None,
+                "source_url": "https://example.com/model-a.jpg",
+                "label": "题干图",
+            },
+            {
+                "kind": "image",
+                "scope": "option",
+                "index": 0,
+                "source_url": "https://example.com/option-a.jpg",
+                "label": "选项A",
+            },
+        ]
+
     @pytest.mark.asyncio
     async def test_parse_qq_survey_returns_http_result_without_browser_fallback(self, patch_attrs) -> None:
         browser_used = {"value": False}

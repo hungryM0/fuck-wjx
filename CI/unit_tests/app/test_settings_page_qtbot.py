@@ -150,3 +150,41 @@ def test_settings_page_can_change_config_directory(qtbot, monkeypatch, tmp_path)
     assert fake_settings.data[CONFIG_DIRECTORY_SETTING_KEY] == str(selected_dir.resolve())
     assert page.config_directory_card.contentLabel.text() == str(selected_dir.resolve())
     assert selected_dir.is_dir()
+
+
+def test_settings_page_shows_error_when_config_directory_creation_fails(qtbot, monkeypatch, tmp_path) -> None:
+    fake_settings = _FakeSettings()
+    fake_window = _FakeWindow()
+    selected_dir = tmp_path / "broken-configs"
+    bars: list[tuple[str, str, int]] = []
+    qtbot.addWidget(fake_window)
+    monkeypatch.setattr(settings_module, "app_settings", lambda: fake_settings)
+    monkeypatch.setattr(settings_module, "get_default_user_config_directory", lambda: "D:/default-configs")
+    monkeypatch.setattr(
+        settings_module,
+        "resolve_user_config_directory",
+        lambda settings=None: str(
+            fake_settings.data.get(CONFIG_DIRECTORY_SETTING_KEY) or "D:/default-configs"
+        ),
+    )
+    monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
+    monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
+    monkeypatch.setattr(
+        settings_module.QFileDialog,
+        "getExistingDirectory",
+        lambda *_args, **_kwargs: str(selected_dir),
+    )
+    monkeypatch.setattr(
+        settings_module.os,
+        "makedirs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("拒绝访问")),
+    )
+
+    page = SettingsPage(parent=fake_window)
+    page.show()
+    page._show_bar = lambda text, level, timeout: bars.append((str(text), str(level), int(timeout)))
+
+    page._on_config_directory_clicked()
+
+    assert CONFIG_DIRECTORY_SETTING_KEY not in fake_settings.data
+    assert bars == [("无法创建配置文件目录：拒绝访问", "error", 3500)]
