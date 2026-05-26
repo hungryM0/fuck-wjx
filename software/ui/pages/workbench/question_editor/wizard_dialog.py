@@ -50,8 +50,43 @@ _LEFT_PANEL_MIN_WIDTH = 240
 _LEFT_PANEL_MAX_WIDTH = 520
 _RIGHT_PANEL_MIN_WIDTH = 420
 _RIGHT_CONTENT_MIN_WIDTH = 320
-_RIGHT_CONTENT_SAFE_MARGIN = 28
 _WIDGET_MAX_SIZE = 16777215
+
+
+class _CurrentPagePopUpStackedWidget(PopUpAniStackedWidget):
+    """按当前页计算尺寸，避免长题撑高所有短题。"""
+
+    def hasHeightForWidth(self) -> bool:
+        current = self.currentWidget()
+        if current is not None:
+            return current.hasHeightForWidth()
+        return super().hasHeightForWidth()
+
+    def heightForWidth(self, width: int) -> int:
+        current = self.currentWidget()
+        if current is not None and current.hasHeightForWidth():
+            return current.heightForWidth(width)
+        return super().heightForWidth(width)
+
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        if current is not None:
+            return current.sizeHint()
+        return super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        current = self.currentWidget()
+        if current is not None:
+            return current.minimumSizeHint()
+        return super().minimumSizeHint()
+
+    def setCurrentIndex(self, *args, **kwargs) -> None:
+        super().setCurrentIndex(*args, **kwargs)
+        self.updateGeometry()
+
+    def setCurrentWidget(self, *args, **kwargs) -> None:
+        super().setCurrentWidget(*args, **kwargs)
+        self.updateGeometry()
 
 
 class QuestionWizardDialog(
@@ -189,8 +224,8 @@ class QuestionWizardDialog(
         detail_layout = QVBoxLayout(detail_host)
         detail_layout.setContentsMargins(0, 0, 0, 0)
         detail_layout.setSpacing(0)
-        detail_stack = PopUpAniStackedWidget(detail_host)
-        detail_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        detail_stack = _CurrentPagePopUpStackedWidget(detail_host)
+        detail_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         detail_layout.addWidget(detail_stack, 0, Qt.AlignmentFlag.AlignTop)
         detail_scroll.setWidget(detail_host)
         self._detail_scroll = detail_scroll
@@ -262,24 +297,41 @@ class QuestionWizardDialog(
         viewport_width = viewport.width() if viewport is not None else detail_scroll.width()
         if viewport_width <= 0:
             return
-        content_width = max(
-            _RIGHT_CONTENT_MIN_WIDTH,
-            viewport_width - _RIGHT_CONTENT_SAFE_MARGIN,
-        )
+        content_width = max(_RIGHT_CONTENT_MIN_WIDTH, viewport_width)
 
-        detail_host.setMinimumWidth(0)
-        detail_host.setMaximumWidth(_WIDGET_MAX_SIZE)
-        detail_stack.setMinimumWidth(0)
-        detail_stack.setMaximumWidth(_WIDGET_MAX_SIZE)
+        detail_host.setMinimumWidth(content_width)
+        detail_host.setMaximumWidth(content_width)
+        detail_stack.setMinimumWidth(content_width)
+        detail_stack.setMaximumWidth(content_width)
         for page in self._question_cards.values():
-            page.setMinimumWidth(0)
-            page.setMaximumWidth(_WIDGET_MAX_SIZE)
+            page.setMinimumWidth(content_width)
+            page.setMaximumWidth(content_width)
         for card in self._entry_card_widgets.values():
-            card.setMinimumWidth(0)
+            card.setMinimumWidth(content_width)
             card.setMaximumWidth(content_width)
         if self._empty_page is not None:
-            self._empty_page.setMinimumWidth(0)
+            self._empty_page.setMinimumWidth(content_width)
             self._empty_page.setMaximumWidth(content_width)
+        detail_host.updateGeometry()
+        detail_stack.updateGeometry()
+        current_page = detail_stack.currentWidget()
+        if current_page is not None:
+            detail_stack.setMinimumHeight(0)
+            detail_stack.setMaximumHeight(_WIDGET_MAX_SIZE)
+            current_page.setMinimumHeight(0)
+            current_page.setMaximumHeight(_WIDGET_MAX_SIZE)
+            current_page.updateGeometry()
+            current_page.adjustSize()
+            current_height = max(1, current_page.sizeHint().height())
+            detail_stack.setMinimumHeight(current_height)
+            detail_stack.setMaximumHeight(current_height)
+            current_page.setMinimumHeight(current_height)
+            current_page.setMaximumHeight(current_height)
+
+    def _reset_detail_scroll_position(self) -> None:
+        if self._detail_scroll is None:
+            return
+        self._detail_scroll.verticalScrollBar().setValue(0)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -497,8 +549,8 @@ class QuestionWizardDialog(
         self._detail_stack.setCurrentWidget(page)
         self._sync_detail_content_width()
         QTimer.singleShot(0, self._sync_detail_content_width)
-        if self._detail_scroll is not None:
-            self._detail_scroll.verticalScrollBar().setValue(0)
+        self._reset_detail_scroll_position()
+        QTimer.singleShot(0, self._reset_detail_scroll_position)
 
     def _sync_tree_selection(self) -> None:
         if self._tree_widget is None:

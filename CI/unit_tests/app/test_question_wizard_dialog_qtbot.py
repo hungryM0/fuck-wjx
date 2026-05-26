@@ -224,11 +224,75 @@ def test_question_wizard_dialog_detail_keeps_visible_content_width(qtbot) -> Non
 
     dlg._sync_detail_content_width()
     card = dlg._entry_card_widgets[0]
+    viewport_width = dlg._detail_scroll.viewport().width()
+    if viewport_width >= 320:
+        assert card.maximumWidth() == viewport_width
     assert card.maximumWidth() <= dlg._detail_scroll.viewport().width()
     assert card.maximumWidth() >= 320
 
     dlg._select_question(1)
     qtbot.waitUntil(lambda: 1 in dlg._entry_card_widgets)
+    assert dlg._detail_stack.currentWidget() is dlg._question_cards[1]
+
+
+def test_question_wizard_dialog_detail_height_follows_current_question(qtbot) -> None:
+    entries = [
+        QuestionEntry(
+            question_type="multiple",
+            probabilities=[50] * 22,
+            texts=None,
+            rows=1,
+            option_count=22,
+            distribution_mode="custom",
+            custom_weights=[50] * 22,
+            question_num=1,
+        ),
+        QuestionEntry(
+            question_type="single",
+            probabilities=[50, 50],
+            texts=None,
+            rows=1,
+            option_count=2,
+            distribution_mode="custom",
+            custom_weights=[50, 50],
+            question_num=2,
+        ),
+    ]
+    info = [
+        SurveyQuestionMeta(
+            num=1,
+            title="长题",
+            page=1,
+            option_texts=[f"选项{i}" for i in range(22)],
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        ),
+        SurveyQuestionMeta(
+            num=2,
+            title="短题",
+            page=1,
+            option_texts=["A", "B"],
+            logic_parse_status=LOGIC_PARSE_STATUS_COMPLETE,
+        ),
+    ]
+    dlg = QuestionWizardDialog(entries, info, "demo")
+    qtbot.addWidget(dlg)
+    dlg.resize(1000, 620)
+    dlg.show()
+
+    qtbot.waitUntil(lambda: 0 in dlg._entry_card_widgets)
+    assert dlg._detail_scroll is not None
+
+    dlg._sync_detail_content_width()
+    qtbot.waitUntil(lambda: dlg._detail_scroll.verticalScrollBar().maximum() > 0)
+    long_scroll_max = dlg._detail_scroll.verticalScrollBar().maximum()
+
+    dlg._select_question(1)
+    qtbot.waitUntil(lambda: 1 in dlg._entry_card_widgets)
+    qtbot.waitUntil(
+        lambda: dlg._detail_scroll.verticalScrollBar().maximum() < long_scroll_max,
+        timeout=2000,
+    )
+    assert dlg._detail_stack is not None
     assert dlg._detail_stack.currentWidget() is dlg._question_cards[1]
 
 
