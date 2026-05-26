@@ -82,9 +82,13 @@ def _build_title_area(page, layout: QVBoxLayout) -> None:
 
 
 def _build_survey_entry_card(page, layout: QVBoxLayout) -> None:
+    page.parse_btn = PrimaryPushButton(FluentIcon.PLAY, "解析", page.view)
+    page.parse_btn.setToolTip("仅解析问卷结构，不打开配置向导")
+    install_tooltip_filter(page.parse_btn)
     survey_entry = SurveyEntryCard(
         page.view,
         event_filter_owner=page,
+        trailing_widget=page.parse_btn,
         show_parse_button=False,
     )
     page.link_card = survey_entry

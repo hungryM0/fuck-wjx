@@ -192,6 +192,7 @@ def test_reverse_fill_page_builds_and_updates_config(monkeypatch, qtbot, tmp_pat
     xlsx.write_text("placeholder", encoding="utf-8")
 
     page.url_edit.setText("https://www.wjx.cn/vm/demo.aspx")
+    page.parse_btn.click()
     page._parsed_url = page.url_edit.text()
     page.set_question_context(
         [SurveyQuestionMeta(num=1, title="Q1", type_code="3", option_texts=["A", "B"])],
@@ -208,6 +209,8 @@ def test_reverse_fill_page_builds_and_updates_config(monkeypatch, qtbot, tmp_pat
     page.update_status("运行中", 2, 3)
     page.on_run_state_changed(False)
 
+    assert page.parse_btn.text() == "解析"
+    assert controller.parse_calls == ["https://www.wjx.cn/vm/demo.aspx"]
     assert cfg.reverse_fill_enabled is True
     assert cfg.reverse_fill_source_path == str(xlsx)
     assert cfg.threads == cfg.reverse_fill_threads

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QVBoxLayout, QWidget
 from qfluentwidgets import (
     FluentIcon,
     MessageBox,
@@ -22,6 +23,7 @@ from software.app.config import (
     AUTO_SAVE_LOG_RETENTION_COUNT_SETTING_KEY,
     AUTO_SAVE_LOG_RETENTION_OPTIONS,
     AUTO_SAVE_LOGS_SETTING_KEY,
+    CONFIG_DIRECTORY_SETTING_KEY,
     DEFAULT_AUTO_SAVE_LOG_RETENTION_COUNT,
     DEFAULT_AUTO_SAVE_LOGS,
     NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
@@ -29,6 +31,10 @@ from software.app.config import (
     app_settings,
     get_bool_from_qsettings,
     get_int_from_qsettings,
+)
+from software.app.user_paths import (
+    get_default_user_config_directory,
+    resolve_user_config_directory,
 )
 from software.integrations.ai import reset_ai_settings
 from software.logging.action_logger import bind_logged_action, log_action
@@ -67,6 +73,7 @@ class SettingsPage(ScrollArea):
     auto_save_logs_combo: "ComboBox"
     restart_card: PushSettingCard
     reset_ui_card: PrimaryPushSettingCard
+    config_directory_card: PushSettingCard
     clear_survey_cache_card: PushSettingCard
 
     def __init__(self, parent=None):
@@ -89,6 +96,7 @@ class SettingsPage(ScrollArea):
             AUTO_SAVE_LOGS_SETTING_KEY: DEFAULT_AUTO_SAVE_LOGS,
             AUTO_SAVE_LOG_RETENTION_COUNT_SETTING_KEY: DEFAULT_AUTO_SAVE_LOG_RETENTION_COUNT,
             "auto_check_update": True,
+            CONFIG_DIRECTORY_SETTING_KEY: get_default_user_config_directory(),
         }
 
     def _build_ui(self):
@@ -122,6 +130,14 @@ class SettingsPage(ScrollArea):
             "恢复所有设置项的默认值",
             self.tools_group,
         )
+        self.config_directory_card = PushSettingCard(
+            "选择目录",
+            FluentIcon.FOLDER,
+            "配置文件目录",
+            "",
+            self.tools_group,
+        )
+        self._refresh_config_directory_card_content()
         self.clear_survey_cache_card = PushSettingCard(
             "删除缓存",
             FluentIcon.DELETE,
@@ -132,6 +148,7 @@ class SettingsPage(ScrollArea):
         for card in (
             self.restart_card,
             self.reset_ui_card,
+            self.config_directory_card,
             self.clear_survey_cache_card,
         ):
             self.tools_group.addSettingCard(card)
@@ -245,6 +262,16 @@ class SettingsPage(ScrollArea):
             forward_signal_args=False,
         )
         bind_logged_action(
+            self.config_directory_card.clicked,
+            self._on_config_directory_clicked,
+            scope="CONFIG",
+            event="change_config_directory",
+            target="config_directory_card",
+            page="settings",
+            payload_factory=lambda: {"path": self._current_config_directory()},
+            forward_signal_args=False,
+        )
+        bind_logged_action(
             self.clear_survey_cache_card.clicked,
             self._on_clear_survey_parse_cache,
             scope="CONFIG",
@@ -268,6 +295,17 @@ class SettingsPage(ScrollArea):
 
     def _read_bool_setting(self, key: str, default: bool) -> bool:
         return get_bool_from_qsettings(self._settings.value(key), default)
+
+    def _current_config_directory(self) -> str:
+        return resolve_user_config_directory(self._settings)
+
+    def _set_config_directory_content(self, directory: str) -> None:
+        normalized = os.path.abspath(os.path.expanduser(directory))
+        self.config_directory_card.setContent(normalized)
+        self.config_directory_card.contentLabel.setToolTip(normalized)
+
+    def _refresh_config_directory_card_content(self) -> None:
+        self._set_config_directory_content(self._current_config_directory())
 
     def _set_switch_state(self, card, checked: bool):
         button = getattr(card, "switchButton", None)
@@ -404,6 +442,23 @@ class SettingsPage(ScrollArea):
             persist=persist,
         )
 
+    def _apply_config_directory_state(self, directory: str, persist: bool = True) -> str:
+        normalized = os.path.abspath(os.path.expanduser(directory))
+        os.makedirs(normalized, exist_ok=True)
+        if persist:
+            self._settings.setValue(CONFIG_DIRECTORY_SETTING_KEY, normalized)
+            self._settings.sync()
+        self._set_config_directory_content(normalized)
+        log_action(
+            "CONFIG",
+            "change_config_directory",
+            "config_directory_card",
+            "settings",
+            result="changed",
+            payload={"path": normalized, "persist": persist},
+        )
+        return normalized
+
     def _on_navigation_text_toggled(self, checked: bool):
         self._apply_navigation_text_state(checked)
 
@@ -430,6 +485,26 @@ class SettingsPage(ScrollArea):
 
     def _on_auto_update_toggled(self, checked: bool):
         self._apply_auto_update_state(checked)
+
+    def _on_config_directory_clicked(self):
+        current_directory = self._current_config_directory()
+        selected_directory = QFileDialog.getExistingDirectory(
+            self._window_parent(),
+            "选择配置文件目录",
+            current_directory,
+        )
+        if not selected_directory:
+            log_action(
+                "CONFIG",
+                "change_config_directory",
+                "config_directory_card",
+                "settings",
+                result="cancelled",
+            )
+            return
+
+        normalized = self._apply_config_directory_state(selected_directory)
+        self._show_bar(f"配置文件目录已更新：{normalized}", "success", 2500)
 
     def _restart_program(self):
         box = MessageBox(
@@ -484,6 +559,7 @@ class SettingsPage(ScrollArea):
             self._defaults[AUTO_SAVE_LOG_RETENTION_COUNT_SETTING_KEY]
         )
         self._set_switch_state(self.auto_update_card, self._defaults["auto_check_update"])
+        self._set_config_directory_content(self._defaults[CONFIG_DIRECTORY_SETTING_KEY])
 
         self._apply_navigation_text_state(
             self._defaults[NAVIGATION_TEXT_VISIBLE_SETTING_KEY],
@@ -508,6 +584,10 @@ class SettingsPage(ScrollArea):
             persist=False,
         )
         self._apply_auto_update_state(self._defaults["auto_check_update"], persist=False)
+        self._apply_config_directory_state(
+            self._defaults[CONFIG_DIRECTORY_SETTING_KEY],
+            persist=False,
+        )
 
     def _on_reset_ui_settings(self):
         box = MessageBox(

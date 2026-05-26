@@ -9,6 +9,7 @@ from PySide6.QtCore import QSettings
 _SETTINGS_ORG = "SurveyController"
 _SETTINGS_APP = "Settings"
 _SETTINGS_FILE_ENV = "SURVEYCONTROLLER_QSETTINGS_FILE"
+CONFIG_DIRECTORY_SETTING_KEY = "config_directory"
 
 
 def app_settings() -> QSettings:
@@ -50,4 +51,12 @@ def get_int_from_qsettings(
     if maximum is not None:
         result = min(int(maximum), result)
     return result
+
+
+def get_str_from_qsettings(value: Any, default: str = "") -> str:
+    """兼容空值/空白值的字符串读取。"""
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text or default
 

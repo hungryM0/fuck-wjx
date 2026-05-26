@@ -27,3 +27,16 @@ class UserPathsTests:
         assert created
         for path in created:
             assert os.path.isdir(path)
+
+    def test_user_config_directory_can_follow_qsettings_override(self, monkeypatch, tmp_path) -> None:
+        override_dir = tmp_path / "custom-configs"
+
+        class _FakeSettings:
+            def value(self, key: str):
+                if key == user_paths.CONFIG_DIRECTORY_SETTING_KEY:
+                    return str(override_dir)
+                return None
+
+        monkeypatch.setattr(user_paths, "app_settings", lambda: _FakeSettings())
+
+        assert user_paths.get_user_config_directory() == str(override_dir.resolve())

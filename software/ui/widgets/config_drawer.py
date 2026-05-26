@@ -1,4 +1,4 @@
-"""右侧配置抽屉，用于展示 configs 目录下的配置文件列表。"""
+"""右侧配置抽屉，用于展示配置文件目录下的配置文件列表。"""
 
 from __future__ import annotations
 import logging
@@ -103,7 +103,7 @@ class ConfigDrawer(QWidget):
         self.list_widget = ListWidget(self.card)
         card_layout.addWidget(self.list_widget, 1)
 
-        self.empty_label = BodyLabel("configs 目录暂无配置文件", self.card)
+        self.empty_label = BodyLabel("配置文件目录暂无配置文件", self.card)
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setStyleSheet("color: #6b6b6b;")
         card_layout.addWidget(self.empty_label)
@@ -130,7 +130,7 @@ class ConfigDrawer(QWidget):
         self.empty_label.setVisible(not has_items)
 
     def refresh(self):
-        """重新扫描 configs 目录并刷新列表。"""
+        """重新扫描配置文件目录并刷新列表。"""
         configs_dir = get_user_config_directory()
         os.makedirs(configs_dir, exist_ok=True)
 

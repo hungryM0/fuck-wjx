@@ -31,6 +31,7 @@ from software.ui.pages.workbench.shared.run_feedback import (
 def bind_reverse_fill_events(page: Any) -> None:
     page.qr_btn.clicked.connect(page._on_qr_clicked)
     page.url_edit.returnPressed.connect(page._on_parse_clicked)
+    page.parse_btn.clicked.connect(page._on_parse_clicked)
     page.url_edit.textChanged.connect(page._on_url_text_changed)
     page.file_edit.editingFinished.connect(page._refresh_preview)
     page.reverse_fill_threads_spin.valueChanged.connect(page._on_reverse_fill_threads_changed)

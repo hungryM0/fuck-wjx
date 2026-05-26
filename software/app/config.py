@@ -16,15 +16,19 @@ from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
 from software.app.settings_store import (
+    CONFIG_DIRECTORY_SETTING_KEY as _CONFIG_DIRECTORY_SETTING_KEY,
     app_settings as _app_settings,
     get_bool_from_qsettings as _get_bool_from_qsettings,
     get_int_from_qsettings as _get_int_from_qsettings,
+    get_str_from_qsettings as _get_str_from_qsettings,
 )
 
 app_settings = _app_settings
 get_bool_from_qsettings = _get_bool_from_qsettings
 get_int_from_qsettings = _get_int_from_qsettings
+get_str_from_qsettings = _get_str_from_qsettings
 
+CONFIG_DIRECTORY_SETTING_KEY = _CONFIG_DIRECTORY_SETTING_KEY
 NAVIGATION_TEXT_VISIBLE_SETTING_KEY = "navigation_selected_text_visible"
 AUTO_SAVE_LOGS_SETTING_KEY = "auto_save_logs"
 AUTO_SAVE_LOG_RETENTION_COUNT_SETTING_KEY = "auto_save_log_retention_count"

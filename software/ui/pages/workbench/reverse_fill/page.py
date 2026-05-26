@@ -102,6 +102,7 @@ class ReverseFillPage(SurveyClipboardMixin, QWidget):
     preview_badge: "InfoBadge"
     qr_btn: QToolButton
     url_edit: LineEdit
+    parse_btn: PrimaryPushButton
     file_edit: LineEdit
     browse_btn: "PushButton"
     open_wizard_btn: PrimaryPushButton

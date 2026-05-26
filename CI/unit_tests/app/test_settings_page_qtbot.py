@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QWidget
 from software.app.config import (
     AUTO_SAVE_LOG_RETENTION_COUNT_SETTING_KEY,
     AUTO_SAVE_LOGS_SETTING_KEY,
+    CONFIG_DIRECTORY_SETTING_KEY,
     NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
     TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY,
 )
@@ -60,6 +61,14 @@ def test_settings_page_toggles_update_settings_and_related_widgets(qtbot, monkey
     fake_window = _FakeWindow()
     qtbot.addWidget(fake_window)
     monkeypatch.setattr(settings_module, "app_settings", lambda: fake_settings)
+    monkeypatch.setattr(settings_module, "get_default_user_config_directory", lambda: "D:/default-configs")
+    monkeypatch.setattr(
+        settings_module,
+        "resolve_user_config_directory",
+        lambda settings=None: str(
+            fake_settings.data.get(CONFIG_DIRECTORY_SETTING_KEY) or "D:/default-configs"
+        ),
+    )
     monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
     monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
 
@@ -85,6 +94,14 @@ def test_settings_page_reset_restores_defaults(qtbot, monkeypatch) -> None:
     fake_window = _FakeWindow()
     qtbot.addWidget(fake_window)
     monkeypatch.setattr(settings_module, "app_settings", lambda: fake_settings)
+    monkeypatch.setattr(settings_module, "get_default_user_config_directory", lambda: "D:/default-configs")
+    monkeypatch.setattr(
+        settings_module,
+        "resolve_user_config_directory",
+        lambda settings=None: str(
+            fake_settings.data.get(CONFIG_DIRECTORY_SETTING_KEY) or "D:/default-configs"
+        ),
+    )
     monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
     monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
 
@@ -100,3 +117,36 @@ def test_settings_page_reset_restores_defaults(qtbot, monkeypatch) -> None:
     assert page.auto_save_logs_card.isChecked() is page._defaults[AUTO_SAVE_LOGS_SETTING_KEY]
     assert page.navigation_text_card.isChecked() is page._defaults[NAVIGATION_TEXT_VISIBLE_SETTING_KEY]
     assert page.task_result_notification_card.isChecked() is page._defaults[TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY]
+    assert page.config_directory_card.contentLabel.text().replace("\\", "/") == "D:/default-configs"
+
+
+def test_settings_page_can_change_config_directory(qtbot, monkeypatch, tmp_path) -> None:
+    fake_settings = _FakeSettings()
+    fake_window = _FakeWindow()
+    selected_dir = tmp_path / "custom-configs"
+    qtbot.addWidget(fake_window)
+    monkeypatch.setattr(settings_module, "app_settings", lambda: fake_settings)
+    monkeypatch.setattr(settings_module, "get_default_user_config_directory", lambda: "D:/default-configs")
+    monkeypatch.setattr(
+        settings_module,
+        "resolve_user_config_directory",
+        lambda settings=None: str(
+            fake_settings.data.get(CONFIG_DIRECTORY_SETTING_KEY) or "D:/default-configs"
+        ),
+    )
+    monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
+    monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
+    monkeypatch.setattr(
+        settings_module.QFileDialog,
+        "getExistingDirectory",
+        lambda *_args, **_kwargs: str(selected_dir),
+    )
+
+    page = SettingsPage(parent=fake_window)
+    page.show()
+
+    page._on_config_directory_clicked()
+
+    assert fake_settings.data[CONFIG_DIRECTORY_SETTING_KEY] == str(selected_dir.resolve())
+    assert page.config_directory_card.contentLabel.text() == str(selected_dir.resolve())
+    assert selected_dir.is_dir()

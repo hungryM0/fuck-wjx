@@ -48,3 +48,9 @@ class SettingsStoreTests:
         assert settings_store.get_int_from_qsettings("", default=5) == 5
         assert settings_store.get_int_from_qsettings("bad", default=6) == 6
         assert settings_store.get_int_from_qsettings(object(), default=7) == 7
+
+    def test_get_str_from_qsettings_uses_default_for_missing_or_blank_values(self) -> None:
+        assert settings_store.get_str_from_qsettings(None, default="fallback") == "fallback"
+        assert settings_store.get_str_from_qsettings("", default="fallback") == "fallback"
+        assert settings_store.get_str_from_qsettings("   ", default="fallback") == "fallback"
+        assert settings_store.get_str_from_qsettings(" D:/configs ") == "D:/configs"
