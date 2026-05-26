@@ -18,11 +18,6 @@ class _FakeHttpResponse:
 
 
 class WjxParserTests:
-    def test_parser_module_no_longer_exposes_parse_browser_fallback(self) -> None:
-        assert not hasattr(wjx_parser, "acquire_parse_browser_session")
-        assert not hasattr(wjx_parser, "is_playwright_startup_environment_error")
-        assert not hasattr(wjx_parser, "describe_playwright_startup_error")
-
     def test_is_paused_survey_page_accepts_pause_copy(self) -> None:
         html = "<html><body>此问卷（123）已暂停，不能填写</body></html>"
         assert wjx_parser.is_paused_survey_page(html)

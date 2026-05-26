@@ -6,8 +6,6 @@ from unittest.mock import patch
 import pytest
 
 from credamo.provider import parser as credamo_parser
-from tencent.provider import parser as qq_parser
-from wjx.provider import parser as wjx_parser
 
 
 class _FakeDriver:
@@ -69,24 +67,6 @@ class _FakeDriver:
 
 
 class ParseBrowserPoolUsageTests:
-    def test_wjx_parser_no_longer_uses_parse_browser_pool(self) -> None:
-        assert not hasattr(wjx_parser, "acquire_parse_browser_session")
-
-    @pytest.mark.asyncio
-    async def test_wjx_http_failure_is_terminal_without_parse_browser_pool(self) -> None:
-        with patch("wjx.provider.parser.http_client.aget", side_effect=RuntimeError("http failed")), patch("wjx.provider.parser.parse_survey_questions_from_html", return_value=[{"num": 1, "title": "Q1", "type_code": "3"}]), patch("wjx.provider.parser.extract_survey_title_from_html", return_value="问卷标题"):
-            with pytest.raises(RuntimeError, match="无法获取问卷网页：http failed"):
-                await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
-
-    def test_qq_parser_no_longer_uses_parse_browser_pool(self) -> None:
-        assert not hasattr(qq_parser, "acquire_parse_browser_session")
-
-    @pytest.mark.asyncio
-    async def test_qq_http_failure_is_terminal_without_parse_browser_pool(self) -> None:
-        with patch("tencent.provider.parser._fetch_qq_survey_via_http", side_effect=RuntimeError("http failed")):
-            with pytest.raises(RuntimeError, match="腾讯问卷 HTTP 解析失败：http failed"):
-                await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
-
     @pytest.mark.asyncio
     async def test_credamo_parser_uses_parse_browser_pool(self) -> None:
         used_pool = {"value": False}

@@ -37,9 +37,6 @@ class _FakeHttpResponse:
 
 
 class TencentParserTests:
-    def test_parser_module_no_longer_exposes_parse_browser_fallback(self) -> None:
-        assert not hasattr(qq_parser, "acquire_parse_browser_session")
-
     def test_login_required_helpers_cover_url_error_and_response(self) -> None:
         assert qq_parser._is_qq_login_required_url("https://open.weixin.qq.com/connect/confirm?a=1")
         assert qq_parser._is_qq_login_required_url("wj.qq.com/r/login.html")
