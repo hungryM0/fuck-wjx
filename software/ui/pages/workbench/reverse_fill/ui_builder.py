@@ -23,7 +23,7 @@ from qfluentwidgets import (
     TableWidget,
 )
 
-from software.app.config import HEADLESS_MAX_THREADS
+from software.app.config import HTTP_MAX_THREADS
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.pages.workbench.shared.random_ip_toggle_row import RandomIpToggleRow
 from software.ui.pages.workbench.shared.survey_entry_card import SurveyEntryCard
@@ -140,7 +140,7 @@ def _build_file_picker(page, layout: QVBoxLayout) -> None:
     concurrency_row = QHBoxLayout()
     concurrency_row.setSpacing(12)
     page.reverse_fill_threads_spin = NoWheelSpinBox(page.file_panel)
-    page.reverse_fill_threads_spin.setRange(1, HEADLESS_MAX_THREADS)
+    page.reverse_fill_threads_spin.setRange(1, HTTP_MAX_THREADS)
     page.reverse_fill_threads_spin.setValue(page._reverse_fill_threads_value)
     page.reverse_fill_threads_spin.setFixedWidth(160)
     page.reverse_fill_threads_spin.setFixedHeight(36)

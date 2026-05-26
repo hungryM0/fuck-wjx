@@ -107,7 +107,7 @@ async def test_wjx_fill_survey_browser_entry_is_removed() -> None:
     except RuntimeError as exc:
         assert "纯 HTTP 提交链路" in str(exc)
     else:
-        raise AssertionError("问卷星不应继续暴露 Playwright 填答入口")
+        raise AssertionError("问卷星不应继续暴露浏览器填答入口")
 
 
 async def test_qq_fill_survey_browser_entry_is_removed() -> None:
@@ -123,7 +123,7 @@ async def test_qq_fill_survey_browser_entry_is_removed() -> None:
     except RuntimeError as exc:
         assert "纯 HTTP 提交链路" in str(exc)
     else:
-        raise AssertionError("腾讯问卷不应继续暴露 Playwright 填答入口")
+        raise AssertionError("腾讯问卷不应继续暴露浏览器填答入口")
 
 
 async def test_handle_submission_verification_detected_uses_ctx_config_provider() -> None:

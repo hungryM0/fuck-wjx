@@ -88,68 +88,6 @@ def make_runtime_state():
 
 
 @pytest.fixture
-def restore_credamo_runtime_patchpoints():
-    yield
-    from credamo.provider import runtime as credamo_runtime
-
-    credamo_runtime._sync_runtime_dom_patch_points()
-    credamo_runtime._sync_runtime_answerer_patch_points()
-
-
-class _FakeNavigationDriver:
-    def __init__(self, *, failures: int = 0, failure_message: str = "goto timeout") -> None:
-        self.failures = failures
-        self.failure_message = failure_message
-        self.calls: list[tuple[str, int, str]] = []
-
-    def get(self, url: str, timeout: int = 20000, wait_until: str = "domcontentloaded") -> None:
-        self.calls.append((url, timeout, wait_until))
-        if self.failures > 0:
-            self.failures -= 1
-            raise TimeoutError(self.failure_message)
-
-
-class _FakeBrowserSession:
-    def __init__(self, *, create_browser_exception: Exception | None = None, driver: object | None = None) -> None:
-        self.create_browser_exception = create_browser_exception
-        self.driver = driver
-        self.proxy_address = ""
-        self.dispose_called = 0
-        self.shutdown_called = 0
-
-    def create_browser(self, *_args, **_kwargs):
-        if self.create_browser_exception is not None:
-            raise self.create_browser_exception
-        return "edge"
-
-    def dispose(self) -> None:
-        self.dispose_called += 1
-        self.driver = None
-
-    def shutdown(self) -> None:
-        self.shutdown_called += 1
-
-
-class _FakeManagedDriver:
-    def __init__(self) -> None:
-        self.window_sizes: list[tuple[int, int]] = []
-        self.cleanup_marked = False
-        self.quit_calls = 0
-
-    def set_window_size(self, width: int, height: int) -> None:
-        self.window_sizes.append((width, height))
-
-    def mark_cleanup_done(self) -> bool:
-        if self.cleanup_marked:
-            return False
-        self.cleanup_marked = True
-        return True
-
-    def quit(self) -> None:
-        self.quit_calls += 1
-
-
-@pytest.fixture
 def make_mock_event():
     def factory(
         *,
@@ -161,37 +99,6 @@ def make_mock_event():
         event.is_set.return_value = is_set
         event.wait.return_value = wait_return
         return event
-
-    return factory
-
-
-@pytest.fixture
-def make_navigation_driver():
-    def factory(*, failures: int = 0, failure_message: str = "goto timeout") -> _FakeNavigationDriver:
-        return _FakeNavigationDriver(failures=failures, failure_message=failure_message)
-
-    return factory
-
-
-@pytest.fixture
-def make_browser_session():
-    def factory(
-        *,
-        create_browser_exception: Exception | None = None,
-        driver: object | None = None,
-    ) -> _FakeBrowserSession:
-        return _FakeBrowserSession(
-            create_browser_exception=create_browser_exception,
-            driver=driver,
-        )
-
-    return factory
-
-
-@pytest.fixture
-def make_managed_driver():
-    def factory() -> _FakeManagedDriver:
-        return _FakeManagedDriver()
 
     return factory
 

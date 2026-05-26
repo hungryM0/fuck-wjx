@@ -18,14 +18,8 @@ from software.providers.common import (
 from software.providers.contracts import SurveyDefinition
 from software.providers.hooks import (
     HookTarget,
-    build_action_hook,
     build_fill_http_hook,
-    build_fill_hook,
     build_parse_hook,
-    build_predicate_hook,
-    build_submission_recovery_hook,
-    build_text_hook,
-    build_wait_hook,
 )
 from software.providers.survey_cache import parse_survey_with_cache
 
@@ -44,27 +38,21 @@ _WJX_PARSE: HookTarget = ("wjx.provider.parser", "parse_wjx_survey")
 _QQ_PARSE: HookTarget = ("tencent.provider.parser", "parse_qq_survey")
 _CREDAMO_PARSE: HookTarget = ("credamo.provider.parser", "parse_credamo_survey")
 
-_CREDAMO_FILL: HookTarget = ("credamo.provider.runtime", "brush_credamo")
 _WJX_FILL_HTTP: HookTarget = ("wjx.provider.http_runtime", "brush_wjx_http")
 _QQ_FILL_HTTP: HookTarget = ("tencent.provider.http_runtime", "brush_qq_http")
 _CREDAMO_FILL_HTTP: HookTarget = ("credamo.provider.http_runtime", "brush_credamo_http")
 
-_CREDAMO_IS_COMPLETION_PAGE: HookTarget = ("credamo.provider.submission", "is_completion_page")
-_CREDAMO_SUBMISSION_REQUIRES_VERIFICATION: HookTarget = ("credamo.provider.submission", "submission_requires_verification")
-_CREDAMO_SUBMISSION_VALIDATION_MESSAGE: HookTarget = ("credamo.provider.submission", "submission_validation_message")
-_CREDAMO_WAIT_FOR_SUBMISSION_VERIFICATION: HookTarget = ("credamo.provider.submission", "wait_for_submission_verification")
-_CREDAMO_HANDLE_SUBMISSION_VERIFICATION_DETECTED: HookTarget = ("credamo.provider.submission", "handle_submission_verification_detected")
-_CREDAMO_CONSUME_SUBMISSION_SUCCESS_SIGNAL: HookTarget = ("credamo.provider.submission", "consume_submission_success_signal")
-_CREDAMO_ATTEMPT_SUBMISSION_RECOVERY: HookTarget = ("credamo.provider.submission", "attempt_submission_recovery")
-_CREDAMO_IS_DEVICE_QUOTA_LIMIT_PAGE: HookTarget = ("credamo.provider.submission", "is_device_quota_limit_page")
-
 
 async def _wjx_browser_runtime_removed(*_args: Any, **_kwargs: Any) -> bool:
-    raise RuntimeError("问卷星已固化为纯 HTTP 提交链路，不再支持 Playwright 填答兜底")
+    raise RuntimeError("问卷星已固化为纯 HTTP 提交链路，不再支持浏览器填答兜底")
 
 
 async def _qq_browser_runtime_removed(*_args: Any, **_kwargs: Any) -> bool:
-    raise RuntimeError("腾讯问卷已固化为纯 HTTP 提交链路，不再支持 Playwright 填答兜底")
+    raise RuntimeError("腾讯问卷已固化为纯 HTTP 提交链路，不再支持浏览器填答兜底")
+
+
+async def _credamo_browser_runtime_removed(*_args: Any, **_kwargs: Any) -> bool:
+    raise RuntimeError("见数已固化为纯 HTTP 提交链路，不再支持浏览器填答兜底")
 
 
 _PROVIDER_REGISTRY = {
@@ -88,16 +76,8 @@ _PROVIDER_REGISTRY = {
         SURVEY_PROVIDER_CREDAMO,
         ProviderAdapterHooks(
             parse_survey=build_parse_hook(SURVEY_PROVIDER_CREDAMO, _CREDAMO_PARSE),
-            fill_survey=build_fill_hook(_CREDAMO_FILL),
+            fill_survey=_credamo_browser_runtime_removed,
             fill_survey_http=build_fill_http_hook(_CREDAMO_FILL_HTTP),
-            is_completion_page=build_predicate_hook(_CREDAMO_IS_COMPLETION_PAGE),
-            submission_requires_verification=build_predicate_hook(_CREDAMO_SUBMISSION_REQUIRES_VERIFICATION),
-            submission_validation_message=build_text_hook(_CREDAMO_SUBMISSION_VALIDATION_MESSAGE),
-            wait_for_submission_verification=build_wait_hook(_CREDAMO_WAIT_FOR_SUBMISSION_VERIFICATION),
-            handle_submission_verification_detected=build_action_hook(_CREDAMO_HANDLE_SUBMISSION_VERIFICATION_DETECTED),
-            attempt_submission_recovery=build_submission_recovery_hook(_CREDAMO_ATTEMPT_SUBMISSION_RECOVERY),
-            consume_submission_success_signal=build_predicate_hook(_CREDAMO_CONSUME_SUBMISSION_SUCCESS_SIGNAL),
-            is_device_quota_limit_page=build_predicate_hook(_CREDAMO_IS_DEVICE_QUOTA_LIMIT_PAGE),
         ),
     ),
 }

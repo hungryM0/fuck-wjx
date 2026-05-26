@@ -279,14 +279,13 @@ class EngineGuiAdapter:
             self.active_drivers.clear()
             return drained
 
-    def cleanup_browsers(self) -> None:
+    def cleanup_targets(self) -> None:
         cleaned = 0
         seen: set[int] = set()
         while True:
             drivers = self._drain_cleanup_targets()
             if not drivers:
                 break
-            # LIFO 清理可确保先关 context/page，再关共享 browser pool。
             for driver in reversed(drivers):
                 identifier = id(driver)
                 if identifier in seen:
@@ -308,10 +307,10 @@ class EngineGuiAdapter:
                         quit_driver()
                         cleaned += 1
                 except Exception:
-                    logging.warning("[兜底清理] 强制关闭浏览器失败", exc_info=True)
+                    logging.warning("[兜底清理] 强制关闭运行时资源失败", exc_info=True)
         if seen:
             logging.info(
-                "[兜底清理] 已强制关闭 %d/%d 个 driver 实例",
+                "[兜底清理] 已强制关闭 %d/%d 个运行时资源",
                 cleaned,
                 len(seen),
             )

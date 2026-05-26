@@ -147,17 +147,13 @@ class ConfigCodecTests:
                 "url": "https://wjx.cn/vm/demo.aspx",
                 "target": "bad",
                 "threads": "4",
-                "browser_preference": ["edge", "edge", "bad", "chrome"],
                 "submit_interval": ["1", "3"],
                 "answer_duration": ["bad"],
-                "timed_mode_enabled": True,
-                "timed_mode_interval": "bad",
                 "random_ip_enabled": "yes",
                 "proxy_source": "bad",
                 "custom_proxy_api": "https://proxy.example",
                 "random_ua_keys": ["pc_web", "bad"],
                 "random_ua_ratios": {"wechat": 20, "mobile": 20, "pc": 20},
-                "headless_mode": "off",
                 "reverse_fill_format": "bad",
                 "reverse_fill_start_row": "-2",
                 "reverse_fill_threads": "0",
@@ -170,15 +166,12 @@ class ConfigCodecTests:
 
         assert cfg.target == 1
         assert cfg.threads == 4
-        assert cfg.browser_preference == ["edge"]
         assert cfg.submit_interval == (1, 3)
         assert cfg.answer_duration == (0, 0)
-        assert cfg.timed_mode_interval == 3.0
         assert cfg.random_ip_enabled is True
         assert cfg.proxy_source == "custom"
         assert cfg.random_ua_keys == ["pc_web"]
         assert cfg.random_ua_ratios == {"wechat": 33, "mobile": 33, "pc": 34}
-        assert cfg.headless_mode is False
         assert cfg.reverse_fill_format == "auto"
         assert cfg.reverse_fill_start_row == 1
         assert cfg.reverse_fill_threads == 1

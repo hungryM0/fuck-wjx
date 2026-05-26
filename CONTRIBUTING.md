@@ -11,7 +11,6 @@
 - Windows 10/11
 - Python 3.13.3
 - Git
-- Microsoft Edge 浏览器
 - uv 包管理器
 
 安装 uv（如果没有的话）：
@@ -54,11 +53,6 @@ cd SurveyController
 ```bash
 uv sync
 ```
-
-> [!NOTE]
-> 本项目默认使用 Windows 操作系统自带的 Microsoft Edge 浏览器
->
-> **不需要另外执行** `playwright install chromium`。
 
 启动程序：
 
@@ -241,7 +235,7 @@ git push
 | 通用执行引擎、任务调度 | `software/core/` |
 | UI 页面、弹窗、组件 | `software/ui/` |
 | 配置读写、表格、二维码、报告 | `software/io/` |
-| 浏览器、HTTP、代理配置 | `software/network/` |
+| HTTP、代理配置 | `software/network/` |
 | AI 接入 | `software/integrations/ai/`、`software/core/ai/` |
 | 更新日志入口、更多菜单 | `software/ui/shell/main_window_parts/lazy_pages.py` |
 | 自动更新 | `software/update/` |
@@ -258,7 +252,7 @@ git push
 - Python 代码保持简单直白，优先复用现有模块。
 - GUI 一律使用 QFluentWidgets 原生组件。
 - 尽量**不要使用 emoji 表情符号**，而应该要使用 QFluentWidgets 提供的图标资源。
-- 浏览器自动化默认使用系统自带的 Microsoft Edge。
+- 当前分支用纯 HTTP 完成问卷提交，不要新增 Playwright、Selenium 或浏览器自动化依赖。
 - `software/app/runtime_paths.py` 只表示安装目录和只读资源目录，不要把它当可写目录。
 - 用户配置写入 `%AppData%\SurveyController\`。
 - 日志和缓存写入 `%LocalAppData%\SurveyController\`。
@@ -283,7 +277,7 @@ uv run python CI/python_ci.py --full
 uv run pytest CI/unit_tests
 ```
 
-完整检查会额外做模块导入和主窗口冒烟测试。涉及启动链路、UI、浏览器、配置迁移时，建议跑完整检查。
+完整检查会额外做模块导入和主窗口冒烟测试。涉及启动链路、UI、HTTP 提交链路、配置迁移时，建议跑完整检查。
 
 ## 测试建议
 
@@ -342,7 +336,7 @@ Fixes #123
 │   ├── integrations/        # 外部服务接入
 │   ├── io/                  # 文件读写、报告、二维码、表格
 │   ├── logging/             # 日志
-│   ├── network/             # 浏览器、HTTP、代理配置
+│   ├── network/             # HTTP、代理配置
 │   ├── providers/           # 平台提供方公共层
 │   ├── system/              # 系统能力封装
 │   ├── ui/                  # PySide6 / QFluentWidgets 界面

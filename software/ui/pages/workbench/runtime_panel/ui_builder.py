@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, FluentIcon, SettingCardGroup
+from PySide6.QtWidgets import QVBoxLayout
+from qfluentwidgets import FluentIcon, SettingCardGroup
 
 from software.ui.pages.workbench.runtime_panel.ai import RuntimeAISection
 from software.ui.pages.workbench.runtime_panel.cards import (
     RandomUASettingCard,
     ReliabilitySettingCard,
     TimeRangeSettingCard,
-    TimedModeSettingCard,
 )
 from software.ui.pages.workbench.runtime_panel.random_ip_card import RandomIPSettingCard
 from software.ui.widgets.setting_cards import (
     SliderSettingCard,
     SpinBoxSettingCard,
-    SwitchSettingCard,
 )
 
 
@@ -46,9 +44,9 @@ def build_runtime_page_ui(page) -> None:
     page.thread_card = SliderSettingCard(
         FluentIcon.APPLICATION,
         "并发会话",
-        "控制同时运行的独立问卷会话数量，程序会自动复用更少的浏览器底座",
+        "控制同时运行的独立 HTTP 会话数量",
         min_val=page.MIN_THREADS,
-        max_val=page.NON_HEADLESS_MAX_THREADS,
+        max_val=page.HTTP_MAX_THREADS,
         default=2,
         parent=run_group,
     )
@@ -56,35 +54,15 @@ def build_runtime_page_ui(page) -> None:
     page.reliability_card = ReliabilitySettingCard(parent=run_group)
     page.reliability_card.setChecked(True)
     page.reliability_card.set_alpha(0.85)
-    page.headless_card = SwitchSettingCard(
-        FluentIcon.SPEED_HIGH,
-        "无头模式",
-        "开启后浏览器在后台运行，不显示窗口，可提高并发性能",
-        parent=run_group,
-    )
-    page.headless_card.setChecked(True)
     for card in (
         page.target_card,
         page.thread_card,
         page.reliability_card,
-        page.headless_card,
     ):
         run_group.addSettingCard(card)
     layout.addWidget(run_group)
 
     time_group = SettingCardGroup("时间控制", page.view)
-    time_hint = BodyLabel("（其实官方并不会因为你提交过快就封你号）", time_group)
-    time_hint.setStyleSheet("color: green; font-size: 12px;")
-    title_container = QWidget(time_group)
-    title_layout = QHBoxLayout(title_container)
-    title_layout.setContentsMargins(0, 0, 0, 0)
-    title_layout.setSpacing(8)
-    time_group.titleLabel.setParent(title_container)
-    title_layout.addWidget(time_group.titleLabel)
-    title_layout.addWidget(time_hint)
-    title_layout.addStretch()
-    time_group.vBoxLayout.insertWidget(0, title_container)
-
     page.interval_card = TimeRangeSettingCard(
         FluentIcon.HISTORY,
         "提交间隔",
@@ -99,13 +77,7 @@ def build_runtime_page_ui(page) -> None:
         max_seconds=None,
         parent=time_group,
     )
-    page.timed_card = TimedModeSettingCard(
-        FluentIcon.RINGER,
-        "定时模式",
-        "启用后忽略时间设置，在开放后立即提交",
-        parent=time_group,
-    )
-    for card in (page.interval_card, page.answer_card, page.timed_card):
+    for card in (page.interval_card, page.answer_card):
         time_group.addSettingCard(card)
     layout.addWidget(time_group)
 

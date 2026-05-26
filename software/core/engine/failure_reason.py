@@ -6,7 +6,6 @@ from enum import Enum
 
 
 class FailureReason(str, Enum):
-    BROWSER_START_FAILED = "browser_start_failed"
     PROXY_UNAVAILABLE = "proxy_unavailable"
     PAGE_LOAD_FAILED = "page_load_failed"
     FILL_FAILED = "fill_failed"

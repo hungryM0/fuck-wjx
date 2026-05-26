@@ -17,9 +17,9 @@ from software.core.questions.consistency import (
 from software.core.questions.distribution import (
     resolve_distribution_probabilities,
 )
-from software.core.questions.runtime_async import (
-    resolve_runtime_option_fill_text_from_config,
-    resolve_runtime_text_values_from_config,
+from software.core.questions.text_values import (
+    resolve_option_fill_text_from_config,
+    resolve_text_values_from_config,
 )
 from software.core.questions.strict_ratio import (
     enforce_reference_rank_order,
@@ -111,10 +111,11 @@ async def _build_wjx_single_action(
 
     selected_text = option_texts[selected_index] if selected_index < len(option_texts) else ""
     fill_entries = config.single_option_fill_texts[config_index] if config_index < len(config.single_option_fill_texts) else None
-    fill_value = await resolve_runtime_option_fill_text_from_config(
+    fill_value = await resolve_option_fill_text_from_config(
         fill_entries,
         selected_index,
         driver=driver,
+        question_title=str(question.title or ""),
         question_number=current,
         option_text=selected_text,
     )
@@ -186,10 +187,11 @@ async def _build_wjx_dropdown_action(
 
     selected_text = option_texts[selected_index] if selected_index < len(option_texts) else ""
     fill_entries = config.droplist_option_fill_texts[config_index] if config_index < len(config.droplist_option_fill_texts) else None
-    fill_value = await resolve_runtime_option_fill_text_from_config(
+    fill_value = await resolve_option_fill_text_from_config(
         fill_entries,
         selected_index,
         driver=driver,
+        question_title=str(question.title or ""),
         question_number=current,
         option_text=selected_text,
     )
@@ -241,7 +243,7 @@ async def _build_wjx_text_action(
             text_entry_types = list(getattr(ctx.config, "text_entry_types", []) or [])
             multi_text_blank_modes = list(getattr(ctx.config, "multi_text_blank_modes", []) or [])
             multi_text_blank_ranges = list(getattr(ctx.config, "multi_text_blank_int_ranges", []) or [])
-            text_values = resolve_runtime_text_values_from_config(
+            text_values = resolve_text_values_from_config(
                 config.texts[config_index] if config_index < len(config.texts) else [DEFAULT_FILL_TEXT],
                 config.texts_prob[config_index] if config_index < len(config.texts_prob) else [1.0],
                 blank_count=blank_count,
@@ -341,10 +343,11 @@ async def _build_wjx_multiple_action(
         selected_texts: list[str] = []
         for option_idx in selected:
             selected_text = option_texts[option_idx] if option_idx < len(option_texts) else ""
-            fill_value = await resolve_runtime_option_fill_text_from_config(
+            fill_value = await resolve_option_fill_text_from_config(
                 fill_entries,
                 option_idx,
                 driver=driver,
+                question_title=str(question.title or ""),
                 question_number=current,
                 option_text=selected_text,
             )

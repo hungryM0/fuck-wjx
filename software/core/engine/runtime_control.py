@@ -5,17 +5,7 @@ import threading
 from typing import Any, Optional
 
 from software.core.engine.async_wait import sleep_or_stop
-from software.core.task import ExecutionState
 from software.logging.log_utils import log_suppressed_exception
-
-def _is_headless_mode(ctx: Optional[ExecutionState]) -> bool:
-    """当前任务是否启用无头模式。"""
-    if ctx is None:
-        return False
-    config = getattr(ctx, "config", None)
-    if config is not None and hasattr(config, "headless_mode"):
-        return bool(getattr(config, "headless_mode", False))
-    return bool(getattr(ctx, "headless_mode", False))
 
 
 def _wait_if_paused(gui_instance: Optional[Any], stop_signal: Optional[threading.Event]) -> None:

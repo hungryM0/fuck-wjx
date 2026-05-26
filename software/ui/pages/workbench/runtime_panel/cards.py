@@ -1,10 +1,10 @@
-"""运行参数页 - 专属设置卡片组件（随机UA、定时模式等）"""
+"""运行参数页 - 专属设置卡片组件。"""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -15,7 +15,6 @@ from qfluentwidgets import (
     LineEdit,
     SettingCard,
     SwitchButton,
-    TransparentToolButton,
 )
 
 from software.core.psychometrics.psychometric import (
@@ -26,38 +25,6 @@ from software.core.psychometrics.psychometric import (
 )
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.widgets.setting_cards import set_widget_enabled_with_opacity
-
-
-class TimedModeSettingCard(SettingCard):
-    """定时模式设置卡。"""
-
-    def __init__(self, icon, title, content, parent=None):
-        super().__init__(icon, title, content, parent)
-        self.helpButton = TransparentToolButton(FluentIcon.INFO, self)
-        self.helpButton.setFixedSize(18, 18)
-        self.helpButton.setIconSize(QSize(14, 14))
-        self.helpButton.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        title_row = QHBoxLayout()
-        title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.setSpacing(4)
-        self.vBoxLayout.removeWidget(self.titleLabel)
-        title_row.addWidget(self.titleLabel)
-        title_row.addWidget(self.helpButton)
-        title_row.addStretch()
-        self.vBoxLayout.insertLayout(0, title_row)
-
-        self.switchButton = SwitchButton(self, IndicatorPosition.RIGHT)
-        self.switchButton.setOnText("开")
-        self.switchButton.setOffText("关")
-        self.hBoxLayout.addWidget(self.switchButton, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addSpacing(16)
-
-    def isChecked(self):
-        return self.switchButton.isChecked()
-
-    def setChecked(self, checked):
-        self.switchButton.setChecked(checked)
 
 
 class RandomUASettingCard(ExpandGroupSettingCard):

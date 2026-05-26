@@ -76,7 +76,6 @@ class _FakeDashboard:
             url="https://example.com/survey",
             target=self.target_spin.value(),
             threads=4,
-            headless_mode=True,
             random_ip_enabled=True,
         )
 
@@ -203,7 +202,7 @@ def test_normal_start_ignores_reverse_fill_target_override() -> None:
     assert cfg.reverse_fill_enabled is False
 
 
-def test_no_submit_test_forces_single_headed_run_without_random_ip() -> None:
+def test_no_submit_test_forces_single_http_run_without_random_ip() -> None:
     controller = _FakeController()
     dashboard = _FakeDashboard(target=8)
     coordinator = WorkbenchRunCoordinator(
@@ -220,7 +219,6 @@ def test_no_submit_test_forces_single_headed_run_without_random_ip() -> None:
     assert cfg.submit_enabled is False
     assert cfg.target == 1
     assert cfg.threads == 1
-    assert cfg.headless_mode is False
     assert cfg.random_ip_enabled is False
 
 

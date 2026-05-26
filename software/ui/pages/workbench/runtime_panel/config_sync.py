@@ -19,15 +19,12 @@ class RuntimeConfigSyncMixin:
     controller: Any
     target_card: Any
     thread_card: Any
-    headless_card: Any
     interval_card: TimeRangeSettingCard
     answer_card: TimeRangeSettingCard
-    timed_card: Any
     random_ip_card: Any
     random_ua_card: Any
     reliability_card: Any
     ai_section: Any
-    _suppress_headless_tip: bool
     MIN_THREADS: Any
 
     def update_config(self, cfg: RuntimeConfig):
@@ -36,14 +33,12 @@ class RuntimeConfigSyncMixin:
         cfg.threads = max(
             self.MIN_THREADS,
             min(
-                page._resolve_thread_max(self.headless_card.isChecked()),
+                page._resolve_thread_max(),
                 self.thread_card.slider.value(),
             ),
         )
-        cfg.browser_preference = []
         cfg.submit_interval = self._card_value_as_range(self.interval_card)
         cfg.answer_duration = self._card_value_as_range(self.answer_card)
-        cfg.timed_mode_enabled = self.timed_card.switchButton.isChecked()
         cfg.random_ip_enabled = self.random_ip_card.switchButton.isChecked()
         cfg.random_ua_enabled = self.random_ua_card.switchButton.isChecked()
         cfg.random_ua_ratios = (
@@ -62,7 +57,6 @@ class RuntimeConfigSyncMixin:
                 exc,
                 level=logging.INFO,
             )
-        cfg.headless_mode = self.headless_card.switchButton.isChecked()
         try:
             source = page.selected_proxy_source()
             cfg.proxy_source = source
@@ -83,9 +77,6 @@ class RuntimeConfigSyncMixin:
         self.target_card.spinBox.setValue(max(1, cfg.target))
         self.interval_card.setValue(self._range_start_value(cfg.submit_interval))
         self.answer_card.setValue(self._range_start_value(cfg.answer_duration))
-
-        self.timed_card.switchButton.setChecked(cfg.timed_mode_enabled)
-        page._sync_timed_mode(cfg.timed_mode_enabled)
 
         self.random_ip_card.switchButton.blockSignals(True)
         self.random_ip_card.switchButton.setChecked(cfg.random_ip_enabled)
@@ -121,19 +112,14 @@ class RuntimeConfigSyncMixin:
                 level=logging.INFO,
             )
 
-        self._suppress_headless_tip = True
-        try:
-            self.headless_card.setChecked(getattr(cfg, "headless_mode", True))
-            page._apply_thread_limit_by_headless(self.headless_card.isChecked())
-            max_threads = page._resolve_thread_max(self.headless_card.isChecked())
-            self.thread_card.slider.setValue(
-                max(
-                    self.MIN_THREADS,
-                    min(max_threads, int(cfg.threads or self.MIN_THREADS)),
-                )
+        page._apply_thread_limit()
+        max_threads = page._resolve_thread_max()
+        self.thread_card.slider.setValue(
+            max(
+                self.MIN_THREADS,
+                min(max_threads, int(cfg.threads or self.MIN_THREADS)),
             )
-        finally:
-            self._suppress_headless_tip = False
+        )
 
         try:
             proxy_source = normalize_proxy_source(
@@ -166,19 +152,7 @@ class RuntimeConfigSyncMixin:
             self.target_card.spinBox.blockSignals(False)
 
         threads = state.get("threads")
-        headless = state.get("headless_mode")
-        if headless is not None and bool(self.headless_card.switchButton.isChecked()) != bool(
-            headless
-        ):
-            self._suppress_headless_tip = True
-            try:
-                self.headless_card.switchButton.blockSignals(True)
-                self.headless_card.switchButton.setChecked(bool(headless))
-            finally:
-                self.headless_card.switchButton.blockSignals(False)
-                self._suppress_headless_tip = False
-        if headless is not None:
-            page._apply_thread_limit_by_headless(bool(headless))
+        page._apply_thread_limit()
         if threads is not None and int(self.thread_card.slider.value()) != int(threads):
             self.thread_card.slider.blockSignals(True)
             self.thread_card.slider.setValue(max(1, int(threads)))
@@ -192,15 +166,6 @@ class RuntimeConfigSyncMixin:
             self.random_ip_card.switchButton.setChecked(bool(random_ip_enabled))
             self.random_ip_card.switchButton.blockSignals(False)
             self.random_ip_card._sync_ip_enabled(bool(random_ip_enabled))
-
-        timed_mode_enabled = state.get("timed_mode_enabled")
-        if timed_mode_enabled is not None and bool(
-            self.timed_card.switchButton.isChecked()
-        ) != bool(timed_mode_enabled):
-            self.timed_card.switchButton.blockSignals(True)
-            self.timed_card.switchButton.setChecked(bool(timed_mode_enabled))
-            self.timed_card.switchButton.blockSignals(False)
-            page._sync_timed_mode(bool(timed_mode_enabled))
 
         answer_duration = state.get("answer_duration")
         if isinstance(answer_duration, (list, tuple)) and len(answer_duration) >= 2:

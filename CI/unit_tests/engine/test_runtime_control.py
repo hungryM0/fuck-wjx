@@ -1,17 +1,11 @@
 from __future__ import annotations
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from software.core.engine.runtime_control import _is_headless_mode, _sleep_with_stop, _wait_if_paused
+from software.core.engine.runtime_control import _sleep_with_stop, _wait_if_paused
 
 class RuntimeControlTests:
-
-    def test_is_headless_mode_reads_flag_from_context(self) -> None:
-        assert not _is_headless_mode(None)
-        assert _is_headless_mode(SimpleNamespace(headless_mode=True))
-
     def test_wait_if_paused_calls_gui_handler(self, make_gui_mock) -> None:
         gui = make_gui_mock('wait_if_paused')
         stop_signal = object()

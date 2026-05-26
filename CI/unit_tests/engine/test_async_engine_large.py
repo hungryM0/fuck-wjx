@@ -186,15 +186,14 @@ class AsyncRuntimeEngineLargeTests:
         assert any(call[0] == pause_event.clear for call in loop.threadsafe_calls)
 
     @pytest.mark.asyncio
-    async def test_run_builds_pool_and_cleans_up_even_when_runner_fails(self, monkeypatch) -> None:
+    async def test_run_starts_slots_and_closes_scheduler_when_runner_fails(self, monkeypatch) -> None:
         engine = _build_engine()
-        config = ExecutionConfig(num_threads=2, headless_mode=True, browser_preference=["edge"], target_num=5, survey_provider="wjx")
+        config = ExecutionConfig(num_threads=2, target_num=5, survey_provider="wjx")
         state = ExecutionState(config=config)
         bus_events: list[dict[str, object]] = []
         engine._status_bus = SimpleNamespace(emit=lambda event: bus_events.append(event))
         created_runners: list[SimpleNamespace] = []
         created_schedulers: list[SimpleNamespace] = []
-        created_pools: list[SimpleNamespace] = []
 
         class _FakeRunner:
             def __init__(self, **kwargs) -> None:
@@ -220,21 +219,9 @@ class AsyncRuntimeEngineLargeTests:
             async def close(self) -> None:
                 self.close_calls += 1
 
-        class _FakePool:
-            def __init__(self, **kwargs) -> None:
-                self.kwargs = kwargs
-                self.shutdown_calls = 0
-                created_pools.append(self)
-
-            async def shutdown(self) -> None:
-                self.shutdown_calls += 1
-
-        monkeypatch.setattr(async_engine, "BrowserPoolConfig", SimpleNamespace(from_concurrency=lambda concurrency, headless: SimpleNamespace(owner_count=1, contexts_per_owner=8, logical_concurrency=concurrency, headless=headless)))
-        monkeypatch.setattr(async_engine, "AsyncBrowserOwnerPool", _FakePool)
         monkeypatch.setattr(async_engine, "AsyncScheduler", _FakeScheduler)
         monkeypatch.setattr(async_engine, "AsyncRunContext", lambda **kwargs: SimpleNamespace(**kwargs))
         monkeypatch.setattr(async_engine, "AsyncSlotRunner", _FakeRunner)
-        monkeypatch.setattr(async_engine, "build_owner_window_positions", lambda owner_count: [(50, 50)] * owner_count)
 
         with pytest.raises(RuntimeError, match="slot boom"):
             await engine._run(config=config, state=state, gui_instance="gui")
@@ -244,25 +231,22 @@ class AsyncRuntimeEngineLargeTests:
         assert created_runners[1].slot_id == 2
         assert created_runners[0].cancelled is True
         assert created_schedulers[0].close_calls == 1
-        assert created_pools[0].shutdown_calls == 1
         assert state.stop_event.is_set()
-        assert engine._browser_pool is None
         assert engine._stop_event is None
         assert engine._pause_event is None
         assert engine._state is None
 
     @pytest.mark.asyncio
-    async def test_run_retains_browser_pool_after_successful_no_submit_test(self, monkeypatch) -> None:
+    async def test_run_successful_no_submit_test_clears_runtime_state(self, monkeypatch) -> None:
         engine = _build_engine()
         config = ExecutionConfig(
             num_threads=1,
-            headless_mode=False,
             target_num=1,
             submit_enabled=False,
             survey_provider="wjx",
         )
         state = ExecutionState(config=config)
-        created_pools: list[SimpleNamespace] = []
+        created_schedulers: list[_FakeScheduler] = []
 
         class _FakeRunner:
             def __init__(self, **_kwargs) -> None:
@@ -276,31 +260,22 @@ class AsyncRuntimeEngineLargeTests:
             def __init__(self, *, concurrency: int) -> None:
                 self.concurrency = concurrency
                 self.close_calls = 0
+                created_schedulers.append(self)
 
             async def close(self) -> None:
                 self.close_calls += 1
 
-        class _FakePool:
-            def __init__(self, **kwargs) -> None:
-                self.kwargs = kwargs
-                self.shutdown_calls = 0
-                created_pools.append(self)
-
-            async def shutdown(self) -> None:
-                self.shutdown_calls += 1
-
-        monkeypatch.setattr(async_engine, "BrowserPoolConfig", SimpleNamespace(from_concurrency=lambda concurrency, headless: SimpleNamespace(owner_count=1, contexts_per_owner=1, logical_concurrency=concurrency, headless=headless)))
-        monkeypatch.setattr(async_engine, "AsyncBrowserOwnerPool", _FakePool)
         monkeypatch.setattr(async_engine, "AsyncScheduler", _FakeScheduler)
         monkeypatch.setattr(async_engine, "AsyncRunContext", lambda **kwargs: SimpleNamespace(**kwargs))
         monkeypatch.setattr(async_engine, "AsyncSlotRunner", _FakeRunner)
-        monkeypatch.setattr(async_engine, "build_owner_window_positions", lambda owner_count: [(50, 50)] * owner_count)
 
         await engine._run(config=config, state=state, gui_instance="gui")
 
-        assert created_pools[0].shutdown_calls == 0
-        assert engine._browser_pool is None
-        assert engine._retained_no_submit_browser_pool is created_pools[0]
+        assert created_schedulers[0].close_calls == 1
+        assert state.stop_event.is_set()
+        assert engine._stop_event is None
+        assert engine._pause_event is None
+        assert engine._state is None
 
     def test_shutdown_handles_future_errors_and_stops_loop(self) -> None:
         engine = _build_engine()

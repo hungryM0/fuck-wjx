@@ -162,7 +162,6 @@ class WorkbenchRunCoordinator:
         if not cfg.submit_enabled:
             cfg.target = 1
             cfg.threads = 1
-            cfg.headless_mode = False
             cfg.random_ip_enabled = False
         if not cfg.question_entries:
             log_action(

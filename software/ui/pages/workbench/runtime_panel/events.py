@@ -33,33 +33,6 @@ def bind_runtime_page_events(page: Any) -> None:
         payload_factory=lambda enabled: {"enabled": bool(enabled)},
     )
     bind_logged_action(
-        page.headless_card.switchButton.checkedChanged,
-        page._on_headless_toggled,
-        scope="CONFIG",
-        event="toggle_headless_mode",
-        target="headless_switch",
-        page="runtime",
-        payload_factory=lambda enabled: {"enabled": bool(enabled)},
-    )
-    bind_logged_action(
-        page.timed_card.switchButton.checkedChanged,
-        page._on_timed_mode_toggled,
-        scope="CONFIG",
-        event="toggle_timed_mode",
-        target="timed_mode_switch",
-        page="runtime",
-        payload_factory=lambda enabled: {"enabled": bool(enabled)},
-    )
-    bind_logged_action(
-        page.timed_card.helpButton.clicked,
-        page._show_timed_mode_help,
-        scope="UI",
-        event="open_timed_mode_help",
-        target="timed_mode_help",
-        page="runtime",
-        forward_signal_args=False,
-    )
-    bind_logged_action(
         page.random_ip_card.proxyCombo.currentIndexChanged,
         page._on_proxy_source_changed,
         scope="CONFIG",

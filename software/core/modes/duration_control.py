@@ -27,7 +27,7 @@ _NAVIGATION_TRANSIENT_ERRORS = (
 
 
 def _is_navigation_transient_error(exc: BaseException) -> bool:
-    """页面跳转时 Playwright 可能短暂无法读取 DOM。"""
+    """页面跳转时可能短暂无法读取状态。"""
 
     message = str(exc or "").lower()
     return any(pattern in message for pattern in _NAVIGATION_TRANSIENT_ERRORS)

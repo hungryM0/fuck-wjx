@@ -120,18 +120,12 @@ class RuntimePreparationTests:
         assert artifacts.questions_info[0].provider == 'qq'
         assert artifacts.questions_info[0] is not config.questions_info[0]
 
-    def test_prepare_execution_artifacts_clamps_threads_by_headless_mode(self) -> None:
-        headless_config = self._build_config()
-        headless_config.headless_mode = True
-        headless_config.threads = 99
-        headed_config = self._build_config()
-        headed_config.headless_mode = False
-        headed_config.threads = 99
+    def test_prepare_execution_artifacts_clamps_threads_by_http_limit(self) -> None:
+        config = self._build_config()
+        config.threads = 99
         with patch('software.ui.controller.run_controller_parts.runtime_preparation.build_enabled_reverse_fill_spec', return_value=None), patch('software.ui.controller.run_controller_parts.runtime_preparation.configure_probabilities', return_value=None):
-            headless_artifacts = prepare_execution_artifacts(headless_config)
-            headed_artifacts = prepare_execution_artifacts(headed_config)
-        assert headless_artifacts.execution_config_template.num_threads == 64
-        assert headed_artifacts.execution_config_template.num_threads == 12
+            artifacts = prepare_execution_artifacts(config)
+        assert artifacts.execution_config_template.num_threads == 64
 
     def test_prepare_execution_artifacts_uses_reverse_fill_sample_count_and_threads(self) -> None:
         config = self._build_config()

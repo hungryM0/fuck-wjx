@@ -100,16 +100,15 @@ class RuntimeInitGateTests:
         assert self.mixin.thread_progress_events[-1] == {'threads': [], 'target': 0, 'num_threads': 0, 'per_thread_target': 0, 'initializing': False}
 
     def test_build_initialization_logs_marks_stage_and_completion(self) -> None:
-        self.mixin._init_stage_text = '正在检查浏览器'
-        self.mixin._init_steps = [{'key': 'probe', 'label': '浏览器快检'}, {'key': 'warmup', 'label': '预热'}]
+        self.mixin._init_stage_text = '正在检查运行时'
+        self.mixin._init_steps = [{'key': 'probe', 'label': '运行时快检'}, {'key': 'warmup', 'label': '预热'}]
         self.mixin._init_completed_steps = {'probe'}
         self.mixin._init_current_step_key = 'warmup'
         lines = self.mixin._build_initialization_logs()
-        assert lines == ['当前阶段：正在检查浏览器', '[√] 浏览器快检', '[>] 预热']
+        assert lines == ['当前阶段：正在检查运行时', '[√] 运行时快检', '[>] 预热']
 
     def test_start_with_initialization_gate_bypasses_gate_for_single_thread(self) -> None:
         config = RuntimeConfig()
-        config.headless_mode = True
         config.threads = 1
         self.mixin._start_with_initialization_gate(config, proxy_pool=['proxy-a'])
         assert len(self.mixin.started_workers) == 1
@@ -118,7 +117,6 @@ class RuntimeInitGateTests:
 
     def test_start_with_initialization_gate_starts_workers_directly(self) -> None:
         config = RuntimeConfig()
-        config.headless_mode = True
         config.threads = 2
         self.mixin._start_with_initialization_gate(config, proxy_pool=['proxy-a'])
         assert len(self.mixin.started_workers) == 1

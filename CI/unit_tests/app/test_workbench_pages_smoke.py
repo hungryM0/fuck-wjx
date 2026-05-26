@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, Signal
 
 from software.core.config.schema import RuntimeConfig
 from software.core.questions.config import QuestionEntry
+from software.app.config import HTTP_MAX_THREADS
 from software.providers.contracts import SurveyQuestionMeta
 from software.ui.pages.workbench.dashboard.page import DashboardPage
 from software.ui.pages.workbench.reverse_fill.page import ReverseFillPage
@@ -31,8 +32,6 @@ class _FakeController(QObject):
             "target": 10,
             "threads": 2,
             "random_ip_enabled": False,
-            "headless_mode": True,
-            "timed_mode_enabled": False,
             "proxy_source": "default",
             "answer_duration": (0, 0),
         }
@@ -57,8 +56,6 @@ class _FakeController(QObject):
                 "target": cfg.target,
                 "threads": cfg.threads,
                 "random_ip_enabled": cfg.random_ip_enabled,
-                "headless_mode": cfg.headless_mode,
-                "timed_mode_enabled": cfg.timed_mode_enabled,
                 "proxy_source": cfg.proxy_source,
                 "answer_duration": cfg.answer_duration,
             }
@@ -139,15 +136,14 @@ def test_runtime_page_builds_and_syncs_config_without_network(monkeypatch, qtbot
     page = RuntimePage(controller)
     qtbot.addWidget(page)
 
-    cfg = RuntimeConfig(target=7, threads=99, headless_mode=False, random_ip_enabled=True)
+    cfg = RuntimeConfig(target=7, threads=99, random_ip_enabled=True)
     page.apply_config(cfg)
     page.update_config(cfg)
 
     assert page.target_card.spinBox.value() == 7
-    assert page.thread_card.slider.slider.maximum() == page.NON_HEADLESS_MAX_THREADS
+    assert page.thread_card.slider.slider.maximum() == HTTP_MAX_THREADS
     assert cfg.target == 7
-    assert cfg.threads <= page.NON_HEADLESS_MAX_THREADS
-    assert cfg.browser_preference == []
+    assert cfg.threads <= HTTP_MAX_THREADS
     assert cfg.ai_system_prompt
 
 

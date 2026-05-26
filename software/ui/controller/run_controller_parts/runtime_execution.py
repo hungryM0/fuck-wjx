@@ -307,7 +307,6 @@ class RunControllerExecutionMixin:
         self.adapter.execution_state = execution_state
         self._prepared_execution_artifacts = None
 
-        self.config.headless_mode = bool(execution_config.headless_mode)
         self.config.threads = worker_count
         self._apply_sleep_blocker_for_run_start()
         self.running = True
@@ -396,9 +395,9 @@ class RunControllerExecutionMixin:
 
         def _cleanup():
             try:
-                adapter.cleanup_browsers()
+                adapter.cleanup_targets()
             except Exception:
-                logging.warning("执行浏览器清理任务失败", exc_info=True)
+                logging.warning("执行运行时清理任务失败", exc_info=True)
             finally:
                 self._dispatch_to_ui_async(self.cleanupFinished.emit)
 
@@ -492,9 +491,9 @@ class RunControllerExecutionMixin:
 
         try:
             if self.adapter:
-                self.adapter.cleanup_browsers()
+                self.adapter.cleanup_targets()
         except Exception:
-            logging.warning("关闭窗口时执行浏览器兜底清理失败", exc_info=True)
+            logging.warning("关闭窗口时执行运行时兜底清理失败", exc_info=True)
 
         deadline = time.monotonic() + max(0.0, float(timeout_seconds or 0.0))
         current = threading.current_thread()

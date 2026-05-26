@@ -53,26 +53,6 @@ class ExecutionStateConcurrencyTests:
         assert all((not thread.is_alive() for thread in threads))
         assert state.proxy_waiting_threads == 0
 
-    def test_get_browser_semaphore_reuses_same_instance_under_concurrent_calls(self) -> None:
-        state = ExecutionState()
-        barrier = threading.Barrier(6)
-        semaphore_ids: list[int] = []
-        ids_lock = threading.Lock()
-
-        def _worker() -> None:
-            barrier.wait()
-            semaphore = state.get_browser_semaphore(2)
-            with ids_lock:
-                semaphore_ids.append(id(semaphore))
-        threads = [threading.Thread(target=_worker, name=f'SemaphoreCaller-{idx}') for idx in range(6)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=2.0)
-        assert len(set(semaphore_ids)) == 1
-        assert state.get_browser_semaphore(2) is state.get_browser_semaphore(2)
-        assert state.get_browser_semaphore(2) is not state.get_browser_semaphore(3)
-
     def test_reserve_joint_sample_returns_unique_values_under_concurrency(self) -> None:
         state = ExecutionState()
         barrier = threading.Barrier(5)

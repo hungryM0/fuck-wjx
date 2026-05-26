@@ -56,8 +56,6 @@ class ExecutionConfig:
 
     psycho_target_alpha: float = 0.85
 
-    headless_mode: bool = False
-    browser_preference: List[str] = field(default_factory=list)
     num_threads: int = 1
     target_num: int = 1
     fail_threshold: int = 5
@@ -66,9 +64,6 @@ class ExecutionConfig:
 
     submit_interval_range_seconds: Tuple[int, int] = (0, 0)
     answer_duration_range_seconds: Tuple[int, int] = (0, 0)
-
-    timed_mode_enabled: bool = False
-    timed_mode_refresh_interval: float = 0.5
 
     random_proxy_ip_enabled: bool = False
     proxy_ip_pool: List[ProxyLease] = field(default_factory=list)
@@ -123,10 +118,6 @@ class ExecutionState(
     _runtime_condition: threading.Condition = field(default_factory=threading.Condition, repr=False)
 
     _proxy_fetch_lock: threading.Lock = field(default_factory=threading.Lock)
-    _browser_semaphore: Optional[threading.Semaphore] = field(default=None, repr=False)
-    _browser_semaphore_lock: threading.Lock = field(default_factory=threading.Lock)
-    _browser_semaphore_max_instances: int = 0
-
     def __setattr__(self, name: str, value: Any) -> None:
         """阻止把静态配置字段误写到运行态对象本身。"""
         if name in _EXECUTION_STATE_FIELD_NAMES:

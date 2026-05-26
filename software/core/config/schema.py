@@ -21,11 +21,8 @@ class RuntimeConfig:
     survey_provider: str = SURVEY_PROVIDER_WJX
     target: int = 1
     threads: int = 1
-    browser_preference: List[str] = field(default_factory=list)
     submit_interval: Tuple[int, int] = (0, 0)
     answer_duration: Tuple[int, int] = (0, 0)
-    timed_mode_enabled: bool = False
-    timed_mode_interval: float = 3.0
     random_ip_enabled: bool = False
     proxy_source: str = "default"
     custom_proxy_api: str = ""
@@ -38,7 +35,6 @@ class RuntimeConfig:
     pause_on_aliyun_captcha: bool = True
     reliability_mode_enabled: bool = True
     psycho_target_alpha: float = 0.85
-    headless_mode: bool = True
     ai_mode: str = "free"
     ai_provider: str = "deepseek"
     ai_api_key: str = ""

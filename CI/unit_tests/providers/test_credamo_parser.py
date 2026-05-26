@@ -10,117 +10,12 @@ from software.core.questions.normalization import configure_probabilities
 from software.core.questions.schema import QuestionEntry
 
 
-async def _async_collect_next(iterator):
-    return next(iterator)
-
-
 class CredamoParserTests:
-
-    class _FakeButton:
-
-        def __init__(self, text: str, visible: bool) -> None:
-            self.text = text
-            self.visible = visible
-
-        async def is_visible(self, timeout: int=0) -> bool:
-            _ = timeout
-            return self.visible
-
-        async def text_content(self, timeout: int=0) -> str:
-            _ = timeout
-            return self.text
-
-        async def get_attribute(self, _name: str) -> str:
-            return ''
-
-    class _FakeLocator:
-
-        def __init__(self, items: list['CredamoParserTests._FakeButton']) -> None:
-            self.items = items
-
-        async def count(self) -> int:
-            return len(self.items)
-
-        def nth(self, index: int) -> 'CredamoParserTests._FakeButton':
-            return self.items[index]
-
-    class _FakePage:
-
-        def __init__(self, buttons: list['CredamoParserTests._FakeButton']) -> None:
-            self.buttons = buttons
-
-        def locator(self, _selector: str) -> 'CredamoParserTests._FakeLocator':
-            return CredamoParserTests._FakeLocator(self.buttons)
-
-    class _RetryPage:
-
-        def __init__(self, url: str='https://www.credamo.com/answer.html#/s/demo/') -> None:
-            self.url = url
-            self.goto_calls: list[tuple[str, str, int]] = []
-            self.reload_calls = 0
-            self.wait_calls = 0
-
-        async def goto(self, url: str, wait_until: str, timeout: int) -> None:
-            self.goto_calls.append((url, wait_until, timeout))
-
-        async def reload(self, wait_until: str, timeout: int) -> None:
-            _ = wait_until, timeout
-            self.reload_calls += 1
-
-        async def wait_for_load_state(self, state: str, timeout: int) -> None:
-            _ = state, timeout
-            self.wait_calls += 1
-
-        async def wait_for_timeout(self, timeout: int) -> None:
-            _ = timeout
-            return None
-
     def test_infer_type_code_uses_page_block_kind(self) -> None:
         assert parser._infer_type_code({'question_kind': 'dropdown'}) == '7'
         assert parser._infer_type_code({'question_kind': 'scale'}) == '5'
         assert parser._infer_type_code({'question_kind': 'order'}) == '11'
         assert parser._infer_type_code({'question_kind': 'multiple'}) == '4'
-
-    @pytest.mark.asyncio
-    async def test_detect_navigation_action_ignores_hidden_submit_button(self) -> None:
-        page = self._FakePage([self._FakeButton('提交', False), self._FakeButton('下一页', True)])
-        assert await parser._detect_navigation_action(page) == 'next'
-
-    @pytest.mark.asyncio
-    async def test_retry_initial_question_load_refreshes_when_stuck_on_loading_shell(self) -> None:
-        page = self._RetryPage()
-        expected_roots = [object()]
-        with patch('credamo.provider.parser._question_roots', side_effect=[[], expected_roots]), patch('credamo.provider.parser._page_loading_snapshot', return_value=('答卷', '载入中...')):
-            roots = await parser._retry_initial_question_load_if_needed(page)
-        assert roots == expected_roots
-        assert page.goto_calls == [(page.url, 'domcontentloaded', 45000)]
-        assert page.wait_calls == 1
-        assert page.reload_calls == 0
-
-    @pytest.mark.asyncio
-    async def test_retry_initial_question_load_skips_refresh_when_not_loading_shell(self) -> None:
-        page = self._RetryPage()
-        with patch('credamo.provider.parser._question_roots', return_value=[]), patch('credamo.provider.parser._page_loading_snapshot', return_value=('AI 技能成长平台功能需求调研问卷', '页面正文')):
-            roots = await parser._retry_initial_question_load_if_needed(page)
-        assert roots == []
-        assert page.goto_calls == []
-        assert page.wait_calls == 0
-
-    @pytest.mark.asyncio
-    async def test_question_roots_accepts_plain_question_selector(self) -> None:
-        class _EvalPage:
-            async def evaluate(self, _script):
-                return [0]
-
-            async def query_selector_all(self, selector: str):
-                if selector == '.answer-page .question':
-                    return []
-                if selector == '.question':
-                    return [object()]
-                return []
-
-        roots = await parser._question_roots(_EvalPage())
-        assert len(roots) == 1
 
     def test_normalize_question_keeps_credamo_specific_type(self) -> None:
         question = parser._normalize_question({'question_num': 'Q3', 'title': 'Q3', 'question_kind': 'dropdown', 'provider_type': 'dropdown', 'option_texts': ['选项 1', '选项 2', '选项 3'], 'text_inputs': 0, 'page': 2, 'question_id': 'question-2'}, fallback_num=3)
@@ -129,7 +24,7 @@ class CredamoParserTests:
         assert question['provider_type'] == 'dropdown'
         assert question['provider_page_id'] == '2'
         assert question['options'] == 3
-        assert question['logic_parse_status'] == 'unknown'
+        assert question['logic_parse_status'] == 'none'
 
     def test_normalize_question_detects_matrix_scale(self) -> None:
         question = parser._normalize_question({'question_num': 'Q11', 'title': 'Q11', 'question_kind': 'matrix', 'provider_type': 'matrix', 'option_texts': ['选项 1', '选项 2', '选项 3', '选项 4', '选项 5'], 'row_texts': ['陈述 1', '陈述 2', '陈述 3', '陈述 4', '陈述 5', '陈述 6', '陈述 7'], 'text_inputs': 0, 'page': 1, 'question_id': 'question-5'}, fallback_num=11)
@@ -145,19 +40,6 @@ class CredamoParserTests:
         assert question['option_texts'] == ['非常满意', '比较满意', '满意', '比较不满意', '非常不满意']
         assert question['options'] == 5
         assert question['rows'] == 2
-
-    @pytest.mark.asyncio
-    async def test_extract_questions_from_current_page_reads_matrix_header_container_texts(self) -> None:
-
-        class _EvalPage:
-
-            async def evaluate(self, script: str):
-                self.script = script
-                return [{'question_id': 'question-3', 'question_num': 'Q8', 'title': 'Q8 生成基于专业与目标的大学四年成长路径', 'title_full_text': 'Q8 生成基于专业与目标的大学四年成长路径', 'title_text': '生成基于专业与目标的大学四年成长路径', 'tip_text': '', 'body_text': 'Q8 生成基于专业与目标的大学四年成长路径 非常满意 比较满意 满意 比较不满意 非常不满意 如果提供此服务，您觉得 如果不提供此服务，您觉得', 'option_texts': ['选项 1', '选项 2', '选项 3', '选项 4', '选项 5'], 'matrix_column_texts': ['非常满意', '比较满意', '满意', '比较不满意', '非常不满意'], 'row_texts': ['如果提供此服务，您觉得', '如果不提供此服务，您觉得'], 'input_types': ['radio'], 'text_inputs': 0, 'required': True, 'provider_type': 'matrix', 'question_kind': 'matrix', 'question_media': [{'kind': 'image', 'scope': 'title', 'index': None, 'source_url': 'https://example.com/q8.png', 'label': '题干图'}]}]
-        questions = await parser._extract_questions_from_current_page(_EvalPage(), page_number=1)
-        assert len(questions) == 1
-        assert questions[0]['option_texts'] == ['非常满意', '比较满意', '满意', '比较不满意', '非常不满意']
-        assert questions[0]['question_media'] == [{'kind': 'image', 'scope': 'title', 'index': None, 'source_url': 'https://example.com/q8.png', 'label': '题干图'}]
 
     def test_normalize_question_detects_force_select_instruction(self) -> None:
         question = parser._normalize_question({'question_num': 'Q7', 'title': 'Q7 本题检测是否认真作答，请选 非常不满意', 'title_text': '本题检测是否认真作答，请选 非常不满意', 'question_kind': 'single', 'provider_type': 'single', 'option_texts': ['非常不满意', '不满意', '满意', '非常满意'], 'text_inputs': 0, 'page': 1, 'question_id': 'question-7'}, fallback_num=7)
@@ -211,7 +93,7 @@ class CredamoParserTests:
     def test_normalize_question_prefers_full_title_text_and_strips_type_tag(self) -> None:
         question = parser._normalize_question({'question_num': 'Q7', 'title': '本题检测是否认真作答', 'title_full_text': 'Q7 [单选题] 本题检测是否认真作答，请选 非常不满意', 'title_text': '本题检测是否认真作答', 'question_kind': 'single', 'provider_type': 'single', 'option_texts': ['非常不满意', '不满意', '满意', '非常满意'], 'text_inputs': 0, 'page': 1, 'question_id': 'question-7'}, fallback_num=7)
         assert question['num'] == 7
-        assert question['title'] == '本题检测是否认真作答，请选 非常不满意'
+        assert question['title'] == '[单选题] 本题检测是否认真作答，请选 非常不满意'
         assert question['forced_option_index'] == 0
         assert question['forced_option_text'] == '非常不满意'
 
@@ -301,175 +183,44 @@ class CredamoParserTests:
         assert entries[0].texts == ['你好']
 
     @pytest.mark.asyncio
-    async def test_collect_current_page_until_stable_keeps_revealed_questions(self) -> None:
-        q8 = {'provider_question_id': 'question-8', 'num': 8, 'title': 'Q8'}
-        q9 = {'provider_question_id': 'question-9', 'num': 9, 'title': 'Q9'}
-        page = object()
+    async def test_parse_credamo_survey_reads_detail_interface_questions(self) -> None:
+        detail_data = {
+            "surveyTitle": "Credamo 标题",
+            "questions": [
+                {
+                    "qstNo": "Q1",
+                    "qstTitle": "正式题目",
+                    "questionType": 2,
+                    "selector": 1,
+                    "questionId": "q1",
+                    "choices": [{"display": "A"}, {"display": "B"}],
+                },
+                {
+                    "qstNo": "Q2",
+                    "qstTitle": "矩阵题",
+                    "questionType": 4,
+                    "questionId": "q2",
+                    "choices": [{"display": "行1"}, {"display": "行2"}],
+                    "answers": [{"display": "满意"}, {"display": "不满意"}],
+                },
+            ],
+        }
 
-        async def fake_prime(_page, questions, primed_keys=None):
-            primed = primed_keys if primed_keys is not None else set()
-            count = 0
-            for question in questions:
-                key = parser._question_dedupe_key(question)
-                if key in primed:
-                    continue
-                primed.add(key)
-                count += 1
-            return count
-        with patch('credamo.provider.parser._extract_questions_from_current_page', side_effect=[[q8], [q8, q9]]), patch('credamo.provider.parser._prime_page_for_next', side_effect=fake_prime), patch('credamo.provider.parser._wait_for_dynamic_questions', side_effect=[[q8, q9], [q8, q9]]):
-            current, discovered = await parser._collect_current_page_until_stable(page, page_number=1)
-        assert [question['num'] for question in current] == [8, 9]
-        assert [question['num'] for question in discovered] == [8, 9]
-
-    def test_append_unseen_questions_and_page_signature_helpers(self) -> None:
-        questions = [{'provider_question_id': 'q1', 'title': 'Q1'}, {'provider_question_id': 'q2', 'title': 'Q2'}]
-        seen = {'page:1|id:q1|num:1|title:Q1'}
-        target = [{'provider_question_id': 'q1', 'title': 'Q1'}]
-
-        added = parser._append_unseen_questions(target, seen, [
-            {'provider_page_id': '1', 'provider_question_id': 'q1', 'num': 1, 'title': 'Q1'},
-            {'provider_page_id': '1', 'provider_question_id': 'q2', 'num': 2, 'title': 'Q2'},
-        ])
-
-        assert parser._extract_page_signature(questions) == (('q1', 'Q1'), ('q2', 'Q2'))
-        assert added == 1
-        assert target[-1]['title'] == 'Q2'
-
-    def test_question_dedupe_key_does_not_trust_reused_credamo_dom_id(self) -> None:
-        q8 = {'provider_page_id': '2', 'provider_question_id': 'question-0', 'num': 8, 'title': '请问100+100等于多少'}
-        q10 = {'provider_page_id': '4', 'provider_question_id': 'question-0', 'num': 10, 'title': '本题检测是否认真作答，请输入：你好'}
-        assert parser._question_dedupe_key(q8) != parser._question_dedupe_key(q10)
-
-    @pytest.mark.asyncio
-    async def test_prime_question_uses_forced_scale_answer(self) -> None:
-        page = object()
-        root = object()
-        question = {'provider_type': 'scale', 'options': 7, 'forced_option_index': 0}
-
-        async def _fake_question_roots(_page):
-            return [root]
-
-        scale_mock = AsyncMock(return_value=True)
-        with patch('credamo.provider.runtime._question_roots', side_effect=_fake_question_roots), patch('credamo.provider.runtime._answer_scale', scale_mock):
-            assert await parser._prime_page_for_next(page, [question]) == 1
-        scale_mock.assert_awaited_once_with(page, root, [100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-
-    @pytest.mark.asyncio
-    async def test_prime_question_answers_matrix_for_dynamic_reveal(self) -> None:
-        page = object()
-        root = object()
-        question = {'provider_type': 'matrix', 'options': 5}
-
-        async def _fake_question_roots(_page):
-            return [root]
-
-        matrix_mock = AsyncMock(return_value=True)
-        with patch('credamo.provider.runtime._question_roots', side_effect=_fake_question_roots), patch('credamo.provider.runtime._answer_matrix', matrix_mock):
-            assert await parser._prime_page_for_next(page, [question]) == 1
-        matrix_mock.assert_awaited_once_with(page, root, [100.0, 0.0, 0.0, 0.0, 0.0])
-
-    @pytest.mark.asyncio
-    async def test_parse_credamo_survey_skips_intro_page_before_collecting_questions(self) -> None:
-        intro_questions = [
-            {'question_num': 'Q1', 'title': '知情同意书', 'type_code': '1', 'question_kind': '', 'provider_type': '1', 'option_texts': [], 'text_inputs': 0, 'page': 1, 'question_id': 'intro-1'}
-        ]
-        real_questions = [
-            {'question_num': 'Q2', 'title': '正式题目', 'type_code': '3', 'question_kind': 'single', 'provider_type': 'single', 'option_texts': ['A'], 'text_inputs': 0, 'page': 2, 'question_id': 'q2'}
-        ]
-
-        class _FakePage:
-            async def wait_for_load_state(self, *_args, **_kwargs) -> None:
-                return None
-
-            async def title(self) -> str:
-                return 'Credamo 标题'
-
-            @property
-            def url(self) -> str:
-                return 'https://www.credamo.com/answer.html#/s/demo'
-
-        class _FakeDriver:
-            async def get(self, *_args, **_kwargs) -> None:
-                return None
-
-            async def page(self):
-                return _FakePage()
-
-        class _FakeContext:
-            async def __aenter__(self):
-                return _FakeDriver()
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-        collect_iter = iter([
-            (intro_questions, intro_questions),
-            (real_questions, real_questions),
-        ])
-
-        with patch('credamo.provider.parser.acquire_parse_browser_session', return_value=_FakeContext()), \
-             patch('credamo.provider.parser._retry_initial_question_load_if_needed', return_value=[object()]), \
-             patch('credamo.provider.parser._collect_current_page_until_stable', new=AsyncMock(side_effect=lambda *_args, **_kwargs: next(collect_iter))), \
-             patch('credamo.provider.parser._detect_navigation_action', side_effect=['next', 'submit']), \
-             patch('credamo.provider.parser._click_navigation', new=AsyncMock(return_value=True)), \
-             patch('credamo.provider.parser._wait_for_page_change', new=AsyncMock(return_value=True)):
-            info, title = await parser.parse_credamo_survey('https://www.credamo.com/answer.html#/s/demo')
+        with patch('credamo.provider.parser._fetch_detail', new=AsyncMock(return_value=detail_data)):
+            info, title = await parser.parse_credamo_survey('https://www.credamo.com/answer.html#/s/demo_')
 
         assert title == 'Credamo 标题'
-        assert len(info) == 1
-        assert info[0]['title'] == '正式题目'
+        assert [item['title'] for item in info] == ['正式题目', '矩阵题']
+        assert info[0]['provider_type'] == 'single'
+        assert info[0]['option_texts'] == ['A', 'B']
+        assert info[1]['provider_type'] == 'matrix'
+        assert info[1]['row_texts'] == ['行1', '行2']
 
     @pytest.mark.asyncio
-    async def test_parse_credamo_survey_recovers_when_first_page_temporarily_empty(self) -> None:
-        real_questions = [
-            {'question_num': 'Q2', 'title': '正式题目', 'type_code': '3', 'question_kind': 'single', 'provider_type': 'single', 'option_texts': ['A'], 'text_inputs': 0, 'page': 1, 'question_id': 'q2'}
-        ]
-
-        class _FakePage:
-            async def wait_for_load_state(self, *_args, **_kwargs) -> None:
-                return None
-
-            async def title(self) -> str:
-                return 'Credamo 标题'
-
-            async def wait_for_timeout(self, *_args, **_kwargs) -> None:
-                return None
-
-            @property
-            def url(self) -> str:
-                return 'https://www.credamo.com/answer.html#/s/demo'
-
-        class _FakeDriver:
-            async def get(self, *_args, **_kwargs) -> None:
-                return None
-
-            async def page(self):
-                return _FakePage()
-
-        class _FakeContext:
-            async def __aenter__(self):
-                return _FakeDriver()
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-        collect_iter = iter([
-            ([], []),
-            (real_questions, real_questions),
-        ])
-
-        with patch('credamo.provider.parser.acquire_parse_browser_session', return_value=_FakeContext()), \
-             patch('credamo.provider.parser._retry_initial_question_load_if_needed', return_value=[object()]), \
-             patch('credamo.provider.parser._collect_current_page_until_stable', new=AsyncMock(side_effect=lambda *_args, **_kwargs: next(collect_iter))), \
-             patch('credamo.provider.parser._extract_questions_from_current_page', new=AsyncMock(return_value=real_questions)), \
-             patch('credamo.provider.parser._detect_navigation_action', side_effect=['submit']), \
-             patch('credamo.provider.parser._click_navigation', new=AsyncMock(return_value=True)), \
-             patch('credamo.provider.parser._wait_for_page_change', new=AsyncMock(return_value=True)):
-            info, title = await parser.parse_credamo_survey('https://www.credamo.com/answer.html#/s/demo')
-
-        assert title == 'Credamo 标题'
-        assert len(info) == 1
-        assert info[0]['title'] == '正式题目'
+    async def test_parse_credamo_survey_rejects_empty_detail_questions(self) -> None:
+        with patch('credamo.provider.parser._fetch_detail', new=AsyncMock(return_value={"surveyTitle": "空问卷", "questions": []})):
+            with pytest.raises(parser.CredamoParseError, match="未返回可解析题目"):
+                await parser.parse_credamo_survey('https://www.credamo.com/answer.html#/s/demo_')
 
     def test_order_entry_is_exposed_to_runtime_mapping(self) -> None:
         entry = QuestionEntry(question_type='order', probabilities=-1, option_count=4, question_num=6, question_title='排序题', survey_provider='credamo')

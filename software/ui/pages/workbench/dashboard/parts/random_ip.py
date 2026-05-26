@@ -383,7 +383,6 @@ class DashboardRandomIPMixin:
         try:
             state = self.controller.get_runtime_ui_state()
             current_source = str(state.get("proxy_source") or "").strip().lower()
-            timed_enabled = bool(state.get("timed_mode_enabled", False))
         except Exception as exc:
             context = "_update_ip_cost_infobar: self.controller.get_runtime_ui_state()"
             log_suppressed_exception(
@@ -397,10 +396,6 @@ class DashboardRandomIPMixin:
             if self._ip_benefit_infobar:
                 self._ip_benefit_infobar.show()
             return
-        if timed_enabled:
-            self._ip_cost_infobar.hide()
-            return
-
         self._ip_cost_infobar.hide()
 
     def _on_random_ip_toggled(self, enabled: bool):

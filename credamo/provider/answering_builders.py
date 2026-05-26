@@ -6,15 +6,13 @@ import random
 from typing import Any, Optional
 
 from software.app.config import DEFAULT_FILL_TEXT
-from software.core.questions.runtime_async import resolve_runtime_text_values_from_config
+from software.core.questions.text_values import resolve_text_values_from_config
 from software.core.questions.utils import (
     normalize_droplist_probs,
     weighted_index,
 )
 from software.providers.answering import AnswerAction
 
-
-from .answering_matrix import _normalize_positive_indices
 
 def build_answer_action(
     *,
@@ -109,7 +107,7 @@ def build_answer_action(
         multi_text_blank_modes = list(getattr(config, "multi_text_blank_modes", []) or [])
         multi_text_blank_ranges = list(getattr(config, "multi_text_blank_int_ranges", []) or [])
         blank_count = max(1, int(getattr(question_meta, "text_inputs", 1) or 1))
-        text_values = resolve_runtime_text_values_from_config(
+        text_values = resolve_text_values_from_config(
             text_config,
             text_probabilities,
             blank_count=blank_count,
@@ -124,6 +122,24 @@ def build_answer_action(
             text_values=tuple(text_values),
         )
     return None
+
+
+def _normalize_positive_indices(weights: Any, option_count: int) -> list[int]:
+    total = max(0, int(option_count or 0))
+    if total <= 0:
+        return []
+    selected: list[int] = []
+    raw_weights = list(weights or []) if isinstance(weights, (list, tuple)) else []
+    for index in range(total):
+        try:
+            value = float(raw_weights[index]) if index < len(raw_weights) else 0.0
+        except Exception:
+            value = 0.0
+        if value > 0:
+            selected.append(index)
+    if not selected:
+        selected = [random.randrange(total)]
+    return selected
 
 
 def _resolve_plan_choice(

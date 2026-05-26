@@ -9,7 +9,6 @@ dependencies = [
     "httpx>=0.27,<1",
     "openpyxl",
     "packaging",
-    "playwright",
     "PySide6==6.11.1",
     "PySide6-Fluent-Widgets==1.11.2",
     "velopack",

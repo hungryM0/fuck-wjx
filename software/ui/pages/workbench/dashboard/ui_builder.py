@@ -26,7 +26,7 @@ from qfluentwidgets import (
     TableWidget,
 )
 
-from software.app.config import NON_HEADLESS_MAX_THREADS
+from software.app.config import HTTP_MAX_THREADS
 from software.ui.dialogs.quota_redeem import load_shop_icon
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.pages.workbench.dashboard.cards import RuntimeSettingsHintCard
@@ -121,7 +121,7 @@ def build_dashboard_page_ui(page: Any) -> None:
     spin_row.addWidget(page.target_spin)
     spin_row.addSpacing(12)
     spin_row.addWidget(BodyLabel("并发数：", page))
-    page.thread_slider = ValueSlider(1, NON_HEADLESS_MAX_THREADS, 1, parent=page)
+    page.thread_slider = ValueSlider(1, HTTP_MAX_THREADS, 1, parent=page)
     page.thread_slider.setMinimumWidth(220)
     page.thread_spin = page.thread_slider
     spin_row.addWidget(page.thread_slider)

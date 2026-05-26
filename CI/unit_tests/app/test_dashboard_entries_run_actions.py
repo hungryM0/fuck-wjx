@@ -49,7 +49,7 @@ class _EntriesPage(DashboardEntriesMixin, DashboardRunActionsMixin):
         )
         self.runtime_page = SimpleNamespace(
             reliability_card=SimpleNamespace(switchButton=SimpleNamespace(isChecked=lambda: False)),
-            update_config=MagicMock(side_effect=lambda cfg: setattr(cfg, "headless_mode", False)),
+            update_config=MagicMock(),
             focus_answer_duration_setting=MagicMock(),
             set_proxy_source=MagicMock(return_value="default"),
             set_custom_proxy_api=MagicMock(),
@@ -328,7 +328,7 @@ def test_run_question_wizard_and_run_actions(monkeypatch, qtbot) -> None:
     assert page.title_label.text == "标题"
     assert page.cost_refreshed >= 1
 
-    page._apply_runtime_ui_state({"target": 5, "threads": 9, "headless_mode": False, "random_ip_enabled": True})
+    page._apply_runtime_ui_state({"target": 5, "threads": 9, "random_ip_enabled": True})
     assert page.target_spin._value == 5
     assert page.thread_spin._value == 9
     assert page.random_ip_cb._checked is True

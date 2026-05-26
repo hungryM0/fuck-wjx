@@ -78,7 +78,7 @@ class _FakeAdapter:
     def resume_run(self) -> None:
         self.resume_calls += 1
 
-    def cleanup_browsers(self) -> None:
+    def cleanup_targets(self) -> None:
         self.cleanup_calls += 1
 
     def is_paused(self) -> bool:
@@ -273,7 +273,6 @@ class _DummyExecutionController(RunControllerExecutionMixin):
     def _prepare_engine_state(self, proxy_pool):
         execution_config = SimpleNamespace(
             num_threads=3,
-            headless_mode=True,
             proxy_pool=list(proxy_pool),
         )
         execution_state = _FakeExecutionState(target_num=12, num_threads=3)

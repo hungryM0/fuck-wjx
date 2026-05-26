@@ -190,14 +190,12 @@ try {
         "--noinclude-pytest-mode=nofollow"
         "--noinclude-setuptools-mode=nofollow"
         "--noinclude-custom-mode=numpy:nofollow"
-        "--playwright-include-browser=none"
         "--include-qt-plugins=platforms,styles,imageformats,networkinformation,tls"
         "--nofollow-import-to=qfluentwidgets.multimedia"
         "--nofollow-import-to=PySide6.QtMultimedia"
         "--nofollow-import-to=PySide6.QtMultimediaWidgets"
         "--nofollow-import-to=PySide6.QtPdf"
         "--nofollow-import-to=PySide6.QtPdfWidgets"
-        "--nofollow-import-to=playwright.sync_api"
         "--nofollow-import-to=pytest"
         "--nofollow-import-to=setuptools"
         "--nofollow-import-to=unittest"
@@ -209,8 +207,7 @@ try {
         "--include-module=tencent.provider.runtime_flow"
         "--include-module=tencent.provider.submission"
         "--include-module=credamo.provider.parser"
-        "--include-module=credamo.provider.runtime"
-        "--include-module=credamo.provider.submission"
+        "--include-module=credamo.provider.http_runtime"
         "--include-module=win32api"
         "--include-module=win32con"
         "--include-module=win32gui"
@@ -239,29 +236,6 @@ New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
 Move-Item -LiteralPath $compiledDistDir -Destination $packDir -Force
 
 Write-Step "Trim packaged bloat"
-$blockedPlaywrightPaths = @(
-    "playwright\driver\package\api.json",
-    "playwright\driver\package\types",
-    "playwright\driver\package\index.d.ts",
-    "playwright\driver\package\index.mjs",
-    "playwright\driver\package\README.md",
-    "playwright\driver\package\protocol.yml",
-    "playwright\driver\package\lib\vite",
-    "playwright\driver\package\lib\tools\backend",
-    "playwright\driver\package\lib\tools\cli-client",
-    "playwright\driver\package\lib\tools\cli-daemon",
-    "playwright\driver\package\lib\tools\dashboard",
-    "playwright\driver\package\lib\tools\mcp",
-    "playwright\driver\package\lib\tools\utils",
-    "playwright\driver\package\lib\tools\exports.js",
-    "playwright\driver\package\lib\mcpBundle.js",
-    "playwright\driver\package\lib\mcpBundleImpl.js",
-    "playwright\driver\package\lib\zodBundle.js",
-    "playwright\driver\package\lib\zodBundleImpl.js"
-)
-foreach ($relativePath in $blockedPlaywrightPaths) {
-    Remove-IfExists -Path (Join-Path $packDir $relativePath)
-}
 
 $blockedQtFiles = @(
     "qt6multimedia.dll",
@@ -360,19 +334,10 @@ if (-not (Test-Path $packDir)) {
 if (-not (Test-Path $mainExe)) {
     throw ("Main executable not found: {0}" -f $mainExe)
 }
-foreach ($relativePath in $blockedPlaywrightPaths + $blockedQtFiles) {
+foreach ($relativePath in $blockedQtFiles) {
     $candidate = Join-Path $packDir $relativePath
     if (Test-Path $candidate) {
         throw ("Blocked payload still exists: {0}" -f $candidate)
-    }
-}
-foreach ($relativePath in @(
-    "playwright\driver\node.exe",
-    "playwright\driver\package\cli.js"
-)) {
-    $candidate = Join-Path $packDir $relativePath
-    if (-not (Test-Path $candidate)) {
-        throw ("Required Playwright driver file missing: {0}" -f $candidate)
     }
 }
 

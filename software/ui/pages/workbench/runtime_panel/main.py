@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import ScrollArea
 
-from software.app.config import HEADLESS_MAX_THREADS, NON_HEADLESS_MAX_THREADS
+from software.app.config import HTTP_MAX_THREADS
 from software.ui.controller.run_controller import RunController
 from software.ui.pages.workbench.runtime_panel.config_sync import RuntimeConfigSyncMixin
 from software.ui.pages.workbench.runtime_panel.control_sync import RuntimeControlSyncMixin
@@ -21,13 +21,11 @@ if TYPE_CHECKING:
         RandomUASettingCard,
         ReliabilitySettingCard,
         TimeRangeSettingCard,
-        TimedModeSettingCard,
     )
     from software.ui.pages.workbench.runtime_panel.random_ip_card import RandomIPSettingCard
     from software.ui.widgets.setting_cards import (
         SliderSettingCard,
         SpinBoxSettingCard,
-        SwitchSettingCard,
     )
 
 
@@ -40,8 +38,7 @@ class RuntimePage(
     """独立的运行参数/开关页，方便在侧边栏查看。"""
 
     MIN_THREADS = 1
-    NON_HEADLESS_MAX_THREADS = NON_HEADLESS_MAX_THREADS
-    HEADLESS_MAX_THREADS = HEADLESS_MAX_THREADS
+    HTTP_MAX_THREADS = HTTP_MAX_THREADS
     SUBMIT_INTERVAL_MAX_SECONDS = 300
     view: QWidget
     target_card: "SpinBoxSettingCard"
@@ -49,16 +46,13 @@ class RuntimePage(
     random_ip_card: "RandomIPSettingCard"
     random_ua_card: "RandomUASettingCard"
     reliability_card: "ReliabilitySettingCard"
-    headless_card: "SwitchSettingCard"
     interval_card: "TimeRangeSettingCard"
     answer_card: "TimeRangeSettingCard"
-    timed_card: "TimedModeSettingCard"
     ai_section: "RuntimeAISection"
 
     def __init__(self, controller: RunController, parent=None):
         super().__init__(parent)
         self.controller = controller
-        self._suppress_headless_tip = False
         self._last_benefit_proxy_compatible = None
         self.view = QWidget(self)
         self.setWidget(self.view)
@@ -71,14 +65,12 @@ class RuntimePage(
         self.controller.runStateChanged.connect(self.on_run_state_changed)
         self.controller.randomIpLoadingChanged.connect(self._apply_random_ip_loading)
         self._sync_random_ua(self.random_ua_card.isChecked())
-        self._apply_thread_limit_by_headless(self.headless_card.isChecked())
+        self._apply_thread_limit()
         self.controller.set_runtime_ui_state(
             emit=False,
             target=self.target_card.spinBox.value(),
             threads=self.thread_card.slider.value(),
             random_ip_enabled=self.random_ip_card.switchButton.isChecked(),
-            headless_mode=self.headless_card.switchButton.isChecked(),
-            timed_mode_enabled=self.timed_card.switchButton.isChecked(),
             proxy_source=self.selected_proxy_source(),
             submit_interval=self._card_value_as_range(self.interval_card),
             answer_duration=self._card_value_as_range(self.answer_card),

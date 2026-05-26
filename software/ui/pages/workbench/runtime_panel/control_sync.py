@@ -6,7 +6,6 @@ import logging
 from typing import Any, cast
 
 from PySide6.QtCore import QPoint, QTimer
-from qfluentwidgets import FluentIcon, InfoBar, InfoBarPosition, PopupTeachingTip, TeachingTipTailPosition
 
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
@@ -17,16 +16,12 @@ class RuntimeControlSyncMixin:
     view: Any
     answer_card: Any
     thread_card: Any
-    headless_card: Any
     interval_card: Any
-    timed_card: Any
     random_ip_card: Any
     random_ua_card: Any
     reliability_card: Any
-    _suppress_headless_tip: bool
     MIN_THREADS: Any
-    NON_HEADLESS_MAX_THREADS: int
-    HEADLESS_MAX_THREADS: int
+    HTTP_MAX_THREADS: int
 
     def focus_answer_duration_setting(self):
         """跳转并聚焦到“作答时长”设置项。"""
@@ -66,11 +61,11 @@ class RuntimeControlSyncMixin:
         QTimer.singleShot(0, _focus_target)
         QTimer.singleShot(80, _focus_target)
 
-    def _resolve_thread_max(self, headless_enabled: bool) -> int:
-        return self.HEADLESS_MAX_THREADS if headless_enabled else self.NON_HEADLESS_MAX_THREADS
+    def _resolve_thread_max(self) -> int:
+        return self.HTTP_MAX_THREADS
 
-    def _apply_thread_limit_by_headless(self, headless_enabled: bool) -> bool:
-        max_threads = self._resolve_thread_max(bool(headless_enabled))
+    def _apply_thread_limit(self) -> bool:
+        max_threads = self._resolve_thread_max()
         previous_value = int(self.thread_card.slider.value())
         clamped = previous_value > max_threads
 
@@ -89,64 +84,6 @@ class RuntimeControlSyncMixin:
 
     def on_run_state_changed(self, running: bool) -> None:
         self.thread_card.slider.setEnabled(not bool(running or self._thread_edit_locked()))
-
-    def _show_headless_limit_tip(self):
-        parent = cast(Any, self).window() or self.view
-        InfoBar.info(
-            "",
-            (f"已关闭无头模式，并发上限为 {self.NON_HEADLESS_MAX_THREADS}，已自动调整"),
-            parent=parent,
-            position=InfoBarPosition.TOP,
-            duration=2200,
-        )
-
-    def _on_headless_toggled(self, enabled: bool):
-        clamped = self._apply_thread_limit_by_headless(bool(enabled))
-        self.controller.set_runtime_ui_state(
-            headless_mode=bool(enabled),
-            threads=int(self.thread_card.slider.value()),
-        )
-        log_action(
-            "CONFIG",
-            "toggle_headless_mode",
-            "headless_switch",
-            "runtime",
-            result="changed",
-            payload={
-                "enabled": bool(enabled),
-                "threads": int(self.thread_card.slider.value()),
-                "clamped": clamped,
-            },
-        )
-        if (not enabled) and clamped and not self._suppress_headless_tip:
-            self._show_headless_limit_tip()
-
-    def _show_timed_mode_help(self):
-        log_action(
-            "UI",
-            "open_timed_mode_help",
-            "timed_mode_help",
-            "runtime",
-            result="opened",
-        )
-        content = (
-            "启用后，程序会忽略「提交间隔」和「作答时长」设置，改为高频刷新并在开放后立即提交。\n\n"
-            "典型应用场景：\n"
-            "- 抢志愿填报名额\n"
-            "- 抢课程选课名额（如大学选课问卷）\n"
-            "- 抢活动报名名额（如讲座、比赛报名）\n"
-            "- 其他在特定时间点开放的问卷"
-        )
-        PopupTeachingTip.create(
-            target=self.timed_card.helpButton,
-            icon=FluentIcon.INFO,
-            title="定时模式说明",
-            content=content,
-            isClosable=True,
-            tailPosition=TeachingTipTailPosition.BOTTOM,
-            duration=-1,
-            parent=self.view,
-        )
 
     def _on_random_ip_toggled(self, enabled: bool):
         if self.controller.request_toggle_random_ip(bool(enabled)):
@@ -197,29 +134,6 @@ class RuntimeControlSyncMixin:
                 exc,
                 level=logging.WARNING,
             )
-
-    def _sync_timed_mode(self, enabled: bool):
-        try:
-            self.interval_card.setEnabled(not enabled)
-            self.answer_card.setEnabled(not enabled)
-        except Exception as exc:
-            log_suppressed_exception(
-                "_sync_timed_mode: self.interval_card.setEnabled(not enabled)",
-                exc,
-                level=logging.WARNING,
-            )
-
-    def _on_timed_mode_toggled(self, enabled: bool):
-        self._sync_timed_mode(bool(enabled))
-        self.controller.set_runtime_ui_state(timed_mode_enabled=bool(enabled))
-        log_action(
-            "CONFIG",
-            "toggle_timed_mode",
-            "timed_mode_switch",
-            "runtime",
-            result="changed",
-            payload={"enabled": bool(enabled)},
-        )
 
     def _on_reliability_mode_toggled(self, enabled: bool):
         try:

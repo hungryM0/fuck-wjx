@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 import threading
+
 from software.ui.controller.run_controller import EngineGuiAdapter
 
-class _FakeCleanupTarget:
 
+class _FakeCleanupTarget:
     def __init__(self, name: str, events: list[str], on_quit=None) -> None:
         self.name = name
         self.events = events
@@ -22,7 +24,7 @@ class _FakeCleanupTarget:
             self.on_quit()
 
 
-class _FakeManagedDriver(_FakeCleanupTarget):
+class _FakeManagedTarget(_FakeCleanupTarget):
     def __init__(self, name: str, events: list[str]) -> None:
         super().__init__(name, events)
         self.aclose_calls = 0
@@ -31,29 +33,37 @@ class _FakeManagedDriver(_FakeCleanupTarget):
         self.aclose_calls += 1
         self.events.append(f"{self.name}:aclose")
 
+
 class EngineGuiAdapterCleanupTests:
-
     def _build_adapter(self) -> EngineGuiAdapter:
-        return EngineGuiAdapter(dispatcher=lambda callback: callback(), async_dispatcher=lambda callback: callback(), stop_signal=threading.Event())
+        return EngineGuiAdapter(
+            dispatcher=lambda callback: callback(),
+            async_dispatcher=lambda callback: callback(),
+            stop_signal=threading.Event(),
+        )
 
-    def test_cleanup_browsers_uses_lifo_order(self) -> None:
+    def test_cleanup_targets_uses_lifo_order(self) -> None:
         adapter = self._build_adapter()
         events: list[str] = []
-        pool = _FakeCleanupTarget('pool', events)
-        driver = _FakeCleanupTarget('driver', events)
+        pool = _FakeCleanupTarget("pool", events)
+        driver = _FakeCleanupTarget("driver", events)
         adapter.register_cleanup_target(pool)
         adapter.register_cleanup_target(driver)
-        adapter.cleanup_browsers()
-        assert events == ['driver', 'pool']
+        adapter.cleanup_targets()
+        assert events == ["driver", "pool"]
 
-    def test_cleanup_browsers_drains_targets_added_during_cleanup(self) -> None:
+    def test_cleanup_targets_drains_targets_added_during_cleanup(self) -> None:
         adapter = self._build_adapter()
         events: list[str] = []
-        late = _FakeCleanupTarget('late', events)
-        first = _FakeCleanupTarget('first', events, on_quit=lambda: adapter.register_cleanup_target(late))
+        late = _FakeCleanupTarget("late", events)
+        first = _FakeCleanupTarget(
+            "first",
+            events,
+            on_quit=lambda: adapter.register_cleanup_target(late),
+        )
         adapter.register_cleanup_target(first)
-        adapter.cleanup_browsers()
-        assert events == ['first', 'late']
+        adapter.cleanup_targets()
+        assert events == ["first", "late"]
         assert adapter.active_drivers == []
 
     def test_runtime_actions_use_bound_callbacks(self) -> None:
@@ -71,13 +81,13 @@ class EngineGuiAdapterCleanupTests:
 
         assert events == [("refresh",), ("toggle", True), ("submit", "stop")]
 
-    def test_cleanup_browsers_prefers_async_close_when_available(self) -> None:
+    def test_cleanup_targets_prefers_async_close_when_available(self) -> None:
         adapter = self._build_adapter()
         events: list[str] = []
-        driver = _FakeManagedDriver("driver", events)
+        driver = _FakeManagedTarget("driver", events)
 
         adapter.register_cleanup_target(driver)
-        adapter.cleanup_browsers()
+        adapter.cleanup_targets()
 
         assert events == ["driver:aclose"]
         assert driver.aclose_calls == 1

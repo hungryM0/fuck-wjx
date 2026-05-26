@@ -7,27 +7,14 @@ import logging
 import random
 from typing import Any, Optional, cast
 
-import software.core.modes.timed_mode as timed_mode
 from software.core.ai.runtime import AIRuntimeError
 from software.core.engine.async_events import AsyncRunContext, ThreadEventProxy
 from software.core.engine.async_scheduler import AsyncScheduler
 from software.core.engine.failure_reason import FailureReason
-from software.core.engine.page_loader import exception_summary as _page_load_exception_summary
-from software.core.engine.page_loader import load_survey_page as _page_loader_load_survey_page
-from software.core.engine.page_load_probe import wait_for_page_probe
 from software.core.engine.provider_common import ensure_joint_psychometric_answer_plan
 from software.core.engine.run_stop_policy import RunStopPolicy
-from software.core.engine.runtime_ui_bridge import (
-    handle_random_ip_submission as trigger_random_ip_submission,
-)
 from software.core.engine.runtime_error_handlers import handle_ai_runtime_error as _handle_ai_runtime_error_impl
-from software.core.engine.runtime_error_handlers import handle_proxy_connection_error as _handle_proxy_connection_error_impl
-from software.core.engine.submission_service import SubmissionService
 from software.core.task import ExecutionConfig, ExecutionState
-from software.network.browser import ProxyConnectionError
-from software.network.browser.async_owner_pool import AsyncBrowserOwnerPool, AsyncBrowserSession
-from software.network.browser.runtime_async import BrowserDriver as AsyncBrowserDriver
-from software.network.browser.startup import BrowserStartupRuntimeError
 import software.network.http as http_client
 from software.network.proxy.pool import is_proxy_responsive_async
 from software.network.session_policy import (
@@ -39,22 +26,12 @@ from software.network.session_policy import (
 )
 from software.providers.common import SURVEY_PROVIDER_CREDAMO, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX, normalize_survey_provider
 from software.providers.http_logic import get_http_logic_fallback_reason
-from software.providers.registry import fill_survey, fill_survey_http
-from software.providers.registry import is_device_quota_limit_page as _provider_is_device_quota_limit_page
+from software.providers.registry import fill_survey_http
 
 JOINT_PRE_ANSWER_RESERVATION_LEASE_SECONDS = 45.0
 JOINT_SLOT_WAIT_POLL_SECONDS = 0.5
 JOINT_PRE_ANSWER_ATTEMPT_REQUEUE_DELAY_SECONDS = 0.2
 _JOINT_PRE_ANSWER_TIMEOUT = object()
-
-
-async def _load_survey_page(driver: Any, config: ExecutionConfig, *, phase_updater: Any = None) -> None:
-    return await _page_loader_load_survey_page(
-        driver,
-        config,
-        phase_updater=phase_updater,
-        probe_waiter=wait_for_page_probe,
-    )
 
 
 class AsyncSlotRunner:
@@ -68,7 +45,6 @@ class AsyncSlotRunner:
         state: ExecutionState,
         run_context: AsyncRunContext,
         scheduler: AsyncScheduler,
-        browser_pool: AsyncBrowserOwnerPool,
         gui_instance: Any = None,
     ) -> None:
         self.slot_id = max(1, int(slot_id or 1))
@@ -77,11 +53,9 @@ class AsyncSlotRunner:
         self.state = state
         self.run_context = run_context
         self.scheduler = scheduler
-        self.browser_pool = browser_pool
         self.gui_instance = gui_instance
         self.stop_proxy = ThreadEventProxy(run_context.stop_event, loop=asyncio.get_running_loop())
         self.stop_policy = RunStopPolicy(config, state, gui_instance)
-        self.submission_service = SubmissionService(config, state, self.stop_policy)
         self.proxy_address: Optional[str] = None
         self._joint_pre_answer_timed_out = False
 
@@ -96,15 +70,6 @@ class AsyncSlotRunner:
             self.state.update_thread_step(self.slot_label, 0, 0, status_text=status_text, running=True)
         except Exception:
             logging.info("更新 slot 步骤失败：%s", status_text, exc_info=True)
-
-    def _resolve_timed_refresh_interval(self) -> float:
-        try:
-            refresh_interval = float(self.config.timed_mode_refresh_interval or timed_mode.DEFAULT_REFRESH_INTERVAL)
-        except Exception:
-            refresh_interval = timed_mode.DEFAULT_REFRESH_INTERVAL
-        if refresh_interval <= 0:
-            refresh_interval = timed_mode.DEFAULT_REFRESH_INTERVAL
-        return refresh_interval
 
     async def _should_stop_loop(self) -> bool:
         await self.run_context.wait_if_paused()
@@ -270,39 +235,6 @@ class AsyncSlotRunner:
         ua_value, _ = _select_user_agent_for_session(self.state)
         return proxy_address, ua_value
 
-    async def _open_session(self) -> Optional[AsyncBrowserSession]:
-        if self.run_context.stop_requested():
-            return None
-        proxy_result = await self._run_pre_answer_step_with_joint_lease(
-            "获取代理",
-            self._select_session_proxy_and_ua,
-        )
-        if proxy_result is _JOINT_PRE_ANSWER_TIMEOUT:
-            return None
-        proxy_address, ua_value = proxy_result
-        if self.run_context.stop_requested():
-            return None
-        if self.config.random_proxy_ip_enabled and not proxy_address:
-            return None
-        self.proxy_address = proxy_address
-        self._update_step("启动浏览器会话")
-        session = await self._run_pre_answer_step_with_joint_lease(
-            "启动浏览器",
-            lambda: self.browser_pool.open_session(proxy_address=proxy_address, user_agent=ua_value),
-        )
-        if session is _JOINT_PRE_ANSWER_TIMEOUT:
-            return None
-        driver = session.driver
-        driver.thread_name = self.slot_label
-        driver.session_state = self.state
-        driver.session_proxy_address = proxy_address or ""
-        return session
-
-    async def _close_session(self, session: Optional[AsyncBrowserSession]) -> None:
-        if session is not None:
-            await session.close()
-        self._release_session_proxy()
-
     def _release_session_proxy(self) -> None:
         if self.proxy_address:
             try:
@@ -310,87 +242,6 @@ class AsyncSlotRunner:
             except Exception:
                 logging.info("释放代理占用失败", exc_info=True)
         self.proxy_address = None
-
-    async def _load_survey_or_record_failure(self, session: AsyncBrowserSession) -> bool:
-        if self.run_context.stop_requested():
-            return False
-        await self.run_context.wait_if_paused()
-        self._update_step("加载问卷")
-        try:
-            if self.config.timed_mode_enabled:
-                ready = await self._run_pre_answer_step_with_joint_lease(
-                    "加载问卷",
-                    lambda: timed_mode.wait_until_open(
-                        cast(AsyncBrowserDriver, session.driver),
-                        self.config.url,
-                        self.stop_proxy,
-                        refresh_interval=self._resolve_timed_refresh_interval(),
-                        logger=logging.info,
-                    ),
-                )
-                if ready is _JOINT_PRE_ANSWER_TIMEOUT:
-                    return False
-                if not ready:
-                    self.run_context.stop_event.set()
-                    return False
-            else:
-                async def _load_and_confirm() -> bool:
-                    await _load_survey_page(
-                        session.driver,
-                        self.config,
-                        phase_updater=lambda status_text: self._update_step(status_text),
-                    )
-                    return True
-
-                loaded = await self._run_pre_answer_step_with_joint_lease(
-                    "加载问卷",
-                    _load_and_confirm,
-                )
-                if loaded is _JOINT_PRE_ANSWER_TIMEOUT:
-                    return False
-        except ProxyConnectionError:
-            raise
-        except Exception as exc:
-            self.stop_policy.record_failure(
-                self.stop_proxy,
-                thread_name=self.slot_label,
-                failure_reason=FailureReason.PAGE_LOAD_FAILED,
-                status_text="加载问卷失败",
-                log_message=f"加载问卷失败，本轮按失败处理：{_page_load_exception_summary(exc)}",
-                consume_reverse_fill_attempt=False,
-            )
-            return False
-        return True
-
-    async def _handle_device_quota_limit(self, session: AsyncBrowserSession) -> bool:
-        hit = await _provider_is_device_quota_limit_page(
-            session.driver,
-            provider=self.config.survey_provider,
-        )
-        if not hit:
-            return False
-        stopped = self.stop_policy.record_failure(
-            self.stop_proxy,
-            thread_name=self.slot_label,
-            failure_reason=FailureReason.DEVICE_QUOTA_LIMIT,
-            status_text="设备达到填写次数上限",
-            log_message="设备达到填写次数上限，本轮按失败处理",
-            consume_reverse_fill_attempt=False,
-        )
-        if stopped:
-            self.run_context.stop_event.set()
-        self._update_status("设备达到填写次数上限")
-        if not stopped and not self.run_context.stop_requested() and self.config.random_proxy_ip_enabled:
-            trigger_random_ip_submission(self.gui_instance, self.stop_proxy)
-        return True
-
-    async def _finalize_after_submit(self, session: AsyncBrowserSession) -> Any:
-        return await self.submission_service.finalize_after_submit(
-            cast(AsyncBrowserDriver, session.driver),
-            stop_signal=self.stop_proxy,
-            gui_instance=self.gui_instance,
-            thread_name=self.slot_label,
-        )
 
     def _finalize_without_submit(self) -> Any:
         should_stop = self.stop_policy.record_success(
@@ -408,21 +259,6 @@ class AsyncSlotRunner:
                 "should_stop": should_stop,
             },
         )()
-
-    async def _wait_for_next_unique_proxy(self) -> bool:
-        if not self.config.random_proxy_ip_enabled:
-            return True
-        self._update_status("等待新代理")
-        while not self.run_context.stop_requested():
-            stopped = await asyncio.to_thread(
-                self.state.wait_for_runtime_change,
-                stop_signal=self.stop_proxy,
-                timeout=0.5,
-            )
-            if stopped:
-                return False
-            return True
-        return False
 
     async def _run_pre_answer_step_with_joint_lease(self, label: str, operation: Any) -> Any:
         if self.state.peek_reserved_joint_sample(self.slot_label) is None:
@@ -468,24 +304,6 @@ class AsyncSlotRunner:
             return True
         return False
 
-    def _handle_proxy_connection_error(self, session: Optional[AsyncBrowserSession]) -> bool:
-        holder = type("_AsyncSessionHolder", (), {"proxy_address": self.proxy_address})()
-        del session
-        return _handle_proxy_connection_error_impl(
-            holder,
-            self.stop_proxy,
-            thread_name=self.slot_label,
-            state=self.state,
-            config=self.config,
-            stop_policy=self.stop_policy,
-            update_thread_status=lambda name, status_text: self._update_status(status_text),
-            handle_proxy_unavailable=lambda _stop_signal, **kwargs: self._handle_proxy_unavailable(
-                status_text=str(kwargs.get("status_text") or "代理不可用"),
-                log_message=str(kwargs.get("log_message") or "代理连接失败"),
-            ),
-            mark_proxy_temporarily_bad=_mark_proxy_temporarily_bad,
-        )
-
     async def _handle_ai_runtime_error(self, exc: AIRuntimeError) -> bool:
         return _handle_ai_runtime_error_impl(
             exc,
@@ -499,8 +317,6 @@ class AsyncSlotRunner:
         provider = normalize_survey_provider(self.config.survey_provider)
         if not bool(str(self.config.url or "").strip()) or provider not in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_CREDAMO}:
             return False
-        if provider in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}:
-            return True
         questions = list((self.config.questions_metadata or {}).values())
         return not bool(get_http_logic_fallback_reason(questions))
 
@@ -684,170 +500,11 @@ class AsyncSlotRunner:
         except Exception:
             logging.info("HTTP slot 收尾状态更新失败", exc_info=True)
 
-    def _handle_browser_startup_error(self, exc: BrowserStartupRuntimeError) -> bool:
-        message = str(exc or "").strip() or "浏览器底座启动失败"
-        logging.error("异步浏览器底座启动失败，已停止本次运行，避免继续消耗随机IP：%s", message)
-        self.stop_policy.record_failure(
-            self.stop_proxy,
-            thread_name=self.slot_label,
-            failure_reason=FailureReason.BROWSER_START_FAILED,
-            status_text="浏览器启动失败",
-            log_message=message,
-            terminal_stop_category="browser_start_failed",
-            force_stop_when_threshold_reached=True,
-            consume_reverse_fill_attempt=False,
-        )
-        self.state.mark_terminal_stop(
-            "browser_start_failed",
-            failure_reason=FailureReason.BROWSER_START_FAILED.value,
-            message=message,
-        )
-        self.run_context.stop_event.set()
-        return True
-
     async def run(self) -> None:
-        if self._uses_http_runtime():
-            await self._run_http_runtime()
+        if not self._uses_http_runtime():
+            self._block_http_runtime(self._resolve_http_runtime_block_reason())
             return
-
-        self._update_status("会话启动", running=True)
-        while True:
-            if await self._should_stop_loop():
-                break
-            token_id = await self.scheduler.acquire()
-            if token_id is None:
-                break
-            session: Optional[AsyncBrowserSession] = None
-            keep_session_open = False
-            should_requeue_dispatch = True
-            dispatch_delay_seconds = 0.0
-            try:
-                self._joint_pre_answer_timed_out = False
-                if not await self._prepare_round_context():
-                    should_requeue_dispatch = False
-                    break
-                session = await self._open_session()
-                if session is None:
-                    if not self._joint_pre_answer_timed_out:
-                        self._release_round_resources(requeue_reverse_fill=True)
-                    else:
-                        dispatch_delay_seconds = JOINT_PRE_ANSWER_ATTEMPT_REQUEUE_DELAY_SECONDS
-                    if self.run_context.stop_requested():
-                        should_requeue_dispatch = False
-                        break
-                    continue
-                if not await self._load_survey_or_record_failure(session):
-                    if not self._joint_pre_answer_timed_out:
-                        self._release_round_resources(requeue_reverse_fill=True)
-                    else:
-                        dispatch_delay_seconds = JOINT_PRE_ANSWER_ATTEMPT_REQUEUE_DELAY_SECONDS
-                    if self.run_context.stop_requested():
-                        should_requeue_dispatch = False
-                        break
-                    continue
-                if await self._handle_device_quota_limit(session):
-                    self._release_round_resources(requeue_reverse_fill=True)
-                    if self.run_context.stop_requested():
-                        should_requeue_dispatch = False
-                        break
-                    continue
-                try:
-                    marked_answering = self.state.mark_joint_sample_answering(self.slot_label)
-                except Exception:
-                    logging.info("标记联合信效度槽位进入答题失败", exc_info=True)
-                    marked_answering = False
-                if self._requires_joint_sample() and not marked_answering:
-                    logging.warning("会话[%s]进入答题前发现联合信效度槽位已释放，本轮放弃并重试", self.slot_label)
-                    self._release_round_resources(requeue_reverse_fill=True)
-                    dispatch_delay_seconds = JOINT_PRE_ANSWER_ATTEMPT_REQUEUE_DELAY_SECONDS
-                    continue
-                finished = await fill_survey(
-                    session.driver,
-                    self.config,
-                    self.state,
-                    stop_signal=self.stop_proxy,
-                    thread_name=self.slot_label,
-                    provider=self.config.survey_provider,
-                )
-                if self.run_context.stop_requested() or not finished:
-                    self._release_round_resources(requeue_reverse_fill=True)
-                    if self.run_context.stop_requested():
-                        should_requeue_dispatch = False
-                        break
-                    continue
-                outcome = (
-                    await self._finalize_after_submit(session)
-                    if bool(getattr(self.config, "submit_enabled", True))
-                    else self._finalize_without_submit()
-                )
-                if outcome.status == "success":
-                    keep_session_open = not bool(getattr(self.config, "submit_enabled", True))
-                    if bool(getattr(outcome, "should_rotate_proxy", False)):
-                        await self._close_session(session)
-                        session = None
-                        keep_session_open = False
-                        if not await self._wait_for_next_unique_proxy():
-                            should_requeue_dispatch = False
-                            break
-                    if outcome.should_stop:
-                        should_requeue_dispatch = False
-                        break
-                    dispatch_delay_seconds = self._resolve_dispatch_delay_seconds()
-                    if dispatch_delay_seconds > 0:
-                        self._update_step("等待提交间隔")
-                elif outcome.status == "aborted":
-                    self._release_round_resources(requeue_reverse_fill=True)
-                    should_requeue_dispatch = False
-                    break
-                else:
-                    dispatch_delay_seconds = self._resolve_dispatch_delay_seconds()
-                    if dispatch_delay_seconds > 0:
-                        self._update_step("等待提交间隔")
-            except AIRuntimeError as exc:
-                if await self._handle_ai_runtime_error(exc):
-                    should_requeue_dispatch = False
-                    break
-                self._release_round_resources(requeue_reverse_fill=True)
-            except ProxyConnectionError:
-                if self._handle_proxy_connection_error(session):
-                    should_requeue_dispatch = False
-                    break
-                self._release_round_resources(requeue_reverse_fill=True)
-            except BrowserStartupRuntimeError as exc:
-                if self._handle_browser_startup_error(exc):
-                    should_requeue_dispatch = False
-                    break
-                self._release_round_resources(requeue_reverse_fill=True)
-            except Exception:
-                if self.run_context.stop_requested():
-                    should_requeue_dispatch = False
-                    break
-                logging.exception("异步会话[%s]运行异常", self.slot_label)
-                if self.stop_policy.record_failure(
-                    self.stop_proxy,
-                    thread_name=self.slot_label,
-                    failure_reason=FailureReason.FILL_FAILED,
-                    consume_reverse_fill_attempt=False,
-                ):
-                    should_requeue_dispatch = False
-                    break
-                self._release_round_resources(requeue_reverse_fill=True)
-            finally:
-                if not keep_session_open:
-                    await self._close_session(session)
-                else:
-                    self._release_session_proxy()
-                await self.scheduler.release(
-                    int(token_id),
-                    requeue=bool(should_requeue_dispatch and not self.run_context.stop_requested()),
-                    delay_seconds=dispatch_delay_seconds,
-                )
-        try:
-            self.state.release_joint_sample(self.slot_label)
-            self.state.release_reverse_fill_sample(self.slot_label, requeue=True)
-            self.state.mark_thread_finished(self.slot_label, status_text=self._resolve_finished_status_text())
-        except Exception:
-            logging.info("slot 收尾状态更新失败", exc_info=True)
+        await self._run_http_runtime()
 
 
 __all__ = ["AsyncSlotRunner"]

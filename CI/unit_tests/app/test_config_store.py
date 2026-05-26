@@ -42,8 +42,7 @@ class ConfigStoreTests:
               "config_schema_version": 5,
               "url": "https://www.wjx.cn/vm/demo.aspx",
               "target": "9",
-              "threads": 3,
-              "headless_mode": "false"
+              "threads": 3
             }
             """,
             encoding="utf-8",
@@ -54,7 +53,6 @@ class ConfigStoreTests:
         assert config.url == "https://www.wjx.cn/vm/demo.aspx"
         assert config.target == 9
         assert config.threads == 3
-        assert config.headless_mode is False
 
     def test_load_config_returns_default_when_missing_or_invalid_in_non_strict_mode(self, tmp_path: Path) -> None:
         missing = config_store.load_config(str(tmp_path / "missing.json"))

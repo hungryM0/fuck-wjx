@@ -157,14 +157,9 @@ _DEFAULT_AI_FREE_ENDPOINT = "https://api-wjx.hungrym0.top/api/ai/free"
 _DEFAULT_STATUS_ENDPOINT = "https://api-wjx.hungrym0.top/api/status"
 _DEFAULT_EMAIL_VERIFY_ENDPOINT = "https://api-wjx.hungrym0.top/api/email"
 
-# ==================== 浏览器配置 ====================
-# 浏览器选择优先级（固定使用系统 Microsoft Edge）
-BROWSER_PREFERENCE = ["edge"]
-# 无头模式窗口尺寸 (宽x高)
-HEADLESS_WINDOW_SIZE = "1920,1080"
-# 并发会话上限
-NON_HEADLESS_MAX_THREADS = 12
-HEADLESS_MAX_THREADS = 64
+# ==================== HTTP 运行时配置 ====================
+# 纯 HTTP 并发会话上限
+HTTP_MAX_THREADS = 64
 
 # ==================== 用户代理配置 ====================
 USER_AGENT_PRESETS = {
@@ -209,25 +204,13 @@ APP_ICON_RELATIVE_PATH = "icon.ico"
 SUBMIT_INITIAL_DELAY = 0.35
 # 点击提交后的稳定延迟（秒）
 SUBMIT_CLICK_SETTLE_DELAY = 0.25
-# 无头模式专属：提交流程前置等待（秒）
-HEADLESS_SUBMIT_INITIAL_DELAY = 0.15
-# 无头模式专属：点击提交后的稳定等待（秒）
-HEADLESS_SUBMIT_CLICK_SETTLE_DELAY = 0.10
-# 无头模式专属：翻页前后的缓冲等待（秒）
-HEADLESS_PAGE_BUFFER_DELAY = 0.20
-# 无头模式专属：点击下一页后的等待（秒）
-HEADLESS_PAGE_CLICK_DELAY = 0.20
 # 提交后等待 URL 变化的最大时间（秒）
 POST_SUBMIT_URL_MAX_WAIT = 0.8
 # 提交后 URL 变化检测轮询间隔（秒）
 POST_SUBMIT_URL_POLL_INTERVAL = 0.05
-# 判定提交成功后，关闭浏览器实例前的缓冲等待（秒）
-# 目的：避免过早关闭页面导致提交请求尚未发送/尚未完成就被中断。
+# 判定提交成功后的缓冲等待（秒）
 POST_SUBMIT_CLOSE_GRACE_SECONDS = 0.8
-# 无头模式专属：提交成功后关闭浏览器前的缓冲等待（秒）
-HEADLESS_POST_SUBMIT_CLOSE_GRACE_SECONDS = 0.25
-# 停止操作的强制等待时间（秒）- 浏览器cleanup延迟启动时间
-# 降低此值可减少窗口关闭到重新打开的间隔
+# 停止操作的强制等待时间（秒）
 STOP_FORCE_WAIT_SECONDS = 0.3
 
 # ==================== 代理配置 ====================

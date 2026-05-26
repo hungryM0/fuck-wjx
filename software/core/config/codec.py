@@ -25,7 +25,7 @@ from software.providers.contracts import (
     serialize_survey_question_metas,
 )
 from software.logging.log_utils import log_suppressed_exception
-from software.app.config import BROWSER_PREFERENCE, USER_AGENT_PRESETS
+from software.app.config import USER_AGENT_PRESETS
 
 CURRENT_CONFIG_SCHEMA_VERSION = 5
 _SUPPORTED_LEGACY_CONFIG_SCHEMA_VERSIONS = {3, 4}
@@ -311,7 +311,6 @@ def build_runtime_config_snapshot(
     snapshot.questions_info = clone_questions_info(info_source, default_provider=default_provider)
     snapshot.answer_rules = copy.deepcopy(list(getattr(snapshot, "answer_rules", []) or []))
     snapshot.dimension_groups = copy.deepcopy(list(getattr(snapshot, "dimension_groups", []) or []))
-    snapshot.browser_preference = copy.deepcopy(list(getattr(snapshot, "browser_preference", []) or []))
     snapshot.random_ua_keys = copy.deepcopy(list(getattr(snapshot, "random_ua_keys", []) or []))
     snapshot.random_ua_ratios = copy.deepcopy(dict(getattr(snapshot, "random_ua_ratios", {}) or {}))
     return snapshot
@@ -360,24 +359,6 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         normalized = str(value or REVERSE_FILL_FORMAT_AUTO).strip().lower()
         return normalized if normalized in _REVERSE_FILL_FORMATS else REVERSE_FILL_FORMAT_AUTO
 
-    def _browser_pref_list(value: Any) -> List[str]:
-        allowed = set(BROWSER_PREFERENCE)
-        prefs: List[str] = []
-        raw_list: List[Any] = []
-        if isinstance(value, str):
-            raw_list = [value]
-        elif isinstance(value, (list, tuple)):
-            raw_list = list(value)
-        if not raw_list:
-            return prefs
-        for item in raw_list:
-            name = str(item or "").strip().lower()
-            if not name or name not in allowed:
-                continue
-            if name not in prefs:
-                prefs.append(name)
-        return prefs
-
     config = RuntimeConfig()
     config.url = str(raw.get("url") or "")
     config.survey_title = str(raw.get("survey_title") or "")
@@ -387,11 +368,8 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     )
     config.target = _as_int(raw.get("target"), 1)
     config.threads = _as_int(raw.get("threads"), 1)
-    config.browser_preference = _browser_pref_list(raw.get("browser_preference"))
     config.submit_interval = _tuple_pair(raw.get("submit_interval"))
     config.answer_duration = _tuple_pair(raw.get("answer_duration"))
-    config.timed_mode_enabled = bool(raw.get("timed_mode_enabled", False))
-    config.timed_mode_interval = _as_float(raw.get("timed_mode_interval") or 3.0, 3.0)
     custom_proxy_api = str(raw.get("custom_proxy_api") or "").strip()
     proxy_source = str(raw.get("proxy_source") or "default").strip().lower()
     if proxy_source not in ("default", "benefit", "custom"):
@@ -424,7 +402,6 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.pause_on_aliyun_captcha = bool(raw.get("pause_on_aliyun_captcha", True))
     config.reliability_mode_enabled = bool(raw.get("reliability_mode_enabled", True))
     config.psycho_target_alpha = normalize_target_alpha(raw.get("psycho_target_alpha"))
-    config.headless_mode = _as_bool(raw.get("headless_mode", True), True)
     config.reverse_fill_enabled = _as_bool(raw.get("reverse_fill_enabled", False), False)
     config.reverse_fill_source_path = str(raw.get("reverse_fill_source_path") or "")
     config.reverse_fill_format = _reverse_fill_format(raw.get("reverse_fill_format"))

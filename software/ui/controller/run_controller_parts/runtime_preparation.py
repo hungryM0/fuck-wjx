@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple, cast
 
-from software.app.config import HEADLESS_MAX_THREADS, NON_HEADLESS_MAX_THREADS
+from software.app.config import HTTP_MAX_THREADS
 from software.core.psychometrics.psychometric import normalize_target_alpha
 from software.core.questions.config import (
     configure_probabilities,
@@ -67,11 +67,8 @@ class RuntimePreparationError(Exception):
 
 
 def _resolve_thread_limit(config: RuntimeConfig) -> int:
-    return (
-        HEADLESS_MAX_THREADS
-        if bool(getattr(config, "headless_mode", False))
-        else NON_HEADLESS_MAX_THREADS
-    )
+    del config
+    return HTTP_MAX_THREADS
 
 
 def _resolve_survey_provider(config: RuntimeConfig) -> str:
@@ -88,8 +85,6 @@ def _resolve_survey_title(config: RuntimeConfig, fallback_title: str) -> str:
 
 def _resolve_proxy_answer_duration(config: RuntimeConfig) -> Tuple[int, int]:
     raw = getattr(config, "answer_duration", None) or (0, 0)
-    if bool(getattr(config, "timed_mode_enabled", False)):
-        return (0, 0)
     return (int(raw[0]), int(raw[1]))
 
 
@@ -181,8 +176,6 @@ def _build_execution_config_template(
         survey_provider=survey_provider,
         target_num=requested_target_num,
         num_threads=max(1, min(thread_limit, requested_num_threads)),
-        headless_mode=bool(getattr(config, "headless_mode", False)),
-        browser_preference=copy.deepcopy(list(getattr(config, "browser_preference", []) or [])),
         fail_threshold=5,
         submit_interval_range_seconds=(
             int(getattr(config, "submit_interval", (0, 0))[0]),
@@ -192,8 +185,6 @@ def _build_execution_config_template(
             int(getattr(config, "answer_duration", (0, 0))[0]),
             int(getattr(config, "answer_duration", (0, 0))[1]),
         ),
-        timed_mode_enabled=bool(getattr(config, "timed_mode_enabled", False)),
-        timed_mode_refresh_interval=float(getattr(config, "timed_mode_interval", 3.0) or 3.0),
         random_proxy_ip_enabled=bool(getattr(config, "random_ip_enabled", False)),
         proxy_ip_pool=[],
         random_user_agent_enabled=bool(getattr(config, "random_ua_enabled", False)),

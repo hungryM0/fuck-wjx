@@ -26,7 +26,7 @@ from software.providers.registry import parse_survey  # noqa: E402
 from software.ui.controller.run_controller_parts.runtime_preparation import prepare_execution_artifacts  # noqa: E402
 
 
-def _build_live_test_config(url: str, *, headless: bool) -> RuntimeConfig:
+def _build_live_test_config(url: str) -> RuntimeConfig:
     normalized_url = str(url or "").strip()
     if not normalized_url:
         raise ValueError("问卷链接为空")
@@ -46,12 +46,10 @@ def _build_live_test_config(url: str, *, headless: bool) -> RuntimeConfig:
         threads=1,
         submit_interval=(0, 0),
         answer_duration=(0, 0),
-        timed_mode_enabled=False,
         random_ip_enabled=False,
         random_ua_enabled=False,
         fail_stop_enabled=True,
         reliability_mode_enabled=True,
-        headless_mode=headless,
         reverse_fill_enabled=False,
     )
     config.questions_info = list(questions_info)
@@ -63,14 +61,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
     parser.add_argument("--timeout", type=float, default=180.0)
-    parser.add_argument("--headed", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    config = _build_live_test_config(args.url, headless=not bool(args.headed))
+    config = _build_live_test_config(args.url)
 
     prepared = prepare_execution_artifacts(config, fallback_survey_title=config.survey_title)
     execution_config = prepared.execution_config_template
@@ -80,7 +77,6 @@ def main() -> int:
     execution_config.answer_duration_range_seconds = (0, 0)
     execution_config.random_proxy_ip_enabled = False
     execution_config.random_user_agent_enabled = False
-    execution_config.headless_mode = bool(config.headless_mode)
     state = ExecutionState(config=execution_config)
     state.initialize_reverse_fill_runtime()
 

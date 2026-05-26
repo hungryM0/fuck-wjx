@@ -14,8 +14,6 @@ class RuntimeSettingsState:
         "target": 1,
         "threads": 1,
         "random_ip_enabled": False,
-        "headless_mode": True,
-        "timed_mode_enabled": False,
         "survey_provider": "wjx",
         "proxy_source": "default",
         "submit_interval": (0, 0),
@@ -29,7 +27,7 @@ class RuntimeSettingsState:
     def normalize_value(key: str, value: Any) -> Any:
         if key in {"target", "threads"}:
             return max(1, int(value or 1))
-        if key in {"random_ip_enabled", "headless_mode", "timed_mode_enabled"}:
+        if key in {"random_ip_enabled"}:
             return bool(value)
         if key == "proxy_source":
             normalized = str(value or "default").strip().lower()
@@ -74,8 +72,6 @@ class RuntimeSettingsState:
         updates: Dict[str, Any] = {
             "target": getattr(config, "target", 1),
             "random_ip_enabled": getattr(config, "random_ip_enabled", False),
-            "headless_mode": getattr(config, "headless_mode", True),
-            "timed_mode_enabled": getattr(config, "timed_mode_enabled", False),
             "survey_provider": getattr(config, "survey_provider", "wjx"),
             "proxy_source": getattr(config, "proxy_source", "default"),
             "submit_interval": getattr(config, "submit_interval", (0, 0)),
@@ -90,8 +86,6 @@ class RuntimeSettingsState:
         config.target = max(1, int(state["target"] or 1))
         config.threads = max(1, int(state["threads"] or 1))
         config.random_ip_enabled = bool(state["random_ip_enabled"])
-        config.headless_mode = bool(state["headless_mode"])
-        config.timed_mode_enabled = bool(state["timed_mode_enabled"])
         config.survey_provider = str(state["survey_provider"] or "wjx")
         config.proxy_source = str(state["proxy_source"] or "default")
         config.submit_interval = self.normalize_value(

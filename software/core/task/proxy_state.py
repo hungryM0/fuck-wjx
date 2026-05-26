@@ -24,9 +24,6 @@ class ProxyLease:
 if TYPE_CHECKING:
     class _ProxyRuntimeHost(Protocol):
         lock: threading.Lock
-        _browser_semaphore_lock: threading.Lock
-        _browser_semaphore: Optional[threading.Semaphore]
-        _browser_semaphore_max_instances: int
         proxy_waiting_threads: int
         proxy_in_use_by_thread: dict[str, ProxyLease]
         successful_proxy_addresses: set[str]
@@ -41,14 +38,6 @@ if TYPE_CHECKING:
 
 
 class ProxyRuntimeMixin:
-    def get_browser_semaphore(self: "_ProxyRuntimeHost", max_instances: int) -> threading.Semaphore:
-        normalized = max(1, int(max_instances or 1))
-        with self._browser_semaphore_lock:
-            if self._browser_semaphore is None or self._browser_semaphore_max_instances != normalized:
-                self._browser_semaphore = threading.Semaphore(normalized)
-                self._browser_semaphore_max_instances = normalized
-            return self._browser_semaphore
-
     def register_proxy_waiter(self: "_ProxyRuntimeHost") -> None:
         with self.lock:
             self.proxy_waiting_threads = max(0, int(self.proxy_waiting_threads or 0)) + 1

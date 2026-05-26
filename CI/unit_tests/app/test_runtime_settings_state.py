@@ -16,8 +16,6 @@ def test_runtime_settings_state_defaults() -> None:
             "target": 1,
             "threads": 1,
             "random_ip_enabled": False,
-            "headless_mode": True,
-            "timed_mode_enabled": False,
             "survey_provider": SURVEY_PROVIDER_WJX,
             "proxy_source": "default",
             "submit_interval": (0, 0),
@@ -32,8 +30,6 @@ def test_runtime_settings_state_writes_synced_defaults_to_config() -> None:
         target=9,
         threads=3,
         random_ip_enabled=True,
-        headless_mode=False,
-        timed_mode_enabled=True,
         survey_provider="qq",
         proxy_source="custom",
         submit_interval=(2, 4),
@@ -48,8 +44,6 @@ def test_runtime_settings_state_writes_synced_defaults_to_config() -> None:
         "target": cfg.target,
         "threads": cfg.threads,
         "random_ip_enabled": cfg.random_ip_enabled,
-        "headless_mode": cfg.headless_mode,
-        "timed_mode_enabled": cfg.timed_mode_enabled,
         "survey_provider": cfg.survey_provider,
         "proxy_source": cfg.proxy_source,
         "submit_interval": cfg.submit_interval,
@@ -58,8 +52,6 @@ def test_runtime_settings_state_writes_synced_defaults_to_config() -> None:
         "target": 1,
         "threads": 1,
         "random_ip_enabled": False,
-        "headless_mode": True,
-        "timed_mode_enabled": False,
         "survey_provider": SURVEY_PROVIDER_WJX,
         "proxy_source": "default",
         "submit_interval": (0, 0),
@@ -74,8 +66,6 @@ def test_runtime_settings_state_normalizes_updates() -> None:
         target=0,
         threads="4",
         random_ip_enabled=1,
-        headless_mode=0,
-        timed_mode_enabled="yes",
         proxy_source="CUSTOM",
         submit_interval=(3, 1),
         answer_duration=[2, 8],
@@ -85,8 +75,6 @@ def test_runtime_settings_state_normalizes_updates() -> None:
     assert current["target"] == 1
     assert current["threads"] == 4
     assert current["random_ip_enabled"] is True
-    assert current["headless_mode"] is False
-    assert current["timed_mode_enabled"] is True
     assert current["proxy_source"] == "custom"
     assert current["submit_interval"] == (3, 3)
     assert current["answer_duration"] == (2, 8)
@@ -121,8 +109,6 @@ def test_run_controller_writes_runtime_state_to_config(qapp) -> None:
         target=10,
         threads=3,
         random_ip_enabled=True,
-        headless_mode=False,
-        timed_mode_enabled=True,
         proxy_source="custom",
         submit_interval=(4, 2),
         answer_duration=(6, 9),
@@ -134,8 +120,6 @@ def test_run_controller_writes_runtime_state_to_config(qapp) -> None:
     assert cfg.target == 10
     assert cfg.threads == 3
     assert cfg.random_ip_enabled is True
-    assert cfg.headless_mode is False
-    assert cfg.timed_mode_enabled is True
     assert cfg.proxy_source == "custom"
     assert cfg.submit_interval == (4, 4)
     assert cfg.answer_duration == (6, 9)
@@ -147,8 +131,6 @@ def test_runtime_settings_state_writes_to_config() -> None:
         target=12,
         threads=4,
         random_ip_enabled=True,
-        headless_mode=False,
-        timed_mode_enabled=True,
         survey_provider="qq",
         proxy_source="benefit",
         submit_interval=(5, 1),
@@ -163,8 +145,6 @@ def test_runtime_settings_state_writes_to_config() -> None:
     assert cfg.target == 12
     assert cfg.threads == 4
     assert cfg.random_ip_enabled is True
-    assert cfg.headless_mode is False
-    assert cfg.timed_mode_enabled is True
     assert cfg.survey_provider == "qq"
     assert cfg.proxy_source == "benefit"
     assert cfg.submit_interval == (5, 5)
