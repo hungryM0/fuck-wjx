@@ -502,6 +502,40 @@ class AsyncSlotRunner:
         questions = list((self.config.questions_metadata or {}).values())
         return not bool(get_http_logic_fallback_reason(questions))
 
+    def _resolve_playwright_fallback_block_reason(self) -> str:
+        provider = normalize_survey_provider(self.config.survey_provider)
+        if provider not in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}:
+            return ""
+        url = str(self.config.url or "").strip()
+        if not url:
+            return "问卷链接为空，无法进入纯 HTTP 提交"
+        questions = list((self.config.questions_metadata or {}).values())
+        reason = str(get_http_logic_fallback_reason(questions) or "").strip()
+        if reason:
+            return f"{reason}，已禁用 Playwright 兜底"
+        return ""
+
+    def _block_playwright_fallback(self, reason: str) -> None:
+        message = str(reason or "").strip() or "当前问卷不支持纯 HTTP 提交，已禁用 Playwright 兜底"
+        logging.error("会话[%s]已阻止 Playwright 兜底：%s", self.slot_label, message)
+        self._update_status("纯 HTTP 不支持", running=False)
+        self.stop_policy.record_failure(
+            self.stop_proxy,
+            thread_name=self.slot_label,
+            failure_reason=FailureReason.FILL_FAILED,
+            status_text="纯 HTTP 不支持",
+            log_message=message,
+            terminal_stop_category="http_runtime_only",
+            force_stop_when_threshold_reached=True,
+            consume_reverse_fill_attempt=False,
+        )
+        self.state.mark_terminal_stop(
+            "http_runtime_only",
+            failure_reason=FailureReason.FILL_FAILED.value,
+            message=message,
+        )
+        self.run_context.stop_event.set()
+
     def _mark_http_submit_success(self) -> bool:
         if self.proxy_address:
             try:
@@ -661,6 +695,17 @@ class AsyncSlotRunner:
     async def run(self) -> None:
         if self._uses_http_runtime():
             await self._run_http_runtime()
+            return
+
+        block_reason = self._resolve_playwright_fallback_block_reason()
+        if block_reason:
+            self._block_playwright_fallback(block_reason)
+            try:
+                self.state.release_joint_sample(self.slot_label)
+                self.state.release_reverse_fill_sample(self.slot_label, requeue=True)
+                self.state.mark_thread_finished(self.slot_label, status_text=self._resolve_finished_status_text())
+            except Exception:
+                logging.info("阻止 Playwright 兜底后的收尾状态更新失败", exc_info=True)
             return
 
         self._update_status("会话启动", running=True)

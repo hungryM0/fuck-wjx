@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 from software.app.config import HEADLESS_PAGE_BUFFER_DELAY, HEADLESS_PAGE_CLICK_DELAY
 from software.core.engine.async_wait import sleep_or_stop
-from software.core.modes.duration_control import has_configured_answer_duration, simulate_answer_duration_delay
 from software.core.task import ExecutionConfig, ExecutionState
 from software.network.browser import NoSuchElementException
 from software.network.browser.runtime_async import BrowserDriver
@@ -241,21 +240,6 @@ async def brush_qq(
 
         is_last_page = page_index == len(page_groups) - 1
         if is_last_page:
-            if has_configured_answer_duration(runtime_config.answer_duration_range_seconds):
-                try:
-                    ctx.update_thread_status(thread_name, "等待时长中", running=True)
-                except Exception:
-                    logging.info("更新线程状态失败：等待时长中", exc_info=True)
-            if await simulate_answer_duration_delay(
-                active_stop,
-                runtime_config.answer_duration_range_seconds,
-                survey_provider=getattr(runtime_config, "survey_provider", ""),
-            ):
-                try:
-                    ctx.update_thread_status(thread_name, "已中断", running=False)
-                except Exception:
-                    logging.info("更新线程状态失败：已中断", exc_info=True)
-                return False
             break
 
         current_first = str(group.anchor_question_id or "")

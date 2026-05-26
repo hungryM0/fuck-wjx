@@ -20,7 +20,7 @@ from software.network.proxy.policy.source import (
     get_proxy_source,
     is_official_proxy_source,
 )
-from software.providers.common import SURVEY_PROVIDER_WJX
+from software.providers.common import SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
 
 
 # ==================== 地址规范化 ====================
@@ -149,6 +149,9 @@ def get_proxy_required_ttl_seconds(
     if normalized_provider == SURVEY_PROVIDER_WJX:
         # 问卷星可通过 starttime 回填作答时长，因此只要求代理在分配时尚未过期。
         return 0
+    if normalized_provider == SURVEY_PROVIDER_QQ:
+        # 腾讯问卷代理固定拿 1 分钟，不再随配置时长放大 TTL。
+        return 60
     if normalized_provider:
         minute = get_proxy_minute_by_answer_seconds(
             max_seconds,

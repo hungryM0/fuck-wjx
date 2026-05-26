@@ -250,6 +250,7 @@ async def test_qq_http_runtime_uses_proxy_and_answer_session(monkeypatch) -> Non
         url="https://wj.qq.com/s2/123/hash/",
         survey_provider="qq",
         submit_enabled=True,
+        answer_duration_range_seconds=(480, 480),
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(num=1, title="Q1", provider="qq", provider_question_id="q1", provider_type="radio"),
@@ -272,6 +273,7 @@ async def test_qq_http_runtime_uses_proxy_and_answer_session(monkeypatch) -> Non
     monkeypatch.setattr(qq_http, "_fetch_submit_source", fake_fetch)
     monkeypatch.setattr(qq_http, "build_answer_action", fake_build_action)
     monkeypatch.setattr(qq_http.http_client, "apost", fake_post)
+    monkeypatch.setattr(qq_http, "sample_answer_duration_seconds", lambda *_args, **_kwargs: 480.0)
 
     ok = await qq_http.brush_qq_http(
         config,
@@ -284,6 +286,7 @@ async def test_qq_http_runtime_uses_proxy_and_answer_session(monkeypatch) -> Non
     assert captured.fetch_proxies == "http://1.1.1.1:80"
     assert captured.post_kwargs["proxies"] == "http://1.1.1.1:80"
     assert captured.post_kwargs["headers"]["X-Answer-Session"] == "sess"
+    assert captured.post_kwargs["json"]["answer_survey"]["duration"] == 480
 
 
 @pytest.mark.asyncio

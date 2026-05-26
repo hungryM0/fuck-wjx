@@ -71,8 +71,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime, "_answer_question_by_meta", _async_append(calls, "star", result=True)),
             (runtime, "submit", _async_append(calls, "submit")),
         )
@@ -117,8 +115,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime_answerers, "_click_star_cell", _star_click),
             (runtime_answerers, "_click_matrix_cell", _plain_click),
             (runtime, "submit", _async_append(calls, "submit")),
@@ -161,8 +157,6 @@ class TencentRuntimeTests:
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
             (runtime, "HEADLESS_PAGE_CLICK_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime, "_answer_qq_single", _async_append(calls, "single")),
             (runtime, "_answer_qq_text", _async_append(calls, "text")),
             (runtime, "_click_next_page_button", _async_append(calls, "next", result=True)),
@@ -256,8 +250,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime, "_answer_question_by_meta", _async_append(calls, "answer", result=True)),
             (runtime, "submit", _async_append(calls, "submit")),
         )
@@ -309,8 +301,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime, "_answer_question_by_meta", _async_append(calls, "answer", result=True)),
             (runtime, "submit", _async_append(calls, "submit")),
         )
@@ -369,8 +359,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime, "_answer_question_by_meta", _answer_question_by_meta),
             (runtime, "submit", _async_append(calls, "submit")),
         )
@@ -388,8 +376,9 @@ class TencentRuntimeTests:
         assert calls == ["page1-q1", "page1-q2", "submit"]
 
     @pytest.mark.asyncio
-    async def test_brush_qq_aborts_during_final_duration_wait_before_submit(self, make_runtime_state, patch_attrs) -> None:
+    async def test_brush_qq_skips_final_duration_wait_even_when_configured(self, make_runtime_state, patch_attrs) -> None:
         ctx = make_runtime_state({1: _meta(1)}, {1: ("single", 0)})
+        ctx.config.answer_duration_range_seconds = (300, 300)
         calls: list[str] = []
         patch_attrs(
             (runtime, "_wait_for_question_visible", _async_return(True)),
@@ -398,8 +387,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: True),
-            (runtime, "simulate_answer_duration_delay", _async_return(True)),
             (runtime, "_answer_question_by_meta", _async_append(calls, "single", result=True)),
             (runtime, "submit", _async_append(calls, "submit")),
         )
@@ -413,10 +400,9 @@ class TencentRuntimeTests:
             psycho_plan=None,
         )
 
-        assert not result
-        assert calls == ["single"]
-        assert ("等待时长中", True) in ctx.status_updates
-        assert ctx.status_updates[-1] == ("已中断", False)
+        assert result
+        assert calls == ["single", "submit"]
+        assert ("等待时长中", True) not in ctx.status_updates
 
     @pytest.mark.asyncio
     async def test_brush_qq_skips_question_when_snapshot_says_not_visible_and_no_mapping(self, make_runtime_state, patch_attrs) -> None:
@@ -438,8 +424,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime, "_answer_question_by_meta", _async_append(calls, "single", result=True)),
             (runtime, "submit", _async_append(calls, "submit")),
         )
@@ -481,8 +465,6 @@ class TencentRuntimeTests:
             (runtime, "dismiss_resume_dialog_if_present", _async_return(None)),
             (runtime, "_is_headless_mode", lambda _ctx: True),
             (runtime, "HEADLESS_PAGE_BUFFER_DELAY", 0.0),
-            (runtime, "has_configured_answer_duration", lambda _value: False),
-            (runtime, "simulate_answer_duration_delay", _async_return(False)),
             (runtime, "_answer_question_by_meta", _answer_question_by_meta),
             (runtime, "submit", _async_append(calls, "submit")),
         )

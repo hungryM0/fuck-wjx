@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 
 from software.core.engine.async_wait import sleep_or_stop
 from software.network.proxy.policy.source import get_proxy_minute_by_answer_seconds
-from software.providers.common import SURVEY_PROVIDER_WJX
+from software.providers.common import SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
 from software.logging.log_utils import log_suppressed_exception
 
 _COMPLETION_MARKERS = (
@@ -68,7 +68,7 @@ def sample_answer_duration_seconds(
 
     normalized_provider = str(survey_provider or "").strip().lower()
     safe_upper = max_delay
-    if normalized_provider and normalized_provider != SURVEY_PROVIDER_WJX:
+    if normalized_provider and normalized_provider not in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}:
         proxy_ref_seconds = max(0, int(max(raw_min, raw_max)))
         ip_minute = get_proxy_minute_by_answer_seconds(
             proxy_ref_seconds,

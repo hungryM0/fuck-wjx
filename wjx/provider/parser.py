@@ -28,11 +28,6 @@ _NOT_OPEN_TIME_RE = re.compile(
     r"此问卷将于\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2})\s*开放"
 )
 
-acquire_parse_browser_session = None
-is_playwright_startup_environment_error = lambda _exc: False
-describe_playwright_startup_error = lambda exc: str(exc or "")
-
-
 def is_paused_survey_page(html: str) -> bool:
     """检测页面是否为“问卷已暂停，不能填写”提示页。"""
     text = _normalize_html_text(html)

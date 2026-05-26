@@ -92,13 +92,13 @@ class DurationControlTests:
         assert not await duration_control.simulate_answer_duration_delay(answer_duration_range_seconds=(10, 10))
         assert slept == [10.0]
 
-    def test_sample_answer_duration_seconds_caps_non_wjx_by_proxy_minute(self, patch_attrs) -> None:
+    def test_sample_answer_duration_seconds_keeps_qq_unclamped(self, patch_attrs) -> None:
         patch_attrs((duration_control.random, "gauss", lambda center, _std: center))
         waited = duration_control.sample_answer_duration_seconds(
             (250, 250),
             survey_provider=SURVEY_PROVIDER_QQ,
         )
-        assert waited < 300
+        assert waited == 250.0
 
     def test_sample_answer_duration_seconds_keeps_wjx_unclamped(self, patch_attrs) -> None:
         patch_attrs((duration_control.random, "gauss", lambda center, _std: center))
@@ -107,6 +107,14 @@ class DurationControlTests:
             survey_provider=SURVEY_PROVIDER_WJX,
         )
         assert waited == 250.0
+
+    def test_sample_answer_duration_seconds_still_caps_other_provider_by_proxy_minute(self, patch_attrs) -> None:
+        patch_attrs((duration_control.random, "gauss", lambda center, _std: center))
+        waited = duration_control.sample_answer_duration_seconds(
+            (250, 250),
+            survey_provider="credamo",
+        )
+        assert waited < 300
 
     @pytest.mark.asyncio
     async def test_completion_page_detects_complete_url_and_provider_signal(self, patch_attrs) -> None:

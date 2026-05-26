@@ -84,8 +84,6 @@ def _strip_markdown_images(text: Any) -> str:
     if not raw_text:
         return ""
     return _QQ_MARKDOWN_IMAGE_RE.sub(" ", raw_text)
-
-
 def _normalize_media_url(raw: Any) -> str:
     text = str(raw or "").strip()
     if not text:
@@ -321,13 +319,9 @@ def _build_qq_parse_result(
     *,
     raw_title: Any,
     empty_error_message: str,
-    browser_media: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     title = _normalize_qq_title(raw_title or "")
     info = _standardize_qq_questions(questions)
-    if browser_media:
-        _merge_browser_media(info, browser_media)
-        _inherit_description_browser_media(info)
     if not info:
         raise RuntimeError(empty_error_message)
     return info, title
@@ -951,202 +945,6 @@ def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str,
         })
     _attach_qq_logic_metadata(questions, normalized)
     return _assign_visible_display_numbers(_merge_same_page_descriptions_into_questions(normalized))
-
-
-async def _extract_qq_media_via_browser(page: Any) -> Dict[str, List[Dict[str, Any]]]:
-    script = r"""
-() => {
-  const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-  const normalizeUrl = (value) => {
-    const text = clean(value);
-    if (!text) return '';
-    if (text.startsWith('//')) return `https:${text}`;
-    return text;
-  };
-  const uniquePush = (items, media) => {
-    if (!media || !media.source_url) return;
-    const key = `${media.scope}|${String(media.index)}|${media.source_url}`;
-    if (items.__seen.has(key)) return;
-    items.__seen.add(key);
-    items.list.push(media);
-  };
-  const result = {};
-  const roots = Array.from(document.querySelectorAll('main [data-question-id], .question-list [data-question-id], .question-item, .question'));
-  roots.forEach((root, index) => {
-    const questionId = clean(root.getAttribute('data-question-id') || root.getAttribute('data-id') || root.id || String(index + 1));
-    const holder = { list: [], __seen: new Set() };
-    const optionNodes = Array.from(root.querySelectorAll('.choice-item, .option-item, li'));
-    optionNodes.forEach((item, optionIndex) => {
-      const label = clean(item.innerText || item.textContent || '') || `选项 ${optionIndex + 1}`;
-      Array.from(item.querySelectorAll('img')).forEach((img) => {
-        uniquePush(holder, {
-          kind: 'image',
-          scope: 'option',
-          index: optionIndex,
-          source_url: normalizeUrl(img.getAttribute('src') || img.getAttribute('data-src')),
-          label,
-        });
-      });
-    });
-    const rowNodes = Array.from(root.querySelectorAll('tbody tr, .matrix-row'));
-    rowNodes.forEach((row, rowIndex) => {
-      const labelNode = row.querySelector('th, td, .label, .row-title');
-      const label = clean((labelNode && (labelNode.innerText || labelNode.textContent)) || '') || `第 ${rowIndex + 1} 行`;
-      Array.from(row.querySelectorAll('img')).forEach((img) => {
-        uniquePush(holder, {
-          kind: 'image',
-          scope: 'row',
-          index: rowIndex,
-          source_url: normalizeUrl(img.getAttribute('src') || img.getAttribute('data-src')),
-          label,
-        });
-      });
-    });
-    Array.from(root.querySelectorAll('img')).forEach((img) => {
-      if (img.closest('.choice-item, .option-item, li, tbody tr, .matrix-row')) {
-        return;
-      }
-      uniquePush(holder, {
-        kind: 'image',
-        scope: 'title',
-        index: null,
-        source_url: normalizeUrl(img.getAttribute('src') || img.getAttribute('data-src')),
-        label: '题干图',
-      });
-    });
-    result[questionId] = holder.list;
-  });
-  return result;
-}
-"""
-    payload = await page.evaluate(script) or {}
-    if not isinstance(payload, dict):
-        return {}
-    normalized: Dict[str, List[Dict[str, Any]]] = {}
-    for key, value in payload.items():
-        question_id = str(key or "").strip()
-        if not question_id or not isinstance(value, list):
-            continue
-        normalized[question_id] = [item for item in value if isinstance(item, dict)]
-    return normalized
-
-
-async def _get_qq_browser_current_url(driver: Any, page: Any) -> str:
-    try:
-        return str(getattr(page, "url", "") or await driver.current_url() or "")
-    except Exception:
-        return ""
-
-
-async def _ensure_qq_browser_ready(driver: Any, page: Any) -> None:
-    current_url = await _get_qq_browser_current_url(driver, page)
-    if _is_qq_login_required_url(current_url):
-        _raise_qq_login_required()
-    try:
-        await page.wait_for_selector("main, .question-list, .page-control", state="visible", timeout=12000)
-        return
-    except Exception:
-        try:
-            await page.wait_for_load_state("networkidle", timeout=1500)
-        except Exception:
-            pass
-    current_url = await _get_qq_browser_current_url(driver, page)
-    if _is_qq_login_required_url(current_url):
-        _raise_qq_login_required()
-
-
-async def _fetch_qq_browser_payload(page: Any, survey_id: str, hash_value: str) -> Dict[str, Any]:
-    payload = await page.evaluate(
-        """async ({ surveyId, hashValue }) => {
-            const sessionUrl = `https://wj.qq.com/api/v2/respondent/surveys/${surveyId}/session?_=${Date.now()}&hash=${encodeURIComponent(hashValue)}`;
-            await fetch(sessionUrl, {
-                credentials: 'include',
-                headers: {
-                    'Accept': 'application/json, text/plain, */*'
-                }
-            });
-
-            const metaUrl = `https://wj.qq.com/api/v2/respondent/surveys/${surveyId}/meta?_=${Date.now()}&hash=${encodeURIComponent(hashValue)}&locale=zhs`;
-            const metaResponse = await fetch(metaUrl, {
-                credentials: 'include',
-                headers: {
-                    'Accept': 'application/json, text/plain, */*'
-                }
-            });
-            const metaJson = await metaResponse.json();
-
-            const requestUrl = `https://wj.qq.com/api/v2/respondent/surveys/${surveyId}/questions?_=${Date.now()}&hash=${encodeURIComponent(hashValue)}&locale=zhs`;
-            const response = await fetch(requestUrl, { credentials: 'include' });
-            const json = await response.json();
-            return {
-                status: response.status,
-                ok: response.ok,
-                payload: json,
-                metaStatus: metaResponse.status,
-                metaPayload: metaJson,
-                title: document.title || '',
-                pageUrl: location.href || ''
-            };
-        }""",
-        {"surveyId": survey_id, "hashValue": hash_value},
-    ) or {}
-    if not isinstance(payload, dict):
-        raise RuntimeError("腾讯问卷浏览器回退返回了无效响应")
-    return payload
-
-
-def _extract_qq_browser_questions(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    if _is_qq_login_required_url(payload.get("pageUrl")):
-        _raise_qq_login_required()
-    _raise_if_qq_login_required(payload)
-    if not bool(payload.get("ok")):
-        raise RuntimeError(f"腾讯问卷题目接口请求失败（HTTP {payload.get('status') or 'unknown'}）")
-    meta_payload = payload.get("metaPayload") or {}
-    meta_data = _ensure_qq_api_ok(meta_payload, "meta?locale=zhs")
-    outer_payload = payload.get("payload") or {}
-    questions_data = _ensure_qq_api_ok(outer_payload, "questions?locale=zhs")
-    questions = questions_data.get("questions")
-    if not isinstance(questions, list) or not questions:
-        raise RuntimeError("腾讯问卷题目接口未返回可解析的题目数据")
-    return meta_data, questions
-
-
-async def _fetch_qq_survey_via_browser(url: str, survey_id: str, hash_value: str) -> Tuple[List[Dict[str, Any]], str]:
-    del url, survey_id, hash_value
-    raise RuntimeError("腾讯问卷解析已禁用浏览器兜底")
-
-
-def _merge_browser_media(
-    info: List[Dict[str, Any]],
-    browser_media: Dict[str, List[Dict[str, Any]]],
-) -> None:
-    if not browser_media:
-        return
-    for item in info:
-        question_id = str(item.get("provider_question_id") or "").strip()
-        if not question_id:
-            continue
-        existing = list(item.get("question_media") or [])
-        seen = {
-            (
-                str(media.get("scope") or ""),
-                media.get("index"),
-                str(media.get("source_url") or ""),
-            )
-            for media in existing
-            if isinstance(media, dict)
-        }
-        for media in browser_media.get(question_id, []):
-            key = (
-                str(media.get("scope") or ""),
-                media.get("index"),
-                str(media.get("source_url") or ""),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            existing.append(media)
-        item["question_media"] = existing
 
 
 async def parse_qq_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:

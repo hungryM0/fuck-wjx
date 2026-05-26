@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -37,55 +36,10 @@ class _FakeHttpResponse:
         return self._json_payload
 
 
-class _FakeQQPage:
-    def __init__(self, *, payload=None, url: str = "https://wj.qq.com/s2/123/hash/", wait_selector_error: Exception | None = None) -> None:
-        self._payload = payload or {}
-        self.url = url
-        self.wait_selector_error = wait_selector_error
-        self.selector_waits: list[tuple[str, str, int]] = []
-        self.load_state_waits: list[tuple[str, int]] = []
-        self.evaluations: list[tuple[str, object]] = []
-
-    async def wait_for_selector(self, selector: str, *, state: str, timeout: int) -> None:
-        self.selector_waits.append((selector, state, timeout))
-        if self.wait_selector_error is not None:
-            raise self.wait_selector_error
-
-    async def wait_for_load_state(self, state: str, *, timeout: int) -> None:
-        self.load_state_waits.append((state, timeout))
-
-    async def evaluate(self, script: str, payload: object):
-        self.evaluations.append((script, payload))
-        return self._payload
-
-
-class _FakeQQDriver:
-    def __init__(self, page: _FakeQQPage | None, *, title: str = "") -> None:
-        self._page = page
-        self._title = title
-        self._current_url = getattr(page, "url", "")
-        self.get_calls: list[str] = []
-
-    async def get(self, url: str) -> None:
-        self.get_calls.append(url)
-
-    async def page(self):
-        return self._page
-
-    async def title(self) -> str:
-        return self._title
-
-    async def current_url(self) -> str:
-        return self._current_url
-
-    def mark_cleanup_done(self) -> bool:
-        return True
-
-    async def aclose(self) -> None:
-        return None
-
-
 class TencentParserTests:
+    def test_parser_module_no_longer_exposes_parse_browser_fallback(self) -> None:
+        assert not hasattr(qq_parser, "acquire_parse_browser_session")
+
     def test_login_required_helpers_cover_url_error_and_response(self) -> None:
         assert qq_parser._is_qq_login_required_url("https://open.weixin.qq.com/connect/confirm?a=1")
         assert qq_parser._is_qq_login_required_url("wj.qq.com/r/login.html")
@@ -387,281 +341,13 @@ class TencentParserTests:
             },
         ]
 
-    def test_markdown_image_text_is_stripped_from_title_and_converted_to_media_url(self) -> None:
-        normalized = qq_parser._standardize_qq_questions(
-            [
-                {
-                    "id": "q5",
-                    "type": "description",
-                    "title": "模特A：无眼镜 ![2552.jpeg](https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg){auto,auto}",
-                    "description": "请观察以下模特照片",
-                    "page_id": "page-a",
-                    "page": "2",
-                },
-                {
-                    "id": "q6",
-                    "type": "matrix_radio",
-                    "title": "请根据您对模特的第一印象进行评价",
-                    "options": [{"text": "1"}, {"text": "2"}],
-                    "sub_titles": [{"text": "专业"}],
-                    "page_id": "page-a",
-                    "page": "2",
-                },
-            ]
-        )
-
-        second = normalized[1]
-        assert second["title"] == "模特A：无眼镜 请根据您对模特的第一印象进行评价"
-        assert second["question_media"] == [
-            {
-                "kind": "image",
-                "scope": "title",
-                "index": None,
-                "source_url": "https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg",
-                "label": "题干图",
-            }
-        ]
-
-    def test_normalize_media_url_extracts_markdown_image_target(self) -> None:
-        assert (
-            qq_parser._normalize_media_url(
-                "![2552.jpeg](https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg){auto,auto}"
-            )
-            == "https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg"
-        )
-
-    def test_merge_browser_media_skips_duplicates_and_keeps_existing_order(self) -> None:
-        info = [
-            {
-                "provider_question_id": "q1",
-                "question_media": [
-                    {
-                        "kind": "image",
-                        "scope": "title",
-                        "index": None,
-                        "source_url": "https://example.com/title.png",
-                        "label": "题干图",
-                    }
-                ],
-            }
-        ]
-
-        qq_parser._merge_browser_media(
-            info,
-            {
-                "q1": [
-                    {
-                        "kind": "image",
-                        "scope": "title",
-                        "index": None,
-                        "source_url": "https://example.com/title.png",
-                        "label": "重复题干图",
-                    },
-                    {
-                        "kind": "image",
-                        "scope": "option",
-                        "index": 0,
-                        "source_url": "https://example.com/option-a.png",
-                        "label": "选项A",
-                    },
-                    {
-                        "kind": "image",
-                        "scope": "option",
-                        "index": 0,
-                        "source_url": "https://example.com/option-a.png",
-                        "label": "重复选项图",
-                    },
-                ]
-            },
-        )
-
-        assert info[0]["question_media"] == [
-            {
-                "kind": "image",
-                "scope": "title",
-                "index": None,
-                "source_url": "https://example.com/title.png",
-                "label": "题干图",
-            },
-            {
-                "kind": "image",
-                "scope": "option",
-                "index": 0,
-                "source_url": "https://example.com/option-a.png",
-                "label": "选项A",
-            },
-        ]
-
-    @pytest.mark.asyncio
-    async def test_parse_qq_survey_does_not_fall_back_to_browser_when_http_fails(self, patch_attrs) -> None:
-        browser_used = {"value": False}
-
-        @asynccontextmanager
-        async def fake_pool():
-            browser_used["value"] = True
-            yield _FakeQQDriver(_FakeQQPage())
-
+    async def test_parse_qq_survey_returns_http_result_without_browser_fallback(self, patch_attrs) -> None:
         patch_attrs(
             (qq_parser, "_fetch_qq_survey_via_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("http failed"))),
-            (qq_parser, "acquire_parse_browser_session", fake_pool),
         )
 
         with pytest.raises(RuntimeError, match="腾讯问卷 HTTP 解析失败：http failed"):
             await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
-
-        assert not browser_used["value"]
-
-    @pytest.mark.asyncio
-    async def test_extract_qq_media_via_browser_collects_title_image_outside_title_node(self) -> None:
-        class _EvalPage:
-            async def evaluate(self, script: str):
-                assert "root.querySelectorAll('img')" in script
-                assert "img.closest('.choice-item, .option-item, li, tbody tr, .matrix-row')" in script
-                return {
-                    "q5": [
-                        {
-                            "kind": "image",
-                            "scope": "title",
-                            "index": None,
-                            "source_url": "https://example.com/model-a.jpg",
-                            "label": "题干图",
-                        }
-                    ]
-                }
-
-        media = await qq_parser._extract_qq_media_via_browser(_EvalPage())
-
-        assert media == {
-            "q5": [
-                {
-                    "kind": "image",
-                    "scope": "title",
-                    "index": None,
-                    "source_url": "https://example.com/model-a.jpg",
-                    "label": "题干图",
-                }
-            ]
-        }
-
-    def test_merge_same_page_descriptions_carries_media_to_next_question(self) -> None:
-        merged = qq_parser._merge_same_page_descriptions_into_questions(
-            [
-                {
-                    "num": 5,
-                    "page": 2,
-                    "title": "模特A",
-                    "description": "",
-                    "is_description": True,
-                    "question_media": [
-                        {
-                            "kind": "image",
-                            "scope": "title",
-                            "index": None,
-                            "source_url": "https://example.com/model-a.jpg",
-                            "label": "题干图",
-                        }
-                    ],
-                },
-                {
-                    "num": 6,
-                    "page": 2,
-                    "title": "请评分",
-                    "description": "",
-                    "is_description": False,
-                    "question_media": [],
-                },
-            ]
-        )
-
-        assert merged[1]["title"] == "模特A 请评分"
-        assert merged[1]["question_media"] == [
-            {
-                "kind": "image",
-                "scope": "title",
-                "index": None,
-                "source_url": "https://example.com/model-a.jpg",
-                "label": "题干图",
-            }
-        ]
-
-    def test_inherit_description_browser_media_merges_late_browser_images_into_next_question(self) -> None:
-        items = [
-            {
-                "num": 5,
-                "page": 2,
-                "title": "模特A",
-                "description": "",
-                "is_description": True,
-                "question_media": [
-                    {
-                        "kind": "image",
-                        "scope": "title",
-                        "index": None,
-                        "source_url": "https://example.com/model-a.jpg",
-                        "label": "题干图",
-                    }
-                ],
-            },
-            {
-                "num": 6,
-                "page": 2,
-                "title": "请评分",
-                "description": "",
-                "is_description": False,
-                "question_media": [
-                    {
-                        "kind": "image",
-                        "scope": "option",
-                        "index": 0,
-                        "source_url": "https://example.com/option-a.jpg",
-                        "label": "选项A",
-                    }
-                ],
-            },
-        ]
-
-        qq_parser._inherit_description_browser_media(items)
-
-        assert items[1]["question_media"] == [
-            {
-                "kind": "image",
-                "scope": "title",
-                "index": None,
-                "source_url": "https://example.com/model-a.jpg",
-                "label": "题干图",
-            },
-            {
-                "kind": "image",
-                "scope": "option",
-                "index": 0,
-                "source_url": "https://example.com/option-a.jpg",
-                "label": "选项A",
-            },
-        ]
-
-    @pytest.mark.asyncio
-    async def test_parse_qq_survey_returns_http_result_without_browser_fallback(self, patch_attrs) -> None:
-        browser_used = {"value": False}
-
-        @asynccontextmanager
-        async def fake_pool():
-            browser_used["value"] = True
-            yield _FakeQQDriver(_FakeQQPage())
-
-        patch_attrs(
-            (
-                qq_parser,
-                "_fetch_qq_survey_via_http",
-                AsyncMock(return_value=([{"num": 1, "title": "HTTP 题目", "type_code": "3"}], "HTTP 标题")),
-            ),
-            (qq_parser, "acquire_parse_browser_session", fake_pool),
-        )
-
-        info, title = await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
-
-        assert info == [{"num": 1, "title": "HTTP 题目", "type_code": "3"}]
-        assert title == "HTTP 标题"
-        assert not browser_used["value"]
 
     @pytest.mark.asyncio
     async def test_parse_qq_survey_rejects_login_url_and_http_failure_without_browser_fallback(self, patch_attrs) -> None:
@@ -676,23 +362,13 @@ class TencentParserTests:
             await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
 
     @pytest.mark.asyncio
-    async def test_parse_qq_survey_skips_browser_fallback_for_login_required_http_error(self, patch_attrs) -> None:
-        browser_used = {"value": False}
-
-        @asynccontextmanager
-        async def fake_pool():
-            browser_used["value"] = True
-            yield _FakeQQDriver(_FakeQQPage())
-
+    async def test_parse_qq_survey_login_required_http_error_is_terminal(self, patch_attrs) -> None:
         patch_attrs(
             (qq_parser, "_fetch_qq_survey_via_http", AsyncMock(side_effect=RuntimeError("need login"))),
-            (qq_parser, "acquire_parse_browser_session", fake_pool),
         )
 
         with pytest.raises(RuntimeError, match="需要登录"):
             await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
-
-        assert not browser_used["value"]
 
     @pytest.mark.asyncio
     async def test_parse_qq_survey_http_failure_is_terminal(self, patch_attrs) -> None:

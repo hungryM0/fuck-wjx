@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 
 from wjx.provider import parser as wjx_parser
-
-
-async def _raise_browser_error(exc: Exception) -> None:
-    raise exc
 
 
 class _FakeHttpResponse:
@@ -22,36 +17,12 @@ class _FakeHttpResponse:
             raise self._should_raise
 
 
-class _FakeBrowserDriver:
-    def __init__(self, html: str) -> None:
-        self._html = html
-        self._page = self._FakePage()
-        self.get_calls: list[tuple[str, int, str]] = []
-
-    class _FakePage:
-        async def wait_for_selector(self, *_args, **_kwargs) -> None:
-            return None
-
-        async def wait_for_load_state(self, *_args, **_kwargs) -> None:
-            return None
-
-    async def get(self, url: str, timeout: int = 20000, wait_until: str = "domcontentloaded") -> None:
-        self.get_calls.append((url, timeout, wait_until))
-
-    async def page(self):
-        return self._page
-
-    async def page_source(self) -> str:
-        return self._html
-
-    def mark_cleanup_done(self) -> bool:
-        return True
-
-    async def aclose(self) -> None:
-        return None
-
-
 class WjxParserTests:
+    def test_parser_module_no_longer_exposes_parse_browser_fallback(self) -> None:
+        assert not hasattr(wjx_parser, "acquire_parse_browser_session")
+        assert not hasattr(wjx_parser, "is_playwright_startup_environment_error")
+        assert not hasattr(wjx_parser, "describe_playwright_startup_error")
+
     def test_is_paused_survey_page_accepts_pause_copy(self) -> None:
         html = "<html><body>此问卷（123）已暂停，不能填写</body></html>"
         assert wjx_parser.is_paused_survey_page(html)
@@ -193,48 +164,30 @@ class WjxParserTests:
 
     @pytest.mark.asyncio
     async def test_parse_wjx_survey_returns_http_parse_result_without_browser_fallback(self, patch_attrs) -> None:
-        browser_used = {"value": False}
         aget = AsyncMock(return_value=_FakeHttpResponse("<html><body>ok</body></html>"))
-
-        @asynccontextmanager
-        async def fake_pool():
-            browser_used["value"] = True
-            yield _FakeBrowserDriver("<html></html>")
 
         patch_attrs(
             (wjx_parser.http_client, "aget", aget),
             (wjx_parser, "parse_survey_questions_from_html", lambda _html: [{"num": 1, "title": "Q1", "type_code": "3"}]),
             (wjx_parser, "extract_survey_title_from_html", lambda _html: "  标题  "),
-            (wjx_parser, "acquire_parse_browser_session", fake_pool),
         )
 
         info, title = await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
 
         assert info == [{"num": 1, "title": "Q1", "type_code": "3"}]
         assert title == "标题"
-        assert not browser_used["value"]
         assert aget.await_args.kwargs.get("proxies") == {}
 
     @pytest.mark.asyncio
-    async def test_parse_wjx_survey_does_not_fall_back_to_browser_when_http_parse_result_is_empty(self, patch_attrs) -> None:
-        browser_used = {"value": False}
-
-        @asynccontextmanager
-        async def fake_pool():
-            browser_used["value"] = True
-            yield _FakeBrowserDriver("<html><body>browser-ok</body></html>")
-
+    async def test_parse_wjx_survey_raises_when_http_parse_result_is_empty(self, patch_attrs) -> None:
         patch_attrs(
             (wjx_parser.http_client, "aget", AsyncMock(return_value=_FakeHttpResponse("<html><body>http-empty</body></html>"))),
             (wjx_parser, "parse_survey_questions_from_html", lambda _html: []),
             (wjx_parser, "extract_survey_title_from_html", lambda _html: "HTTP 标题"),
-            (wjx_parser, "acquire_parse_browser_session", fake_pool),
         )
 
         with pytest.raises(RuntimeError, match="无法打开问卷链接"):
             await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
-
-        assert not browser_used["value"]
 
     @pytest.mark.asyncio
     async def test_parse_wjx_survey_keeps_http_fast_path_even_when_static_page_has_hidden_questions(self, patch_attrs) -> None:
@@ -248,80 +201,33 @@ class WjxParserTests:
           </div>
         </body></html>
         """
-        browser_used = {"value": False}
-
-        @asynccontextmanager
-        async def fake_pool():
-            browser_used["value"] = True
-            yield _FakeBrowserDriver("<html></html>")
 
         patch_attrs(
             (wjx_parser.http_client, "aget", AsyncMock(return_value=_FakeHttpResponse(static_html))),
             (wjx_parser, "parse_survey_questions_from_html", lambda _html: [{"num": 23, "display_num": 22, "title": "Q23", "type_code": "2"}]),
             (wjx_parser, "extract_survey_title_from_html", lambda _html: "标题"),
-            (wjx_parser, "acquire_parse_browser_session", fake_pool),
         )
 
         info, title = await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
 
         assert info == [{"num": 23, "display_num": 22, "title": "Q23", "type_code": "2"}]
         assert title == "标题"
-        assert not browser_used["value"]
 
     @pytest.mark.asyncio
-    async def test_parse_wjx_survey_skips_browser_fallback_for_paused_gate_page(self, patch_attrs) -> None:
-        browser_used = {"value": False}
-
-        @asynccontextmanager
-        async def fake_pool():
-            browser_used["value"] = True
-            yield _FakeBrowserDriver("<html></html>")
-
+    async def test_parse_wjx_survey_raises_paused_error_without_browser_fallback(self, patch_attrs) -> None:
         patch_attrs(
             (wjx_parser.http_client, "aget", AsyncMock(return_value=_FakeHttpResponse("<html><body>问卷已暂停，不能填写</body></html>"))),
-            (wjx_parser, "acquire_parse_browser_session", fake_pool),
         )
 
         with pytest.raises(wjx_parser.SurveyPausedError, match="问卷已暂停"):
             await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
 
-        assert not browser_used["value"]
-
     @pytest.mark.asyncio
-    async def test_parse_wjx_survey_raises_combined_environment_message(self, patch_attrs) -> None:
-        http_exc = OSError("socket blocked")
-        http_exc.winerror = 10013
-        browser_exc = RuntimeError("playwright blocked")
-
-        @asynccontextmanager
-        async def fake_pool_with_error():
-            await _raise_browser_error(browser_exc)
-            yield
-
-        patch_attrs(
-            (wjx_parser.http_client, "aget", AsyncMock(side_effect=http_exc)),
-            (wjx_parser, "acquire_parse_browser_session", fake_pool_with_error),
-            (wjx_parser, "is_playwright_startup_environment_error", lambda exc: exc is browser_exc),
-            (wjx_parser, "describe_playwright_startup_error", lambda _exc: "不该走到这里"),
-        )
-
-        with pytest.raises(RuntimeError, match="WinError 10013"):
-            await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
-
-    @pytest.mark.asyncio
-    async def test_parse_wjx_survey_uses_browser_fallback_message_when_http_error_is_plain(self, patch_attrs) -> None:
+    async def test_parse_wjx_survey_surfaces_http_error_directly(self, patch_attrs) -> None:
         http_exc = RuntimeError("http failed")
-        browser_exc = RuntimeError("browser failed")
-
-        @asynccontextmanager
-        async def fake_pool():
-            await _raise_browser_error(browser_exc)
-            yield
 
         patch_attrs(
             (wjx_parser.http_client, "aget", AsyncMock(side_effect=http_exc)),
-            (wjx_parser, "acquire_parse_browser_session", fake_pool),
-            (wjx_parser, "is_playwright_startup_environment_error", lambda exc: False),
         )
 
         with pytest.raises(RuntimeError, match="无法获取问卷网页：http failed"):

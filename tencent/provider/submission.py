@@ -13,6 +13,10 @@ from software.app.config import (
     SUBMIT_CLICK_SETTLE_DELAY,
     SUBMIT_INITIAL_DELAY,
 )
+from software.core.modes.duration_control import (
+    has_configured_answer_duration,
+    sample_answer_duration_seconds,
+)
 from software.core.engine.runtime_control import _is_headless_mode, _sleep_with_stop
 from software.core.engine.stop_signal import StopSignalLike
 from software.core.questions.runtime_async import extract_text_from_runtime_element
@@ -32,6 +36,124 @@ from tencent.provider.runtime_state import peek_qq_runtime_state
 class SubmissionRecoveryHint:
     question_numbers: tuple[int, ...]
     message: str
+
+
+def _resolve_submit_duration_seconds(ctx: Optional[ExecutionState]) -> int:
+    if ctx is None:
+        return 0
+    answer_duration = getattr(getattr(ctx, "config", None), "answer_duration_range_seconds", (0, 0))
+    if not has_configured_answer_duration(answer_duration):
+        return 0
+    try:
+        sampled = sample_answer_duration_seconds(answer_duration, survey_provider="qq")
+    except Exception:
+        logging.warning("腾讯问卷提交时长采样失败，已跳过浏览器提交流程时长注入", exc_info=True)
+        return 0
+    return max(1, int(round(float(sampled or 0.0))))
+
+
+async def _install_submit_duration_override(driver: BrowserDriver, target_seconds: int) -> bool:
+    normalized_target = max(1, int(target_seconds or 0))
+    script = r"""
+return (() => {
+    const targetSeconds = Math.max(1, Math.round(Number(arguments[0] || 0)));
+    if (!targetSeconds) {
+        return { ok: false, reason: 'invalid-target' };
+    }
+
+    window.__surveyControllerQqDurationTarget = targetSeconds;
+
+    const isTargetUrl = (url) => /\/api\/v2\/respondent\/surveys\/\d+\/answers(?:\?|$)/.test(String(url || ''));
+    const rewriteBody = (body) => {
+        if (typeof body !== 'string' || !body) {
+            return body;
+        }
+        try {
+            const payload = JSON.parse(body);
+            if (!payload || typeof payload !== 'object') {
+                return body;
+            }
+            const answerSurvey = payload.answer_survey;
+            if (!answerSurvey || typeof answerSurvey !== 'object') {
+                return body;
+            }
+            payload.answer_survey.duration = Math.max(
+                1,
+                Math.round(Number(window.__surveyControllerQqDurationTarget || targetSeconds))
+            );
+            return JSON.stringify(payload);
+        } catch (_error) {
+            return body;
+        }
+    };
+
+    if (!window.__surveyControllerQqDurationHookInstalled) {
+        if (typeof window.fetch === 'function') {
+            const originalFetch = window.fetch.bind(window);
+            window.fetch = (input, init) => {
+                const requestUrl =
+                    typeof input === 'string'
+                        ? input
+                        : (input && typeof input.url === 'string' ? input.url : '');
+                let nextInit = init;
+                if (isTargetUrl(requestUrl) && init && typeof init.body === 'string') {
+                    nextInit = { ...init, body: rewriteBody(init.body) };
+                }
+                return originalFetch(input, nextInit);
+            };
+        }
+
+        if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.prototype) {
+            const originalOpen = XMLHttpRequest.prototype.open;
+            const originalSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                try {
+                    this.__surveyControllerQqRequestUrl = String(url || '');
+                } catch (_error) {}
+                return originalOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function(body) {
+                let nextBody = body;
+                try {
+                    if (isTargetUrl(this.__surveyControllerQqRequestUrl) && typeof body === 'string') {
+                        nextBody = rewriteBody(body);
+                    }
+                } catch (_error) {}
+                return originalSend.call(this, nextBody);
+            };
+        }
+
+        window.__surveyControllerQqDurationHookInstalled = true;
+    }
+
+    return {
+        ok: true,
+        targetSeconds,
+        hooked: !!window.__surveyControllerQqDurationHookInstalled,
+    };
+})();
+    """
+    try:
+        result = await driver.execute_script(script, normalized_target)
+    except Exception as exc:
+        logging.warning("腾讯问卷提交时长注入失败：%s", exc)
+        return False
+    if isinstance(result, dict) and bool(result.get("ok")):
+        logging.info(
+            "腾讯问卷提交时长已注入为 %s 秒（hooked=%s）",
+            int(result.get("targetSeconds") or normalized_target),
+            bool(result.get("hooked")),
+        )
+        return True
+    logging.warning("腾讯问卷提交时长注入未生效：target=%s result=%s", normalized_target, result)
+    return False
+
+
+async def _prepare_submit_duration_override(driver: BrowserDriver, ctx: Optional[ExecutionState]) -> None:
+    target_seconds = _resolve_submit_duration_seconds(ctx)
+    if target_seconds <= 0:
+        return
+    await _install_submit_duration_override(driver, target_seconds)
 
 
 def _runtime_context_summary(driver: BrowserDriver) -> str:
@@ -270,6 +392,9 @@ async def submit(
 
     if pre_submit_delay > 0 and await _sleep_with_stop(stop_signal, pre_submit_delay):
         return
+    if stop_signal and stop_signal.is_set():
+        return
+    await _prepare_submit_duration_override(driver, ctx)
     if stop_signal and stop_signal.is_set():
         return
 

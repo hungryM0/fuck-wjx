@@ -72,6 +72,51 @@ def _async_return(value=None):
 
 class TencentSubmissionTests:
     @pytest.mark.asyncio
+    async def test_prepare_submit_duration_override_installs_hook_when_configured(self, patch_attrs) -> None:
+        driver = _FakeDriver()
+        executed: list[tuple[str, tuple[Any, ...]]] = []
+        state = ExecutionState(config=ExecutionConfig(survey_provider="qq", answer_duration_range_seconds=(300, 300)))
+
+        async def _execute_script(script: str, *args: Any):
+            executed.append((script, args))
+            return {"ok": True, "targetSeconds": 300, "hooked": True}
+
+        driver.execute_script = _execute_script
+        patch_attrs((submission, "sample_answer_duration_seconds", lambda *_args, **_kwargs: 300.0))
+
+        await submission._prepare_submit_duration_override(driver, state)
+
+        assert len(executed) == 1
+        assert "__surveyControllerQqDurationHookInstalled" in executed[0][0]
+        assert executed[0][1] == (300,)
+
+    @pytest.mark.asyncio
+    async def test_submit_skips_duration_override_when_unconfigured(self, patch_attrs) -> None:
+        driver = _FakeDriver()
+        execute_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        async def _execute_script(script: str, *args: Any):
+            execute_calls.append((script, args))
+            return None
+
+        driver.execute_script = _execute_script
+        patch_attrs(
+            (submission, "_click_submit_button", _async_return(True)),
+            (submission, "_click_submit_confirm_button", _async_return(None)),
+            (submission, "_is_headless_mode", lambda _ctx: True),
+            (submission, "HEADLESS_SUBMIT_INITIAL_DELAY", 0.0),
+            (submission, "HEADLESS_SUBMIT_CLICK_SETTLE_DELAY", 0.0),
+        )
+
+        await submission.submit(
+            driver,
+            ctx=ExecutionState(config=ExecutionConfig(survey_provider="qq", answer_duration_range_seconds=(0, 0))),
+            stop_signal=threading.Event(),
+        )
+
+        assert execute_calls == []
+
+    @pytest.mark.asyncio
     async def test_submit_reads_runtime_state_when_submit_button_missing(self, patch_attrs) -> None:
         driver = _FakeDriver()
         reads: list[str] = []
