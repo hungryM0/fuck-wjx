@@ -34,7 +34,7 @@ from software.logging.log_utils import (
 _RANDOM_IP_SYNC_FAILURE_LOG_KEY = "random_ip_quota_sync_failure"
 
 
-class RunControllerRandomIPMixin:
+class RandomIpRuntimeService:
     if TYPE_CHECKING:
         adapter: Any
         _async_engine_client: Any
@@ -486,3 +486,9 @@ class RunControllerRandomIPMixin:
         except Exception as exc:
             message = format_random_ip_error(exc)
             logging.warning("刷新随机IP状态失败：%s", message)
+
+
+class RunControllerRandomIPMixin(RandomIpRuntimeService):
+    """RunController 随机 IP 兼容 mixin。"""
+
+    pass

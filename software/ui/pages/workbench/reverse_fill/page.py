@@ -27,7 +27,7 @@ from software.core.reverse_fill.schema import (
     REVERSE_FILL_FORMAT_WJX_TEXT,
     ReverseFillSpec,
 )
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.providers.common import SURVEY_PROVIDER_WJX, normalize_survey_provider
 from software.providers.contracts import (
     SurveyQuestionMeta,

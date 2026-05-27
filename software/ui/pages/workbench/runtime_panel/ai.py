@@ -33,7 +33,7 @@ from software.integrations.ai import (
     get_default_system_prompt,
     save_ai_settings,
 )
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 
 
 class AIPromptSettingCard(ExpandGroupSettingCard):

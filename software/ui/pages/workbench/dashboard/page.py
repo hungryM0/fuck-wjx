@@ -34,7 +34,7 @@ from software.ui.pages.workbench.shared.run_feedback import init_run_feedback_st
 from software.ui.widgets.config_drawer import ConfigDrawer
 from software.ui.widgets.full_width_infobar import FullWidthInfoBar
 from software.ui.controller.run_controller import RunController
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.ui.pages.workbench.runtime_panel.main import RuntimePage
 from software.ui.pages.workbench.strategy.page import QuestionStrategyPage
 from software.ui.pages.workbench.session import WorkbenchState

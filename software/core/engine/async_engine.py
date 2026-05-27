@@ -12,6 +12,7 @@ from software.core.engine.async_events import AsyncRunContext
 from software.core.engine.async_runtime_loop import AsyncSlotRunner
 from software.core.engine.async_scheduler import AsyncScheduler
 from software.core.engine.async_status_bus import AsyncStatusBus
+from software.core.engine.runtime_ui_bridge import RuntimeUiBridge
 from software.core.task import ExecutionConfig, ExecutionState
 from software.providers.registry import parse_survey
 
@@ -67,14 +68,26 @@ class AsyncRuntimeEngine:
             raise RuntimeError("AsyncRuntimeEngine loop 未启动")
         return asyncio.run_coroutine_threadsafe(coro, self._loop)
 
-    def start_run(self, *, config: ExecutionConfig, state: ExecutionState, gui_instance: Any = None) -> concurrent.futures.Future[Any]:
+    def start_run(
+        self,
+        *,
+        config: ExecutionConfig,
+        state: ExecutionState,
+        runtime_bridge: RuntimeUiBridge | None = None,
+    ) -> concurrent.futures.Future[Any]:
         if self._run_future is not None and not self._run_future.done():
             raise RuntimeError("任务已在运行中")
-        future = self._submit(self._run(config=config, state=state, gui_instance=gui_instance))
+        future = self._submit(self._run(config=config, state=state, runtime_bridge=runtime_bridge))
         self._run_future = future
         return future
 
-    async def _run(self, *, config: ExecutionConfig, state: ExecutionState, gui_instance: Any = None) -> None:
+    async def _run(
+        self,
+        *,
+        config: ExecutionConfig,
+        state: ExecutionState,
+        runtime_bridge: RuntimeUiBridge | None = None,
+    ) -> None:
         self._stop_event = asyncio.Event()
         self._pause_event = asyncio.Event()
         self._state = state
@@ -103,7 +116,7 @@ class AsyncRuntimeEngine:
                             state=state,
                             run_context=run_context,
                             scheduler=scheduler,
-                            gui_instance=gui_instance,
+                            runtime_bridge=runtime_bridge,
                         ).run(),
                         name=f"AsyncSlotRunner-{slot_index + 1}",
                     )
@@ -189,8 +202,14 @@ class AsyncEngineClient:
     def thread(self) -> Optional[threading.Thread]:
         return self._engine.thread
 
-    def start_run(self, config: ExecutionConfig, state: ExecutionState, *, gui_instance: Any = None) -> concurrent.futures.Future[Any]:
-        return self._engine.start_run(config=config, state=state, gui_instance=gui_instance)
+    def start_run(
+        self,
+        config: ExecutionConfig,
+        state: ExecutionState,
+        *,
+        runtime_bridge: RuntimeUiBridge | None = None,
+    ) -> concurrent.futures.Future[Any]:
+        return self._engine.start_run(config=config, state=state, runtime_bridge=runtime_bridge)
 
     def stop_run(self) -> None:
         self._engine.stop_run()

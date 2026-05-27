@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 
 
 class RuntimeSettingsState:

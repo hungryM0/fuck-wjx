@@ -16,6 +16,8 @@ from software.core.engine.runtime_actions import (
     RuntimeActionResult,
     ensure_runtime_action_result,
 )
+from software.core.engine.runtime_ui_bridge import RuntimeUiBridge
+from software.core.engine.stop_signal import StopSignalLike
 from software.core.task import ExecutionState
 
 
@@ -32,7 +34,7 @@ class BoolVar:
         self._value = bool(value)
 
 
-class EngineGuiAdapter:
+class EngineGuiAdapter(RuntimeUiBridge):
     """传给引擎的 UI 适配器，负责把回调桥接回 Qt 主线程。"""
 
     def __init__(
@@ -100,7 +102,7 @@ class EngineGuiAdapter:
     def get_pause_reason(self) -> str:
         return self._pause_reason or ""
 
-    def wait_if_paused(self, stop_signal: Optional[threading.Event] = None) -> None:
+    def wait_if_paused(self, stop_signal: Optional[StopSignalLike] = None) -> None:
         signal = stop_signal or self._stop_signal
         while self.is_paused() and signal and not signal.is_set():
             signal.wait(0.25)

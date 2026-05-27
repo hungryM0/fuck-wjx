@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 from software.core.task import ExecutionConfig, ExecutionState
 from software.providers import registry
 from software.providers.common import SURVEY_PROVIDER_CREDAMO, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
-from software.providers.hooks import build_predicate_hook
+from software.providers.contracts import SurveyDefinition
+from software.providers.hooks import build_parse_hook, build_predicate_hook
 
 
 async def test_parse_survey_routes_detected_provider_through_cache_loader() -> None:
@@ -180,3 +181,28 @@ async def test_provider_hook_rejects_non_async_return_value() -> None:
             assert "provider hook 必须返回 awaitable" in str(exc)
         else:
             raise AssertionError("同步 provider hook 不应再被接受")
+
+
+async def test_parse_hook_normalizes_tuple_result_to_survey_definition() -> None:
+    async def fake_parse(_url: str):
+        return ([{"num": 1, "title": "Q1", "type_code": "3"}], "  标题  ")
+
+    with patch("software.providers.hooks._load_hook", return_value=fake_parse):
+        hook = build_parse_hook(SURVEY_PROVIDER_QQ, ("fake.module", "parse"))
+        definition = await hook("https://wj.qq.com/s2/demo")
+
+    assert isinstance(definition, SurveyDefinition)
+    assert definition.provider == SURVEY_PROVIDER_QQ
+    assert definition.title == "标题"
+    assert definition.questions[0].provider == SURVEY_PROVIDER_QQ
+
+
+async def test_parse_hook_rejects_sync_parser_result() -> None:
+    with patch("software.providers.hooks._load_hook", return_value=lambda _url: ([], "标题")):
+        hook = build_parse_hook(SURVEY_PROVIDER_WJX, ("fake.module", "parse"))
+        try:
+            await hook("https://www.wjx.cn/vm/demo.aspx")
+        except TypeError as exc:
+            assert "解析 hook 必须返回 awaitable" in str(exc)
+        else:
+            raise AssertionError("同步解析 hook 不应再被接受")

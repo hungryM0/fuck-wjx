@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from software.core.questions.config import QuestionEntry
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.ui.pages.workbench.session import WorkbenchRunCoordinator, WorkbenchState
 
 

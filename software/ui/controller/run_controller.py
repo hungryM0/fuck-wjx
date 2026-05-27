@@ -12,7 +12,8 @@ from software.core.engine.cleanup import CleanupRunner
 from software.core.engine.async_engine import AsyncEngineClient
 from software.core.questions.config import QuestionEntry
 from software.core.task import ExecutionState
-from software.io.config import RuntimeConfig, load_config, save_config
+from software.core.config.schema import RuntimeConfig
+from software.io.config.store import load_config, save_config
 from software.providers.contracts import SurveyQuestionMeta
 from software.system.power_management import SystemSleepBlocker
 from software.ui.controller.engine_adapter import (

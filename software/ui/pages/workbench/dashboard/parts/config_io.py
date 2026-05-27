@@ -9,10 +9,8 @@ from typing import TYPE_CHECKING, Any, cast
 from PySide6.QtWidgets import QFileDialog, QWidget
 
 from software.app.user_paths import get_user_config_directory
-from software.io.config import (
-    build_default_config_filename,
-    build_runtime_config_snapshot,
-)
+from software.core.config.codec import build_runtime_config_snapshot
+from software.io.config.store import build_default_config_filename
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
 

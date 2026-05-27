@@ -18,7 +18,8 @@ from software.core.reverse_fill.validation import (
     build_enabled_reverse_fill_spec,
 )
 from software.core.task import ExecutionConfig
-from software.io.config import RuntimeConfig, clone_questions_info
+from software.core.config.schema import RuntimeConfig
+from software.core.config.codec import clone_questions_info
 from software.network.proxy import set_proxy_occupy_minute_by_answer_duration
 from software.providers.common import (
     SURVEY_PROVIDER_WJX,

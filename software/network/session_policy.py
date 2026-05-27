@@ -1,14 +1,15 @@
 """会话策略 - 代理切换与浏览器实例复用逻辑"""
 import asyncio
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 import logging
 
 from software.core.engine.stop_signal import StopSignalLike
+from software.core.engine.runtime_ui_bridge import RuntimeUiBridge
 from software.core.task import ExecutionState, ProxyLease
 from software.network.proxy.pool import coerce_proxy_lease, mask_proxy_for_log
 from software.network.proxy.api import fetch_proxy_batch_async
 from software.network.proxy import get_proxy_required_ttl_seconds, proxy_lease_has_sufficient_ttl
-from software.io.config import _select_user_agent_from_ratios
+from software.core.config.codec import _select_user_agent_from_ratios
 
 _PROXY_WAIT_POLL_SECONDS = 0.3
 _BAD_PROXY_COOLDOWN_SECONDS = 180.0
@@ -26,13 +27,13 @@ def _blocked_proxy_addresses_locked(ctx: ExecutionState, *, exclude_thread_name:
 
 def _record_bad_proxy_and_maybe_pause(
     ctx: ExecutionState,
-    gui_instance: Optional[Any],
+    runtime_bridge: Optional[RuntimeUiBridge],
 ) -> bool:
     """
     记录代理不可用事件。
     现阶段不再根据代理异常次数自动暂停任务，统一由提交连续失败止损控制。
     """
-    _ = ctx, gui_instance
+    _ = ctx, runtime_bridge
     return False
 
 

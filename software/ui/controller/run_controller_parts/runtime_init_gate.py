@@ -6,7 +6,7 @@ import copy
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from .runtime_preparation import PreparedExecutionArtifacts
 
 

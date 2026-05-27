@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from software.app.config import HTTP_MAX_THREADS
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.providers.common import detect_survey_provider
 from software.ui.helpers.proxy_access import apply_proxy_source_settings
 from software.ui.pages.workbench.runtime_panel.proxy_source import (

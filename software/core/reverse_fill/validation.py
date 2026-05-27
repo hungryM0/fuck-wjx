@@ -33,7 +33,7 @@ from software.core.reverse_fill.schema import (
     reverse_fill_format_label,
 )
 from software.io.spreadsheets.wjx_excel import load_wjx_excel_export
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.providers.common import SURVEY_PROVIDER_WJX, normalize_survey_provider
 from software.providers.contracts import SurveyQuestionMeta, ensure_survey_question_meta
 

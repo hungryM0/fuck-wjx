@@ -8,7 +8,8 @@ from typing import Any, List, Mapping, Sequence
 
 from PySide6.QtCore import QTimer, Qt, Slot
 
-from software.io.config import RuntimeConfig, build_runtime_config_snapshot
+from software.core.config.schema import RuntimeConfig
+from software.core.config.codec import build_runtime_config_snapshot
 from software.logging.action_logger import log_action
 from software.providers.common import detect_survey_provider
 from software.providers.contracts import (

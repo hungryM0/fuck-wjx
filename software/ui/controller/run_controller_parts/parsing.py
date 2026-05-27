@@ -20,7 +20,7 @@ from software.providers.errors import (
 )
 
 if TYPE_CHECKING:
-    from software.io.config import RuntimeConfig
+    from software.core.config.schema import RuntimeConfig
 
 
 class RunControllerParsingMixin:

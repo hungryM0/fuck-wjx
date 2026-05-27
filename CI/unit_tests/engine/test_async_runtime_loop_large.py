@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 import software.core.engine.async_runtime_loop as runtime_loop
+import software.core.engine.async_proxy_session as proxy_session
+import software.core.engine.async_round_resources as round_resources
 from software.core.ai.runtime import AIRuntimeError
 from software.core.engine.async_events import AsyncRunContext
 from software.core.engine.async_runtime_loop import AsyncSlotRunner
@@ -86,7 +88,7 @@ def _build_runner(
         state=state,
         run_context=run_context,
         scheduler=scheduler,
-        gui_instance=SimpleNamespace(active_drivers=[]),
+        runtime_bridge=None,
     )
     runner.stop_policy = _FakeStopPolicy(state)
     return runner, state, run_context, scheduler
@@ -137,11 +139,11 @@ class AsyncRuntimeLoopLargeTests:
         async def fake_select_proxy_for_session_async(*_args, **_kwargs):
             return "http://1.1.1.1:80"
 
-        monkeypatch.setattr(runtime_loop, "_select_proxy_for_session_async", fake_select_proxy_for_session_async)
-        monkeypatch.setattr(runtime_loop, "_record_bad_proxy_and_maybe_pause", lambda *_args, **_kwargs: False)
-        monkeypatch.setattr(runtime_loop, "is_proxy_responsive_async", lambda proxy: asyncio.sleep(0, result=False))
-        monkeypatch.setattr(runtime_loop, "_discard_unresponsive_proxy", lambda *_args, **_kwargs: None)
-        monkeypatch.setattr(runtime_loop, "_select_user_agent_for_session", lambda *_args, **_kwargs: ("UA", None))
+        monkeypatch.setattr(proxy_session, "_select_proxy_for_session_async", fake_select_proxy_for_session_async)
+        monkeypatch.setattr(proxy_session, "_record_bad_proxy_and_maybe_pause", lambda *_args, **_kwargs: False)
+        monkeypatch.setattr(proxy_session, "is_proxy_responsive_async", lambda proxy: asyncio.sleep(0, result=False))
+        monkeypatch.setattr(proxy_session, "_discard_unresponsive_proxy", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(proxy_session, "_select_user_agent_for_session", lambda *_args, **_kwargs: ("UA", None))
         runner, _state, _ctx, _scheduler = _build_runner(config=config, state=state)
 
         proxy, ua = await runner._select_session_proxy_and_ua()
@@ -159,7 +161,7 @@ class AsyncRuntimeLoopLargeTests:
         terminal: list[tuple[str, str, str]] = []
         state.mark_terminal_stop = lambda category, *, failure_reason, message: terminal.append((category, failure_reason, message))
         state.release_joint_sample = lambda *_args, **_kwargs: None
-        monkeypatch.setattr(runtime_loop, "ensure_joint_psychometric_answer_plan", lambda _config: SimpleNamespace(sample_count=2))
+        monkeypatch.setattr(round_resources, "ensure_joint_psychometric_answer_plan", lambda _config: SimpleNamespace(sample_count=2))
         runner, _state, ctx, _scheduler = _build_runner(config=config, state=state)
 
         assert await runner._prepare_round_context() is False
@@ -223,7 +225,7 @@ class AsyncRuntimeLoopLargeTests:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, _state, _ctx, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [6, None]
-        monkeypatch.setattr(runtime_loop, "fill_survey_http", lambda *_args, **_kwargs: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner.http_submitter, "submit", lambda **_kwargs: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
 
@@ -237,7 +239,7 @@ class AsyncRuntimeLoopLargeTests:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, state, _ctx, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [6, None]
-        monkeypatch.setattr(runtime_loop, "fill_survey_http", lambda *_args, **_kwargs: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner.http_submitter, "submit", lambda **_kwargs: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
         monkeypatch.setattr(runtime_loop, "update_http_submit_step", lambda state, thread, label: asyncio.sleep(0, result=state.update_thread_step(thread, 1, 4, status_text=label, running=True)))
@@ -257,7 +259,7 @@ class AsyncRuntimeLoopLargeTests:
         )
         runner, _state, _ctx, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [7]
-        monkeypatch.setattr(runtime_loop, "fill_survey_http", lambda *_args, **_kwargs: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner.http_submitter, "submit", lambda **_kwargs: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
 
@@ -271,7 +273,7 @@ class AsyncRuntimeLoopLargeTests:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, _state, _ctx, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [5, None]
-        monkeypatch.setattr(runtime_loop, "fill_survey_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(AIRuntimeError("ai bad")))
+        monkeypatch.setattr(runner.http_submitter, "submit", lambda **_kwargs: (_ for _ in ()).throw(AIRuntimeError("ai bad")))
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
         monkeypatch.setattr(runner, "_handle_ai_runtime_error", lambda exc: asyncio.sleep(0, result=False))
@@ -289,9 +291,9 @@ class AsyncRuntimeLoopLargeTests:
         runner, state, ctx, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [8]
         monkeypatch.setattr(
-            runtime_loop,
-            "fill_survey_http",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(SubmissionVerificationRequiredError("请启用随机 IP 后再提交")),
+            runner.http_submitter,
+            "submit",
+            lambda **_kwargs: (_ for _ in ()).throw(SubmissionVerificationRequiredError("请启用随机 IP 后再提交")),
         )
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
@@ -310,9 +312,9 @@ class AsyncRuntimeLoopLargeTests:
         runner, state, ctx, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [10]
         monkeypatch.setattr(
-            runtime_loop,
-            "fill_survey_http",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(SurveyProviderUnavailableAtRuntimeError("问卷已暂停")),
+            runner.http_submitter,
+            "submit",
+            lambda **_kwargs: (_ for _ in ()).throw(SurveyProviderUnavailableAtRuntimeError("问卷已暂停")),
         )
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
@@ -330,7 +332,7 @@ class AsyncRuntimeLoopLargeTests:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, _state, _ctx, scheduler = _build_runner(config=config)
         scheduler.acquire_values = [9]
-        monkeypatch.setattr(runtime_loop, "fill_survey_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(runtime_loop.http_client.ConnectTimeout("proxy bad")))
+        monkeypatch.setattr(runner.http_submitter, "submit", lambda **_kwargs: (_ for _ in ()).throw(runtime_loop.http_client.ConnectTimeout("proxy bad")))
         monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
         monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=("http://1.1.1.1:80", "UA")))
         monkeypatch.setattr(runner, "_handle_http_transport_error", lambda _exc: True)

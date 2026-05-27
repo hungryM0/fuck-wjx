@@ -5,7 +5,7 @@ from concurrent.futures import Future
 from types import SimpleNamespace
 from typing import Any
 
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.ui.controller.run_controller_parts.runtime_execution import (
     RunControllerExecutionMixin,
 )
@@ -135,8 +135,8 @@ class _FakeEngineClient:
         self.shutdown_calls = []
         self.future = _FakeRunFuture()
 
-    def start_run(self, execution_config, execution_state, *, gui_instance):
-        self.start_calls.append((execution_config, execution_state, gui_instance))
+    def start_run(self, execution_config, execution_state, *, runtime_bridge):
+        self.start_calls.append((execution_config, execution_state, runtime_bridge))
         return self.future
 
     def stop_run(self) -> None:

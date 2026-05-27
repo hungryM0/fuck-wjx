@@ -16,7 +16,8 @@ from software.app.user_paths import (
     get_user_config_directory,
     get_user_local_data_root,
 )
-from software.io.config import RuntimeConfig, build_runtime_config_snapshot
+from software.core.config.schema import RuntimeConfig
+from software.core.config.codec import build_runtime_config_snapshot
 from software.logging.log_utils import (
     finalize_session_log_persistence,
     log_suppressed_exception,
@@ -153,7 +154,7 @@ class MainWindowLifecycleMixin:
             continue_box.cancelButton.setText("取消")
             return bool(continue_box.exec())
 
-        from software.io.config import save_config
+        from software.io.config.store import save_config
 
         save_config(cfg, path)
         logging.info("配置已保存到: %s", path)

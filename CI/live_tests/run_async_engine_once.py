@@ -82,7 +82,7 @@ def main() -> int:
 
     client = AsyncEngineClient()
     try:
-        future = client.start_run(execution_config, state, gui_instance=None)
+        future = client.start_run(execution_config, state, runtime_bridge=None)
         future.result(timeout=max(1.0, float(args.timeout or 1.0)))
     finally:
         client.shutdown(timeout=15.0)

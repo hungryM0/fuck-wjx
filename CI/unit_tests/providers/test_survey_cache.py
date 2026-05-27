@@ -116,6 +116,33 @@ class SurveyCacheTests:
             assert titles == []
 
     @pytest.mark.asyncio
+    async def test_parser_failure_does_not_poison_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            calls = 0
+            original_runtime_directory = self._patch_cache_directory(temp_dir)
+
+            async def parser(_url: str):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise RuntimeError("parse failed")
+                return build_survey_definition(
+                    "wjx",
+                    "恢复标题",
+                    [{"num": 1, "title": "恢复题目", "type_code": "3"}],
+                )
+
+            try:
+                with pytest.raises(RuntimeError):
+                    await parse_survey_with_cache("https://www.wjx.cn/vm/demo.aspx", parser)
+                result = await parse_survey_with_cache("https://www.wjx.cn/vm/demo.aspx", parser)
+            finally:
+                survey_cache.get_user_cache_directory = original_runtime_directory
+
+            assert calls == 2
+            assert result.title == "恢复标题"
+
+    @pytest.mark.asyncio
     async def test_credamo_reuses_cache_within_short_ttl(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             calls: list[str] = []

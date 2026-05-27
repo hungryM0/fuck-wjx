@@ -14,6 +14,7 @@ from software.providers.contracts import (
     LOGIC_PARSE_STATUS_UNKNOWN,
     build_survey_definition,
     ensure_survey_question_meta,
+    serialize_survey_question_metas,
 )
 from tencent.provider import parser as qq_parser
 from wjx.provider.html_parser import parse_survey_questions_from_html
@@ -217,3 +218,28 @@ class ProviderContractsTests:
         assert dumped["logic_parse_status"] in {"none", "complete", "unknown"}
         assert dumped["rows"] >= 1
         assert isinstance(dumped["question_media"], list)
+
+    def test_serialized_question_meta_preserves_provider_identity_fields(self) -> None:
+        meta = ensure_survey_question_meta(
+            {
+                "num": 8,
+                "title": "联系方式",
+                "provider": SURVEY_PROVIDER_QQ,
+                "provider_question_id": "question-8",
+                "provider_page_id": "page-2",
+                "provider_type": "text",
+                "required": True,
+                "option_texts": ["姓名", "电话"],
+            },
+            default_provider=SURVEY_PROVIDER_WJX,
+        )
+
+        dumped = serialize_survey_question_metas([meta])[0]
+        cloned = ensure_survey_question_meta(dumped, default_provider=SURVEY_PROVIDER_WJX)
+
+        assert dumped["provider"] == SURVEY_PROVIDER_QQ
+        assert dumped["provider_question_id"] == "question-8"
+        assert dumped["provider_page_id"] == "page-2"
+        assert dumped["provider_type"] == "text"
+        assert dumped["required"] is True
+        assert cloned.provider == SURVEY_PROVIDER_QQ

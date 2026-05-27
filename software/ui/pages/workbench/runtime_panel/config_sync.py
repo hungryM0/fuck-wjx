@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.logging.log_utils import log_suppressed_exception
 from software.ui.pages.workbench.runtime_panel.cards import TimeRangeSettingCard
 from software.ui.pages.workbench.runtime_panel.proxy_source import (

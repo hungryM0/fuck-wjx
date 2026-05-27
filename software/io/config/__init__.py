@@ -1,4 +1,10 @@
-"""配置 IO。"""
+"""旧配置入口。
+
+项目内部新代码应直接导入：
+- software.core.config.schema
+- software.core.config.codec
+- software.io.config.store
+"""
 
 from software.core.config.codec import (
     CURRENT_CONFIG_SCHEMA_VERSION,

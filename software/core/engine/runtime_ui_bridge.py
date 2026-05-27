@@ -1,8 +1,8 @@
-"""引擎访问 UI 适配器的最小桥接接口。"""
+"""运行内核访问外层 UI/控制器能力的最小桥接接口。"""
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, cast
+from typing import Optional, Protocol
 
 from software.core.engine.stop_signal import StopSignalLike
 
@@ -13,16 +13,19 @@ class RuntimeUiBridge(Protocol):
     def handle_random_ip_submission(self, stop_signal: Optional[StopSignalLike] = None) -> None: ...
 
 
-def wait_if_paused(gui_instance: Any, stop_signal: Optional[StopSignalLike]) -> None:
-    if gui_instance is None:
+def wait_if_paused(runtime_bridge: RuntimeUiBridge | None, stop_signal: Optional[StopSignalLike]) -> None:
+    if runtime_bridge is None:
         return
-    cast(RuntimeUiBridge, gui_instance).wait_if_paused(stop_signal)
+    runtime_bridge.wait_if_paused(stop_signal)
 
 
-def handle_random_ip_submission(gui_instance: Any, stop_signal: Optional[StopSignalLike]) -> None:
-    if gui_instance is None:
+def handle_random_ip_submission(
+    runtime_bridge: RuntimeUiBridge | None,
+    stop_signal: Optional[StopSignalLike],
+) -> None:
+    if runtime_bridge is None:
         return
-    cast(RuntimeUiBridge, gui_instance).handle_random_ip_submission(stop_signal)
+    runtime_bridge.handle_random_ip_submission(stop_signal)
 
 
 __all__ = [

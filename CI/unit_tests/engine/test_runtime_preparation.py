@@ -2,7 +2,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import patch
 from software.core.questions.config import QuestionEntry
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.core.reverse_fill.schema import ReverseFillSpec
 from software.ui.controller.run_controller_parts.runtime_preparation import PreparedExecutionArtifacts, RuntimePreparationError, prepare_execution_artifacts
 

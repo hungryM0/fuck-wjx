@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 
 from .runtime_execution import RunControllerExecutionMixin
 from .runtime_init_gate import RunControllerInitializationMixin

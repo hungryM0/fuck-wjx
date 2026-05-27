@@ -492,7 +492,7 @@ class MainWindowModalSafetyTests:
                 "software.ui.shell.main_window_parts.lifecycle.QFileDialog.getSaveFileName",
                 return_value=("D:/cfg.json", "json"),
             ),
-            patch("software.io.config.save_config") as save_mock,
+            patch("software.io.config.store.save_config") as save_mock,
             patch(
                 "software.ui.shell.main_window_parts.lifecycle.get_user_config_directory",
                 return_value="D:/configs",

@@ -7,7 +7,8 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QDialog, QWidget
 
 from software.core.questions.config import QuestionEntry
-from software.io.config import RuntimeConfig, build_runtime_config_snapshot
+from software.core.config.schema import RuntimeConfig
+from software.core.config.codec import build_runtime_config_snapshot
 from software.logging.action_logger import log_action
 from software.providers.contracts import (
     SurveyQuestionMeta,

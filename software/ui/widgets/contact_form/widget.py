@@ -27,7 +27,8 @@ from software.app.config import (
 )
 from software.app.user_paths import get_fatal_crash_log_path, get_user_local_data_root
 from software.app.version import __VERSION__
-from software.io.config import RuntimeConfig, save_config
+from software.core.config.schema import RuntimeConfig
+from software.io.config.store import save_config
 from software.logging.log_utils import (
     LOG_BUFFER_HANDLER,
     export_full_log_to_file,

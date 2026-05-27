@@ -5,10 +5,11 @@ from __future__ import annotations
 import math
 import logging
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from software.core.engine.failure_reason import FailureReason
 from software.core.engine.runtime_ui_bridge import (
+    RuntimeUiBridge,
     handle_random_ip_submission as trigger_random_ip_submission,
 )
 from software.core.engine.runtime_ui_bridge import wait_if_paused as runtime_wait_if_paused
@@ -19,14 +20,19 @@ from software.core.task import ExecutionConfig, ExecutionState
 class RunStopPolicy:
     """统一处理暂停、成功、失败、达标停止等策略。"""
 
-    def __init__(self, config: ExecutionConfig, state: ExecutionState, gui_instance: Optional[Any] = None):
+    def __init__(
+        self,
+        config: ExecutionConfig,
+        state: ExecutionState,
+        runtime_bridge: Optional[RuntimeUiBridge] = None,
+    ):
         self.config = config
         self.state = state
-        self.gui_instance = gui_instance
+        self.runtime_bridge = runtime_bridge
 
     def wait_if_paused(self, stop_signal: Optional[StopSignalLike]) -> None:
         try:
-            runtime_wait_if_paused(self.gui_instance, stop_signal)
+            runtime_wait_if_paused(self.runtime_bridge, stop_signal)
         except Exception:
             logging.info("暂停等待失败", exc_info=True)
 
@@ -188,7 +194,7 @@ class RunStopPolicy:
             self.trigger_target_reached_stop(stop_signal, message=terminal_message)
         if should_handle_random_ip:
             try:
-                trigger_random_ip_submission(self.gui_instance, stop_signal)
+                trigger_random_ip_submission(self.runtime_bridge, stop_signal)
             except Exception:
                 logging.info("提交成功后刷新随机IP失败", exc_info=True)
         return should_break or trigger_target_stop

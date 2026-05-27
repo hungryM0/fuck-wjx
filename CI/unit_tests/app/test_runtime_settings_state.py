@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.providers.common import SURVEY_PROVIDER_WJX
 from software.ui.controller.run_controller import RunController
 from software.ui.controller.runtime_settings_state import RuntimeSettingsState

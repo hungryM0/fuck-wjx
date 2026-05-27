@@ -155,7 +155,7 @@ class AsyncRuntimeEngineLargeTests:
         monkeypatch.setattr(engine, "_submit", _fake_submit)
         monkeypatch.setattr(async_engine, "parse_survey", lambda url: asyncio.sleep(0, result=f"parsed:{url}"))
 
-        future = engine.start_run(config=config, state=state, gui_instance="gui")
+        future = engine.start_run(config=config, state=state, runtime_bridge=None)
         assert future is run_future
         assert engine._run_future is run_future
 
@@ -224,7 +224,7 @@ class AsyncRuntimeEngineLargeTests:
         monkeypatch.setattr(async_engine, "AsyncSlotRunner", _FakeRunner)
 
         with pytest.raises(RuntimeError, match="slot boom"):
-            await engine._run(config=config, state=state, gui_instance="gui")
+            await engine._run(config=config, state=state, runtime_bridge=None)
 
         assert len(created_runners) == 2
         assert created_runners[0].slot_id == 1
@@ -269,7 +269,7 @@ class AsyncRuntimeEngineLargeTests:
         monkeypatch.setattr(async_engine, "AsyncRunContext", lambda **kwargs: SimpleNamespace(**kwargs))
         monkeypatch.setattr(async_engine, "AsyncSlotRunner", _FakeRunner)
 
-        await engine._run(config=config, state=state, gui_instance="gui")
+        await engine._run(config=config, state=state, runtime_bridge=None)
 
         assert created_schedulers[0].close_calls == 1
         assert state.stop_event.is_set()

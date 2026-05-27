@@ -18,13 +18,14 @@ from software.app.config import (
 from software.core.engine.async_engine import AsyncEngineClient
 from software.core.engine.failure_reason import FailureReason
 from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
-from software.io.config import RuntimeConfig
+from software.core.config.schema import RuntimeConfig
 from software.providers.contracts import SurveyQuestionMeta
 from .runtime_preparation import (
     PreparedExecutionArtifacts,
     RuntimePreparationError,
     prepare_execution_artifacts,
 )
+from .runtime_shutdown import RuntimeShutdownHelper, clear_finished_thread
 
 
 class RunControllerExecutionMixin:
@@ -324,7 +325,7 @@ class RunControllerExecutionMixin:
         run_future = engine_client.start_run(
             execution_config,
             execution_state,
-            gui_instance=self.adapter,
+            runtime_bridge=self.adapter,
         )
         runtime_thread = engine_client.thread
         self.worker_threads = (
@@ -469,22 +470,7 @@ class RunControllerExecutionMixin:
         self._emit_status()
 
     def _collect_shutdown_threads(self) -> List[threading.Thread]:
-        seen: set[int] = set()
-        threads: List[threading.Thread] = []
-        for candidate in [
-            getattr(self, "_init_gate_thread", None),
-            *list(self.worker_threads or []),
-            getattr(self, "_monitor_thread", None),
-            *list(getattr(self, "collect_random_ip_background_threads", lambda: [])() or []),
-        ]:
-            if not isinstance(candidate, threading.Thread):
-                continue
-            identifier = id(candidate)
-            if identifier in seen:
-                continue
-            seen.add(identifier)
-            threads.append(candidate)
-        return threads
+        return RuntimeShutdownHelper(self).collect_threads()
 
     def shutdown_for_close(self, timeout_seconds: float = 5.0) -> bool:
         self._cleanup_scheduled = True
@@ -526,10 +512,8 @@ class RunControllerExecutionMixin:
                 logging.warning("关闭窗口时停止 async-first 内核失败", exc_info=True)
 
         self.worker_threads = [thread for thread in self.worker_threads if thread.is_alive()]
-        if self._monitor_thread is not None and not self._monitor_thread.is_alive():
-            self._monitor_thread = None
-        if self._init_gate_thread is not None and not self._init_gate_thread.is_alive():
-            self._init_gate_thread = None
+        self._monitor_thread = clear_finished_thread(self._monitor_thread)
+        self._init_gate_thread = clear_finished_thread(self._init_gate_thread)
         alive = [thread for thread in pending if thread.is_alive()]
         if alive:
             logging.warning(
