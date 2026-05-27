@@ -271,7 +271,7 @@ async def test_wjx_http_runtime_builds_only_visible_questions_after_logic(monkey
 
 
 @pytest.mark.asyncio
-async def test_wjx_http_runtime_keeps_jump_skipped_questions_in_final_submit(monkeypatch) -> None:
+async def test_wjx_http_runtime_skips_jump_hidden_questions(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
@@ -316,8 +316,68 @@ async def test_wjx_http_runtime_keeps_jump_skipped_questions_in_final_submit(mon
 
     actions = await wjx_http._build_actions(config, state, psycho_plan=None, stop_signal=None)
 
-    assert built_questions == [1, 2, 3]
-    assert [action.question_num for action in actions] == [1, 2, 3]
+    assert built_questions == [1, 3]
+    assert [action.question_num for action in actions] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_wjx_http_runtime_blocks_unparsed_jump_logic(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://www.wjx.cn/vm/demo.aspx",
+        survey_provider="wjx",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(
+            num=1,
+            title="Q1",
+            type_code="3",
+            has_jump=True,
+            logic_parse_status="unknown",
+            option_texts=["A", "B"],
+            options=2,
+        ),
+        2: SurveyQuestionMeta(num=2, title="Q2", type_code="3", option_texts=["C", "D"], options=2),
+    }
+    state = ExecutionState(config=config)
+
+    async def fake_build_action(*_args, **_kwargs):
+        raise AssertionError("未知跳题逻辑不该生成答案")
+
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+
+    with pytest.raises(RuntimeError, match="第1题逻辑规则未完整解析"):
+        await wjx_http._build_actions(config, state, psycho_plan=None, stop_signal=None)
+
+
+@pytest.mark.asyncio
+async def test_wjx_http_runtime_blocks_unparsed_display_logic(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://www.wjx.cn/vm/demo.aspx",
+        survey_provider="wjx",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", option_texts=["A", "B"], options=2),
+        2: SurveyQuestionMeta(
+            num=2,
+            title="Q2",
+            type_code="3",
+            has_display_condition=True,
+            logic_parse_status="unknown",
+            option_texts=["C", "D"],
+            options=2,
+        ),
+    }
+    state = ExecutionState(config=config)
+
+    async def fake_build_action(*_args, **_kwargs):
+        raise AssertionError("未知显隐逻辑不该生成答案")
+
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+
+    with pytest.raises(RuntimeError, match="第2题逻辑规则未完整解析"):
+        await wjx_http._build_actions(config, state, psycho_plan=None, stop_signal=None)
 
 
 @pytest.mark.asyncio
@@ -481,6 +541,53 @@ async def test_qq_http_runtime_submits_only_visible_questions_grouped_by_page(mo
     pages = captured["json"]["answer_survey"]["pages"]
     assert [page["id"] for page in pages] == ["p1", "p2"]
     assert [[question["id"] for question in page["questions"]] for page in pages] == [["q1"], ["q3"]]
+
+
+@pytest.mark.asyncio
+async def test_qq_http_runtime_blocks_unparsed_display_logic(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://wj.qq.com/s2/123/hash/",
+        survey_provider="qq",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(
+            num=1,
+            title="Q1",
+            provider="qq",
+            provider_question_id="q1",
+            provider_type="radio",
+            option_texts=["A", "B"],
+            options=2,
+        ),
+        2: SurveyQuestionMeta(
+            num=2,
+            title="Q2",
+            provider="qq",
+            provider_question_id="q2",
+            provider_type="radio",
+            has_display_condition=True,
+            logic_parse_status="unknown",
+            option_texts=["C", "D"],
+            options=2,
+        ),
+    }
+    state = ExecutionState(config=config)
+
+    async def fake_fetch(*_args, **_kwargs):
+        return "sess", {}, [
+            {"id": "q1", "type": "radio", "options": [{"id": "o1", "text": "A"}, {"id": "o2", "text": "B"}], "page_id": "p1"},
+            {"id": "q2", "type": "radio", "options": [{"id": "o3", "text": "C"}, {"id": "o4", "text": "D"}], "page_id": "p1"},
+        ]
+
+    async def fake_build_action(*_args, **_kwargs):
+        raise AssertionError("未知显隐逻辑不该生成答案")
+
+    monkeypatch.setattr(qq_http, "_fetch_submit_source", fake_fetch)
+    monkeypatch.setattr(qq_http, "build_answer_action", fake_build_action)
+
+    with pytest.raises(RuntimeError, match="第2题逻辑规则未完整解析"):
+        await qq_http.brush_qq_http(config, state)
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from software.providers.answering import AnswerAction
-from software.providers.contracts import SurveyQuestionMeta
+from software.providers.contracts import LOGIC_PARSE_STATUS_COMPLETE, SurveyQuestionMeta
 
 BuildHttpAnswerAction = Callable[[SurveyQuestionMeta], Awaitable[Optional[AnswerAction]]]
 _SUPPORTED_CONDITION_MODES = {"selected", "not_selected"}
@@ -41,6 +41,10 @@ def get_http_logic_fallback_reason(questions: Sequence[SurveyQuestionMeta]) -> s
         question_num = int(getattr(question, "num", 0) or 0)
         if question_num <= 0 or not question_has_survey_logic(question):
             continue
+
+        logic_status = str(getattr(question, "logic_parse_status", "") or "").strip().lower()
+        if logic_status != LOGIC_PARSE_STATUS_COMPLETE:
+            return f"第{question_num}题逻辑规则未完整解析"
 
         for condition in list(getattr(question, "display_conditions", []) or []):
             if not isinstance(condition, dict):

@@ -239,7 +239,6 @@ async def _build_actions(
     plan = await build_http_logic_plan(
         questions,
         build_action=_build_action,
-        respect_jump_logic=False,
     )
     return list(plan.actions)
 
