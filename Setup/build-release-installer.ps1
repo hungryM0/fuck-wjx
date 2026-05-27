@@ -203,9 +203,9 @@ try {
         "--include-module=wjx.provider.parser"
         "--include-module=wjx.provider.http_runtime"
         "--include-module=tencent.provider.parser"
-        "--include-module=tencent.provider.runtime"
-        "--include-module=tencent.provider.runtime_flow"
-        "--include-module=tencent.provider.submission"
+        "--include-module=tencent.provider.http_runtime"
+        "--include-module=tencent.provider.answering_builders"
+        "--include-module=tencent.provider.answering_rules"
         "--include-module=credamo.provider.parser"
         "--include-module=credamo.provider.http_runtime"
         "--include-module=win32api"
@@ -221,7 +221,10 @@ try {
         "--output-filename=SurveyController.exe"
         "SurveyController.py"
     )
-    uv run python @nuitkaArgs
+    & uv run python @nuitkaArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Nuitka build failed with exit code {0}" -f $LASTEXITCODE)
+    }
 }
 finally {
     Pop-Location
@@ -276,11 +279,14 @@ if (-not $SkipVelopack) {
         Write-Step "Drop existing same-version assets"
         Push-Location $repoRoot
         try {
-            uv run python CI/release_tools/trim_velopack_feed.py `
+            & uv run python CI/release_tools/trim_velopack_feed.py `
                 --release-dir $releaseRoot `
                 --channel $Channel `
                 --keep-full $KeepFullVersions `
                 --drop-version $packVersion
+            if ($LASTEXITCODE -ne 0) {
+                throw ("Velopack feed trim failed with exit code {0}" -f $LASTEXITCODE)
+            }
         }
         finally {
             Pop-Location
@@ -289,7 +295,7 @@ if (-not $SkipVelopack) {
 
     Push-Location $repoRoot
     try {
-        vpk pack `
+        & vpk pack `
             --packId SurveyController `
             --packTitle "SurveyController" `
             --packVersion $packVersion `
@@ -299,6 +305,9 @@ if (-not $SkipVelopack) {
             --delta "BestSpeed" `
             --channel $Channel `
             --outputDir $releaseRoot
+        if ($LASTEXITCODE -ne 0) {
+            throw ("Velopack pack failed with exit code {0}" -f $LASTEXITCODE)
+        }
     }
     finally {
         Pop-Location
@@ -317,10 +326,13 @@ if (-not $SkipVelopack) {
     Write-Step "Trim Velopack feed history"
     Push-Location $repoRoot
     try {
-        uv run python CI/release_tools/trim_velopack_feed.py `
+        & uv run python CI/release_tools/trim_velopack_feed.py `
             --release-dir $releaseRoot `
             --channel $Channel `
             --keep-full $KeepFullVersions
+        if ($LASTEXITCODE -ne 0) {
+            throw ("Velopack feed trim failed with exit code {0}" -f $LASTEXITCODE)
+        }
     }
     finally {
         Pop-Location
