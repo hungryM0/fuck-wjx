@@ -159,6 +159,22 @@ class ProviderContractsTests:
             },
         ]
 
+    def test_description_provider_type_is_not_treated_as_unsupported(self) -> None:
+        meta = ensure_survey_question_meta(
+            {
+                "num": 5,
+                "title": "模特A：无眼镜",
+                "type_code": "0",
+                "provider_type": "description",
+                "unsupported": True,
+                "unsupported_reason": "暂不支持腾讯题型：description",
+            },
+            default_provider=SURVEY_PROVIDER_QQ,
+        )
+
+        assert meta.is_description is True
+        assert meta.unsupported is False
+
     @pytest.mark.parametrize(
         ("provider", "question_builder"),
         [

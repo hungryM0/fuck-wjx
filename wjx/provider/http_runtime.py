@@ -28,17 +28,7 @@ from wjx.provider.parser import _parse_wjx_html
 
 
 WJX_SUBMISSION_VERIFICATION_MESSAGE = "问卷星触发智能验证，当前链路已停止。请启用随机 IP 后再提交。"
-_WJX_VERIFICATION_TOKENS = (
-    "智能验证",
-    "安全校验",
-    "请先完成验证",
-    "拖动滑块",
-    "滑块验证",
-    "验证码",
-    "captcha",
-    "nc_token",
-    "aliyun",
-)
+_WJX_SUBMISSION_VERIFICATION_TEXT = "需要安全校验，请重新提交"
 
 
 def _proxy_arg(proxy_address: str | None) -> Any:
@@ -164,8 +154,7 @@ def is_wjx_submission_verification_response(response_text: str) -> bool:
     text = str(response_text or "").strip()
     if not text:
         return False
-    lowered = text.lower()
-    return any(token in text or token in lowered for token in _WJX_VERIFICATION_TOKENS)
+    return _WJX_SUBMISSION_VERIFICATION_TEXT in text
 
 
 def _raise_submit_rejected(config: ExecutionConfig, response_text: str) -> None:

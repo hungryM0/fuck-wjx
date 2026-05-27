@@ -283,7 +283,9 @@ def _normalize_question(question: SurveyQuestionInput, provider: str, index: int
     if not isinstance(attached_option_selects, list):
         attached_option_selects = []
 
-    unsupported = bool(normalized.get("unsupported"))
+    provider_type = str(normalized.get("provider_type") or normalized.get("type_code") or "").strip()
+    is_description = bool(normalized.get("is_description")) or provider_type.lower() == "description"
+    unsupported = bool(normalized.get("unsupported")) and not is_description
     unsupported_reason = str(normalized.get("unsupported_reason") or "").strip()
     if unsupported and not unsupported_reason:
         unsupported_reason = "当前平台暂不支持该题型"
@@ -314,7 +316,7 @@ def _normalize_question(question: SurveyQuestionInput, provider: str, index: int
         has_attached_option_select=bool(normalized.get("has_attached_option_select") or attached_option_selects),
         is_location=bool(normalized.get("is_location")),
         is_rating=bool(normalized.get("is_rating")),
-        is_description=bool(normalized.get("is_description")),
+        is_description=is_description,
         rating_max=_as_int(normalized.get("rating_max"), option_count if bool(normalized.get("is_rating")) else 0, minimum=0),
         text_inputs=_as_int(normalized.get("text_inputs"), 0, minimum=0),
         text_input_labels=text_input_labels,
@@ -337,7 +339,7 @@ def _normalize_question(question: SurveyQuestionInput, provider: str, index: int
         provider=normalized_provider,
         provider_question_id=str(normalized.get("provider_question_id") or question_number).strip(),
         provider_page_id=str(normalized.get("provider_page_id") or page_number).strip(),
-        provider_type=str(normalized.get("provider_type") or normalized.get("type_code") or "").strip(),
+        provider_type=provider_type,
         provider_page_raw=normalized.get("provider_page_raw"),
         unsupported=unsupported,
         unsupported_reason=unsupported_reason,

@@ -43,6 +43,8 @@ def _headers(page_url: str, user_agent: str | None = None) -> dict[str, str]:
 def _metadata_by_provider_id(config: ExecutionConfig) -> dict[str, SurveyQuestionMeta]:
     result: dict[str, SurveyQuestionMeta] = {}
     for item in (config.questions_metadata or {}).values():
+        if bool(getattr(item, "is_description", False)):
+            continue
         question_id = str(getattr(item, "provider_question_id", "") or "").strip()
         if question_id:
             result[question_id] = item

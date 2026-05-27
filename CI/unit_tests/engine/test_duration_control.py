@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from software.core.modes import duration_control
-from software.providers.common import SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
+from software.providers.common import SURVEY_PROVIDER_CREDAMO, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
 
 
 class _Driver:
@@ -108,13 +108,13 @@ class DurationControlTests:
         )
         assert waited == 250.0
 
-    def test_sample_answer_duration_seconds_still_caps_other_provider_by_proxy_minute(self, patch_attrs) -> None:
+    def test_sample_answer_duration_seconds_keeps_credamo_unclamped(self, patch_attrs) -> None:
         patch_attrs((duration_control.random, "gauss", lambda center, _std: center))
         waited = duration_control.sample_answer_duration_seconds(
             (250, 250),
-            survey_provider="credamo",
+            survey_provider=SURVEY_PROVIDER_CREDAMO,
         )
-        assert waited < 300
+        assert waited == 250.0
 
     @pytest.mark.asyncio
     async def test_completion_page_detects_complete_url_and_provider_signal(self, patch_attrs) -> None:

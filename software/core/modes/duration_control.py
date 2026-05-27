@@ -6,8 +6,6 @@ import random
 from typing import Any, Optional, Tuple
 
 from software.core.engine.async_wait import sleep_or_stop
-from software.network.proxy.policy.source import get_proxy_minute_by_answer_seconds
-from software.providers.common import SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
 from software.logging.log_utils import log_suppressed_exception
 
 _COMPLETION_MARKERS = (
@@ -66,27 +64,15 @@ def sample_answer_duration_seconds(
         min_delay = max(0, base - jitter)
         max_delay = base + jitter
 
-    normalized_provider = str(survey_provider or "").strip().lower()
-    safe_upper = max_delay
-    if normalized_provider and normalized_provider not in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}:
-        proxy_ref_seconds = max(0, int(max(raw_min, raw_max)))
-        ip_minute = get_proxy_minute_by_answer_seconds(
-            proxy_ref_seconds,
-            survey_provider=normalized_provider,
-        )
-        if ip_minute > 0:
-            ip_limit_seconds = int(ip_minute) * 60
-            safe_upper = min(max_delay, max(min_delay, ip_limit_seconds - 1))
-
-    center = (min_delay + safe_upper) / 2.0
-    std_dev = (safe_upper - min_delay) / 6.0 if safe_upper > min_delay else 0.0
+    center = (min_delay + max_delay) / 2.0
+    std_dev = (max_delay - min_delay) / 6.0 if max_delay > min_delay else 0.0
 
     if std_dev > 0:
         wait_seconds = random.gauss(center, std_dev)
     else:
         wait_seconds = float(min_delay)
 
-    return max(min_delay, min(safe_upper, wait_seconds))
+    return max(min_delay, min(max_delay, wait_seconds))
 
 
 async def wait_answer_duration_seconds(

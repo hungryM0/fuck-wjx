@@ -484,6 +484,77 @@ async def test_qq_http_runtime_submits_only_visible_questions_grouped_by_page(mo
 
 
 @pytest.mark.asyncio
+async def test_qq_http_runtime_skips_description_metadata(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://wj.qq.com/s2/123/hash/",
+        survey_provider="qq",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        5: SurveyQuestionMeta(
+            num=5,
+            title="模特A：无眼镜",
+            provider="qq",
+            provider_question_id="q5",
+            provider_type="description",
+            is_description=True,
+        ),
+        6: SurveyQuestionMeta(
+            num=6,
+            title="模特A评分",
+            provider="qq",
+            provider_question_id="q6",
+            provider_type="matrix_star",
+            type_code="6",
+            option_texts=["1", "2"],
+            row_texts=["专业"],
+            options=2,
+            rows=1,
+        ),
+    }
+    state = ExecutionState(config=config)
+    built_questions: list[int] = []
+    captured: dict[str, object] = {}
+
+    async def fake_fetch(*_args, **_kwargs):
+        return "sess", {}, [
+            {"id": "q5", "type": "description", "title": "模特A", "page_id": "p1"},
+            {
+                "id": "q6",
+                "type": "matrix_star",
+                "options": [{"id": "o1", "text": "1"}, {"id": "o2", "text": "2"}],
+                "sub_titles": [{"id": "r1", "text": "专业"}],
+                "page_id": "p1",
+            },
+        ]
+
+    async def fake_build_action(_driver, question, _ctx, **_kwargs):
+        built_questions.append(int(question.num))
+        return AnswerAction(
+            question_num=int(question.num),
+            question_id=str(question.provider_question_id),
+            kind="matrix",
+            matrix_indices=(0,),
+            record_type="matrix",
+        )
+
+    async def fake_post(*_args, **kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(payload={"code": "OK"})
+
+    monkeypatch.setattr(qq_http, "_fetch_submit_source", fake_fetch)
+    monkeypatch.setattr(qq_http, "build_answer_action", fake_build_action)
+    monkeypatch.setattr(qq_http.http_client, "apost", fake_post)
+
+    ok = await qq_http.brush_qq_http(config, state)
+
+    assert ok is True
+    assert built_questions == [6]
+    submitted_questions = captured["json"]["answer_survey"]["pages"][0]["questions"]
+    assert [item["id"] for item in submitted_questions] == ["q6"]
+
+
+@pytest.mark.asyncio
 async def test_credamo_http_runtime_uses_proxy_and_posts_json(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.credamo.com/s/A73QR3ano",
@@ -690,8 +761,9 @@ def test_wjx_submit_rejected_message_includes_question_title_and_display_num() -
 def test_wjx_submit_rejected_detects_submission_verification() -> None:
     config = ExecutionConfig(url="https://www.wjx.cn/vm/demo.aspx", survey_provider="wjx")
 
-    assert wjx_http.is_wjx_submission_verification_response("请先完成智能验证")
     assert wjx_http.is_wjx_submission_verification_response("7〒需要安全校验，请重新提交！")
+    assert not wjx_http.is_wjx_submission_verification_response("请先完成智能验证")
+    assert not wjx_http.is_wjx_submission_verification_response("请先完成验证码校验后重新提交")
 
     with pytest.raises(SubmissionVerificationRequiredError, match="启用随机 IP"):
         wjx_http._raise_submit_rejected(config, "7〒需要安全校验，请重新提交！")

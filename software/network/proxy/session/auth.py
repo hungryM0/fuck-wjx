@@ -333,7 +333,7 @@ def format_random_ip_error(exc: BaseException) -> str:
     if detail == "invalid_upstream":
         return "代理上游参数不被后端接受，请更新客户端"
     if detail == "minute_not_supported_for_idiot":
-        return "限时福利代理源只支持 1 分钟代理，请切回默认代理源或缩短作答时长"
+        return "限时福利代理源只支持 1 分钟代理，请切回默认代理源"
     if detail == "invalid_area_for_idiot":
         return "限时福利代理源的地区格式不正确，请重新选择具体城市后再试"
     if detail == "insufficient_quota":

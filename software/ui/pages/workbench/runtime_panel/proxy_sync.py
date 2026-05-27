@@ -130,18 +130,9 @@ class RuntimeProxySyncMixin:
             return 1
 
     def _show_benefit_proxy_limit_tip(self, minute: int) -> None:
+        del minute
         parent = cast(Any, self).window() or self.view
-        if self._current_survey_provider() == "wjx":
-            content = (
-                "问卷星链路会固定拿 1 分钟代理。"
-                "限时福利源仍然只支持少部分城市，不适合长时间保活。"
-            )
-        else:
-            content = (
-                f"当前作答时长会要求 {minute} 分钟代理，"
-                "但“限时福利”只支持 1 分钟。请切回默认代理源，"
-                "或缩短作答时长后再试。"
-            )
+        content = "限时福利源只支持少部分城市。如地区不可用，请切回默认代理源。"
         InfoBar.warning(
             "",
             content,
@@ -155,7 +146,7 @@ class RuntimeProxySyncMixin:
             self._last_benefit_proxy_compatible = None
             return True
         minute = self._current_proxy_required_minute_for_benefit()
-        compatible = minute <= 1
+        compatible = True
         previous = self._last_benefit_proxy_compatible
         self._last_benefit_proxy_compatible = compatible
         if show_tip and (not compatible) and previous is not False:

@@ -22,7 +22,11 @@ from software.app.config import (
     PROXY_SOURCE_DEFAULT,
     PROXY_TTL_GRACE_SECONDS,
 )
-from software.providers.common import SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
+from software.providers.common import (
+    SURVEY_PROVIDER_CREDAMO,
+    SURVEY_PROVIDER_QQ,
+    SURVEY_PROVIDER_WJX,
+)
 
 PROXY_SOURCE_BENEFIT = "benefit"
 PROXY_UPSTREAM_DEFAULT = "default"
@@ -132,7 +136,7 @@ def get_proxy_minute_by_answer_seconds(
     survey_provider: Optional[str] = None,
 ) -> int:
     normalized_provider = str(survey_provider or "").strip().lower()
-    if normalized_provider in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ}:
+    if normalized_provider in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_CREDAMO}:
         return 1
     required_seconds = get_proxy_required_seconds_by_answer_seconds(total_seconds)
     minute = int(_map_answer_seconds_to_proxy_minute(required_seconds))
@@ -203,6 +207,13 @@ def set_proxy_occupy_minute_by_answer_duration(
     elif normalized_provider == SURVEY_PROVIDER_QQ:
         logging.info(
             "腾讯问卷代理 minute 已固定为 %s（min=%s秒, max=%s秒，提交时长仍按运行参数写入）",
+            minute,
+            min_seconds,
+            max_seconds,
+        )
+    elif normalized_provider == SURVEY_PROVIDER_CREDAMO:
+        logging.info(
+            "见数代理 minute 已固定为 %s（min=%s秒, max=%s秒，提交时长仍按运行参数写入）",
             minute,
             min_seconds,
             max_seconds,
