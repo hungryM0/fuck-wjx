@@ -7,17 +7,13 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    Action,
     BodyLabel,
     CardWidget,
-    FluentIcon,
     IndeterminateProgressBar,
     MessageBox,
-    PrimarySplitPushButton,
     PrimaryPushButton,
     ProgressBar,
     PushButton,
-    RoundMenu,
     SegmentedWidget,
     StrongBodyLabel,
 )
@@ -64,7 +60,7 @@ class DashboardProgressMixin:
         progress_indeterminate_bar: IndeterminateProgressBar
         progress_pct: StrongBodyLabel
         target_spin: Any
-        start_btn: PrimarySplitPushButton
+        start_btn: PrimaryPushButton
         resume_btn: PrimaryPushButton
         stop_btn: PushButton
         thread_view_seg: SegmentedWidget
@@ -100,7 +96,6 @@ class DashboardProgressMixin:
         ) -> Optional[Any]: ...
         def show_task_result_windows_notification(self, title: str, message: str) -> None: ...
         def _on_start_clicked(self) -> None: ...
-        def _on_no_submit_test_clicked(self) -> None: ...
         def resume_run_from_ui(self) -> None: ...
         def window(self) -> Any: ...
 
@@ -295,11 +290,7 @@ class DashboardProgressMixin:
         self.progress_pct.setMinimumWidth(50)
         self.progress_pct.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.progress_pct.setStyleSheet("font-size: 13px; font-weight: bold;")
-        self.start_btn = PrimarySplitPushButton("开始执行", self)
-        self.start_btn_menu = RoundMenu(parent=self.start_btn)
-        self.no_submit_test_action = Action(FluentIcon.LABEL, "单次小测（不提交）", self.start_btn_menu)
-        self.start_btn_menu.addAction(self.no_submit_test_action)
-        self.start_btn.setFlyout(self.start_btn_menu)
+        self.start_btn = PrimaryPushButton("开始执行", self)
         self.resume_btn = PrimaryPushButton("继续", self)
         self.resume_btn.setEnabled(False)
         self.resume_btn.hide()
@@ -325,15 +316,6 @@ class DashboardProgressMixin:
             scope="RUN",
             event="start_run",
             target="start_btn",
-            page="dashboard",
-            forward_signal_args=False,
-        )
-        bind_logged_action(
-            self.no_submit_test_action.triggered,
-            self._on_no_submit_test_clicked,
-            scope="RUN",
-            event="start_no_submit_test",
-            target="start_btn_menu",
             page="dashboard",
             forward_signal_args=False,
         )

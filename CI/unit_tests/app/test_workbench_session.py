@@ -202,26 +202,6 @@ def test_normal_start_ignores_reverse_fill_target_override() -> None:
     assert cfg.reverse_fill_enabled is False
 
 
-def test_no_submit_test_forces_single_http_run_without_random_ip() -> None:
-    controller = _FakeController()
-    dashboard = _FakeDashboard(target=8)
-    coordinator = WorkbenchRunCoordinator(
-        controller=controller,
-        state=_state_with_one_entry(),
-        dashboard=dashboard,
-    )
-
-    started = coordinator.start(submit_enabled=False)
-
-    assert started is True
-    assert len(controller.started_configs) == 1
-    cfg = controller.started_configs[0]
-    assert cfg.submit_enabled is False
-    assert cfg.target == 1
-    assert cfg.threads == 1
-    assert cfg.random_ip_enabled is False
-
-
 def test_starting_state_locks_dashboard_run_controls() -> None:
     controller = _FakeController()
     dashboard = _FakeDashboard(target=3)

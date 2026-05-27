@@ -148,23 +148,6 @@ class AsyncSlotRunner:
     def _release_session_proxy(self) -> None:
         self.proxy_session.release_current_proxy()
 
-    def _finalize_without_submit(self) -> Any:
-        should_stop = self.stop_policy.record_success(
-            self.stop_proxy,
-            thread_name=self.slot_label,
-            status_text="单测完成",
-            terminal_message="不提交单测已完成",
-        )
-        return type(
-            "_NoSubmitOutcome",
-            (),
-            {
-                "status": "success",
-                "should_rotate_proxy": False,
-                "should_stop": should_stop,
-            },
-        )()
-
     async def _run_pre_answer_step_with_joint_lease(self, label: str, operation: Any) -> Any:
         return await self.round_resources.run_pre_answer_step_with_joint_lease(label, operation)
 
@@ -326,16 +309,10 @@ class AsyncSlotRunner:
                         break
                     continue
 
-                if bool(getattr(self.config, "submit_enabled", True)):
-                    should_stop = self._mark_http_submit_success()
-                    if should_stop:
-                        should_requeue_dispatch = False
-                        break
-                else:
-                    outcome = self._finalize_without_submit()
-                    if outcome.should_stop:
-                        should_requeue_dispatch = False
-                        break
+                should_stop = self._mark_http_submit_success()
+                if should_stop:
+                    should_requeue_dispatch = False
+                    break
                 dispatch_delay_seconds = self._resolve_dispatch_delay_seconds()
                 if dispatch_delay_seconds > 0:
                     self._update_step("等待提交间隔")

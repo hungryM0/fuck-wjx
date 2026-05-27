@@ -16,11 +16,8 @@ class QuotaRequestValidationInputs:
     email: str
     amount_text: str
     quantity_text: str
-    verify_code: str
     payment_method: str
     donated: bool
-    verify_code_requested: bool
-    verify_code_requested_email: str
 
 
 @dataclass(frozen=True)
@@ -71,13 +68,6 @@ def validate_quota_request(
             normalized_quota_text,
             amount_rule_blocked=True,
         )
-    if not inputs.verify_code_requested:
-        return QuotaRequestValidationResult("请先点击发送验证码", normalized_quota_text)
-    if inputs.email != inputs.verify_code_requested_email:
-        return QuotaRequestValidationResult("邮箱已变更，请重新发送验证码", normalized_quota_text)
-    if inputs.verify_code != "114514":
-        return QuotaRequestValidationResult("验证码错误，请重试", normalized_quota_text)
-
     return QuotaRequestValidationResult(None, normalized_quota_text)
 
 

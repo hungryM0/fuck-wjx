@@ -53,17 +53,10 @@ class DashboardRunActionsMixin:
         def _sync_random_ip_toggle_presentation(self, enabled: bool) -> None: ...
         def window(self) -> Any: ...
 
-    def _on_start_clicked(
-        self,
-        enable_reverse_fill: bool = False,
-        submit_enabled: bool = True,
-    ):
+    def _on_start_clicked(self, enable_reverse_fill: bool = False):
         coordinator = getattr(self, "run_coordinator", None)
         if coordinator is not None:
-            coordinator.start(
-                enable_reverse_fill=enable_reverse_fill,
-                submit_enabled=submit_enabled,
-            )
+            coordinator.start(enable_reverse_fill=enable_reverse_fill)
             return
         log_action(
             "RUN",
@@ -74,9 +67,6 @@ class DashboardRunActionsMixin:
             level=logging.ERROR,
         )
         self._toast("运行编排器未初始化，无法开始执行", "error")
-
-    def _on_no_submit_test_clicked(self):
-        self._on_start_clicked(submit_enabled=False)
 
     def update_question_meta(self, title: str, count: int):
         self.count_label.setText(f"{count} 题")

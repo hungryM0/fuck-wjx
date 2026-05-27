@@ -133,7 +133,7 @@ class WorkbenchRunCoordinator:
                 logging.debug("构建配置时同步反填配置失败", exc_info=True)
         return cfg
 
-    def start(self, *, enable_reverse_fill: bool = False, submit_enabled: bool = True) -> bool:
+    def start(self, *, enable_reverse_fill: bool = False) -> bool:
         dashboard = self.dashboard
         if getattr(self.controller, "running", False):
             if getattr(dashboard, "_completion_notified", False):
@@ -159,11 +159,6 @@ class WorkbenchRunCoordinator:
         )
         if enable_reverse_fill and self._reverse_fill_target_override is not None:
             cfg.target = self._reverse_fill_target_override
-        cfg.submit_enabled = bool(submit_enabled)
-        if not cfg.submit_enabled:
-            cfg.target = 1
-            cfg.threads = 1
-            cfg.random_ip_enabled = False
         if not cfg.question_entries:
             log_action(
                 "RUN",
@@ -199,7 +194,6 @@ class WorkbenchRunCoordinator:
                 "target": cfg.target,
                 "threads": cfg.threads,
                 "reverse_fill_enabled": cfg.reverse_fill_enabled,
-                "submit_enabled": cfg.submit_enabled,
             },
         )
         return True

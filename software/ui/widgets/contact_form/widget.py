@@ -23,7 +23,6 @@ from qfluentwidgets import (
 
 from software.app.config import (
     CONTACT_API_URL,
-    EMAIL_VERIFY_ENDPOINT,
 )
 from software.app.user_paths import get_fatal_crash_log_path, get_user_local_data_root
 from software.app.version import __VERSION__
@@ -101,15 +100,6 @@ from .send_actions import (
     on_send_clicked,
     on_send_finished,
 )
-from .verify_code_flow import (
-    on_cooldown_tick,
-    on_send_verify_clicked,
-    on_verify_code_finished,
-    set_verify_code_sending,
-    start_cooldown,
-    stop_cooldown,
-)
-
 http_post = post
 
 
@@ -122,9 +112,6 @@ class ContactForm(StatusPollingMixin, QWidget):
     base_options: Any
     email_label: Any
     email_edit: Any
-    verify_code_edit: Any
-    send_verify_btn: Any
-    verify_send_spinner: Any
     issue_title_label: Any
     issue_title_edit: Any
     amount_row: Any
@@ -168,8 +155,6 @@ class ContactForm(StatusPollingMixin, QWidget):
 
     _statusLoaded = Signal(str, str)  # text, color
     _sendFinished = Signal(bool, str)  # success, message
-    _verifyCodeFinished = Signal(bool, str, str)  # success, message, email
-
     sendSucceeded = Signal()
     quotaRequestSucceeded = Signal()
     cancelRequested = Signal()
@@ -194,9 +179,6 @@ class ContactForm(StatusPollingMixin, QWidget):
     ):
         super().__init__(parent)
         self._sendFinished.connect(self._on_send_finished, Qt.ConnectionType.QueuedConnection)
-        self._verifyCodeFinished.connect(
-            self._on_verify_code_finished, Qt.ConnectionType.QueuedConnection
-        )
         self._init_status_polling(status_endpoint, status_formatter)
         self._attachments = ImageAttachmentManager(max_count=3, max_size_bytes=10 * 1024 * 1024)
         self._current_message_type: str = ""
@@ -205,11 +187,6 @@ class ContactForm(StatusPollingMixin, QWidget):
         self._send_generation: int = 0
         self._send_finished_generation: int = 0
         self._send_state_lock = threading.Lock()
-        self._verify_code_requested: bool = False
-        self._verify_code_requested_email: str = ""
-        self._verify_code_sending: bool = False
-        self._cooldown_timer: Optional[QTimer] = None
-        self._cooldown_remaining: int = 0
         self._polling_started = False
         self._auto_clear_on_success = auto_clear_on_success
         self._manage_polling = manage_polling
@@ -303,7 +280,6 @@ class ContactForm(StatusPollingMixin, QWidget):
             self.show_pending_async_warning()
             return
         self.stop_status_polling()
-        self._stop_cooldown()
         self._stop_activity_indicators()
 
         # 关闭所有可能存在的 InfoBar，避免其内部线程导致崩溃
@@ -341,9 +317,6 @@ class ContactForm(StatusPollingMixin, QWidget):
         return CONTACT_API_URL
 
     @staticmethod
-    def _email_verify_endpoint() -> str:
-        return EMAIL_VERIFY_ENDPOINT
-
     @staticmethod
     def _contact_http_post(*args, **kwargs):
         return ContactForm.http_post(*args, **kwargs)
@@ -366,22 +339,16 @@ class ContactForm(StatusPollingMixin, QWidget):
         email: str,
         amount_text: str,
         quantity_text: str,
-        verify_code: str,
         payment_method: str,
         donated: bool,
-        verify_code_requested: bool,
-        verify_code_requested_email: str,
     ):
         return validate_quota_request(
             QuotaRequestValidationInputs(
                 email=email,
                 amount_text=amount_text,
                 quantity_text=quantity_text,
-                verify_code=verify_code,
                 payment_method=payment_method,
                 donated=donated,
-                verify_code_requested=verify_code_requested,
-                verify_code_requested_email=verify_code_requested_email,
             )
         )
 
@@ -761,21 +728,3 @@ class ContactForm(StatusPollingMixin, QWidget):
     def _find_controller_host(self) -> Optional[QWidget]:
         return find_controller_host(self)
 
-    def _set_verify_code_sending(self, sending: bool):
-        set_verify_code_sending(self, sending)
-
-    def _start_cooldown(self):
-        start_cooldown(self)
-
-    def _on_cooldown_tick(self):
-        on_cooldown_tick(self)
-
-    def _stop_cooldown(self):
-        stop_cooldown(self)
-
-    def _on_send_verify_clicked(self):
-        on_send_verify_clicked(self)
-
-    @Slot(bool, str, str)
-    def _on_verify_code_finished(self, success: bool, error_msg: str, email: str):
-        on_verify_code_finished(self, success, error_msg, email)

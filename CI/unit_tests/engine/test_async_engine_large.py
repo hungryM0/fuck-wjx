@@ -237,47 +237,6 @@ class AsyncRuntimeEngineLargeTests:
         assert engine._state is None
 
     @pytest.mark.asyncio
-    async def test_run_successful_no_submit_test_clears_runtime_state(self, monkeypatch) -> None:
-        engine = _build_engine()
-        config = ExecutionConfig(
-            num_threads=1,
-            target_num=1,
-            submit_enabled=False,
-            survey_provider="wjx",
-        )
-        state = ExecutionState(config=config)
-        created_schedulers: list[_FakeScheduler] = []
-
-        class _FakeRunner:
-            def __init__(self, **_kwargs) -> None:
-                pass
-
-            async def run(self) -> None:
-                state.cur_num = 1
-                state.mark_terminal_stop("target_reached", message="不提交单测已完成")
-
-        class _FakeScheduler:
-            def __init__(self, *, concurrency: int) -> None:
-                self.concurrency = concurrency
-                self.close_calls = 0
-                created_schedulers.append(self)
-
-            async def close(self) -> None:
-                self.close_calls += 1
-
-        monkeypatch.setattr(async_engine, "AsyncScheduler", _FakeScheduler)
-        monkeypatch.setattr(async_engine, "AsyncRunContext", lambda **kwargs: SimpleNamespace(**kwargs))
-        monkeypatch.setattr(async_engine, "AsyncSlotRunner", _FakeRunner)
-
-        await engine._run(config=config, state=state, runtime_bridge=None)
-
-        assert created_schedulers[0].close_calls == 1
-        assert state.stop_event.is_set()
-        assert engine._stop_event is None
-        assert engine._pause_event is None
-        assert engine._state is None
-
-    @pytest.mark.asyncio
     async def test_run_starts_async_proxy_prefetch_without_blocking_slots(self, monkeypatch) -> None:
         engine = _build_engine()
         config = ExecutionConfig(

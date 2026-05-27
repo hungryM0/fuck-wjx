@@ -37,8 +37,6 @@ def on_type_changed(form: Any) -> None:
         form.quantity_edit.show()
         form.urgency_label.show()
         form.urgency_combo.show()
-        form.verify_code_edit.show()
-        form.send_verify_btn.show()
         form.email_edit.setPlaceholderText("name@example.com")
         form.message_label.setText("补充说明（选填）：")
         form.message_edit.setPlaceholderText(
@@ -59,14 +57,6 @@ def on_type_changed(form: Any) -> None:
         form.quantity_edit.hide()
         form.urgency_label.hide()
         form.urgency_combo.hide()
-        form.verify_code_edit.hide()
-        form.send_verify_btn.hide()
-        form.verify_send_spinner.hide()
-        form.verify_code_edit.clear()
-        form._verify_code_requested = False
-        form._verify_code_requested_email = ""
-        form._verify_code_sending = False
-        form._stop_cooldown()
         form.email_edit.setPlaceholderText("name@example.com")
         form.message_label.setText("消息内容：")
         form.message_edit.setPlaceholderText("请详细描述您的问题、需求或留言…")

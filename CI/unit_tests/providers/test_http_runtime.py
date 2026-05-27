@@ -206,7 +206,6 @@ async def test_wjx_http_runtime_uses_proxy_and_posts_submitdata(monkeypatch) -> 
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", options=2, option_texts=["A", "B"]),
@@ -245,7 +244,6 @@ async def test_wjx_http_runtime_builds_only_visible_questions_after_logic(monkey
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(
@@ -294,7 +292,6 @@ async def test_wjx_http_runtime_skips_jump_hidden_questions(monkeypatch) -> None
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(
@@ -344,7 +341,6 @@ async def test_wjx_http_runtime_passes_slot_label_to_reverse_fill_builder(monkey
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", option_texts=["A", "B"], options=2),
@@ -380,7 +376,6 @@ async def test_wjx_http_runtime_accepts_legacy_saved_jump_rules_without_status(m
     config = ExecutionConfig(
         url="https://v.wjx.cn/vm/tgRSrWd.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(
@@ -420,7 +415,6 @@ async def test_wjx_http_runtime_blocks_unparsed_jump_logic(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(
@@ -450,7 +444,6 @@ async def test_wjx_http_runtime_blocks_unparsed_display_logic(monkeypatch) -> No
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", option_texts=["A", "B"], options=2),
@@ -480,7 +473,6 @@ async def test_wjx_http_runtime_requires_all_distinct_display_sources(monkeypatc
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", option_texts=["A", "B"], options=2),
@@ -523,7 +515,6 @@ async def test_qq_http_runtime_uses_proxy_and_answer_session(monkeypatch) -> Non
     config = ExecutionConfig(
         url="https://wj.qq.com/s2/123/hash/",
         survey_provider="qq",
-        submit_enabled=True,
         answer_duration_range_seconds=(480, 480),
     )
     config.questions_metadata = {
@@ -568,7 +559,6 @@ async def test_qq_http_runtime_submits_only_visible_questions_grouped_by_page(mo
     config = ExecutionConfig(
         url="https://wj.qq.com/s2/123/hash/",
         survey_provider="qq",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(
@@ -643,7 +633,6 @@ async def test_qq_http_runtime_blocks_unparsed_display_logic(monkeypatch) -> Non
     config = ExecutionConfig(
         url="https://wj.qq.com/s2/123/hash/",
         survey_provider="qq",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(
@@ -690,7 +679,6 @@ async def test_qq_http_runtime_skips_description_metadata(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://wj.qq.com/s2/123/hash/",
         survey_provider="qq",
-        submit_enabled=True,
     )
     config.questions_metadata = {
         5: SurveyQuestionMeta(
@@ -761,7 +749,6 @@ async def test_credamo_http_runtime_uses_proxy_and_posts_json(monkeypatch) -> No
     config = ExecutionConfig(
         url="https://www.credamo.com/s/A73QR3ano",
         survey_provider="credamo",
-        submit_enabled=True,
         answer_duration_range_seconds=(70, 70),
     )
     config.questions_metadata = {

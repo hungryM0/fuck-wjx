@@ -31,7 +31,6 @@ class RuntimeConfig:
     random_ua_keys: List[str] = field(default_factory=lambda: list(DEFAULT_RANDOM_UA_KEYS))
     random_ua_ratios: Dict[str, int] = field(default_factory=lambda: {"wechat": 33, "mobile": 33, "pc": 34})
     fail_stop_enabled: bool = True
-    submit_enabled: bool = True
     pause_on_aliyun_captcha: bool = True
     reliability_mode_enabled: bool = True
     psycho_target_alpha: float = 0.85

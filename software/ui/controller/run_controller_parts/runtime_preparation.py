@@ -202,7 +202,6 @@ def _build_execution_config_template(
         ),
         pause_on_aliyun_captcha=bool(getattr(config, "pause_on_aliyun_captcha", True)),
         stop_on_fail_enabled=bool(getattr(config, "fail_stop_enabled", True)),
-        submit_enabled=bool(getattr(config, "submit_enabled", True)),
         answer_rules=copy.deepcopy(list(getattr(config, "answer_rules", []) or [])),
         reverse_fill_spec=copy.deepcopy(reverse_fill_spec),
         psycho_target_alpha=psycho_target_alpha,

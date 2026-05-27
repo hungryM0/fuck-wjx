@@ -256,25 +256,6 @@ class AsyncRuntimeLoopLargeTests:
         assert "准备请求" in labels
 
     @pytest.mark.asyncio
-    async def test_run_no_submit_path_records_single_test_success(self, monkeypatch) -> None:
-        config = ExecutionConfig(
-            target_num=1,
-            submit_enabled=False,
-            survey_provider="credamo",
-            url="https://www.credamo.com/answer.html#/s/demo",
-        )
-        runner, _state, _ctx, scheduler = _build_runner(config=config)
-        scheduler.acquire_values = [7]
-        monkeypatch.setattr(runner.http_submitter, "submit", lambda **_kwargs: asyncio.sleep(0, result=True))
-        monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
-        monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
-
-        await runner.run()
-
-        assert runner.stop_policy.success_calls[0]["status_text"] == "单测完成"
-        assert scheduler.release_calls[0]["requeue"] is True
-
-    @pytest.mark.asyncio
     async def test_run_airuntime_error_releases_resources_and_requeues(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
         runner, _state, _ctx, scheduler = _build_runner(config=config)

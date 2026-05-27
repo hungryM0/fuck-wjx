@@ -193,7 +193,6 @@ def _validate_send_request(form: Any, mtype: str, email: str) -> tuple[bool, dic
         form._normalize_quantity_if_needed()
         amount_text = (form.amount_edit.currentText() or "").strip()
         quantity_text = (form.quantity_edit.text() or "").strip()
-        verify_code = (form.verify_code_edit.text() or "").strip()
         request_payment_method = form._selected_payment_method()
         request_amount_text = amount_text
         request_urgency_text = (form.urgency_combo.currentText() or "").strip()
@@ -202,11 +201,8 @@ def _validate_send_request(form: Any, mtype: str, email: str) -> tuple[bool, dic
             email=email,
             amount_text=amount_text,
             quantity_text=quantity_text,
-            verify_code=verify_code,
             payment_method=request_payment_method,
             donated=form.donated_cb.isChecked(),
-            verify_code_requested=form._verify_code_requested,
-            verify_code_requested_email=form._verify_code_requested_email,
         )
         request_quota_text = quota_validation.normalized_quota_text
         if quota_validation.error_message:
@@ -373,10 +369,7 @@ def on_send_finished(form: Any, success: bool, error_msg: str) -> None:
             form._close_amount_rule_infobar()
             form.amount_edit.setText("")
             form.quantity_edit.clear()
-            form.verify_code_edit.clear()
             form._clear_payment_method_selection()
-            form._verify_code_requested = False
-            form._verify_code_requested_email = ""
             urgency_default_index = form.urgency_combo.findText("中")
             if urgency_default_index >= 0:
                 form.urgency_combo.setCurrentIndex(urgency_default_index)

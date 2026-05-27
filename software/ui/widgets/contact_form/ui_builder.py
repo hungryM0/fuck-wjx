@@ -3,7 +3,7 @@
 from typing import Any
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QDoubleValidator, QIntValidator
+from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QButtonGroup,
     QGridLayout,
@@ -20,9 +20,9 @@ from qfluentwidgets import (
     FluentIcon,
     IconWidget,
     IndeterminateProgressRing,
-    LineEdit,
     PrimaryPushButton,
     PushButton,
+    LineEdit,
     RadioButton,
 )
 
@@ -80,27 +80,7 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     email_row.addWidget(form.email_label)
     email_row.addWidget(form.email_edit, 1)
 
-    form.verify_code_edit = LineEdit(form)
-    form.verify_code_edit.setPlaceholderText("6位验证码")
-    form.verify_code_edit.setMaxLength(6)
-    form.verify_code_edit.setValidator(QIntValidator(0, 999999, form))
-    form.verify_code_edit.setMaximumWidth(120)
-
-    form.send_verify_btn = PushButton("发送验证码", form)
-    form.verify_send_spinner = IndeterminateProgressRing(form, start=False)
-    form.verify_send_spinner.setFixedSize(16, 16)
-    form.verify_send_spinner.setStrokeWidth(2)
-    form.verify_send_spinner.hide()
-
-    email_row.addSpacing(4)
-    email_row.addWidget(form.send_verify_btn)
-    email_row.addWidget(form.verify_send_spinner)
-    email_row.addWidget(form.verify_code_edit)
     form_layout.addLayout(email_row)
-
-    form.verify_code_edit.hide()
-    form.send_verify_btn.hide()
-    form.verify_send_spinner.hide()
 
     title_row = QHBoxLayout()
     title_row.setSpacing(6)
@@ -378,7 +358,6 @@ def build_contact_form_ui(form: Any, *, default_type: str, show_cancel_button: b
     form.open_donate_btn.clicked.connect(form._open_donate_page)
     install_tooltip_filters((form.open_donate_btn, form.donated_cb, form.send_btn))
     form.send_btn.clicked.connect(form._on_send_clicked)
-    form.send_verify_btn.clicked.connect(form._on_send_verify_clicked)
     form.attach_add_btn.clicked.connect(form._on_choose_files)
     form.attach_clear_btn.clicked.connect(form._on_clear_attachments)
     form.payment_method_group.buttonToggled.connect(lambda *_: form._update_send_button_state())
