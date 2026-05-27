@@ -12,7 +12,7 @@ from software.core.engine.async_runtime_loop import AsyncSlotRunner
 from software.core.engine.failure_reason import FailureReason
 from software.core.task import ExecutionConfig, ExecutionState
 from software.providers.contracts import SurveyQuestionMeta
-from software.providers.errors import SubmissionVerificationRequiredError
+from software.providers.errors import SubmissionVerificationRequiredError, SurveyProviderUnavailableAtRuntimeError
 
 
 class _FakeScheduler:
@@ -303,6 +303,27 @@ class AsyncRuntimeLoopLargeTests:
         assert scheduler.release_calls[0]["requeue"] is False
         assert state.get_terminal_stop_snapshot()[0] == "submission_verification"
         assert state.get_terminal_stop_snapshot()[1] == FailureReason.SUBMISSION_VERIFICATION_REQUIRED.value
+
+    @pytest.mark.asyncio
+    async def test_run_provider_unavailable_error_stops_without_requeue(self, monkeypatch) -> None:
+        config = ExecutionConfig(url="https://www.wjx.cn/vm/demo.aspx", survey_provider="wjx")
+        runner, state, ctx, scheduler = _build_runner(config=config)
+        scheduler.acquire_values = [10]
+        monkeypatch.setattr(
+            runtime_loop,
+            "fill_survey_http",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(SurveyProviderUnavailableAtRuntimeError("问卷已暂停")),
+        )
+        monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=(None, "UA")))
+
+        await runner.run()
+        await asyncio.sleep(0)
+
+        assert ctx.stop_event.is_set()
+        assert scheduler.release_calls[0]["requeue"] is False
+        assert state.get_terminal_stop_snapshot()[0] == "survey_provider_unavailable"
+        assert state.get_terminal_stop_snapshot()[1] == FailureReason.SURVEY_PROVIDER_UNAVAILABLE.value
 
     @pytest.mark.asyncio
     async def test_run_http_transport_error_breaks_when_handler_requests_stop(self, monkeypatch) -> None:

@@ -9,10 +9,11 @@ from software.core.ai.runtime import AIRuntimeError, is_ai_timeout_runtime_error
 from software.core.engine.failure_reason import FailureReason
 from software.core.engine.stop_signal import StopSignalLike
 from software.core.task import ExecutionConfig, ExecutionState
-from software.providers.errors import SubmissionVerificationRequiredError
+from software.providers.errors import SubmissionVerificationRequiredError, SurveyProviderUnavailableAtRuntimeError
 AI_FILL_FAIL_THRESHOLD = 5
 FREE_AI_TIMEOUT_FAIL_THRESHOLD = AI_FILL_FAIL_THRESHOLD
 SUBMISSION_VERIFICATION_STOP_CATEGORY = "submission_verification"
+SURVEY_PROVIDER_UNAVAILABLE_STOP_CATEGORY = "survey_provider_unavailable"
 
 
 def handle_ai_runtime_error(
@@ -114,11 +115,43 @@ def handle_submission_verification_error(
     return True
 
 
+def handle_survey_provider_unavailable_error(
+    exc: SurveyProviderUnavailableAtRuntimeError,
+    stop_signal: StopSignalLike,
+    *,
+    thread_name: str,
+    state: ExecutionState,
+) -> bool:
+    message = str(exc or "").strip() or "问卷当前不可填写"
+    logging.warning("会话[%s]发现问卷不可继续：%s", thread_name, message)
+    try:
+        state.release_joint_sample(thread_name)
+    except Exception:
+        logging.info("问卷不可继续时释放联合信效度样本槽位失败", exc_info=True)
+    try:
+        state.release_reverse_fill_sample(thread_name, requeue=True)
+    except Exception:
+        logging.info("问卷不可继续时回收反填样本失败", exc_info=True)
+    try:
+        state.increment_thread_fail(thread_name, status_text="问卷不可填写")
+    except Exception:
+        logging.info("问卷不可继续时更新线程状态失败", exc_info=True)
+    state.mark_terminal_stop(
+        SURVEY_PROVIDER_UNAVAILABLE_STOP_CATEGORY,
+        failure_reason=FailureReason.SURVEY_PROVIDER_UNAVAILABLE.value,
+        message=message,
+    )
+    stop_signal.set()
+    return True
+
+
 __all__ = [
     "AI_FILL_FAIL_THRESHOLD",
     "FREE_AI_TIMEOUT_FAIL_THRESHOLD",
     "SUBMISSION_VERIFICATION_STOP_CATEGORY",
+    "SURVEY_PROVIDER_UNAVAILABLE_STOP_CATEGORY",
     "handle_ai_runtime_error",
     "handle_proxy_connection_error",
     "handle_submission_verification_error",
+    "handle_survey_provider_unavailable_error",
 ]

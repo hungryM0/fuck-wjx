@@ -40,6 +40,11 @@ class _CredamoAnswerInit:
     time_code: str
 
 
+class CredamoSubmitResult:
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
 class _CredamoHttpSession:
     def __init__(self, proxy_address: str | None = None) -> None:
         self.proxy_address = str(proxy_address or "").strip()
@@ -188,11 +193,17 @@ def _json_payload(response: Any, label: str) -> Mapping[str, Any]:
 
 
 def _ensure_api_ok(payload: Mapping[str, Any], label: str) -> Mapping[str, Any]:
-    if payload.get("success") is False:
+    if classify_credamo_api_payload(payload) != CredamoSubmitResult.SUCCESS:
         message = str(payload.get("message") or payload.get("msg") or payload.get("code") or payload).strip()
         raise RuntimeError(f"见数{label}失败：{message}")
     data = payload.get("data")
     return data if isinstance(data, Mapping) else payload
+
+
+def classify_credamo_api_payload(payload: Mapping[str, Any]) -> str:
+    if payload.get("success") is False:
+        return CredamoSubmitResult.FAILED
+    return CredamoSubmitResult.SUCCESS
 
 
 async def _fetch_detail(
@@ -836,4 +847,4 @@ async def brush_credamo_http(
     return True
 
 
-__all__ = ["brush_credamo_http"]
+__all__ = ["CredamoSubmitResult", "brush_credamo_http", "classify_credamo_api_payload"]

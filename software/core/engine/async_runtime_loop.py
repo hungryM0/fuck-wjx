@@ -15,8 +15,9 @@ from software.core.engine.provider_common import ensure_joint_psychometric_answe
 from software.core.engine.run_stop_policy import RunStopPolicy
 from software.core.engine.runtime_error_handlers import handle_ai_runtime_error as _handle_ai_runtime_error_impl
 from software.core.engine.runtime_error_handlers import handle_submission_verification_error
+from software.core.engine.runtime_error_handlers import handle_survey_provider_unavailable_error
 from software.core.task import ExecutionConfig, ExecutionState
-from software.providers.errors import SubmissionVerificationRequiredError
+from software.providers.errors import SubmissionVerificationRequiredError, SurveyProviderUnavailableAtRuntimeError
 import software.network.http as http_client
 from software.network.proxy.pool import is_proxy_responsive_async
 from software.network.session_policy import (
@@ -327,6 +328,14 @@ class AsyncSlotRunner:
             state=self.state,
         )
 
+    async def _handle_survey_provider_unavailable_error(self, exc: SurveyProviderUnavailableAtRuntimeError) -> bool:
+        return handle_survey_provider_unavailable_error(
+            exc,
+            self.stop_proxy,
+            thread_name=self.slot_label,
+            state=self.state,
+        )
+
     def _uses_http_runtime(self) -> bool:
         provider = normalize_survey_provider(self.config.survey_provider)
         if not bool(str(self.config.url or "").strip()) or provider not in {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_CREDAMO}:
@@ -478,6 +487,11 @@ class AsyncSlotRunner:
                 self._release_round_resources(requeue_reverse_fill=True)
             except SubmissionVerificationRequiredError as exc:
                 if await self._handle_submission_verification_error(exc):
+                    should_requeue_dispatch = False
+                    break
+                self._release_round_resources(requeue_reverse_fill=True)
+            except SurveyProviderUnavailableAtRuntimeError as exc:
+                if await self._handle_survey_provider_unavailable_error(exc):
                     should_requeue_dispatch = False
                     break
                 self._release_round_resources(requeue_reverse_fill=True)

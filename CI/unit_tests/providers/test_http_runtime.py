@@ -7,7 +7,7 @@ import pytest
 from software.core.task import ExecutionConfig, ExecutionState
 from software.providers.answering import AnswerAction
 from software.providers.contracts import SurveyQuestionMeta
-from software.providers.errors import SubmissionVerificationRequiredError
+from software.providers.errors import SubmissionVerificationRequiredError, SurveyProviderUnavailableAtRuntimeError
 from credamo.provider import answering_builders as credamo_builders
 from credamo.provider import http_runtime as credamo_http
 from tencent.provider import answering_builders as qq_builders
@@ -767,6 +767,44 @@ def test_wjx_submit_rejected_detects_submission_verification() -> None:
 
     with pytest.raises(SubmissionVerificationRequiredError, match="启用随机 IP"):
         wjx_http._raise_submit_rejected(config, "7〒需要安全校验，请重新提交！")
+
+
+def test_wjx_submit_response_classifier_keeps_verification_strict() -> None:
+    assert wjx_http.classify_wjx_submit_response("10〒/joinnew/complete.aspx") == wjx_http.WjxSubmitResult.SUCCESS
+    assert wjx_http.classify_wjx_submit_response("success") == wjx_http.WjxSubmitResult.SUCCESS
+    assert wjx_http.classify_wjx_submit_response("7〒需要安全校验，请重新提交！") == wjx_http.WjxSubmitResult.VERIFICATION
+    assert wjx_http.classify_wjx_submit_response("请先完成智能验证") == wjx_http.WjxSubmitResult.REJECTED
+    assert wjx_http.classify_wjx_submit_response("9〒10〒您提交的答案不符合要求，请检查并修改后重新提交！") == wjx_http.WjxSubmitResult.REJECTED
+
+
+@pytest.mark.asyncio
+async def test_wjx_http_runtime_converts_status_page_to_runtime_stop(monkeypatch) -> None:
+    async def fake_get(*_args, **_kwargs):
+        return _FakeResponse(text="<html><body>此问卷（123）已暂停，不能填写</body></html>")
+
+    monkeypatch.setattr(wjx_http.http_client, "aget", fake_get)
+
+    with pytest.raises(SurveyProviderUnavailableAtRuntimeError, match="问卷已暂停"):
+        await wjx_http._load_wjx_page(
+            "https://www.wjx.cn/vm/demo.aspx",
+            headers={},
+            proxies={},
+        )
+
+
+def test_qq_submit_payload_classifier_and_message() -> None:
+    assert qq_http.classify_qq_submit_payload({"code": "OK"}) == qq_http.QqSubmitResult.SUCCESS
+    assert qq_http.classify_qq_submit_payload({"code": "0"}) == qq_http.QqSubmitResult.SUCCESS
+    assert qq_http.classify_qq_submit_payload({"code": "NEED_LOGIN", "message": "需要登录"}) == qq_http.QqSubmitResult.FAILED
+
+    with pytest.raises(RuntimeError, match="需要登录"):
+        qq_http._raise_qq_submit_failed({"code": "NEED_LOGIN", "message": "需要登录"})
+
+
+def test_credamo_api_payload_classifier() -> None:
+    assert credamo_http.classify_credamo_api_payload({"success": True}) == credamo_http.CredamoSubmitResult.SUCCESS
+    assert credamo_http.classify_credamo_api_payload({"data": {}}) == credamo_http.CredamoSubmitResult.SUCCESS
+    assert credamo_http.classify_credamo_api_payload({"success": False}) == credamo_http.CredamoSubmitResult.FAILED
 
 
 def _async_result(value):

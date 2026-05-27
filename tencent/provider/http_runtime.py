@@ -29,6 +29,11 @@ from tencent.provider.parser import (
 )
 
 
+class QqSubmitResult:
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
 def _proxy_arg(proxy_address: str | None) -> Any:
     proxy = str(proxy_address or "").strip()
     return proxy if proxy else {}
@@ -173,6 +178,18 @@ async def _fetch_submit_source(
     return answer_session_id, session_data, raw_questions
 
 
+def classify_qq_submit_payload(payload: Mapping[str, Any]) -> str:
+    code = str(payload.get("code") or "").upper()
+    if code in {"OK", "0"}:
+        return QqSubmitResult.SUCCESS
+    return QqSubmitResult.FAILED
+
+
+def _raise_qq_submit_failed(payload: Mapping[str, Any]) -> None:
+    message = str(payload.get("message") or payload.get("msg") or payload.get("code") or payload).strip()
+    raise RuntimeError(f"腾讯问卷提交失败：{message}")
+
+
 async def brush_qq_http(
     config: ExecutionConfig,
     ctx: ExecutionState,
@@ -309,10 +326,9 @@ async def brush_qq_http(
     payload = response.json()
     if not isinstance(payload, dict):
         raise RuntimeError("腾讯问卷提交返回了非 JSON 对象")
-    code = str(payload.get("code") or "").upper()
-    if code not in {"OK", "0"}:
-        raise RuntimeError(f"腾讯问卷提交失败：{payload.get('code') or payload}")
+    if classify_qq_submit_payload(payload) != QqSubmitResult.SUCCESS:
+        _raise_qq_submit_failed(payload)
     return True
 
 
-__all__ = ["brush_qq_http"]
+__all__ = ["QqSubmitResult", "brush_qq_http", "classify_qq_submit_payload"]

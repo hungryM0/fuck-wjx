@@ -22,13 +22,26 @@ from software.providers.answering.recording import record_answer_action
 from software.providers.http_logic import build_http_logic_plan
 from software.providers.http_progress import update_http_submit_step
 from software.providers.contracts import SurveyQuestionMeta
-from software.providers.errors import SubmissionVerificationRequiredError
+from software.providers.errors import (
+    SubmissionVerificationRequiredError,
+    SurveyEnterpriseUnavailableError,
+    SurveyNotOpenError,
+    SurveyPausedError,
+    SurveyProviderUnavailableAtRuntimeError,
+    SurveyStoppedError,
+)
 from wjx.provider.answering_builders import build_answer_action
-from wjx.provider.parser import _parse_wjx_html
+from wjx.provider.parser import _parse_wjx_html, _raise_wjx_page_state_errors
 
 
 WJX_SUBMISSION_VERIFICATION_MESSAGE = "问卷星触发智能验证，当前链路已停止。请启用随机 IP 后再提交。"
 _WJX_SUBMISSION_VERIFICATION_TEXT = "需要安全校验，请重新提交"
+
+
+class WjxSubmitResult:
+    SUCCESS = "success"
+    VERIFICATION = "verification"
+    REJECTED = "rejected"
 
 
 def _proxy_arg(proxy_address: str | None) -> Any:
@@ -157,6 +170,23 @@ def is_wjx_submission_verification_response(response_text: str) -> bool:
     return _WJX_SUBMISSION_VERIFICATION_TEXT in text
 
 
+def classify_wjx_submit_response(response_text: str) -> str:
+    text = str(response_text or "").strip()
+    if is_wjx_submission_verification_response(text):
+        return WjxSubmitResult.VERIFICATION
+    lowered = text.lower()
+    success = (
+        "complete.aspx" in lowered
+        or "success" in lowered
+        or lowered.startswith("10")
+        or lowered in {"1", "ok"}
+    )
+    failure = any(token in text for token in ("抱歉", "不符合", "错误", "重新提交"))
+    if success and not failure:
+        return WjxSubmitResult.SUCCESS
+    return WjxSubmitResult.REJECTED
+
+
 def _raise_submit_rejected(config: ExecutionConfig, response_text: str) -> None:
     text = str(response_text or "").strip()
     if is_wjx_submission_verification_response(text):
@@ -175,6 +205,15 @@ def _raise_submit_rejected(config: ExecutionConfig, response_text: str) -> None:
 async def _load_wjx_page(url: str, *, headers: dict[str, str], proxies: Any) -> None:
     response = await http_client.aget(url, timeout=15, headers=headers, proxies=proxies)
     response.raise_for_status()
+    try:
+        _raise_wjx_page_state_errors(response.text)
+    except (
+        SurveyPausedError,
+        SurveyStoppedError,
+        SurveyEnterpriseUnavailableError,
+        SurveyNotOpenError,
+    ) as exc:
+        raise SurveyProviderUnavailableAtRuntimeError(str(exc)) from exc
     _parse_wjx_html(response.text)
 
 
@@ -296,17 +335,15 @@ async def brush_wjx_http(
     response.raise_for_status()
     await update_http_submit_step(ctx, thread_name, "校验结果")
     response_text = str(response.text or "").strip()
-    lowered = response_text.lower()
-    success = (
-        "complete.aspx" in lowered
-        or "success" in lowered
-        or lowered.startswith("10")
-        or lowered in {"1", "ok"}
-    )
-    failure = any(token in response_text for token in ("抱歉", "不符合", "错误", "重新提交")) or is_wjx_submission_verification_response(response_text)
-    if not success or failure:
+    if classify_wjx_submit_response(response_text) != WjxSubmitResult.SUCCESS:
         _raise_submit_rejected(config, response_text)
     return True
 
 
-__all__ = ["WJX_SUBMISSION_VERIFICATION_MESSAGE", "brush_wjx_http", "is_wjx_submission_verification_response"]
+__all__ = [
+    "WJX_SUBMISSION_VERIFICATION_MESSAGE",
+    "WjxSubmitResult",
+    "brush_wjx_http",
+    "classify_wjx_submit_response",
+    "is_wjx_submission_verification_response",
+]

@@ -27,11 +27,16 @@ class SubmissionVerificationRequiredError(RuntimeError):
     """提交被平台智能验证拦截。"""
 
 
+class SurveyProviderUnavailableAtRuntimeError(SurveyProviderStatusError):
+    """运行时发现问卷状态不可继续。"""
+
+
 __all__ = [
     "SubmissionVerificationRequiredError",
     "SurveyEnterpriseUnavailableError",
     "SurveyNotOpenError",
     "SurveyPausedError",
     "SurveyProviderStatusError",
+    "SurveyProviderUnavailableAtRuntimeError",
     "SurveyStoppedError",
 ]
