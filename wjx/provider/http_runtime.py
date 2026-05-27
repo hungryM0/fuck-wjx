@@ -223,6 +223,7 @@ async def _build_actions(
     *,
     psycho_plan: Any,
     stop_signal: Any,
+    thread_name: str = "",
 ) -> list[AnswerAction]:
     questions = _question_items(config)
     for question in questions:
@@ -234,7 +235,13 @@ async def _build_actions(
     async def _build_action(question: SurveyQuestionMeta) -> AnswerAction | None:
         if stop_signal is not None and stop_signal.is_set():
             return None
-        return await build_answer_action(None, question, ctx, psycho_plan=psycho_plan)
+        return await build_answer_action(
+            None,
+            question,
+            ctx,
+            psycho_plan=psycho_plan,
+            thread_name=thread_name,
+        )
 
     plan = await build_http_logic_plan(
         questions,
@@ -277,7 +284,13 @@ async def brush_wjx_http(
     await _load_wjx_page(config.url, headers=headers, proxies=proxies)
 
     await update_http_submit_step(ctx, thread_name, "生成答案")
-    actions = await _build_actions(config, ctx, psycho_plan=psycho_plan, stop_signal=stop_signal)
+    actions = await _build_actions(
+        config,
+        ctx,
+        psycho_plan=psycho_plan,
+        stop_signal=stop_signal,
+        thread_name=thread_name,
+    )
     if not actions:
         return False
     for action in actions:

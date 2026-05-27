@@ -88,3 +88,15 @@ class ReverseFillRuntimeStateTests:
         assert resolve_current_reverse_fill_answer(_ErrorCtx(), 1) is None
         assert resolve_current_reverse_fill_answer(object(), 1) is None
         assert resolve_current_reverse_fill_answer(None, 1) is None
+
+    def test_resolve_current_reverse_fill_answer_can_use_explicit_thread(self) -> None:
+        expected = ReverseFillAnswer(question_num=1, kind=REVERSE_FILL_KIND_CHOICE, choice_index=1)
+        calls: list[tuple[int, str]] = []
+
+        class _Ctx:
+            def get_reverse_fill_answer(self, question_num: int, thread_name: str) -> ReverseFillAnswer:
+                calls.append((question_num, thread_name))
+                return expected
+
+        assert resolve_current_reverse_fill_answer(_Ctx(), 1, thread_name="Slot-2") is expected
+        assert calls == [(1, "Slot-2")]

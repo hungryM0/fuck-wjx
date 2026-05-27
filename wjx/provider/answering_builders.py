@@ -62,12 +62,17 @@ async def _build_wjx_single_action(
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any] = None,
+    thread_name: str = "",
 ) -> Optional[AnswerAction]:
     config = ctx.config
     current = int(question.num or 0)
     option_texts = await _resolve_runtime_option_texts(driver, question)
     option_count = max(1, len(option_texts) or int(question.options or 0))
-    reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, current)
+    reverse_fill_answer = resolve_current_reverse_fill_answer(
+        ctx,
+        current,
+        thread_name=thread_name,
+    )
     forced_index: Optional[int] = None
     if reverse_fill_answer is not None and reverse_fill_answer.kind == REVERSE_FILL_KIND_CHOICE:
         forced_index = _valid_forced_choice_index(reverse_fill_answer.choice_index, option_count)
@@ -139,12 +144,17 @@ async def _build_wjx_dropdown_action(
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
+    thread_name: str = "",
 ) -> Optional[AnswerAction]:
     config = ctx.config
     current = int(question.num or 0)
     option_texts = await _resolve_runtime_option_texts(driver, question)
     option_count = max(1, len(option_texts) or int(question.options or 0))
-    reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, current)
+    reverse_fill_answer = resolve_current_reverse_fill_answer(
+        ctx,
+        current,
+        thread_name=thread_name,
+    )
     forced_index: Optional[int] = None
     if reverse_fill_answer is not None and reverse_fill_answer.kind == REVERSE_FILL_KIND_CHOICE:
         forced_index = _valid_forced_choice_index(reverse_fill_answer.choice_index, option_count)
@@ -212,11 +222,17 @@ async def _build_wjx_text_action(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    thread_name: str = "",
 ) -> Optional[AnswerAction]:
     config = ctx.config
     current = int(question.num or 0)
     blank_count = max(1, int(question.text_inputs or 0))
-    reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, current)
+    reverse_fill_answer = resolve_current_reverse_fill_answer(
+        ctx,
+        current,
+        thread_name=thread_name,
+    )
 
     if reverse_fill_answer is not None and reverse_fill_answer.kind == REVERSE_FILL_KIND_MULTI_TEXT:
         text_values = [str(item or "").strip() or DEFAULT_FILL_TEXT for item in list(reverse_fill_answer.text_values or [])]
@@ -272,12 +288,17 @@ async def _build_wjx_score_like_action(
     *,
     psycho_plan: Optional[Any],
     answer_type: str,
+    thread_name: str = "",
 ) -> Optional[AnswerAction]:
     config = ctx.config
     current = int(question.num or 0)
     option_texts = await _resolve_runtime_option_texts(driver, question)
     option_count = max(2, len(option_texts) or int(question.options or 0))
-    reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, current)
+    reverse_fill_answer = resolve_current_reverse_fill_answer(
+        ctx,
+        current,
+        thread_name=thread_name,
+    )
     forced_index: Optional[int] = None
     if reverse_fill_answer is not None and reverse_fill_answer.kind == REVERSE_FILL_KIND_CHOICE:
         forced_index = _valid_forced_choice_index(reverse_fill_answer.choice_index, option_count)
@@ -320,6 +341,8 @@ async def _build_wjx_multiple_action(
     question: SurveyQuestionMeta,
     config_index: int,
     ctx: ExecutionState,
+    *,
+    thread_name: str = "",
 ) -> Optional[AnswerAction]:
     config = ctx.config
     current = int(question.num or 0)
@@ -365,7 +388,11 @@ async def _build_wjx_multiple_action(
             record_type="multiple",
         )
 
-    reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, current)
+    reverse_fill_answer = resolve_current_reverse_fill_answer(
+        ctx,
+        current,
+        thread_name=thread_name,
+    )
     if reverse_fill_answer is not None and reverse_fill_answer.kind == REVERSE_FILL_KIND_CHOICE:
         forced_index = reverse_fill_answer.choice_index
         if forced_index is not None:
@@ -462,12 +489,17 @@ async def _build_wjx_matrix_action(
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
+    thread_name: str = "",
 ) -> Optional[AnswerAction]:
     config = ctx.config
     current = int(question.num or 0)
     row_count = max(1, int(question.rows or 1))
     option_count = max(2, len(question.option_texts or []) or int(question.options or 0))
-    reverse_fill_answer = resolve_current_reverse_fill_answer(ctx, current)
+    reverse_fill_answer = resolve_current_reverse_fill_answer(
+        ctx,
+        current,
+        thread_name=thread_name,
+    )
     forced_indices: list[int] = []
     if reverse_fill_answer is not None and reverse_fill_answer.kind == REVERSE_FILL_KIND_MATRIX:
         forced_indices = [int(item) for item in list(reverse_fill_answer.matrix_choice_indexes or []) if int(item) >= 0]
@@ -575,27 +607,76 @@ async def build_answer_action(
     ctx: ExecutionState,
     *,
     psycho_plan: Optional[Any],
+    thread_name: str = "",
 ) -> Optional[AnswerAction]:
     config_entry = ctx.config.question_config_index_map.get(int(question.num or 0))
     if not config_entry:
         return None
     entry_type, config_index = config_entry
     if entry_type == "single":
-        return await _build_wjx_single_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
+        return await _build_wjx_single_action(
+            driver,
+            question,
+            config_index,
+            ctx,
+            psycho_plan=psycho_plan,
+            thread_name=thread_name,
+        )
     if entry_type == "multiple":
-        return await _build_wjx_multiple_action(driver, question, config_index, ctx)
+        return await _build_wjx_multiple_action(
+            driver,
+            question,
+            config_index,
+            ctx,
+            thread_name=thread_name,
+        )
     if entry_type == "dropdown":
-        return await _build_wjx_dropdown_action(driver, question, config_index, ctx, psycho_plan=psycho_plan)
+        return await _build_wjx_dropdown_action(
+            driver,
+            question,
+            config_index,
+            ctx,
+            psycho_plan=psycho_plan,
+            thread_name=thread_name,
+        )
     if entry_type in {"text", "multi_text"}:
-        return await _build_wjx_text_action(driver, question, config_index, ctx)
+        return await _build_wjx_text_action(
+            driver,
+            question,
+            config_index,
+            ctx,
+            thread_name=thread_name,
+        )
     if entry_type == "location":
         return None
     if entry_type == "matrix":
-        return await _build_wjx_matrix_action(question, config_index, ctx, psycho_plan=psycho_plan)
+        return await _build_wjx_matrix_action(
+            question,
+            config_index,
+            ctx,
+            psycho_plan=psycho_plan,
+            thread_name=thread_name,
+        )
     if entry_type == "scale":
-        return await _build_wjx_score_like_action(driver, question, config_index, ctx, psycho_plan=psycho_plan, answer_type="scale")
+        return await _build_wjx_score_like_action(
+            driver,
+            question,
+            config_index,
+            ctx,
+            psycho_plan=psycho_plan,
+            answer_type="scale",
+            thread_name=thread_name,
+        )
     if entry_type == "score":
-        return await _build_wjx_score_like_action(driver, question, config_index, ctx, psycho_plan=psycho_plan, answer_type="score")
+        return await _build_wjx_score_like_action(
+            driver,
+            question,
+            config_index,
+            ctx,
+            psycho_plan=psycho_plan,
+            answer_type="score",
+            thread_name=thread_name,
+        )
     if entry_type == "slider":
         return await _build_wjx_slider_action(question, config_index, ctx)
     if entry_type == "order":

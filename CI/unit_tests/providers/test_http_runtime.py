@@ -321,6 +321,42 @@ async def test_wjx_http_runtime_skips_jump_hidden_questions(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_wjx_http_runtime_passes_slot_label_to_reverse_fill_builder(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://www.wjx.cn/vm/demo.aspx",
+        survey_provider="wjx",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", option_texts=["A", "B"], options=2),
+    }
+    state = ExecutionState(config=config)
+    seen_thread_names: list[str] = []
+
+    async def fake_build_action(_driver, question, _ctx, **kwargs):
+        seen_thread_names.append(str(kwargs.get("thread_name") or ""))
+        return AnswerAction(
+            question_num=int(question.num),
+            kind="choice",
+            selected_indices=(0,),
+            record_type="single",
+        )
+
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+
+    actions = await wjx_http._build_actions(
+        config,
+        state,
+        psycho_plan=None,
+        stop_signal=None,
+        thread_name="Slot-2",
+    )
+
+    assert [action.question_num for action in actions] == [1]
+    assert seen_thread_names == ["Slot-2"]
+
+
+@pytest.mark.asyncio
 async def test_wjx_http_runtime_accepts_legacy_saved_jump_rules_without_status(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://v.wjx.cn/vm/tgRSrWd.aspx",

@@ -20,14 +20,22 @@ def create_reverse_fill_runtime_state(spec: Optional[ReverseFillSpec]) -> Option
     return runtime
 
 
-def resolve_current_reverse_fill_answer(task_ctx: Any, question_num: int) -> Optional[ReverseFillAnswer]:
+def resolve_current_reverse_fill_answer(
+    task_ctx: Any,
+    question_num: int,
+    *,
+    thread_name: str = "",
+) -> Optional[ReverseFillAnswer]:
     if task_ctx is None:
         return None
     getter = getattr(task_ctx, "get_reverse_fill_answer", None)
     if not callable(getter):
         return None
     try:
-        answer = getter(int(question_num))
+        if thread_name:
+            answer = getter(int(question_num), thread_name)
+        else:
+            answer = getter(int(question_num))
     except Exception:
         return None
     return answer if isinstance(answer, ReverseFillAnswer) else None
