@@ -42,6 +42,25 @@ def test_wjx_submitdata_formats_common_actions() -> None:
     assert submitdata == "1$1}2$1|3}3$甲^乙}4$1!2,2!3}5$66.0"
 
 
+def test_wjx_submitdata_keeps_frontend_skip_placeholders() -> None:
+    submitdata = wjx_http._submitdata_from_actions(
+        [
+            AnswerAction(question_num=1, kind="choice", selected_indices=(1,), record_type="single"),
+            AnswerAction(question_num=5, kind="choice", selected_indices=(0, 1), record_type="multiple"),
+        ],
+        questions=[
+            SurveyQuestionMeta(num=1, title="单选", type_code="3", option_texts=["A", "B"], options=2),
+            SurveyQuestionMeta(num=2, title="排序", type_code="11", option_texts=["A", "B", "C"], options=3),
+            SurveyQuestionMeta(num=3, title="量表", type_code="5", option_texts=["1", "2"], options=2),
+            SurveyQuestionMeta(num=4, title="填空", type_code="1", options=1),
+            SurveyQuestionMeta(num=5, title="多选", type_code="4", option_texts=["A", "B"], options=2),
+        ],
+        skipped_question_nums=(2, 3, 4),
+    )
+
+    assert submitdata == "1$2}2$-3,-3,-3}3$-3}4$(跳过)}5$1|2"
+
+
 def test_qq_question_answer_builders_cover_choice_text_and_matrix() -> None:
     choice = qq_http._question_answer(
         {"id": "q1", "type": "radio", "options": [{"id": "o1", "text": "A"}, {"id": "o2", "text": "B"}]},

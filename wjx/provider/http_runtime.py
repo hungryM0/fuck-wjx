@@ -19,7 +19,7 @@ from software.core.questions.distribution import record_pending_distribution_cho
 from software.core.task import ExecutionConfig, ExecutionState
 from software.providers.answering import AnswerAction
 from software.providers.answering.recording import record_answer_action
-from software.providers.http_logic import build_http_logic_plan
+from software.providers.http_logic import HttpLogicPlan, build_http_logic_plan
 from software.providers.http_progress import update_http_submit_step
 from software.providers.contracts import SurveyQuestionMeta
 from software.providers.errors import (
@@ -123,11 +123,43 @@ def _submitdata_answer(action: AnswerAction) -> str:
     return ""
 
 
-def _submitdata_from_actions(actions: list[AnswerAction]) -> str:
+def _skipped_submitdata_answer(question: SurveyQuestionMeta) -> str:
+    type_code = str(getattr(question, "type_code", "") or "").strip()
+    option_count = max(1, int(getattr(question, "options", 0) or 0))
+    rows = max(1, int(getattr(question, "rows", 1) or 1))
+    if type_code in {"3", "4", "5", "7"}:
+        return "-3"
+    if type_code == "11":
+        return ",".join("-3" for _ in range(option_count))
+    if type_code == "6":
+        return ",".join(f"{row_index + 1}!-3" for row_index in range(rows))
+    if type_code in {"1", "2", "8", "9", "33", "34"}:
+        return "(跳过)"
+    return "-3"
+
+
+def _submitdata_from_actions(
+    actions: list[AnswerAction],
+    *,
+    questions: list[SurveyQuestionMeta] | None = None,
+    skipped_question_nums: tuple[int, ...] = (),
+) -> str:
+    action_by_num = {int(action.question_num or 0): action for action in actions if int(action.question_num or 0) > 0}
+    skipped_nums = {int(item) for item in skipped_question_nums if int(item) > 0}
+    question_by_num = {
+        int(getattr(question, "num", 0) or 0): question
+        for question in list(questions or [])
+        if int(getattr(question, "num", 0) or 0) > 0
+    }
+    ordered_nums = sorted(set(action_by_num) | skipped_nums)
     parts: list[str] = []
-    for action in actions:
-        question_num = int(action.question_num or 0)
-        answer = _submitdata_answer(action)
+    for question_num in ordered_nums:
+        action = action_by_num.get(question_num)
+        if action is not None:
+            answer = _submitdata_answer(action)
+        else:
+            question = question_by_num.get(question_num)
+            answer = _skipped_submitdata_answer(question) if question is not None else "-3"
         if question_num <= 0 or not answer:
             continue
         answer = answer.replace("，", ",")
@@ -225,10 +257,28 @@ async def _build_actions(
     stop_signal: Any,
     thread_name: str = "",
 ) -> list[AnswerAction]:
+    plan = await _build_action_plan(
+        config,
+        ctx,
+        psycho_plan=psycho_plan,
+        stop_signal=stop_signal,
+        thread_name=thread_name,
+    )
+    return list(plan.actions)
+
+
+async def _build_action_plan(
+    config: ExecutionConfig,
+    ctx: ExecutionState,
+    *,
+    psycho_plan: Any,
+    stop_signal: Any,
+    thread_name: str = "",
+) -> HttpLogicPlan:
     questions = _question_items(config)
     for question in questions:
         if stop_signal is not None and stop_signal.is_set():
-            return []
+            return HttpLogicPlan(actions=())
         if bool(getattr(question, "unsupported", False)):
             raise RuntimeError(f"问卷星第{question.num}题暂不支持：{question.unsupported_reason or question.type_code}")
 
@@ -243,11 +293,10 @@ async def _build_actions(
             thread_name=thread_name,
         )
 
-    plan = await build_http_logic_plan(
+    return await build_http_logic_plan(
         questions,
         build_action=_build_action,
     )
-    return list(plan.actions)
 
 
 def _sample_ktimes(config: ExecutionConfig) -> int:
@@ -284,18 +333,23 @@ async def brush_wjx_http(
     await _load_wjx_page(config.url, headers=headers, proxies=proxies)
 
     await update_http_submit_step(ctx, thread_name, "生成答案")
-    actions = await _build_actions(
+    plan = await _build_action_plan(
         config,
         ctx,
         psycho_plan=psycho_plan,
         stop_signal=stop_signal,
         thread_name=thread_name,
     )
+    actions = list(plan.actions)
     if not actions:
         return False
     for action in actions:
         _record_action(ctx, action)
-    submitdata = _submitdata_from_actions(actions)
+    submitdata = _submitdata_from_actions(
+        actions,
+        questions=_question_items(config),
+        skipped_question_nums=plan.skipped_question_nums,
+    )
     if not bool(getattr(config, "submit_enabled", True)):
         logging.info("问卷星 HTTP 单测已生成答案，未提交。")
         return True
