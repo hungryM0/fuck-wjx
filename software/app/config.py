@@ -155,7 +155,6 @@ _DEFAULT_CARD_REDEEM_ENDPOINT = "https://api-wjx.hungrym0.top/api/cards/redeem"
 _DEFAULT_IP_EXTRACT_ENDPOINT = "https://api-wjx.hungrym0.top/api/ip/extract"
 _DEFAULT_AI_FREE_ENDPOINT = "https://api-wjx.hungrym0.top/api/ai/free"
 _DEFAULT_STATUS_ENDPOINT = "https://api-wjx.hungrym0.top/api/status"
-_DEFAULT_EMAIL_VERIFY_ENDPOINT = "https://api-wjx.hungrym0.top/api/email"
 
 # ==================== HTTP 运行时配置 ====================
 # 纯 HTTP 并发会话上限
@@ -243,7 +242,6 @@ CARD_REDEEM_ENDPOINT = _resolve_env_value("CARD_REDEEM_ENDPOINT", _DEFAULT_CARD_
 IP_EXTRACT_ENDPOINT = _resolve_env_value("IP_EXTRACT_ENDPOINT", _DEFAULT_IP_EXTRACT_ENDPOINT)
 AI_FREE_ENDPOINT = _resolve_env_value("AI_FREE_ENDPOINT", _DEFAULT_AI_FREE_ENDPOINT)
 STATUS_ENDPOINT = _resolve_env_value("STATUS_ENDPOINT", _DEFAULT_STATUS_ENDPOINT)
-EMAIL_VERIFY_ENDPOINT = _resolve_env_value("EMAIL_VERIFY_ENDPOINT", _DEFAULT_EMAIL_VERIFY_ENDPOINT)
 
 
 # ==================== 时长控制配置 ====================

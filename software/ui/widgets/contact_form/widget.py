@@ -8,7 +8,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable, Optional, cast
 
-from PySide6.QtCore import QEvent, QTimer, Qt, Signal, Slot
+from PySide6 import QtCore
+from PySide6.QtCore import QEvent, Qt, Signal, Slot
 from PySide6.QtGui import (
     QKeyEvent,
     QKeySequence,
@@ -85,7 +86,6 @@ from .lifecycle import (
     refresh_random_ip_user_id_hint,
     set_send_loading,
     set_status_loading,
-    set_verify_loading,
     show_pending_async_warning,
     start_status_polling,
     stop_activity_indicators,
@@ -101,6 +101,7 @@ from .send_actions import (
     on_send_finished,
 )
 http_post = post
+QTimer = QtCore.QTimer
 
 
 class ContactForm(StatusPollingMixin, QWidget):
@@ -363,9 +364,6 @@ class ContactForm(StatusPollingMixin, QWidget):
 
     def _set_send_loading(self, loading: bool) -> None:
         set_send_loading(self, loading)
-
-    def _set_verify_loading(self, loading: bool) -> None:
-        set_verify_loading(self, loading)
 
     def _stop_activity_indicators(self) -> None:
         stop_activity_indicators(self)

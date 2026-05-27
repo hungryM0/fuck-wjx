@@ -242,13 +242,11 @@ class _FakeContactForm:
         self.message_edit = _FakeTextEdit("")
         self.email_edit = _FakeLineEdit("")
         self.issue_title_edit = _FakeLineEdit("")
-        self.verify_code_edit = _FakeLineEdit("")
         self.urgency_combo = _FakeComboBox("中", ["低", "中", "高"])
         self.donated_cb = _FakeCheckBox(False)
         self.wechat_radio = _FakeCheckBox(False)
         self.alipay_radio = _FakeCheckBox(False)
         self.send_btn = _FakeLineEdit("")
-        self.send_verify_btn = _FakeLineEdit("")
         self.auto_attach_config_checkbox = _FakeCheckBox(False)
         self.auto_attach_log_checkbox = _FakeCheckBox(False)
         self.status_icon = SimpleNamespace(show=lambda: None, setIcon=lambda _icon: None)
@@ -258,8 +256,6 @@ class _FakeContactForm:
         self._pending_temp_attachment_paths: list[str] = []
         self._random_ip_user_id = 0
         self._last_valid_quantity_text = ""
-        self._verify_code_requested = False
-        self._verify_code_requested_email = ""
         self._send_in_progress = False
         self._send_state_lock = _FakeLock()
         self._send_generation = 0
@@ -268,9 +264,6 @@ class _FakeContactForm:
         self._current_has_email = False
         self._auto_clear_on_success = True
         self._config_snapshot_provider: Any = None
-        self._cooldown_timer = None
-        self._cooldown_remaining = 0
-        self._verify_code_sending = False
         self.rule_actions: list[str] = []
         self.sendSucceeded = _FakeSignal()
         self.quotaRequestSucceeded = _FakeSignal()
@@ -337,11 +330,8 @@ class ContactFormRuleTests:
                 email="user@example.com",
                 amount_text="20.26",
                 quantity_text="2000",
-                verify_code="114514",
                 payment_method="微信",
                 donated=True,
-                verify_code_requested=True,
-                verify_code_requested_email="user@example.com",
             )
         )
         assert result.error_message is None
@@ -352,11 +342,8 @@ class ContactFormRuleTests:
                 email="user@example.com",
                 amount_text="8.88",
                 quantity_text="2000",
-                verify_code="114514",
                 payment_method="微信",
                 donated=True,
-                verify_code_requested=True,
-                verify_code_requested_email="user@example.com",
             )
         )
         assert blocked.error_message == DONATION_AMOUNT_BLOCK_MESSAGE
@@ -563,7 +550,6 @@ class ContactFormRuleTests:
         form._current_has_email = True
         form.amount_edit.setText("20.26")
         form.quantity_edit.setText("10")
-        form.verify_code_edit.setText("114514")
         form.message_edit = _FakeTextEdit("msg")
         form.issue_title_edit.setText("bug")
         form.wechat_radio.setChecked(True)

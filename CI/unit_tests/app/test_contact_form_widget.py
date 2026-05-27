@@ -63,7 +63,6 @@ def test_contact_form_builds_and_switches_between_feedback_and_quota(monkeypatch
 
     assert form.attachments_section.isHidden()
     assert not form.request_payment_section.isHidden()
-    assert not form.verify_code_edit.isHidden()
     assert not form.send_btn.isEnabled()
     assert "支付方式" in form.send_btn.toolTip()
 
@@ -176,8 +175,8 @@ def test_contact_form_send_validation_and_completion_paths(monkeypatch, qtbot) -
     assert len(form._attachments.attachments) == 0
 
 
-def test_contact_form_bug_report_auto_payload_and_verify_code(monkeypatch, qtbot) -> None:
-    recorder = _patch_contact_form_dependencies(monkeypatch, user_id=0)
+def test_contact_form_bug_report_auto_payload(monkeypatch, qtbot) -> None:
+    _patch_contact_form_dependencies(monkeypatch, user_id=0)
     form = ContactForm(
         default_type="报错反馈",
         manage_polling=False,
@@ -188,23 +187,6 @@ def test_contact_form_bug_report_auto_payload_and_verify_code(monkeypatch, qtbot
     files, errors = form._build_bug_report_auto_files_payload()
     assert errors == ["当前运行配置快照：已附带", "当前日志快照：已附带", "fatal_crash.log：未发现"]
     assert {label for label, _payload in files} == {"配置快照", "日志快照"}
-
-    form._verify_code_sending = True
-    form._on_send_verify_clicked()
-    assert recorder.calls == []
-
-    form._verify_code_sending = False
-    form.email_edit.setText("")
-    form._on_send_verify_clicked()
-    assert recorder.calls[-1] == ("warning", "请先填写邮箱地址")
-
-    form._on_verify_code_finished(True, "", "a@example.com")
-    assert form._verify_code_requested is True
-    assert form._verify_code_requested_email == "a@example.com"
-    form._stop_cooldown()
-
-    form._on_verify_code_finished(False, "invalid request", "a@example.com")
-    assert recorder.calls[-1] == ("error", "邮箱参数无效，请检查邮箱后重试")
 
     host = SimpleNamespace(controller=object())
     monkeypatch.setattr(form, "parentWidget", lambda: host)
