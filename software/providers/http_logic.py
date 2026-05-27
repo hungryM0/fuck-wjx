@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from software.providers.answering import AnswerAction
-from software.providers.contracts import LOGIC_PARSE_STATUS_COMPLETE, SurveyQuestionMeta
+from software.providers.contracts import (
+    LOGIC_PARSE_STATUS_COMPLETE,
+    LOGIC_PARSE_STATUS_UNKNOWN,
+    SurveyQuestionMeta,
+)
 
 BuildHttpAnswerAction = Callable[[SurveyQuestionMeta], Awaitable[Optional[AnswerAction]]]
 _SUPPORTED_CONDITION_MODES = {"selected", "not_selected"}
@@ -34,6 +38,26 @@ def question_has_survey_logic(question: SurveyQuestionMeta) -> bool:
     )
 
 
+def _logic_status_is_complete_enough(question: SurveyQuestionMeta) -> bool:
+    logic_status = str(getattr(question, "logic_parse_status", "") or "").strip().lower()
+    if logic_status == LOGIC_PARSE_STATUS_COMPLETE:
+        return True
+    if logic_status != LOGIC_PARSE_STATUS_UNKNOWN:
+        return False
+
+    if bool(getattr(question, "has_jump", False)) and not list(getattr(question, "jump_rules", []) or []):
+        return False
+    if bool(getattr(question, "has_display_condition", False)) and not list(
+        getattr(question, "display_conditions", []) or []
+    ):
+        return False
+    if bool(getattr(question, "has_dependent_display_logic", False)) and not list(
+        getattr(question, "controls_display_targets", []) or []
+    ):
+        return False
+    return True
+
+
 def get_http_logic_fallback_reason(questions: Sequence[SurveyQuestionMeta]) -> str:
     ordered_questions = _ordered_questions(questions)
     max_question_num = max((int(getattr(item, "num", 0) or 0) for item in ordered_questions), default=0)
@@ -42,8 +66,7 @@ def get_http_logic_fallback_reason(questions: Sequence[SurveyQuestionMeta]) -> s
         if question_num <= 0 or not question_has_survey_logic(question):
             continue
 
-        logic_status = str(getattr(question, "logic_parse_status", "") or "").strip().lower()
-        if logic_status != LOGIC_PARSE_STATUS_COMPLETE:
+        if not _logic_status_is_complete_enough(question):
             return f"第{question_num}题逻辑规则未完整解析"
 
         for condition in list(getattr(question, "display_conditions", []) or []):

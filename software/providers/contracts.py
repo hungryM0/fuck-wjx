@@ -150,6 +150,29 @@ def _normalize_logic_parse_status(raw: Any) -> str:
     return LOGIC_PARSE_STATUS_UNKNOWN
 
 
+def _infer_logic_parse_status(normalized: Mapping[str, Any]) -> str:
+    if "logic_parse_status" in normalized:
+        explicit = str(normalized.get("logic_parse_status") or "").strip().lower()
+        if explicit in _VALID_LOGIC_PARSE_STATUSES:
+            return explicit
+        return LOGIC_PARSE_STATUS_UNKNOWN
+
+    has_logic = bool(
+        normalized.get("has_jump")
+        or normalized.get("has_display_condition")
+        or normalized.get("has_dependent_display_logic")
+    )
+    if not has_logic:
+        return LOGIC_PARSE_STATUS_NONE
+
+    has_parsed_logic = bool(
+        _normalize_dict_list(normalized.get("jump_rules"))
+        or _normalize_dict_list(normalized.get("display_conditions"))
+        or _normalize_dict_list(normalized.get("controls_display_targets"))
+    )
+    return LOGIC_PARSE_STATUS_COMPLETE if has_parsed_logic else LOGIC_PARSE_STATUS_UNKNOWN
+
+
 def _normalize_question_media_list(raw: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw, list):
         return []
@@ -329,7 +352,7 @@ def _normalize_question(question: SurveyQuestionInput, provider: str, index: int
         display_conditions=_normalize_dict_list(normalized.get("display_conditions")),
         has_dependent_display_logic=bool(normalized.get("has_dependent_display_logic")),
         controls_display_targets=_normalize_dict_list(normalized.get("controls_display_targets")),
-        logic_parse_status=_normalize_logic_parse_status(normalized.get("logic_parse_status")),
+        logic_parse_status=_infer_logic_parse_status(normalized),
         question_media=_normalize_question_media_list(normalized.get("question_media")),
         slider_min=normalized.get("slider_min"),
         slider_max=normalized.get("slider_max"),

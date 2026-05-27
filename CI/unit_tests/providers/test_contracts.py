@@ -9,6 +9,8 @@ from software.providers.common import (
     SURVEY_PROVIDER_WJX,
 )
 from software.providers.contracts import (
+    LOGIC_PARSE_STATUS_COMPLETE,
+    LOGIC_PARSE_STATUS_NONE,
     LOGIC_PARSE_STATUS_UNKNOWN,
     build_survey_definition,
     ensure_survey_question_meta,
@@ -174,6 +176,22 @@ class ProviderContractsTests:
 
         assert meta.is_description is True
         assert meta.unsupported is False
+
+    def test_legacy_logic_status_is_inferred_from_saved_rules(self) -> None:
+        jump_meta = ensure_survey_question_meta(
+            {
+                "num": 1,
+                "title": "跳题",
+                "has_jump": True,
+                "jump_rules": [{"option_index": 1, "jumpto": 5}],
+            }
+        )
+        plain_meta = ensure_survey_question_meta({"num": 2, "title": "普通题"})
+        unknown_meta = ensure_survey_question_meta({"num": 3, "title": "未知跳题", "has_jump": True})
+
+        assert jump_meta.logic_parse_status == LOGIC_PARSE_STATUS_COMPLETE
+        assert plain_meta.logic_parse_status == LOGIC_PARSE_STATUS_NONE
+        assert unknown_meta.logic_parse_status == LOGIC_PARSE_STATUS_UNKNOWN
 
     @pytest.mark.parametrize(
         ("provider", "question_builder"),

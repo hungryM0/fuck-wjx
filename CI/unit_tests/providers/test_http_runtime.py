@@ -321,6 +321,46 @@ async def test_wjx_http_runtime_skips_jump_hidden_questions(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_wjx_http_runtime_accepts_legacy_saved_jump_rules_without_status(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://v.wjx.cn/vm/tgRSrWd.aspx",
+        survey_provider="wjx",
+        submit_enabled=True,
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(
+            num=1,
+            title="这是一个单选题",
+            type_code="3",
+            has_jump=True,
+            jump_rules=[{"option_index": 1, "jumpto": 5, "option_text": "我才是B"}],
+            option_texts=["其他", "我才是B"],
+            options=2,
+        ),
+        2: SurveyQuestionMeta(num=2, title="排序题", type_code="11", option_texts=["A", "B"], options=2),
+        3: SurveyQuestionMeta(num=3, title="量表题", type_code="5", option_texts=["0", "1"], options=2),
+        4: SurveyQuestionMeta(num=4, title="填空题", type_code="1", options=1),
+        5: SurveyQuestionMeta(num=5, title="多选题", type_code="4", option_texts=["A", "B"], options=2),
+    }
+    state = ExecutionState(config=config)
+    built_questions: list[int] = []
+
+    async def fake_build_action(_driver, question, _ctx, **_kwargs):
+        question_num = int(question.num)
+        built_questions.append(question_num)
+        if question_num == 1:
+            return AnswerAction(question_num=1, kind="choice", selected_indices=(1,), record_type="single")
+        return AnswerAction(question_num=question_num, kind="choice", selected_indices=(0,), record_type="multiple")
+
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+
+    actions = await wjx_http._build_actions(config, state, psycho_plan=None, stop_signal=None)
+
+    assert built_questions == [1, 5]
+    assert [action.question_num for action in actions] == [1, 5]
+
+
+@pytest.mark.asyncio
 async def test_wjx_http_runtime_blocks_unparsed_jump_logic(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
