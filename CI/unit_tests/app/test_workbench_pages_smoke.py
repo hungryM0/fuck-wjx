@@ -295,6 +295,6 @@ def test_dashboard_thread_progress_rows_keep_visible_after_update(monkeypatch, q
     row = page._thread_progress_rows["Slot-1"]
     assert page.thread_view_stack.currentWidget() is page.thread_view_progress_card
     assert page.thread_progress_rows_layout.count() == 1
-    assert row["step_value"].text() == "2/4"
+    assert row["cum_value"].text() == "50%"
     assert row["widget"].sizeHint().height() > 0
     assert page.thread_progress_rows_container.sizeHint().height() > 0
