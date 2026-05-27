@@ -8,9 +8,7 @@ from typing import Callable, Optional
 from software.core.engine.runtime_ui_bridge import RuntimeUiBridge
 from software.core.engine.stop_signal import StopSignalLike
 from software.core.task import ExecutionConfig, ExecutionState
-from software.network.proxy.pool import is_proxy_responsive_async
 from software.network.session_policy import (
-    _discard_unresponsive_proxy,
     _record_bad_proxy_and_maybe_pause,
     _select_proxy_for_session_async,
     _select_user_agent_for_session,
@@ -51,11 +49,6 @@ class AsyncProxySession:
         if self.config.random_proxy_ip_enabled and not proxy_address:
             if _record_bad_proxy_and_maybe_pause(self.state, self.runtime_bridge):
                 return None, None
-        if proxy_address and not await is_proxy_responsive_async(proxy_address):
-            logging.warning("提取到的代理质量过低，自动弃用更换下一个")
-            _discard_unresponsive_proxy(self.state, proxy_address)
-            self.state.release_proxy_in_use(self.slot_label)
-            return None, None
         ua_value, _ = _select_user_agent_for_session(self.state)
         self.proxy_address = proxy_address
         return proxy_address, ua_value

@@ -355,10 +355,7 @@ class AsyncSlotRunner:
                     break
                 self._release_round_resources(requeue_reverse_fill=True)
             except (
-                http_client.ConnectTimeout,
-                http_client.ReadTimeout,
-                http_client.ConnectionError,
-                http_client.Timeout,
+                http_client.TransportError,
             ) as exc:
                 if self._handle_http_transport_error(exc):
                     should_requeue_dispatch = False

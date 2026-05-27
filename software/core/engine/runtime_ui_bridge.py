@@ -12,6 +12,8 @@ class RuntimeUiBridge(Protocol):
 
     def handle_random_ip_submission(self, stop_signal: Optional[StopSignalLike] = None) -> None: ...
 
+    def set_random_ip_loading(self, loading: bool, message: str = "") -> None: ...
+
 
 def wait_if_paused(runtime_bridge: RuntimeUiBridge | None, stop_signal: Optional[StopSignalLike]) -> None:
     if runtime_bridge is None:
@@ -28,8 +30,21 @@ def handle_random_ip_submission(
     runtime_bridge.handle_random_ip_submission(stop_signal)
 
 
+def set_random_ip_loading(
+    runtime_bridge: RuntimeUiBridge | None,
+    loading: bool,
+    message: str = "",
+) -> None:
+    if runtime_bridge is None:
+        return
+    setter = getattr(runtime_bridge, "set_random_ip_loading", None)
+    if callable(setter):
+        setter(bool(loading), str(message or ""))
+
+
 __all__ = [
     "RuntimeUiBridge",
     "handle_random_ip_submission",
+    "set_random_ip_loading",
     "wait_if_paused",
 ]

@@ -14,6 +14,8 @@ from software.core.config.codec import _select_user_agent_from_ratios
 
 _PROXY_WAIT_POLL_SECONDS = 0.3
 _BAD_PROXY_COOLDOWN_SECONDS = 180.0
+_PROXY_FETCH_BUFFER_MULTIPLIER = 2
+_PROXY_FETCH_MAX_BATCH_SIZE = 20
 
 
 def _ensure_proxy_pool_deque_locked(ctx: ExecutionState) -> deque:
@@ -23,6 +25,28 @@ def _ensure_proxy_pool_deque_locked(ctx: ExecutionState) -> deque:
     normalized_pool = deque(pool or [])
     ctx.config.proxy_ip_pool = normalized_pool
     return normalized_pool
+
+
+def _get_proxy_fetch_async_lock(ctx: ExecutionState) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    current_lock = getattr(ctx, "_proxy_fetch_async_lock", None)
+    current_loop = getattr(ctx, "_proxy_fetch_async_lock_loop", None)
+    if not isinstance(current_lock, asyncio.Lock) or current_loop is not loop:
+        current_lock = asyncio.Lock()
+        setattr(ctx, "_proxy_fetch_async_lock", current_lock)
+        setattr(ctx, "_proxy_fetch_async_lock_loop", loop)
+    return current_lock
+
+
+def is_proxy_fetch_in_progress(ctx: ExecutionState) -> bool:
+    current_lock = getattr(ctx, "_proxy_fetch_async_lock", None)
+    return isinstance(current_lock, asyncio.Lock) and current_lock.locked()
+
+
+def release_proxy_fetch_lock(ctx: ExecutionState) -> None:
+    current_lock = getattr(ctx, "_proxy_fetch_async_lock", None)
+    if isinstance(current_lock, asyncio.Lock) and current_lock.locked():
+        current_lock.release()
 
 
 def _active_proxy_addresses_locked(ctx: ExecutionState, *, exclude_thread_name: str = "") -> set[str]:
@@ -94,7 +118,6 @@ def _purge_unusable_proxy_pool_locked(
     pool = _ensure_proxy_pool_deque_locked(ctx)
     kept = deque()
     seen = set()
-    blocked = blocked_addresses or set()
     removed = 0
     while pool:
         item = pool.popleft()
@@ -117,7 +140,6 @@ def _purge_unusable_proxy_pool_locked(
             logging.info("已丢弃即将过期的代理：%s", mask_proxy_for_log(lease.address))
             continue
         seen.add(lease.address)
-        blocked.add(lease.address)
         kept.append(lease)
     if removed:
         logging.info("代理池已清理无效/重复代理 %s 个", removed)
@@ -206,7 +228,10 @@ def merge_prefetched_proxy_leases(ctx: ExecutionState, fetched: Iterable[object]
     with ctx.lock:
         before = len(_ensure_proxy_pool_deque_locked(ctx))
         _merge_fetched_proxy_leases_locked(ctx, fetched, select_first=False)
-        return max(0, len(_ensure_proxy_pool_deque_locked(ctx)) - before)
+        merged_count = max(0, len(_ensure_proxy_pool_deque_locked(ctx)) - before)
+    if merged_count:
+        ctx.notify_runtime_change()
+    return merged_count
 
 
 def _mark_proxy_in_use(ctx: ExecutionState, thread_name: str, lease: Optional[ProxyLease]) -> Optional[str]:
@@ -231,8 +256,27 @@ def _resolve_proxy_request_num_locked(ctx: ExecutionState) -> int:
         return 0
     parallel_capacity = max(1, int(getattr(ctx.config, "num_threads", 1) or 1))
     idle_capacity = max(0, parallel_capacity - active_count)
-    request_count = max(waiting_count, idle_capacity)
-    return max(1, min(request_count, remaining_to_start, 80))
+    buffer_capacity = max(waiting_count, idle_capacity * _PROXY_FETCH_BUFFER_MULTIPLIER)
+    return max(1, min(buffer_capacity, remaining_to_start, _PROXY_FETCH_MAX_BATCH_SIZE))
+
+
+def resolve_proxy_prefetch_request_count(ctx: ExecutionState) -> int:
+    """计算后台预取还需要补多少代理。"""
+    if not bool(getattr(ctx.config, "random_proxy_ip_enabled", False)):
+        return 0
+    with ctx.lock:
+        active_count = len(ctx.proxy_in_use_by_thread)
+        remaining_to_start = max(0, int(ctx.config.target_num or 0) - int(ctx.cur_num or 0) - active_count)
+        if remaining_to_start <= 0:
+            return 0
+        worker_count = max(1, int(getattr(ctx.config, "num_threads", 1) or 1))
+        target_buffer = min(
+            worker_count * _PROXY_FETCH_BUFFER_MULTIPLIER,
+            remaining_to_start,
+            _PROXY_FETCH_MAX_BATCH_SIZE,
+        )
+        current_pool_size = len(_ensure_proxy_pool_deque_locked(ctx))
+    return max(0, int(target_buffer) - int(current_pool_size))
 
 
 def _should_stop_proxy_wait(
@@ -270,14 +314,13 @@ async def _acquire_proxy_fetch_lock_async(
     ctx: ExecutionState,
     stop_signal: Optional[StopSignalLike],
 ) -> bool:
+    lock = _get_proxy_fetch_async_lock(ctx)
     while not _should_stop_proxy_wait(ctx, stop_signal):
-        acquired = await asyncio.to_thread(
-            ctx._proxy_fetch_lock.acquire,
-            True,
-            _PROXY_WAIT_POLL_SECONDS,
-        )
-        if acquired:
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=_PROXY_WAIT_POLL_SECONDS)
             return True
+        except asyncio.TimeoutError:
+            continue
     return False
 
 
@@ -305,6 +348,10 @@ async def _select_proxy_for_session_async(
                 selected = _pop_available_proxy_lease_locked(ctx)
             if selected is not None:
                 return _mark_proxy_in_use(ctx, thread_name, selected)
+            if is_proxy_fetch_in_progress(ctx):
+                if await _wait_for_next_proxy_cycle_async(ctx, stop_signal):
+                    return None
+                continue
 
             # 代理池为空时，使用全局 fetch 锁避免多线程并发重复请求代理 API（会快速耗尽额度）
             fetch_lock_acquired = await _acquire_proxy_fetch_lock_async(ctx, stop_signal)
@@ -335,7 +382,7 @@ async def _select_proxy_for_session_async(
                         if selected is not None:
                             return _mark_proxy_in_use(ctx, thread_name, selected)
             finally:
-                ctx._proxy_fetch_lock.release()
+                release_proxy_fetch_lock(ctx)
 
             if not wait:
                 return None

@@ -130,26 +130,32 @@ class AsyncRuntimeLoopLargeTests:
         assert runner._resolve_dispatch_delay_seconds() == 2.5
 
     @pytest.mark.asyncio
-    async def test_select_session_proxy_and_ua_handles_unresponsive_proxy(self, monkeypatch) -> None:
+    async def test_select_session_proxy_and_ua_skips_proxy_precheck(self, monkeypatch) -> None:
         config = ExecutionConfig(random_proxy_ip_enabled=True, survey_provider="wjx")
         state = ExecutionState(config=config)
         released: list[str] = []
         state.release_proxy_in_use = lambda thread_name: released.append(thread_name)
+        health_calls: list[str] = []
 
         async def fake_select_proxy_for_session_async(*_args, **_kwargs):
             return "http://1.1.1.1:80"
 
         monkeypatch.setattr(proxy_session, "_select_proxy_for_session_async", fake_select_proxy_for_session_async)
         monkeypatch.setattr(proxy_session, "_record_bad_proxy_and_maybe_pause", lambda *_args, **_kwargs: False)
-        monkeypatch.setattr(proxy_session, "is_proxy_responsive_async", lambda proxy: asyncio.sleep(0, result=False))
-        monkeypatch.setattr(proxy_session, "_discard_unresponsive_proxy", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            proxy_session,
+            "is_proxy_responsive_async",
+            lambda proxy: asyncio.sleep(0, result=health_calls.append(proxy) is None),
+            raising=False,
+        )
         monkeypatch.setattr(proxy_session, "_select_user_agent_for_session", lambda *_args, **_kwargs: ("UA", None))
         runner, _state, _ctx, _scheduler = _build_runner(config=config, state=state)
 
         proxy, ua = await runner._select_session_proxy_and_ua()
 
-        assert (proxy, ua) == (None, None)
-        assert released == ["Slot-1"]
+        assert (proxy, ua) == ("http://1.1.1.1:80", "UA")
+        assert health_calls == []
+        assert released == []
 
     @pytest.mark.asyncio
     async def test_prepare_round_context_marks_terminal_stop_when_reverse_fill_exhausted(self, monkeypatch) -> None:
@@ -340,6 +346,37 @@ class AsyncRuntimeLoopLargeTests:
         await runner.run()
 
         assert scheduler.release_calls[0]["requeue"] is False
+
+    @pytest.mark.asyncio
+    async def test_run_remote_protocol_error_uses_transport_handler(self, monkeypatch) -> None:
+        config = ExecutionConfig(url="https://www.credamo.com/answer.html#/s/demo", survey_provider="credamo")
+        runner, _state, _ctx, scheduler = _build_runner(config=config)
+        scheduler.acquire_values = [10, None]
+        seen_errors: list[BaseException] = []
+        release_flags: list[bool] = []
+        monkeypatch.setattr(
+            runner.http_submitter,
+            "submit",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                runtime_loop.http_client.RemoteProtocolError("server disconnected")
+            ),
+        )
+        monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner, "_select_session_proxy_and_ua", lambda: asyncio.sleep(0, result=("http://1.1.1.1:80", "UA")))
+        monkeypatch.setattr(runner, "_release_round_resources", lambda *, requeue_reverse_fill: release_flags.append(requeue_reverse_fill))
+
+        def handle_transport_error(exc: BaseException) -> bool:
+            seen_errors.append(exc)
+            return False
+
+        monkeypatch.setattr(runner, "_handle_http_transport_error", handle_transport_error)
+
+        await runner.run()
+
+        assert isinstance(seen_errors[0], runtime_loop.http_client.RemoteProtocolError)
+        assert release_flags == [True]
+        assert scheduler.release_calls[0]["requeue"] is True
+        assert runner.stop_policy.failure_calls == []
 
     @pytest.mark.asyncio
     async def test_run_generic_exception_records_failure_and_requeues(self, monkeypatch) -> None:

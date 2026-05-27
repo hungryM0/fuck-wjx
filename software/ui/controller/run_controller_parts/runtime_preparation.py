@@ -187,6 +187,7 @@ def _build_execution_config_template(
             int(getattr(config, "answer_duration", (0, 0))[1]),
         ),
         random_proxy_ip_enabled=bool(getattr(config, "random_ip_enabled", False)),
+        proxy_source=str(getattr(config, "proxy_source", "default") or "default").strip().lower(),
         proxy_ip_pool=[],
         random_user_agent_enabled=bool(getattr(config, "random_ua_enabled", False)),
         user_agent_ratios=copy.deepcopy(

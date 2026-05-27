@@ -94,6 +94,7 @@ class _FakeExecutionState:
         self.cur_fail = 0
         self.device_quota_fail_count = 0
         self.config = SimpleNamespace(target_num=target_num, num_threads=num_threads)
+        self.stop_event = threading.Event()
         self.ensure_calls: list[tuple[int, str]] = []
         self.reverse_fill_init_calls = 0
         self.snapshot_rows = [{"thread": "Slot-1"}]
@@ -390,6 +391,30 @@ class RunControllerExecutionTests:
         assert len(spawned) == 2
         assert spawned[-1].name == "Monitor"
         assert spawned[-1].started is True
+
+    def test_start_workers_starts_engine_directly_without_ui_proxy_prefetch_thread(self, monkeypatch) -> None:
+        controller = _DummyExecutionController()
+        config = RuntimeConfig()
+        events: list[str] = []
+
+        def fake_start_run(*_args, **_kwargs):
+            events.append("engine")
+            return _FakeRunFuture()
+
+        class _SpawnedThread:
+            def __init__(self, *, target=None, args=(), daemon=False, name="") -> None:
+                self.name = name
+                self.started = False
+
+            def start(self) -> None:
+                self.started = True
+
+        monkeypatch.setattr(controller._async_engine_client, "start_run", fake_start_run)
+        monkeypatch.setattr(controller_module.threading, "Thread", _SpawnedThread)
+
+        controller._start_workers_with_proxy_pool(config, [], emit_run_state=False)
+
+        assert events == ["engine"]
 
     def test_wait_for_async_run_and_wait_for_threads_cleanup_monitor(self) -> None:
         controller = _DummyExecutionController()

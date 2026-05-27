@@ -119,7 +119,6 @@ class ExecutionState(
     _terminal_stop_lock: threading.Lock = field(default_factory=threading.Lock)
     _runtime_condition: threading.Condition = field(default_factory=threading.Condition, repr=False)
 
-    _proxy_fetch_lock: threading.Lock = field(default_factory=threading.Lock)
     def __setattr__(self, name: str, value: Any) -> None:
         """阻止把静态配置字段误写到运行态对象本身。"""
         if name in _EXECUTION_STATE_FIELD_NAMES:

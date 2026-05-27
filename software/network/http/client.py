@@ -44,10 +44,13 @@ _PREWARMED = False
 
 
 RequestException = httpx.HTTPError
+TransportError = httpx.TransportError
 Timeout = httpx.TimeoutException
 ConnectTimeout = httpx.ConnectTimeout
 ReadTimeout = httpx.ReadTimeout
 ConnectionError = httpx.ConnectError
+ProxyError = httpx.ProxyError
+RemoteProtocolError = httpx.RemoteProtocolError
 HTTPError = httpx.HTTPStatusError
 
 
