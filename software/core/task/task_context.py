@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import threading
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Deque, Dict, List, Optional, Tuple, Union
 
 from software.core.reverse_fill import ReverseFillRuntimeState, ReverseFillSpec
 from software.core.task.distribution_state import DistributionRuntimeMixin
@@ -66,7 +67,8 @@ class ExecutionConfig:
     answer_duration_range_seconds: Tuple[int, int] = (0, 0)
 
     random_proxy_ip_enabled: bool = False
-    proxy_ip_pool: List[ProxyLease] = field(default_factory=list)
+    proxy_source: str = "default"
+    proxy_ip_pool: Union[List[ProxyLease], Deque[ProxyLease]] = field(default_factory=deque)
     random_user_agent_enabled: bool = False
     user_agent_ratios: Dict[str, int] = field(
         default_factory=lambda: {"wechat": 33, "mobile": 33, "pc": 34}

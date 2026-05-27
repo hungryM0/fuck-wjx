@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
-
-import pytest
 
 import software.ui.pages.workbench.dashboard.parts.config_io as config_io_module
 import software.ui.pages.workbench.dashboard.parts.survey_parse as survey_parse_module

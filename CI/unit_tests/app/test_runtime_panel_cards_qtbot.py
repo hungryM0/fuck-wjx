@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import software.ui.pages.workbench.runtime_panel.cards as cards_module
 import software.ui.pages.workbench.runtime_panel.random_ip_card as random_ip_module
 from software.ui.pages.workbench.runtime_panel.cards import (
     FluentIcon,

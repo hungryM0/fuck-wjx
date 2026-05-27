@@ -338,13 +338,113 @@ class TencentParserTests:
             },
         ]
 
-    async def test_parse_qq_survey_returns_http_result_without_browser_fallback(self, patch_attrs) -> None:
+    def test_markdown_image_text_is_stripped_from_title_and_converted_to_media_url(self) -> None:
+        normalized = qq_parser._standardize_qq_questions(
+            [
+                {
+                    "id": "q5",
+                    "type": "description",
+                    "title": "模特A：无眼镜 ![2552.jpeg](https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg){auto,auto}",
+                    "description": "请观察以下模特照片",
+                    "page_id": "page-a",
+                    "page": "2",
+                },
+                {
+                    "id": "q6",
+                    "type": "matrix_radio",
+                    "title": "请根据您对模特的第一印象进行评价",
+                    "options": [{"text": "1"}, {"text": "2"}],
+                    "sub_titles": [{"text": "专业"}],
+                    "page_id": "page-a",
+                    "page": "2",
+                },
+            ]
+        )
+
+        second = normalized[1]
+        assert second["title"] == "模特A：无眼镜 请根据您对模特的第一印象进行评价"
+        assert second["question_media"] == [
+            {
+                "kind": "image",
+                "scope": "title",
+                "index": None,
+                "source_url": "https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg",
+                "label": "题干图",
+            }
+        ]
+
+    def test_normalize_media_url_extracts_markdown_image_target(self) -> None:
+        assert (
+            qq_parser._normalize_media_url(
+                "![2552.jpeg](https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg){auto,auto}"
+            )
+            == "https://wj.gtimg.com/attachments/question/20260523/8cWPTabEOrZS.jpg"
+        )
+
+    @pytest.mark.asyncio
+    async def test_parse_qq_survey_does_not_fall_back_to_browser_when_http_fails(self, patch_attrs) -> None:
         patch_attrs(
             (qq_parser, "_fetch_qq_survey_via_http", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("http failed"))),
         )
 
         with pytest.raises(RuntimeError, match="腾讯问卷 HTTP 解析失败：http failed"):
             await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
+
+    def test_merge_same_page_descriptions_carries_media_to_next_question(self) -> None:
+        merged = qq_parser._merge_same_page_descriptions_into_questions(
+            [
+                {
+                    "num": 5,
+                    "page": 2,
+                    "title": "模特A",
+                    "description": "",
+                    "is_description": True,
+                    "question_media": [
+                        {
+                            "kind": "image",
+                            "scope": "title",
+                            "index": None,
+                            "source_url": "https://example.com/model-a.jpg",
+                            "label": "题干图",
+                        }
+                    ],
+                },
+                {
+                    "num": 6,
+                    "page": 2,
+                    "title": "请评分",
+                    "description": "",
+                    "is_description": False,
+                    "question_media": [],
+                },
+            ]
+        )
+
+        assert merged[1]["title"] == "模特A 请评分"
+        assert merged[1]["question_media"] == [
+            {
+                "kind": "image",
+                "scope": "title",
+                "index": None,
+                "source_url": "https://example.com/model-a.jpg",
+                "label": "题干图",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_parse_qq_survey_returns_http_result_without_browser_fallback(self, patch_attrs) -> None:
+        patch_attrs(
+            (
+                qq_parser,
+                "_fetch_qq_survey_via_http",
+                AsyncMock(return_value=([{"num": 1, "title": "HTTP 题目", "type_code": "3"}], "HTTP 标题")),
+            ),
+        )
+
+        info, title = await qq_parser.parse_qq_survey("https://wj.qq.com/s2/123/hash/")
+
+        assert info == [{"num": 1, "title": "HTTP 题目", "type_code": "3"}]
+        assert title == "HTTP 标题"
 
     @pytest.mark.asyncio
     async def test_parse_qq_survey_rejects_login_url_and_http_failure_without_browser_fallback(self, patch_attrs) -> None:

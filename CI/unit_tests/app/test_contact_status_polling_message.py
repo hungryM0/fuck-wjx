@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from PySide6.QtCore import QObject
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 from qfluentwidgets import ComboBox, LineEdit
 

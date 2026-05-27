@@ -8,7 +8,7 @@ from software.core.task import ExecutionConfig, ExecutionState
 from software.providers import registry
 from software.providers.common import SURVEY_PROVIDER_CREDAMO, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_WJX
 from software.providers.contracts import SurveyDefinition
-from software.providers.hooks import build_parse_hook, build_predicate_hook
+from software.providers.hooks import build_fill_http_hook, build_parse_hook
 
 
 async def test_parse_survey_routes_detected_provider_through_cache_loader() -> None:
@@ -174,9 +174,9 @@ async def test_attempt_submission_recovery_routes_to_selected_provider() -> None
 
 async def test_provider_hook_rejects_non_async_return_value() -> None:
     with patch("software.providers.hooks._load_hook", return_value=lambda *_args, **_kwargs: True):
-        hook = build_predicate_hook(("fake.module", "sync_predicate"))
+        hook = build_fill_http_hook(("fake.module", "sync_http_fill"))
         try:
-            await hook(object())
+            await hook(ExecutionConfig(), ExecutionState())
         except TypeError as exc:
             assert "provider hook 必须返回 awaitable" in str(exc)
         else:

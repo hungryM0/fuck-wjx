@@ -875,6 +875,77 @@ def _attach_qq_logic_metadata(
             normalized_question["logic_parse_status"] = LOGIC_PARSE_STATUS_UNKNOWN
 
 
+def _merge_question_media_lists(*groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = []
+    seen: set[tuple[str, int | None, str]] = set()
+    for group in groups:
+        for item in list(group or []):
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get("scope") or ""),
+                item.get("index"),
+                str(item.get("source_url") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
+
+
+def _merge_same_page_descriptions_into_questions(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    pending: List[Dict[str, Any]] = []
+    for item in items:
+        if bool(item.get("is_description")):
+            pending.append(item)
+            continue
+
+        if pending:
+            current_page = int(item.get("page") or 1)
+            mergeable = [desc for desc in pending if int(desc.get("page") or 1) == current_page]
+            if mergeable:
+                title_parts = [
+                    str(desc.get("title") or "").strip()
+                    for desc in mergeable
+                    if str(desc.get("title") or "").strip()
+                ]
+                title_parts.append(str(item.get("title") or "").strip())
+                item["title"] = " ".join(part for part in title_parts if part).strip()
+
+                description_parts = [
+                    str(desc.get("description") or "").strip()
+                    for desc in mergeable
+                    if str(desc.get("description") or "").strip()
+                ]
+                current_description = str(item.get("description") or "").strip()
+                if current_description:
+                    description_parts.append(current_description)
+                item["description"] = "\n".join(part for part in description_parts if part).strip()
+
+                merged_media: List[Dict[str, Any]] = []
+                for desc in mergeable:
+                    merged_media.extend(list(desc.get("question_media") or []))
+                item["question_media"] = _merge_question_media_lists(
+                    merged_media,
+                    list(item.get("question_media") or []),
+                )
+        pending = []
+
+    return items
+
+
+def _assign_visible_display_numbers(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    visible_counter = 1
+    for item in items:
+        if bool(item.get("is_description")):
+            item["display_num"] = None
+            continue
+        item["display_num"] = visible_counter
+        visible_counter += 1
+    return items
+
+
 def _standardize_qq_questions(questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     page_map = _build_page_number_map(questions)
     normalized: List[Dict[str, Any]] = []
