@@ -7,6 +7,7 @@ import logging
 from software.core.engine.stop_signal import StopSignalLike
 from software.core.engine.runtime_ui_bridge import RuntimeUiBridge
 from software.core.task import ExecutionState, ProxyLease
+from software.app.config import PROXY_MAX_PROXIES
 from software.network.proxy.pool import coerce_proxy_lease, mask_proxy_for_log
 from software.network.proxy.api import fetch_proxy_batch_async
 from software.network.proxy import get_proxy_required_ttl_seconds, proxy_lease_has_sufficient_ttl
@@ -15,7 +16,8 @@ from software.core.config.codec import _select_user_agent_from_ratios
 _PROXY_WAIT_POLL_SECONDS = 0.3
 _BAD_PROXY_COOLDOWN_SECONDS = 180.0
 _PROXY_FETCH_BUFFER_MULTIPLIER = 2
-_PROXY_FETCH_MAX_BATCH_SIZE = 20
+_PROXY_FETCH_MIN_BATCH_SIZE = 20
+_PROXY_PREFETCH_IDLE_SECONDS = 0.35
 
 
 def _ensure_proxy_pool_deque_locked(ctx: ExecutionState) -> deque:
@@ -57,6 +59,12 @@ def _blocked_proxy_addresses_locked(ctx: ExecutionState, *, exclude_thread_name:
     blocked = _active_proxy_addresses_locked(ctx, exclude_thread_name=exclude_thread_name)
     blocked.update(ctx.successful_proxy_addresses_locked())
     return blocked
+
+
+def _resolve_proxy_fetch_max_batch_size(ctx: ExecutionState) -> int:
+    worker_count = max(1, int(getattr(ctx.config, "num_threads", 1) or 1))
+    dynamic_limit = max(_PROXY_FETCH_MIN_BATCH_SIZE, worker_count * _PROXY_FETCH_BUFFER_MULTIPLIER)
+    return max(1, min(int(PROXY_MAX_PROXIES or dynamic_limit), dynamic_limit))
 
 
 def _record_bad_proxy_and_maybe_pause(
@@ -257,7 +265,7 @@ def _resolve_proxy_request_num_locked(ctx: ExecutionState) -> int:
     parallel_capacity = max(1, int(getattr(ctx.config, "num_threads", 1) or 1))
     idle_capacity = max(0, parallel_capacity - active_count)
     buffer_capacity = max(waiting_count, idle_capacity * _PROXY_FETCH_BUFFER_MULTIPLIER)
-    return max(1, min(buffer_capacity, remaining_to_start, _PROXY_FETCH_MAX_BATCH_SIZE))
+    return max(1, min(buffer_capacity, remaining_to_start, _resolve_proxy_fetch_max_batch_size(ctx)))
 
 
 def resolve_proxy_prefetch_request_count(ctx: ExecutionState) -> int:
@@ -273,10 +281,22 @@ def resolve_proxy_prefetch_request_count(ctx: ExecutionState) -> int:
         target_buffer = min(
             worker_count * _PROXY_FETCH_BUFFER_MULTIPLIER,
             remaining_to_start,
-            _PROXY_FETCH_MAX_BATCH_SIZE,
+            _resolve_proxy_fetch_max_batch_size(ctx),
         )
         current_pool_size = len(_ensure_proxy_pool_deque_locked(ctx))
     return max(0, int(target_buffer) - int(current_pool_size))
+
+
+def should_continue_proxy_prefetch(ctx: ExecutionState) -> bool:
+    """随机 IP 运行期间是否还需要后台补仓。"""
+    if not bool(getattr(ctx.config, "random_proxy_ip_enabled", False)):
+        return False
+    if _should_stop_proxy_wait(ctx, getattr(ctx, "stop_event", None)):
+        return False
+    with ctx.lock:
+        active_count = len(ctx.proxy_in_use_by_thread)
+        remaining_to_start = max(0, int(ctx.config.target_num or 0) - int(ctx.cur_num or 0) - active_count)
+    return remaining_to_start > 0
 
 
 def _should_stop_proxy_wait(
@@ -303,11 +323,19 @@ async def _wait_for_next_proxy_cycle_async(
     *,
     timeout: float = _PROXY_WAIT_POLL_SECONDS,
 ) -> bool:
-    return await asyncio.to_thread(
-        ctx.wait_for_runtime_change,
+    return await ctx.wait_for_runtime_change_async(
         stop_signal=stop_signal,
         timeout=timeout,
     )
+
+
+async def wait_for_proxy_prefetch_cycle(
+    ctx: ExecutionState,
+    stop_signal: Optional[StopSignalLike],
+    *,
+    timeout: float = _PROXY_PREFETCH_IDLE_SECONDS,
+) -> bool:
+    return await _wait_for_next_proxy_cycle_async(ctx, stop_signal, timeout=timeout)
 
 
 async def _acquire_proxy_fetch_lock_async(

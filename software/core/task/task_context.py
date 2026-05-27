@@ -117,6 +117,9 @@ class ExecutionState(
     _target_reached_stop_lock: threading.Lock = field(default_factory=threading.Lock)
     _terminal_stop_lock: threading.Lock = field(default_factory=threading.Lock)
     _runtime_condition: threading.Condition = field(default_factory=threading.Condition, repr=False)
+    _runtime_async_event: Any = field(default=None, init=False, repr=False)
+    _runtime_async_event_loop: Any = field(default=None, init=False, repr=False)
+    _runtime_change_seq: int = field(default=0, init=False, repr=False)
 
     def __setattr__(self, name: str, value: Any) -> None:
         """阻止把静态配置字段误写到运行态对象本身。"""

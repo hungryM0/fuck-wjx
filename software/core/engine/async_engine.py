@@ -20,6 +20,8 @@ from software.network.session_policy import (
     merge_prefetched_proxy_leases,
     release_proxy_fetch_lock,
     resolve_proxy_prefetch_request_count,
+    should_continue_proxy_prefetch,
+    wait_for_proxy_prefetch_cycle,
 )
 from software.providers.registry import parse_survey
 
@@ -118,37 +120,42 @@ class AsyncRuntimeEngine:
             raise RuntimeError("AsyncRuntimeEngine stop_event 未初始化")
 
         async def _prefetch_proxy_pool() -> None:
-            request_count = resolve_proxy_prefetch_request_count(state)
-            if request_count <= 0:
-                return
-            set_random_ip_loading(runtime_bridge, True, f"正在准备代理 0/{request_count}")
-            fetch_lock_acquired = False
-            try:
-                fetch_lock_acquired = await _acquire_proxy_fetch_lock_async(state, state.stop_event)
-                if not fetch_lock_acquired or state.stop_event.is_set() or stop_event.is_set():
-                    return
-                fetched = await fetch_proxy_batch_async(
-                    expected_count=request_count,
-                    stop_signal=state.stop_event,
-                )
-                if state.stop_event.is_set() or stop_event.is_set():
-                    return
-                merged_count = merge_prefetched_proxy_leases(state, fetched)
-                if merged_count:
-                    set_random_ip_loading(
-                        runtime_bridge,
-                        True,
-                        f"正在准备代理 {min(merged_count, request_count)}/{request_count}",
+            while should_continue_proxy_prefetch(state) and not stop_event.is_set():
+                request_count = resolve_proxy_prefetch_request_count(state)
+                if request_count <= 0:
+                    if await wait_for_proxy_prefetch_cycle(state, state.stop_event):
+                        return
+                    continue
+                set_random_ip_loading(runtime_bridge, True, f"正在准备代理 0/{request_count}")
+                fetch_lock_acquired = False
+                try:
+                    fetch_lock_acquired = await _acquire_proxy_fetch_lock_async(state, state.stop_event)
+                    if not fetch_lock_acquired or state.stop_event.is_set() or stop_event.is_set():
+                        return
+                    fetched = await fetch_proxy_batch_async(
+                        expected_count=request_count,
+                        stop_signal=state.stop_event,
                     )
-            except Exception:
-                logging.info("随机IP异步预热失败", exc_info=True)
-            finally:
-                if fetch_lock_acquired:
-                    try:
-                        release_proxy_fetch_lock(state)
-                    except Exception:
-                        logging.info("释放随机IP异步预热锁失败", exc_info=True)
-                set_random_ip_loading(runtime_bridge, False, "")
+                    if state.stop_event.is_set() or stop_event.is_set():
+                        return
+                    merged_count = merge_prefetched_proxy_leases(state, fetched)
+                    if merged_count:
+                        set_random_ip_loading(
+                            runtime_bridge,
+                            True,
+                            f"正在准备代理 {min(merged_count, request_count)}/{request_count}",
+                        )
+                except Exception:
+                    logging.info("随机IP异步预热失败", exc_info=True)
+                finally:
+                    if fetch_lock_acquired:
+                        try:
+                            release_proxy_fetch_lock(state)
+                        except Exception:
+                            logging.info("释放随机IP异步预热锁失败", exc_info=True)
+                    set_random_ip_loading(runtime_bridge, False, "")
+                if await wait_for_proxy_prefetch_cycle(state, state.stop_event):
+                    return
 
         prefetch_task = asyncio.create_task(_prefetch_proxy_pool(), name="AsyncProxyPrefetch")
         try:

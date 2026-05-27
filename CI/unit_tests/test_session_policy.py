@@ -16,7 +16,7 @@ class SessionPolicyTests:
         ctx.cur_num = 10
         ctx.proxy_waiting_threads = 120
         ctx.proxy_in_use_by_thread = {'Worker-1': ProxyLease(address='http://1.1.1.1:8000'), 'Worker-2': ProxyLease(address='http://2.2.2.2:8000')}
-        assert session_policy._resolve_proxy_request_num_locked(ctx) == 20
+        assert session_policy._resolve_proxy_request_num_locked(ctx) == 64
         ctx.config.target_num = 12
         assert session_policy._resolve_proxy_request_num_locked(ctx) == 0
 
@@ -24,13 +24,13 @@ class SessionPolicyTests:
         ctx = ExecutionState(config=ExecutionConfig(target_num=64, num_threads=32))
         ctx.cur_num = 0
         ctx.proxy_waiting_threads = 1
-        assert session_policy._resolve_proxy_request_num_locked(ctx) == 20
+        assert session_policy._resolve_proxy_request_num_locked(ctx) == 64
 
         ctx.proxy_in_use_by_thread = {
             f'Worker-{index}': ProxyLease(address=f'http://1.1.1.{index}:8000')
             for index in range(1, 9)
         }
-        assert session_policy._resolve_proxy_request_num_locked(ctx) == 20
+        assert session_policy._resolve_proxy_request_num_locked(ctx) == 48
 
         ctx.config.target_num = 20
         assert session_policy._resolve_proxy_request_num_locked(ctx) == 12

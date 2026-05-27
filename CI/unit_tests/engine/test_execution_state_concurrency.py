@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import threading
 import time
 from software.core.task import ExecutionState, ProxyLease
@@ -34,6 +35,30 @@ class ExecutionStateConcurrencyTests:
         worker.join(timeout=1.0)
         assert not worker.is_alive()
         assert result['value']
+
+    def test_wait_for_runtime_change_async_returns_false_after_notify(self) -> None:
+        async def _run() -> bool:
+            state = ExecutionState()
+            waiter = asyncio.create_task(state.wait_for_runtime_change_async(timeout=1.0))
+            await asyncio.sleep(0)
+            state.notify_runtime_change()
+            return await waiter
+
+        assert asyncio.run(_run()) is False
+
+    def test_wait_for_runtime_change_async_returns_true_when_stop_signal_is_set(self) -> None:
+        async def _run() -> bool:
+            state = ExecutionState()
+            stop_signal = threading.Event()
+            waiter = asyncio.create_task(
+                state.wait_for_runtime_change_async(stop_signal=stop_signal, timeout=1.0)
+            )
+            await asyncio.sleep(0)
+            stop_signal.set()
+            state.notify_runtime_change()
+            return await waiter
+
+        assert asyncio.run(_run()) is True
 
     def test_register_and_unregister_proxy_waiter_stays_consistent_under_concurrency(self) -> None:
         state = ExecutionState()

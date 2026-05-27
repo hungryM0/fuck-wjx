@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from dataclasses import dataclass
@@ -29,12 +30,17 @@ if TYPE_CHECKING:
         successful_proxy_addresses: set[str]
         proxy_cooldown_until_by_address: dict[str, float]
         _runtime_condition: threading.Condition
+        _runtime_async_event: Optional[asyncio.Event]
+        _runtime_async_event_loop: Optional[asyncio.AbstractEventLoop]
+        _runtime_change_seq: int
 
         def _purge_expired_proxy_cooldowns_locked(self, *, now_ts: Optional[float] = None) -> None: ...
         def _is_proxy_in_cooldown_locked(self, proxy_address: str, *, now_ts: Optional[float] = None) -> bool: ...
         def active_proxy_addresses_locked(self, *, exclude_thread_name: str = "") -> set[str]: ...
         def successful_proxy_addresses_locked(self) -> set[str]: ...
         def notify_runtime_change(self) -> None: ...
+        def _runtime_change_sequence(self) -> int: ...
+        def _ensure_runtime_async_event(self) -> asyncio.Event: ...
 
 
 class ProxyRuntimeMixin:
@@ -193,7 +199,15 @@ class ProxyRuntimeMixin:
 
     def notify_runtime_change(self: "_ProxyRuntimeHost") -> None:
         with self._runtime_condition:
+            self._runtime_change_seq += 1
             self._runtime_condition.notify_all()
+        event = self._runtime_async_event
+        loop = self._runtime_async_event_loop
+        if event is not None and loop is not None and not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(event.set)
+            except RuntimeError:
+                pass
 
     def wait_for_runtime_change(
         self: "_ProxyRuntimeHost",
@@ -207,6 +221,46 @@ class ProxyRuntimeMixin:
         with self._runtime_condition:
             self._runtime_condition.wait(timeout=wait_timeout)
         return bool(stop_signal is not None and stop_signal.is_set())
+
+    def _runtime_change_sequence(self: "_ProxyRuntimeHost") -> int:
+        with self._runtime_condition:
+            return int(self._runtime_change_seq)
+
+    def _ensure_runtime_async_event(self: "_ProxyRuntimeHost") -> asyncio.Event:
+        loop = asyncio.get_running_loop()
+        event = self._runtime_async_event
+        if event is None or self._runtime_async_event_loop is not loop:
+            event = asyncio.Event()
+            self._runtime_async_event = event
+            self._runtime_async_event_loop = loop
+        return event
+
+    async def wait_for_runtime_change_async(
+        self: "_ProxyRuntimeHost",
+        *,
+        stop_signal: Optional[StopSignalLike] = None,
+        timeout: Optional[float] = None,
+    ) -> bool:
+        if stop_signal is not None and stop_signal.is_set():
+            return True
+        wait_timeout = None if timeout is None else max(0.0, float(timeout))
+        observed_seq = self._runtime_change_sequence()
+        event = self._ensure_runtime_async_event()
+        while True:
+            if stop_signal is not None and stop_signal.is_set():
+                return True
+            if self._runtime_change_sequence() != observed_seq:
+                return False
+            event.clear()
+            if self._runtime_change_sequence() != observed_seq:
+                return False
+            try:
+                if wait_timeout is None:
+                    await event.wait()
+                else:
+                    await asyncio.wait_for(event.wait(), timeout=wait_timeout)
+            except asyncio.TimeoutError:
+                return bool(stop_signal is not None and stop_signal.is_set())
 
     def release_proxy_in_use(self: "_ProxyRuntimeHost", thread_name: str) -> Optional[ProxyLease]:
         key = str(thread_name or "").strip()

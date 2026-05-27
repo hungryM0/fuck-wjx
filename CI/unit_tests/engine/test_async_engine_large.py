@@ -292,6 +292,60 @@ class AsyncRuntimeEngineLargeTests:
         assert loading_calls[-1] == (False, "")
 
     @pytest.mark.asyncio
+    async def test_run_keeps_prefetching_proxy_pool_after_first_batch_is_consumed(self, monkeypatch) -> None:
+        engine = _build_engine()
+        config = ExecutionConfig(
+            num_threads=2,
+            target_num=5,
+            random_proxy_ip_enabled=True,
+            survey_provider="wjx",
+        )
+        state = ExecutionState(config=config)
+        fetch_counts: list[int] = []
+
+        class _FakeRunner:
+            def __init__(self, **_kwargs) -> None:
+                pass
+
+            async def run(self) -> None:
+                for _idx in range(2):
+                    deadline = asyncio.get_running_loop().time() + 1.0
+                    while not state.config.proxy_ip_pool and asyncio.get_running_loop().time() < deadline:
+                        await asyncio.sleep(0.01)
+                    with state.lock:
+                        if state.config.proxy_ip_pool:
+                            state.config.proxy_ip_pool.popleft()
+                            state.cur_num += 1
+                    state.notify_runtime_change()
+                    await asyncio.sleep(0)
+
+        class _FakeScheduler:
+            def __init__(self, *, concurrency: int) -> None:
+                self.concurrency = concurrency
+
+            async def close(self) -> None:
+                return None
+
+        async def fake_fetch_proxy_batch_async(**kwargs):
+            fetch_counts.append(kwargs["expected_count"])
+            await asyncio.sleep(0)
+            start = sum(fetch_counts)
+            return [
+                ProxyLease(address=f"http://10.0.0.{start + idx}:8000")
+                for idx in range(max(1, int(kwargs["expected_count"])))
+            ]
+
+        monkeypatch.setattr(async_engine, "AsyncScheduler", _FakeScheduler)
+        monkeypatch.setattr(async_engine, "AsyncSlotRunner", _FakeRunner)
+        monkeypatch.setattr(async_engine, "fetch_proxy_batch_async", fake_fetch_proxy_batch_async)
+        monkeypatch.setattr(async_engine, "wait_for_proxy_prefetch_cycle", lambda *_args, **_kwargs: asyncio.sleep(0, result=False))
+
+        await engine._run(config=config, state=state, runtime_bridge=None)
+
+        assert len(fetch_counts) >= 2
+        assert state.cur_num == 4
+
+    @pytest.mark.asyncio
     async def test_run_async_proxy_prefetch_does_not_write_after_stop(self, monkeypatch) -> None:
         engine = _build_engine()
         config = ExecutionConfig(
