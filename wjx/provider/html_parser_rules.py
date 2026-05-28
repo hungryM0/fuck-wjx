@@ -183,6 +183,7 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
     _ = question_number
     has_jump_attr = str(question_div.get("hasjump") or "").strip() == "1"
     jump_rules: List[Dict[str, Any]] = []
+    terminate_keywords = ("结束作答", "结束答题", "结束填写", "终止作答", "停止作答")
 
     def _parse_jump_target(raw_value: Any) -> Optional[int]:
         text_value = str(raw_value or "").strip()
@@ -220,10 +221,14 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
             continue
         jumpto_num = _parse_jump_target(jumpto_raw)
         if jumpto_num:
+            option_text = option_texts[option_idx] if option_idx < len(option_texts) else None
             jump_rules.append({
                 "option_index": option_idx,
                 "jumpto": jumpto_num,
-                "option_text": option_texts[option_idx] if option_idx < len(option_texts) else None,
+                "option_text": option_text,
+                "terminates_survey": bool(
+                    option_text and any(keyword in option_text for keyword in terminate_keywords)
+                ),
             })
         option_idx += 1
 

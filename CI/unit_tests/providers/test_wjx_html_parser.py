@@ -67,7 +67,9 @@ class WjxHtmlParserTests:
         assert second["multi_min_limit"] == 1
         assert second["multi_max_limit"] == 2
         assert second["has_jump"]
-        assert second["jump_rules"] == [{"option_index": 0, "jumpto": 5, "option_text": "功能A"}]
+        assert second["jump_rules"] == [
+            {"option_index": 0, "jumpto": 5, "option_text": "功能A", "terminates_survey": False}
+        ]
         assert second["has_display_condition"]
         assert second["display_conditions"] == [
             {

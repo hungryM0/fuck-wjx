@@ -143,6 +143,23 @@ def _normalize_dict_list(raw: Any) -> List[Dict[str, Any]]:
     return items
 
 
+def _normalize_jump_rules(raw: Any) -> List[Dict[str, Any]]:
+    rules = _normalize_dict_list(raw)
+    normalized_rules: List[Dict[str, Any]] = []
+    terminate_keywords = ("结束作答", "结束答题", "结束填写", "终止作答", "停止作答")
+    for rule in rules:
+        normalized_rule = dict(rule)
+        if "terminates_survey" not in normalized_rule:
+            option_text = str(normalized_rule.get("option_text") or "").strip()
+            normalized_rule["terminates_survey"] = bool(
+                option_text and any(keyword in option_text for keyword in terminate_keywords)
+            )
+        else:
+            normalized_rule["terminates_survey"] = bool(normalized_rule.get("terminates_survey"))
+        normalized_rules.append(normalized_rule)
+    return normalized_rules
+
+
 def _normalize_logic_parse_status(raw: Any) -> str:
     value = str(raw or "").strip().lower()
     if value in _VALID_LOGIC_PARSE_STATUSES:
@@ -250,7 +267,7 @@ def survey_question_meta_to_dict(question: SurveyQuestionMeta) -> Dict[str, Any]
         "is_text_like": bool(question.is_text_like),
         "is_slider_matrix": bool(question.is_slider_matrix),
         "has_jump": bool(question.has_jump),
-        "jump_rules": _normalize_dict_list(question.jump_rules),
+        "jump_rules": _normalize_jump_rules(question.jump_rules),
         "has_display_condition": bool(question.has_display_condition),
         "display_conditions": _normalize_dict_list(question.display_conditions),
         "has_dependent_display_logic": bool(question.has_dependent_display_logic),
@@ -347,7 +364,7 @@ def _normalize_question(question: SurveyQuestionInput, provider: str, index: int
         is_text_like=bool(normalized.get("is_text_like")),
         is_slider_matrix=bool(normalized.get("is_slider_matrix")),
         has_jump=bool(normalized.get("has_jump")),
-        jump_rules=_normalize_dict_list(normalized.get("jump_rules")),
+        jump_rules=_normalize_jump_rules(normalized.get("jump_rules")),
         has_display_condition=bool(normalized.get("has_display_condition")),
         display_conditions=_normalize_dict_list(normalized.get("display_conditions")),
         has_dependent_display_logic=bool(normalized.get("has_dependent_display_logic")),

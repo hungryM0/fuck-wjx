@@ -60,6 +60,16 @@ def test_http_logic_rejects_jump_backwards() -> None:
     assert get_http_logic_fallback_reason([question]) == "第3题跳题目标回跳到已过题目"
 
 
+def test_http_logic_allows_terminate_jump_marker() -> None:
+    question = _question(
+        1,
+        has_jump=True,
+        jump_rules=[{"option_index": 1, "jumpto": 1, "terminates_survey": True}],
+    )
+
+    assert get_http_logic_fallback_reason([question]) == ""
+
+
 @pytest.mark.asyncio
 async def test_http_logic_skips_hidden_questions() -> None:
     questions = [
@@ -94,6 +104,27 @@ async def test_http_logic_jump_can_terminate_early() -> None:
     ]
 
     plan = await build_http_logic_plan(questions, build_action=_choice_action)
+
+    assert [action.question_num for action in plan.actions] == [1]
+    assert plan.terminated_early is True
+
+
+@pytest.mark.asyncio
+async def test_http_logic_terminate_marker_can_end_on_submit_page() -> None:
+    async def _second_option_action(question: SurveyQuestionMeta):
+        return AnswerAction(
+            question_num=question.num,
+            kind="choice",
+            selected_indices=(1,),
+            record_type="single",
+        )
+
+    questions = [
+        _question(1, has_jump=True, jump_rules=[{"option_index": 1, "jumpto": 1, "terminates_survey": True}]),
+        _question(2),
+    ]
+
+    plan = await build_http_logic_plan(questions, build_action=_second_option_action)
 
     assert [action.question_num for action in plan.actions] == [1]
     assert plan.terminated_early is True

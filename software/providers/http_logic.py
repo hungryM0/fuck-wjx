@@ -14,6 +14,7 @@ from software.providers.contracts import (
 
 BuildHttpAnswerAction = Callable[[SurveyQuestionMeta], Awaitable[Optional[AnswerAction]]]
 _SUPPORTED_CONDITION_MODES = {"selected", "not_selected"}
+_TERMINATE_JUMP_KEYWORDS = ("结束作答", "结束答题", "结束填写", "终止作答", "停止作答")
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,15 @@ class HttpLogicPlan:
     actions: tuple[AnswerAction, ...]
     skipped_question_nums: tuple[int, ...] = ()
     terminated_early: bool = False
+
+
+def _jump_rule_terminates_survey(rule: Any) -> bool:
+    if not isinstance(rule, dict):
+        return False
+    if "terminates_survey" in rule:
+        return bool(rule.get("terminates_survey"))
+    option_text = str(rule.get("option_text") or "").strip()
+    return bool(option_text and any(keyword in option_text for keyword in _TERMINATE_JUMP_KEYWORDS))
 
 
 def _ordered_questions(questions: Sequence[SurveyQuestionMeta]) -> list[SurveyQuestionMeta]:
@@ -104,6 +114,8 @@ def get_http_logic_fallback_reason(questions: Sequence[SurveyQuestionMeta]) -> s
                 jump_target = int(rule.get("jumpto") or 0)
             except Exception:
                 jump_target = 0
+            if _jump_rule_terminates_survey(rule):
+                continue
             if jump_target <= question_num:
                 return f"第{question_num}题跳题目标回跳到已过题目"
             if max_question_num > 0 and jump_target > max_question_num + 1:
@@ -182,9 +194,10 @@ def _question_is_visible(
 def _resolve_jump_target(
     question: SurveyQuestionMeta,
     action: AnswerAction,
-) -> Optional[int]:
+) -> tuple[Optional[int], bool]:
     selected_indices = _action_selected_indices(action)
     unconditional_target: Optional[int] = None
+    unconditional_terminates = False
     for rule in list(getattr(question, "jump_rules", []) or []):
         if not isinstance(rule, dict):
             continue
@@ -194,6 +207,7 @@ def _resolve_jump_target(
             jump_target = 0
         if jump_target <= 0:
             continue
+        terminates_survey = _jump_rule_terminates_survey(rule)
         try:
             option_index = int(rule.get("option_index") or 0)
         except Exception:
@@ -201,10 +215,11 @@ def _resolve_jump_target(
         if option_index < 0:
             if unconditional_target is None:
                 unconditional_target = jump_target
+                unconditional_terminates = terminates_survey
             continue
         if option_index in selected_indices:
-            return jump_target
-    return unconditional_target
+            return jump_target, terminates_survey
+    return unconditional_target, unconditional_terminates
 
 
 async def build_http_logic_plan(
@@ -246,10 +261,10 @@ async def build_http_logic_plan(
         actions.append(action)
 
         if respect_jump_logic:
-            jump_target = _resolve_jump_target(question, action)
+            jump_target, terminates_survey = _resolve_jump_target(question, action)
             if jump_target is None:
                 continue
-            if jump_target > max_question_num:
+            if terminates_survey or jump_target > max_question_num:
                 return HttpLogicPlan(
                     actions=tuple(actions),
                     skipped_question_nums=tuple(skipped_question_nums),

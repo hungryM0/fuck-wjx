@@ -429,6 +429,38 @@ async def test_wjx_http_runtime_accepts_legacy_saved_jump_rules_without_status(m
 
 
 @pytest.mark.asyncio
+async def test_wjx_http_runtime_accepts_legacy_cached_terminate_jump_rule(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://v.wjx.cn/vm/hRLCS6n.aspx",
+        survey_provider="wjx",
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(
+            num=1,
+            title="您是否有参与过品牌快闪店的相关经历?",
+            type_code="3",
+            has_jump=True,
+            jump_rules=[{"option_index": 1, "jumpto": 1, "option_text": "没有（结束作答）"}],
+            option_texts=["有（继续作答）", "没有（结束作答）"],
+            options=2,
+        ),
+        2: SurveyQuestionMeta(num=2, title="Q2", type_code="3", option_texts=["A", "B"], options=2),
+    }
+    state = ExecutionState(config=config)
+
+    async def fake_build_action(_driver, question, _ctx, **_kwargs):
+        if int(question.num) == 1:
+            return AnswerAction(question_num=1, kind="choice", selected_indices=(1,), record_type="single")
+        raise AssertionError("结束作答后不该继续生成后续题目答案")
+
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+
+    actions = await wjx_http._build_actions(config, state, psycho_plan=None, stop_signal=None)
+
+    assert [action.question_num for action in actions] == [1]
+
+
+@pytest.mark.asyncio
 async def test_wjx_http_runtime_blocks_unparsed_jump_logic(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",

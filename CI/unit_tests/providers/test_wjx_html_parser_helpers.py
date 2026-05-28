@@ -302,7 +302,7 @@ class WjxHtmlParserHelperTests:
         assert html_parser_rules._extract_multiple_choice_limits(question_div, 2) == (2, 4)
         assert html_parser_rules._extract_jump_rules_from_html(question_div, 2, ["A", "B"]) == (
             True,
-            [{"option_index": 0, "jumpto": 5, "option_text": "A"}],
+            [{"option_index": 0, "jumpto": 5, "option_text": "A", "terminates_survey": False}],
         )
         assert html_parser_rules._extract_display_conditions_from_html(question_div, 2) == (
             True,
@@ -384,7 +384,7 @@ class WjxHtmlParserHelperTests:
         has_display, display_rules = html_parser_rules._extract_display_conditions_from_html(question_div, 3)
 
         assert has_jump is True
-        assert jump_rules == [{"option_index": 0, "jumpto": 8, "option_text": "A"}]
+        assert jump_rules == [{"option_index": 0, "jumpto": 8, "option_text": "A", "terminates_survey": False}]
         assert has_display is True
         assert display_rules == [
             {
@@ -410,7 +410,7 @@ class WjxHtmlParserHelperTests:
 
         assert html_parser_rules._extract_jump_rules_from_html(question_div, 7, ["北京", "上海"]) == (
             True,
-            [{"option_index": 0, "jumpto": 9, "option_text": "北京"}],
+            [{"option_index": 0, "jumpto": 9, "option_text": "北京", "terminates_survey": False}],
         )
 
     def test_jump_rule_helper_supports_unconditional_question_jump(self) -> None:
@@ -426,6 +426,32 @@ class WjxHtmlParserHelperTests:
         assert html_parser_rules._extract_jump_rules_from_html(question_div, 10, ["A", "B"]) == (
             True,
             [{"option_index": -1, "jumpto": 11, "option_text": None}],
+        )
+
+    def test_jump_rule_helper_marks_wjx_end_option_as_terminate(self) -> None:
+        question_div = _soup(
+            """
+            <div hasjump="1" type="3">
+              <input type="radio" value="1" />
+              <input type="radio" value="2" jumpto="1" />
+            </div>
+            """
+        ).div
+
+        assert html_parser_rules._extract_jump_rules_from_html(
+            question_div,
+            1,
+            ["有（继续作答）", "没有（结束作答）"],
+        ) == (
+            True,
+            [
+                {
+                    "option_index": 1,
+                    "jumpto": 1,
+                    "option_text": "没有（结束作答）",
+                    "terminates_survey": True,
+                }
+            ],
         )
 
     def test_attach_display_condition_metadata_dedupes_and_clears_empty_targets(self) -> None:
