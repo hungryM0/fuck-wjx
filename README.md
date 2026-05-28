@@ -60,11 +60,11 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 ## 使用方法
 
-1. **输入问卷** - 粘贴问卷链接或上传/拖入二维码图片（支持问卷星和腾讯问卷）
-2. **自动解析** - 点击「自动配置问卷」，系统自动识别平台和题目结构
-3. **调整配置** - 在配置向导中针对各题设置答案权重和概率分布
+1. **输入问卷** - 粘贴问卷链接，或上传/拖入二维码图片
+2. **自动解析** - 点击 `自动配置问卷`，系统自动识别平台和题目结构
+3. **调整配置** - 在配置向导中，针对各题设置答案权重和概率分布
 4. **设置运行参数** - 指定目标提交份数、并发数、随机IP等选项
-5. **启动任务** - 点击「开始执行」并等待任务完成（可在日志中查看进度）
+5. **启动任务** - 点击 `开始执行` 并等待任务完成
 
 ---
 
@@ -83,8 +83,6 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 ## Mac 系统支持
 
 如果你需要查看支持 macOS 系统的源码，请切换到 [mac 分支](https://github.com/SurveyController/SurveyController/tree/mac)。
-
-**该分支由社区维护。**
 
 ---
 
