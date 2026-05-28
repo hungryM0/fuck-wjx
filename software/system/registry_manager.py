@@ -1,46 +1,40 @@
 # -*- coding: utf-8 -*-
-"""Windows 注册表轻量状态读写。"""
+"""轻量状态读写。"""
 
-import sys
+from __future__ import annotations
 
-# 只在 Windows 平台导入 winreg
-if sys.platform == "win32":
-    import winreg
-else:
-    winreg = None
+from software.app.settings_store import app_settings, get_bool_from_qsettings
 
 
 class RegistryManager:
+    """兼容旧调用名，底层改走 QSettings。"""
 
-    REGISTRY_PATH = r"Software\SurveyController"
+    REGISTRY_PATH = "system_state"
     REGISTRY_KEY_CONFETTI_PLAYED = "ConfettiPlayed"
+
+    @classmethod
+    def _settings_key(cls) -> str:
+        return f"{cls.REGISTRY_PATH}/{cls.REGISTRY_KEY_CONFETTI_PLAYED}"
 
     @staticmethod
     def is_confetti_played() -> bool:
-        """检查彩带动画是否已播放过"""
-        if winreg is None:
-            return False
+        """检查彩带动画是否已播放过。"""
         try:
-            hkey = winreg.HKEY_CURRENT_USER
-            with winreg.OpenKey(hkey, RegistryManager.REGISTRY_PATH) as key:
-                value, _ = winreg.QueryValueEx(key, RegistryManager.REGISTRY_KEY_CONFETTI_PLAYED)
-                return bool(int(value))
-        except FileNotFoundError:
-            return False
+            settings = app_settings()
+            return get_bool_from_qsettings(
+                settings.value(RegistryManager._settings_key()),
+                False,
+            )
         except Exception:
             return False
 
     @staticmethod
     def set_confetti_played(played: bool) -> bool:
-        """设置彩带动画播放状态"""
-        if winreg is None:
-            return False
+        """设置彩带动画播放状态。"""
         try:
-            hkey = winreg.HKEY_CURRENT_USER
-            key = winreg.CreateKeyEx(hkey, RegistryManager.REGISTRY_PATH, 0, winreg.KEY_WRITE)
-            winreg.SetValueEx(key, RegistryManager.REGISTRY_KEY_CONFETTI_PLAYED, 0, winreg.REG_DWORD, int(played))
-            winreg.CloseKey(key)
+            settings = app_settings()
+            settings.setValue(RegistryManager._settings_key(), bool(played))
+            settings.sync()
             return True
         except Exception:
             return False
-

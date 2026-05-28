@@ -7,6 +7,18 @@ from software.update import updater
 
 
 class UpdateHelperTests:
+    def test_check_updates_returns_unsupported_on_macos(self) -> None:
+        with (
+            patch.object(updater.sys, "platform", "darwin"),
+            patch.object(updater, "__VERSION__", "4.0.0"),
+        ):
+            result = updater.UpdateManager.check_updates()
+        assert result == {
+            "has_update": False,
+            "status": "unsupported",
+            "current_version": "4.0.0",
+        }
+
     def test_preview_release_notes_strips_markdown_and_truncates(self) -> None:
         preview = updater._preview_release_notes('# 标题\n\n---\n\n**加粗** 和 ~~删除线~~\n\n* 列表项\n\n普通段落', 18)
         assert preview == '标题\n\n加粗 和 删除线\n- 列表项\n...'

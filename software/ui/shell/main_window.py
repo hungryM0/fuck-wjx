@@ -706,7 +706,7 @@ class MainWindow(
         text = str(msg or "")
         self._toast(text, "error")
         if not self.isActiveWindow():
-            self.show_task_result_windows_notification("任务失败", text)
+            self.show_task_result_system_notification("任务失败", text)
 
     def _open_quota_request_form(self) -> bool:
         return self._open_quota_redeem_dialog()

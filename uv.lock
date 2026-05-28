@@ -188,6 +188,62 @@ wheels = [
 ]
 
 [[package]]
+name = "jaraco-classes"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "more-itertools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/c0/ed4a27bc5571b99e3cff68f8a9fa5b56ff7df1c2251cc715a652ddd26402/jaraco.classes-3.4.0.tar.gz", hash = "sha256:47a024b51d0239c0dd8c8540c6c7f484be3b8fcf0b2d85c13825780d3b3f3acd", size = 11780, upload-time = "2024-03-31T07:27:36.643Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/66/b15ce62552d84bbfcec9a4873ab79d993a1dd4edb922cbfccae192bd5b5f/jaraco.classes-3.4.0-py3-none-any.whl", hash = "sha256:f662826b6bed8cace05e7ff873ce0f9283b5c924470fe664fff1c2f00f581790", size = 6777, upload-time = "2024-03-31T07:27:34.792Z" },
+]
+
+[[package]]
+name = "jaraco-context"
+version = "6.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/50/4763cd07e722bb6285316d390a164bc7e479db9d90daa769f22578f698b4/jaraco_context-6.1.2.tar.gz", hash = "sha256:f1a6c9d391e661cc5b8d39861ff077a7dc24dc23833ccee564b234b81c82dfe3", size = 16801, upload-time = "2026-03-20T22:13:33.922Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f2/58/bc8954bda5fcda97bd7c19be11b85f91973d67a706ed4a3aec33e7de22db/jaraco_context-6.1.2-py3-none-any.whl", hash = "sha256:bf8150b79a2d5d91ae48629d8b427a8f7ba0e1097dd6202a9059f29a36379535", size = 7871, upload-time = "2026-03-20T22:13:32.808Z" },
+]
+
+[[package]]
+name = "jaraco-functools"
+version = "4.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "more-itertools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/cf/ea4ef2920830dea3f5ab2ea4da6fb67724e6dca80ee2553788c3607243d0/jaraco_functools-4.5.0.tar.gz", hash = "sha256:3bb5665ea4a020cf78a7040e89154c77edadb3ca74f366479669c5999aa70b03", size = 20272, upload-time = "2026-05-15T21:34:10.025Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/9a/982e48afcffcd727a9144506720ffd4224b6b7e355c98641866f38b7c043/jaraco_functools-4.5.0-py3-none-any.whl", hash = "sha256:79ce39246eddbde4b3a03b77ea5f0f7878dc669b166a66cf3fa8e266aa3fa2f4", size = 10594, upload-time = "2026-05-15T21:34:08.595Z" },
+]
+
+[[package]]
+name = "keyring"
+version = "25.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jaraco-classes" },
+    { name = "jaraco-context" },
+    { name = "jaraco-functools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz", hash = "sha256:fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b", size = 63516, upload-time = "2025-11-16T16:26:09.482Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/db/e655086b7f3a705df045bf0933bdd9c2f79bb3c97bfef1384598bb79a217/keyring-25.7.0-py3-none-any.whl", hash = "sha256:be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f", size = 39160, upload-time = "2025-11-16T16:26:08.402Z" },
+]
+
+[[package]]
+name = "more-itertools"
+version = "11.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/1d/f4da6f02cdffe04d6362210b807146a26044c88d839208aec273bb0d9184/more_itertools-11.1.0.tar.gz", hash = "sha256:48e8f4d9e7e5878571ecf6f2b4e57634f93cd474cc8cfbd2376f2d11b396e30d", size = 145772, upload-time = "2026-05-22T14:14:29.909Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/3d/1087453384dbde46a8c7f9356eead2c58be8a7bf156bca40243377c85715/more_itertools-11.1.0-py3-none-any.whl", hash = "sha256:4b65538ae22f6fed0ce4874efd317463a7489796a0939fa66824dd542125a192", size = 72226, upload-time = "2026-05-22T14:14:28.824Z" },
+]
+
+[[package]]
 name = "nodeenv"
 version = "1.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3071,11 +3127,12 @@ source = { virtual = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "httpx" },
+    { name = "keyring", marker = "sys_platform == 'darwin'" },
     { name = "openpyxl" },
     { name = "packaging" },
     { name = "pyside6" },
     { name = "pyside6-fluent-widgets" },
-    { name = "velopack" },
+    { name = "velopack", marker = "sys_platform == 'win32'" },
     { name = "zxing-cpp" },
 ]
 
@@ -3096,11 +3153,12 @@ dev = [
 requires-dist = [
     { name = "beautifulsoup4" },
     { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "keyring", marker = "sys_platform == 'darwin'", specifier = ">=25,<26" },
     { name = "openpyxl" },
     { name = "packaging" },
     { name = "pyside6", specifier = "==6.11.1" },
     { name = "pyside6-fluent-widgets", specifier = "==1.11.2" },
-    { name = "velopack" },
+    { name = "velopack", marker = "sys_platform == 'win32'" },
     { name = "zxing-cpp" },
 ]
 
@@ -3130,18 +3188,6 @@ version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/07/85/a2a234da1fab55cc6c03dc17af6aec35089a57dd0ccefe648ebb63d47f05/velopack-1.0.1.tar.gz", hash = "sha256:a175057451b8fdc84efc81b4df0c67d64c43fd11c6418316037b7e3bf09d8426", size = 110132, upload-time = "2026-05-26T14:36:10.23Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/12/b0dc5cec03e340045393316f1e09132a275f3caddb298303d16d3dc2bbd2/velopack-1.0.1-cp37-abi3-macosx_10_12_x86_64.whl", hash = "sha256:a6c077a6659eac11d9163136e0b5da18edb528ea2d9e6971ec094117c10f490a", size = 1486701, upload-time = "2026-05-26T14:35:48.037Z" },
-    { url = "https://files.pythonhosted.org/packages/1f/4c/c76753b2ff45efc9909931b4d4f86b2a9cbe9cbf83333011b63311708949/velopack-1.0.1-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:fa614e5a1095470f68443cd3f126578a4749767f831abebecc3ce63306592525", size = 1467996, upload-time = "2026-05-26T14:35:49.8Z" },
-    { url = "https://files.pythonhosted.org/packages/13/16/23abaa25b0c150b034f58e381a2d0820986701508d0b4c543b5a8b65a484/velopack-1.0.1-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2e92dd33e7d3c879ef96693c26053b7514de505bb43439f58197d30fac18439e", size = 1637053, upload-time = "2026-05-26T14:35:51.342Z" },
-    { url = "https://files.pythonhosted.org/packages/92/55/e4f0735ee5d06ded071c404083cabc713d67ddfd65f0b8bd9cd05d537867/velopack-1.0.1-cp37-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:15f91192e67830aaeec207a7585731e2d263dac1f31da29799a7e872f7926e6a", size = 1332506, upload-time = "2026-05-26T14:35:52.61Z" },
-    { url = "https://files.pythonhosted.org/packages/f5/6e/8d562f7cfea03b8f3ebc5ef11ed65f25a1e20b0889c501c1cbd35972a60c/velopack-1.0.1-cp37-abi3-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:4c2d11385e7292d58fd2875734057755b9040513fe6da772ea213a9da8ee547b", size = 1439547, upload-time = "2026-05-26T14:35:54.01Z" },
-    { url = "https://files.pythonhosted.org/packages/47/27/b7856aa7eba1a6ccc41192a89443c0b1e2455a463c394da2c38d37616e5a/velopack-1.0.1-cp37-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:15fb8ed1c8b24e5dcc3fb805dd7165f347a0762d371ec50155735d77292b8867", size = 1429553, upload-time = "2026-05-26T14:35:55.72Z" },
-    { url = "https://files.pythonhosted.org/packages/a6/66/f52efbdea53b9d0934288dd990b96808d89acb2355e38648a56af4c504c8/velopack-1.0.1-cp37-abi3-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:089d7a5066fce5f560720c769aedbe96ddec41724b73646931bccbdba05ff7f5", size = 1329204, upload-time = "2026-05-26T14:35:57.027Z" },
-    { url = "https://files.pythonhosted.org/packages/9e/08/5f8132eeada44c57c181b5812aaa0a1ccfe268ef2bb7197488a2228526dc/velopack-1.0.1-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8822b5292226fd2ee221af12fe1303b74cb130992f40da2883951c5df7693f6f", size = 1582060, upload-time = "2026-05-26T14:35:58.646Z" },
-    { url = "https://files.pythonhosted.org/packages/81/44/684db9c2504d2eb4b0efe4025fea4450b4ba28e788bf73d05c0b41cfd20e/velopack-1.0.1-cp37-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6529d0963bd2c03bc4ae9949d8f112e3de5e08e2107f1adf4c7f6e309ca0824e", size = 1812926, upload-time = "2026-05-26T14:36:00.038Z" },
-    { url = "https://files.pythonhosted.org/packages/33/a6/f6473a08f0769cf7652bd172ec71836c057b41ef4ac850fcadf0dbf35893/velopack-1.0.1-cp37-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:fe6abfd88fa7b5731799deb8c1fd3b1270ce2e521754d8c364d7c11e240859de", size = 1608960, upload-time = "2026-05-26T14:36:01.74Z" },
-    { url = "https://files.pythonhosted.org/packages/a4/82/a28a06f8d02c6a6840e817fbffd70fc7d69b90f6c40b55a66ed2d9d8b15c/velopack-1.0.1-cp37-abi3-musllinux_1_2_i686.whl", hash = "sha256:2a9a94e35c8e41f51e5c695cf0a7349176f4054caff3432554cefe7ff2db065a", size = 1607281, upload-time = "2026-05-26T14:36:03.166Z" },
-    { url = "https://files.pythonhosted.org/packages/93/8b/8a2aa81af4bcec0ce8db0f57e540c59cde93070dbfd3dbada8f2eda5c189/velopack-1.0.1-cp37-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:a9510fa44d2fec062944f1375b3ae441bd88c9e75d07a924d68d125425174e75", size = 1797415, upload-time = "2026-05-26T14:36:04.64Z" },
     { url = "https://files.pythonhosted.org/packages/06/c8/eb262fbec1ff5dc6b8fd22cf3e6c3d1667ff1c7bf8e3a41271e3a443e3dc/velopack-1.0.1-cp37-abi3-win32.whl", hash = "sha256:cb4dbfc1480f6a9531c146b70066f0effb13d05e695ef41a647fdbbbd5076569", size = 1076997, upload-time = "2026-05-26T14:36:06.077Z" },
     { url = "https://files.pythonhosted.org/packages/98/3b/8ab95719a44f56e7b8f537f8b7c1ecf504d4d139fe69b1912fa50de2075f/velopack-1.0.1-cp37-abi3-win_amd64.whl", hash = "sha256:7c36cb1183ef544ebe63b08ed35d25af0148673043ab5b7805abd3c7f03f7557", size = 1351017, upload-time = "2026-05-26T14:36:07.457Z" },
     { url = "https://files.pythonhosted.org/packages/d8/1a/1a55bd36e93e8572d0a7e1a36f51f3b41a3f4b106ea78f920205206825d2/velopack-1.0.1-cp37-abi3-win_arm64.whl", hash = "sha256:11b03d08c8cb12cc118333543dfb7646b77f2d27b5e34d220d5cf71cbe5f5d8c", size = 1285112, upload-time = "2026-05-26T14:36:08.897Z" },

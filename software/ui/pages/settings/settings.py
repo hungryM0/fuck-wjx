@@ -25,7 +25,7 @@ from software.app.config import (
     DEFAULT_AUTO_SAVE_LOG_RETENTION_COUNT,
     DEFAULT_AUTO_SAVE_LOGS,
     NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
-    TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY,
+    TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY,
     app_settings,
     get_bool_from_qsettings,
     get_int_from_qsettings,
@@ -89,7 +89,7 @@ class SettingsPage(ScrollArea):
             "window_topmost": False,
             "ask_save_on_close": True,
             "prevent_sleep_during_run": True,
-            TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY: True,
+            TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY: True,
             AUTO_SAVE_LOGS_SETTING_KEY: DEFAULT_AUTO_SAVE_LOGS,
             AUTO_SAVE_LOG_RETENTION_COUNT_SETTING_KEY: DEFAULT_AUTO_SAVE_LOG_RETENTION_COUNT,
             "auto_check_update": True,
@@ -383,7 +383,7 @@ class SettingsPage(ScrollArea):
 
     def _apply_task_result_notification_state(self, checked: bool, persist: bool = True):
         self._persist_bool_setting(
-            key=TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY,
+            key=TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY,
             checked=checked,
             event="toggle_task_result_windows_notification",
             target="task_result_notification_switch",
@@ -517,7 +517,7 @@ class SettingsPage(ScrollArea):
         )
         self._set_switch_state(
             self.task_result_notification_card,
-            self._defaults[TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY],
+            self._defaults[TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY],
         )
         self._set_switch_state(self.auto_save_logs_card, self._defaults[AUTO_SAVE_LOGS_SETTING_KEY])
         self._set_auto_save_retention_index(
@@ -537,7 +537,7 @@ class SettingsPage(ScrollArea):
             persist=False,
         )
         self._apply_task_result_notification_state(
-            self._defaults[TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY],
+            self._defaults[TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY],
             persist=False,
         )
         self._apply_auto_save_logs_state(

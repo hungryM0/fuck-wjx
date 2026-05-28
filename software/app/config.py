@@ -32,7 +32,8 @@ CONFIG_DIRECTORY_SETTING_KEY = _CONFIG_DIRECTORY_SETTING_KEY
 NAVIGATION_TEXT_VISIBLE_SETTING_KEY = "navigation_selected_text_visible"
 AUTO_SAVE_LOGS_SETTING_KEY = "auto_save_logs"
 AUTO_SAVE_LOG_RETENTION_COUNT_SETTING_KEY = "auto_save_log_retention_count"
-TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY = "task_result_windows_notification"
+TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY = "task_result_system_notification"
+TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY = TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY
 DEFAULT_AUTO_SAVE_LOGS = True
 DEFAULT_AUTO_SAVE_LOG_RETENTION_COUNT = 10
 AUTO_SAVE_LOG_RETENTION_OPTIONS = (3, 5, 10, 20, 30, 50)
@@ -407,6 +408,6 @@ _ENGLISH_MULTI_MIN_PATTERNS = (
 # ==================== 更新配置 ====================
 VELOPACK_FEED_URL = _resolve_env_value(
     "SURVEYCONTROLLER_VELOPACK_FEED_URL",
-    "https://dl.hungrym0.top/surveycontroller/win/stable/",
+    "https://dl.hungrym0.top/surveycontroller/win/stable/" if sys.platform == "win32" else "",
 )
-VELOPACK_CHANNEL = _resolve_env_value("SURVEYCONTROLLER_VELOPACK_CHANNEL", "stable")
+VELOPACK_CHANNEL = _resolve_env_value("SURVEYCONTROLLER_VELOPACK_CHANNEL", "stable" if sys.platform == "win32" else "")

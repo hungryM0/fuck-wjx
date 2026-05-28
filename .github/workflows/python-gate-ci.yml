@@ -20,7 +20,11 @@ concurrency:
 jobs:
   import-check:
     name: Import Smoke Test
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
 
     steps:
       - name: Checkout repository
@@ -43,7 +47,11 @@ jobs:
 
   window-smoke:
     name: Window Smoke Test
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
 
     steps:
       - name: Checkout repository

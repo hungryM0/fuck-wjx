@@ -58,12 +58,12 @@ class SystemHelpersTests:
         assert blocker.active is True
 
     def test_secure_store_unsupported_and_invalid_key_paths(self, patch_attrs) -> None:
-        patch_attrs((secure_store, "winreg", None))
+        patch_attrs((secure_store.sys, "platform", "linux"))
         secure_store.set_secret("key", "value")
         secure_store.delete_secret("key")
         assert secure_store.read_secret("key").status == "unsupported"
 
-        patch_attrs((secure_store, "winreg", object()))
+        patch_attrs((secure_store.sys, "platform", "darwin"), (secure_store, "keyring", object()))
         assert secure_store.read_secret("").status == "invalid_key"
         secure_store.set_secret("", "value")
         secure_store.delete_secret("")

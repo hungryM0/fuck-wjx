@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 
 from software.app.settings_store import (
     CONFIG_DIRECTORY_SETTING_KEY,
@@ -23,13 +24,21 @@ def _get_env_path(key: str, *fallback_parts: str) -> str:
     return _expand_home_path(*fallback_parts)
 
 
+def _get_macos_root(*parts: str) -> str:
+    return _expand_home_path("Library", *parts)
+
+
 def get_roaming_app_data_root() -> str:
     """返回用户漫游数据根目录。"""
+    if sys.platform == "darwin":
+        return _get_macos_root("Application Support")
     return _get_env_path("APPDATA", "AppData", "Roaming")
 
 
 def get_local_app_data_root() -> str:
     """返回用户本地数据根目录。"""
+    if sys.platform == "darwin":
+        return _get_macos_root("Caches")
     return _get_env_path("LOCALAPPDATA", "AppData", "Local")
 
 
@@ -67,6 +76,8 @@ def get_user_local_data_root() -> str:
 
 def get_user_logs_directory() -> str:
     """返回日志目录。"""
+    if sys.platform == "darwin":
+        return os.path.join(_get_macos_root("Logs"), _APP_NAME)
     return os.path.join(get_user_local_data_root(), "logs")
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 import webbrowser
 from threading import Thread
 from typing import Any, Callable, Optional, cast
@@ -146,6 +147,8 @@ def _fetch_latest_github_release() -> Optional[dict[str, Any]]:
 
 
 def _fetch_latest_velopack_feed_release() -> Optional[dict[str, Any]]:
+    if sys.platform != "win32" or not VELOPACK_FEED_URL or not VELOPACK_CHANNEL:
+        return None
     feed_url = f"{VELOPACK_FEED_URL.rstrip('/')}/releases.{VELOPACK_CHANNEL}.json"
     try:
         response = http_client.get(feed_url, timeout=(10, 30))
@@ -252,6 +255,8 @@ def _build_velopack_feed_update_result(current_version: str) -> dict[str, Any]:
 
 
 def _safe_create_update_manager():
+    if sys.platform != "win32":
+        return None
     velopack_module = _get_velopack_module()
     if velopack_module is None:
         return None
@@ -289,6 +294,8 @@ class UpdateManager:
     @staticmethod
     def check_updates() -> dict[str, Any]:
         current_version = str(__VERSION__ or "").strip()
+        if sys.platform != "win32":
+            return {"has_update": False, "status": "unsupported", "current_version": current_version}
         if not version:
             logging.warning("更新功能依赖 packaging 模块")
             return {"has_update": False, "status": "unknown", "current_version": current_version}
@@ -347,6 +354,8 @@ class UpdateManager:
         *,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> bool:
+        if sys.platform != "win32":
+            raise RuntimeError("当前平台不支持自动更新")
         manager = _safe_create_update_manager()
         if manager is None:
             raise RuntimeError("当前运行环境不支持 Velopack 更新")
@@ -362,6 +371,8 @@ class UpdateManager:
 
     @staticmethod
     def apply_downloaded_update(update_info: Any) -> None:
+        if sys.platform != "win32":
+            raise RuntimeError("当前平台不支持自动更新")
         manager = _safe_create_update_manager()
         if manager is None:
             raise RuntimeError("当前运行环境不支持 Velopack 更新")

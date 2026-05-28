@@ -222,6 +222,8 @@ class MainWindowUpdateMixin:
         self._startup_update_check_completed = True
         self._clear_update_checking_placeholder()
         status = update_info.get("status", "unknown") if update_info else "unknown"
+        if status == "unsupported":
+            return
         if has_update:
             self._startup_update_pending_info = dict(update_info or {})
             self._show_outdated_badge()

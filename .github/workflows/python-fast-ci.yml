@@ -17,7 +17,11 @@ concurrency:
 jobs:
   static-checks:
     name: Static Checks
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
 
     steps:
       - name: Checkout repository
@@ -46,7 +50,11 @@ jobs:
 
   unit-tests:
     name: Unit Tests
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
     env:
       SURVEY_CONTROLLER_UNIT_TEST_TIMEOUT_SECONDS: "300"
 

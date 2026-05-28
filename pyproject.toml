@@ -7,11 +7,12 @@ requires-python = ">=3.13.13"
 dependencies = [
     "beautifulsoup4",
     "httpx>=0.27,<1",
+    "keyring>=25,<26; sys_platform == 'darwin'",
     "openpyxl",
     "packaging",
     "PySide6==6.11.1",
     "PySide6-Fluent-Widgets==1.11.2",
-    "velopack",
+    "velopack; sys_platform == 'win32'",
     "zxing-cpp",
 ]
 

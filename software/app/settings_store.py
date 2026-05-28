@@ -4,12 +4,23 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QCoreApplication, QSettings
 
 _SETTINGS_ORG = "SurveyController"
 _SETTINGS_APP = "Settings"
+_SETTINGS_DOMAIN = "surveycontroller.app"
 _SETTINGS_FILE_ENV = "SURVEYCONTROLLER_QSETTINGS_FILE"
 CONFIG_DIRECTORY_SETTING_KEY = "config_directory"
+
+
+def configure_qt_application_metadata() -> None:
+    """统一设置 Qt 元数据，确保 QSettings 在各平台落到稳定位置。"""
+    if not QCoreApplication.organizationName():
+        QCoreApplication.setOrganizationName(_SETTINGS_ORG)
+    if not QCoreApplication.organizationDomain():
+        QCoreApplication.setOrganizationDomain(_SETTINGS_DOMAIN)
+    if not QCoreApplication.applicationName():
+        QCoreApplication.setApplicationName(_SETTINGS_APP)
 
 
 def app_settings() -> QSettings:
@@ -17,6 +28,7 @@ def app_settings() -> QSettings:
     isolated_settings_file = os.environ.get(_SETTINGS_FILE_ENV)
     if isolated_settings_file:
         return QSettings(isolated_settings_file, QSettings.Format.IniFormat)
+    configure_qt_application_metadata()
     return QSettings(_SETTINGS_ORG, _SETTINGS_APP)
 
 

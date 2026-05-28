@@ -7,7 +7,7 @@ from software.app.config import (
     AUTO_SAVE_LOGS_SETTING_KEY,
     CONFIG_DIRECTORY_SETTING_KEY,
     NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
-    TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY,
+    TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY,
 )
 import software.ui.pages.settings.settings as settings_module
 from software.ui.pages.settings.settings import SettingsPage
@@ -116,7 +116,7 @@ def test_settings_page_reset_restores_defaults(qtbot, monkeypatch) -> None:
     assert fake_settings.synced is True
     assert page.auto_save_logs_card.isChecked() is page._defaults[AUTO_SAVE_LOGS_SETTING_KEY]
     assert page.navigation_text_card.isChecked() is page._defaults[NAVIGATION_TEXT_VISIBLE_SETTING_KEY]
-    assert page.task_result_notification_card.isChecked() is page._defaults[TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY]
+    assert page.task_result_notification_card.isChecked() is page._defaults[TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY]
     assert page.config_directory_card.contentLabel.text().replace("\\", "/") == "D:/default-configs"
 
 

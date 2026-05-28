@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QDialog
 from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox
 
 from software.app.config import (
-    TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY,
+    TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY,
     app_settings,
     get_bool_from_qsettings,
 )
@@ -128,18 +128,21 @@ class MainWindowDialogsMixin:
         except Exception:
             return False
 
-    def _should_show_task_result_windows_notification(self) -> bool:
+    def _should_show_task_result_system_notification(self) -> bool:
         settings = app_settings()
         return (
             get_bool_from_qsettings(
-                settings.value(TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY),
+                settings.value(TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY),
                 True,
             )
             and not self._is_window_activated()
         )
 
-    def show_task_result_windows_notification(self, title: str, message: str) -> None:
-        if not self._should_show_task_result_windows_notification():
+    def _should_show_task_result_windows_notification(self) -> bool:
+        return self._should_show_task_result_system_notification()
+
+    def show_task_result_system_notification(self, title: str, message: str) -> None:
+        if not self._should_show_task_result_system_notification():
             return
         try:
             from PySide6.QtWidgets import QSystemTrayIcon
@@ -158,6 +161,9 @@ class MainWindowDialogsMixin:
             QSystemTrayIcon.MessageIcon.Information,
             5000,
         )
+
+    def show_task_result_windows_notification(self, title: str, message: str) -> None:
+        self.show_task_result_system_notification(title, message)
 
     def _track_async_dialog(self, dialog: QDialog) -> None:
         dialogs = getattr(self, "_async_dialog_refs", None)

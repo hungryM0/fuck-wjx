@@ -110,7 +110,7 @@ class DashboardProgressMixin:
         _main_progress_indeterminate: bool
         _last_device_quota_fail_count: int
         _progress_paused_visual: bool
-        _show_task_result_windows_notification: Any
+        _show_task_result_system_notification: Any
 
         def _sync_start_button_state(self, running: Optional[bool] = None) -> None: ...
         def _sync_thread_slider_enabled(self, running: Optional[bool] = None) -> None: ...
@@ -122,7 +122,7 @@ class DashboardProgressMixin:
             duration: int = 2000,
             show_progress: bool = False,
         ) -> Optional[Any]: ...
-        def show_task_result_windows_notification(self, title: str, message: str) -> None: ...
+        def show_task_result_system_notification(self, title: str, message: str) -> None: ...
         def _on_start_clicked(self) -> None: ...
         def resume_run_from_ui(self) -> None: ...
         def window(self) -> Any: ...
@@ -419,7 +419,7 @@ class DashboardProgressMixin:
             set_completion_notified(self, True)
             self._toast("全部份数已完成", "success", duration=5000)
             try:
-                self.window().show_task_result_windows_notification("任务完成", "全部份数已完成")
+                self.window().show_task_result_system_notification("任务完成", "全部份数已完成")
             except Exception:
                 pass
             self.stop_btn.setEnabled(False)
@@ -775,7 +775,7 @@ class DashboardProgressMixin:
                 )
                 try:
                     message = f"任务结束，设备填写次数上限拦截 {quota_fail_count} 次"
-                    self.window().show_task_result_windows_notification(
+                    self.window().show_task_result_system_notification(
                         "任务失败",
                         message,
                     )

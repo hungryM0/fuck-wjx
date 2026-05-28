@@ -8,7 +8,7 @@ from PySide6.QtCore import qInstallMessageHandler, QtMsgType
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
-from software.app.legacy_data_migration import ensure_legacy_data_migrated
+from software.app.settings_store import configure_qt_application_metadata
 from software.app.user_paths import (
     ensure_user_data_directories,
     get_fatal_crash_log_path,
@@ -130,17 +130,17 @@ def main():
     if _should_run_update_test_probe():
         raise SystemExit(_run_update_test_probe())
 
+    configure_qt_application_metadata()
     ensure_user_data_directories()
     _enable_fault_handler()
     setup_logging()
-    ensure_legacy_data_migrated()
 
     qInstallMessageHandler(_qt_message_handler)
     app = QApplication(sys.argv)
     install_qfluentwidgets_animation_guards()
 
     # 设置默认字体
-    font = QFont("Microsoft YaHei UI", 9)
+    font = QFont("Microsoft YaHei UI" if sys.platform == "win32" else "Sans Serif", 9)
     app.setFont(font)
 
     # 在主线程预热 httpx/httpcore/ssl，避免首次后台请求触发原生层崩溃

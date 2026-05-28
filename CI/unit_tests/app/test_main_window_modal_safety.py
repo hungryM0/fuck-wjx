@@ -348,7 +348,7 @@ class MainWindowModalSafetyTests:
             window._toast("plain", level="info", duration=4)
         assert [call[0] for call in toast.calls] == ["success", "warning", "error", "info"]
 
-    def test_should_show_windows_notification_respects_activation_and_setting(self) -> None:
+    def test_should_show_system_notification_respects_activation_and_setting(self) -> None:
         window = _FakeDialogsWindow()
         settings = SimpleNamespace(value=lambda _key: True)
         with (
@@ -362,7 +362,7 @@ class MainWindowModalSafetyTests:
             ),
             patch.object(window, "_is_window_activated", return_value=False),
         ):
-            assert window._should_show_task_result_windows_notification() is True
+            assert window._should_show_task_result_system_notification() is True
         with (
             patch(
                 "software.ui.shell.main_window_parts.dialogs.app_settings",
@@ -373,17 +373,17 @@ class MainWindowModalSafetyTests:
                 return_value=False,
             ),
         ):
-            assert window._should_show_task_result_windows_notification() is False
+            assert window._should_show_task_result_system_notification() is False
 
-    def test_show_windows_notification_creates_and_reuses_tray_icon(self, monkeypatch) -> None:
+    def test_show_system_notification_creates_and_reuses_tray_icon(self, monkeypatch) -> None:
         import PySide6.QtWidgets as qt_widgets
 
         window = _FakeDialogsWindow()
         monkeypatch.setattr(qt_widgets, "QSystemTrayIcon", _FakeTrayIcon, raising=False)
-        with patch.object(window, "_should_show_task_result_windows_notification", return_value=True):
-            window.show_task_result_windows_notification("标题", "内容")
+        with patch.object(window, "_should_show_task_result_system_notification", return_value=True):
+            window.show_task_result_system_notification("标题", "内容")
             tray = window._task_result_tray_icon
-            window.show_task_result_windows_notification("标题2", "内容2")
+            window.show_task_result_system_notification("标题2", "内容2")
         assert isinstance(tray, _FakeTrayIcon)
         assert tray.visible is True
         assert tray.messages == [

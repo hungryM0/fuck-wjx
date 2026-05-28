@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from software.app.config import (
     NAVIGATION_TEXT_VISIBLE_SETTING_KEY,
-    TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY,
+    TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY,
 )
 
 
@@ -82,8 +82,8 @@ BEHAVIOR_SWITCHES = (
         attr_name="task_result_notification_card",
         icon=FluentIcon.INFO,
         title="后台任务完成/失败时通知",
-        content="当程序不在前台时，任务完成或失败会弹出 Windows 通知",
-        setting_key=TASK_RESULT_WINDOWS_NOTIFICATION_SETTING_KEY,
+        content="当程序不在前台时，任务完成或失败会弹出系统通知",
+        setting_key=TASK_RESULT_SYSTEM_NOTIFICATION_SETTING_KEY,
         default=True,
         event="toggle_task_result_windows_notification",
         target="task_result_notification_switch",
