@@ -295,6 +295,49 @@ def test_dashboard_thread_progress_rows_keep_visible_after_update(monkeypatch, q
     row = page._thread_progress_rows["Slot-1"]
     assert page.thread_view_stack.currentWidget() is page.thread_view_progress_card
     assert page.thread_progress_rows_layout.count() == 1
-    assert row["cum_value"].text() == "50%"
+    assert row["step_bar"].isVisible() is True
+    assert row["step_busy_bar"].isHidden() is True
+    assert row["step_bar"].value() == 50
     assert row["widget"].sizeHint().height() > 0
     assert page.thread_progress_rows_container.sizeHint().height() > 0
+
+
+def test_dashboard_thread_progress_shows_indeterminate_bar_while_fetching_proxy(
+    monkeypatch,
+    qtbot,
+) -> None:
+    _patch_page_dependencies(monkeypatch)
+    controller = _FakeController()
+    runtime_page = RuntimePage(controller)
+    strategy_page = QuestionStrategyPage()
+    state = WorkbenchState()
+    page = DashboardPage(controller, state, runtime_page, strategy_page)
+    qtbot.addWidget(runtime_page)
+    qtbot.addWidget(strategy_page)
+    qtbot.addWidget(page)
+    page.show()
+
+    controller.running = True
+    page.update_thread_progress(
+        {
+            "target": 4,
+            "num_threads": 2,
+            "threads": [
+                {
+                    "thread_name": "Slot-1",
+                    "thread_display_name": "会话 1",
+                    "status_text": "获取代理",
+                    "success_count": 1,
+                    "fail_count": 0,
+                    "step_current": 0,
+                    "step_total": 0,
+                    "running": True,
+                }
+            ],
+        }
+    )
+    qtbot.wait(50)
+
+    row = page._thread_progress_rows["Slot-1"]
+    assert row["step_bar"].isHidden() is True
+    assert row["step_busy_bar"].isVisible() is True
