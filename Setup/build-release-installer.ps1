@@ -42,6 +42,22 @@ function Assert-CommandAvailable {
     }
 }
 
+function Assert-UvPythonVersion {
+    param([string]$MinimumVersion)
+
+    $versionOutput = & uv run python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Failed to resolve uv Python version with exit code {0}" -f $LASTEXITCODE)
+    }
+
+    $versionText = [string]$versionOutput
+    $currentVersion = [version]$versionText.Trim()
+    $requiredVersion = [version]$MinimumVersion
+    if ($currentVersion -lt $requiredVersion) {
+        throw ("Python {0}+ is required, uv is using {1}." -f $MinimumVersion, $currentVersion)
+    }
+}
+
 function Resolve-RepoRoot {
     $scriptRoot = $PSScriptRoot
     if ([string]::IsNullOrWhiteSpace($scriptRoot)) {
@@ -133,6 +149,7 @@ $manifestPath = Join-Path $releaseRoot "releases.$Channel.json"
 Write-Step "Check environment"
 Assert-CommandAvailable -Name "python" -InstallHint "Install Python first and ensure python is available in PATH."
 Assert-CommandAvailable -Name "uv" -InstallHint "Install uv first: powershell -ExecutionPolicy ByPass -c ""irm https://astral.sh/uv/install.ps1 | iex"""
+Assert-UvPythonVersion -MinimumVersion "3.13.13"
 
 Write-Host ("Repo root: {0}" -f $repoRoot)
 Write-Host ("Output dir: {0}" -f $targetRoot)

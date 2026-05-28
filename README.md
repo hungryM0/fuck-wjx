@@ -7,7 +7,7 @@
   [![GitHub Release](https://img.shields.io/github/v/release/SurveyController/SurveyController?style=flat&logo=github&color=blue)](https://github.com/SurveyController/SurveyController/releases/latest)
   ![Downloads](https://img.shields.io/github/downloads/SurveyController/SurveyController/total?style=flat&logo=github&color=green)
   [![Issues](https://img.shields.io/github/issues/SurveyController/SurveyController?style=flat&logo=github)](https://github.com/SurveyController/SurveyController/issues)
-  [![Python](https://img.shields.io/badge/Python-3.13+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+  [![Python](https://img.shields.io/badge/Python-3.13.13+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
   [![License](https://img.shields.io/github/license/SurveyController/SurveyController?style=flat&color=orange)](./LICENSE)
 
   <p><strong>一站式问卷自动化处理程序，适配问卷星、腾讯问卷、Credamo见数平台</strong></p>
@@ -56,7 +56,7 @@ uv run python SurveyController.py
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-**环境要求：** Windows 10/11，Python 3.13+，Git
+**环境要求：** Windows 10/11，Python 3.13.13+，Git
 
 ## 使用方法
 

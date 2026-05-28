@@ -9,7 +9,7 @@
 需要准备：
 
 - Windows 10/11
-- Python 3.13.3
+- Python 3.13.13
 - Git
 - uv 包管理器
 
