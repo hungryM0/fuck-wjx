@@ -199,6 +199,12 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
         except Exception:
             return None
 
+    def _jump_target_terminates(jumpto_num: int, option_text: Optional[str]) -> bool:
+        if option_text and any(keyword in option_text for keyword in terminate_keywords):
+            return True
+        # 问卷星移动版脚本里 jumpto=1/-1 是特殊结束值，不是跳回第 1 题。
+        return int(jumpto_num or 0) in {1, -1} and int(question_number or 0) > 1
+
     selectable_nodes = []
     for input_el in question_div.find_all("input"):
         input_type = (input_el.get("type") or "").lower()
@@ -226,9 +232,7 @@ def _extract_jump_rules_from_html(question_div, question_number: int, option_tex
                 "option_index": option_idx,
                 "jumpto": jumpto_num,
                 "option_text": option_text,
-                "terminates_survey": bool(
-                    option_text and any(keyword in option_text for keyword in terminate_keywords)
-                ),
+                "terminates_survey": _jump_target_terminates(jumpto_num, option_text),
             })
         option_idx += 1
 

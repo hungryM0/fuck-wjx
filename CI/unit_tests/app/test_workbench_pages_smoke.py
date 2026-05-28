@@ -280,7 +280,7 @@ def test_dashboard_thread_progress_rows_keep_visible_after_update(monkeypatch, q
                 {
                     "thread_name": "Slot-1",
                     "thread_display_name": "会话 1",
-                    "status_text": "生成答案",
+                    "status_text": "构造答案",
                     "success_count": 1,
                     "fail_count": 0,
                     "step_current": 2,
@@ -295,8 +295,10 @@ def test_dashboard_thread_progress_rows_keep_visible_after_update(monkeypatch, q
     row = page._thread_progress_rows["Slot-1"]
     assert page.thread_view_stack.currentWidget() is page.thread_view_progress_card
     assert page.thread_progress_rows_layout.count() == 1
-    assert row["step_bar"].isVisible() is True
+    assert row["status"].text() == "构造答案"
+    assert row["step_bar"].isHidden() is False
     assert row["step_busy_bar"].isHidden() is True
+    qtbot.wait(160)
     assert row["step_bar"].value() == 50
     assert row["widget"].sizeHint().height() > 0
     assert page.thread_progress_rows_container.sizeHint().height() > 0
@@ -341,3 +343,108 @@ def test_dashboard_thread_progress_shows_indeterminate_bar_while_fetching_proxy(
     row = page._thread_progress_rows["Slot-1"]
     assert row["step_bar"].isHidden() is True
     assert row["step_busy_bar"].isVisible() is True
+
+
+def test_dashboard_thread_progress_keeps_previous_step_briefly_before_switch(
+    monkeypatch,
+    qtbot,
+) -> None:
+    _patch_page_dependencies(monkeypatch)
+    controller = _FakeController()
+    runtime_page = RuntimePage(controller)
+    strategy_page = QuestionStrategyPage()
+    state = WorkbenchState()
+    page = DashboardPage(controller, state, runtime_page, strategy_page)
+    qtbot.addWidget(runtime_page)
+    qtbot.addWidget(strategy_page)
+    qtbot.addWidget(page)
+    page.show()
+
+    controller.running = True
+    page.update_thread_progress(
+        {
+            "target": 4,
+            "num_threads": 2,
+            "threads": [
+                {
+                    "thread_name": "Slot-1",
+                    "thread_display_name": "会话 1",
+                    "status_text": "构造答案",
+                    "success_count": 1,
+                    "fail_count": 0,
+                    "step_current": 2,
+                    "step_total": 4,
+                    "running": True,
+                }
+            ],
+        }
+    )
+    row = page._thread_progress_rows["Slot-1"]
+    assert row["status"].text() == "构造答案"
+
+    page.update_thread_progress(
+        {
+            "target": 4,
+            "num_threads": 2,
+            "threads": [
+                {
+                    "thread_name": "Slot-1",
+                    "thread_display_name": "会话 1",
+                    "status_text": "提交问卷",
+                    "success_count": 1,
+                    "fail_count": 0,
+                    "step_current": 3,
+                    "step_total": 4,
+                    "running": True,
+                }
+            ],
+        }
+    )
+
+    assert row["status"].text() == "构造答案"
+    assert row["displayed_status_text"] == "构造答案"
+    qtbot.wait(130)
+    assert row["status"].text() == "提交问卷"
+    assert row["displayed_status_text"] == "提交问卷"
+    assert row["step_bar"].isHidden() is True
+    assert row["step_busy_bar"].isVisible() is True
+
+
+def test_dashboard_thread_progress_shows_progress_bar_after_thread_finishes(monkeypatch, qtbot) -> None:
+    _patch_page_dependencies(monkeypatch)
+    controller = _FakeController()
+    runtime_page = RuntimePage(controller)
+    strategy_page = QuestionStrategyPage()
+    state = WorkbenchState()
+    page = DashboardPage(controller, state, runtime_page, strategy_page)
+    qtbot.addWidget(runtime_page)
+    qtbot.addWidget(strategy_page)
+    qtbot.addWidget(page)
+    page.show()
+
+    controller.running = False
+    page.update_thread_progress(
+        {
+            "target": 4,
+            "num_threads": 2,
+            "threads": [
+                {
+                    "thread_name": "Slot-1",
+                    "thread_display_name": "会话 1",
+                    "status_text": "已完成",
+                    "success_count": 1,
+                    "fail_count": 0,
+                    "step_current": 4,
+                    "step_total": 4,
+                    "running": False,
+                }
+            ],
+        }
+    )
+    row = page._thread_progress_rows["Slot-1"]
+    qtbot.wait(160)
+
+    assert row["status"].text() == "已完成"
+    assert row["step_busy_bar"].isHidden() is True
+    assert row["step_bar"].isHidden() is False
+    assert row["step_bar"].value() >= 99

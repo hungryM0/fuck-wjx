@@ -454,6 +454,32 @@ class WjxHtmlParserHelperTests:
             ],
         )
 
+    def test_jump_rule_helper_treats_wjx_mobile_jumpto_one_as_terminate_after_first_question(self) -> None:
+        question_div = _soup(
+            """
+            <div hasjump="1" type="3">
+              <input type="radio" value="1" />
+              <input type="radio" value="2" jumpto="1" />
+            </div>
+            """
+        ).div
+
+        assert html_parser_rules._extract_jump_rules_from_html(
+            question_div,
+            4,
+            ["继续作答", "从未办理、协助或了解过该事项"],
+        ) == (
+            True,
+            [
+                {
+                    "option_index": 1,
+                    "jumpto": 1,
+                    "option_text": "从未办理、协助或了解过该事项",
+                    "terminates_survey": True,
+                }
+            ],
+        )
+
     def test_attach_display_condition_metadata_dedupes_and_clears_empty_targets(self) -> None:
         questions = [
             {"num": 1, "display_conditions": [], "controls_display_targets": []},

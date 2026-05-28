@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
-from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtCore import QAbstractAnimation, QByteArray, QEasingCurve, QObject, QPropertyAnimation, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
@@ -53,7 +54,20 @@ def _resolve_thread_step_percent(step_current: int, step_total: int) -> int:
 
 def _should_use_indeterminate_thread_step(status_text: str, *, running: bool) -> bool:
     text = str(status_text or "").strip()
-    return bool(running and text == "获取代理")
+    if not running:
+        return False
+    if not text:
+        return True
+    if text == "构造答案":
+        return False
+    return not (
+        text.startswith("已")
+        or text in {"提交成功", "失败重试", "代理连接失败", "网络请求失败"}
+    )
+
+
+THREAD_STEP_MIN_VISIBLE_MS = 90
+THREAD_STEP_ANIMATION_MS = 140
 
 
 if TYPE_CHECKING:
@@ -124,12 +138,28 @@ class DashboardProgressMixin:
         self._thread_clear_timer.setInterval(4000)
         self._thread_clear_timer.timeout.connect(self._clear_thread_progress_rows)
 
+    def _create_thread_step_animation(self, bar: Any) -> QPropertyAnimation:
+        animation = QPropertyAnimation(bar, QByteArray(b"value"), cast(QObject, self))
+        animation.setDuration(THREAD_STEP_ANIMATION_MS)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        return animation
+
     def _set_progress_bar_paused(self, bar: Any, paused: bool) -> None:
         if bar is None:
             return
+        ani_group = getattr(bar, "aniGroup", None)
+        ani_state_getter = getattr(ani_group, "state", None) if ani_group is not None else None
         setter = getattr(bar, "setPaused", None)
         if callable(setter):
-            setter(bool(paused))
+            if bool(paused):
+                setter(True)
+                return
+            if callable(ani_state_getter):
+                try:
+                    if ani_state_getter() == QAbstractAnimation.State.Paused:
+                        setter(False)
+                except Exception:
+                    pass
             return
         if bool(paused):
             pauser = getattr(bar, "pause", None)
@@ -137,6 +167,13 @@ class DashboardProgressMixin:
                 pauser()
             return
         resumer = getattr(bar, "resume", None)
+        if callable(resumer) and callable(ani_state_getter):
+            try:
+                if ani_state_getter() == QAbstractAnimation.State.Paused:
+                    resumer()
+            except Exception:
+                pass
+            return
         if callable(resumer):
             resumer()
 
@@ -408,6 +445,13 @@ class DashboardProgressMixin:
         if widget is None:
             return
         try:
+            for timer in widget.findChildren(QTimer):
+                timer.stop()
+        except RuntimeError:
+            return
+        except Exception:
+            pass
+        try:
             for busy_bar in widget.findChildren(IndeterminateProgressBar):
                 set_indeterminate_progress_ring_active(busy_bar, False)
         except RuntimeError:
@@ -459,6 +503,8 @@ class DashboardProgressMixin:
         step_bar.setValue(0)
         step_busy_bar = IndeterminateProgressBar(start=True, parent=row_widget)
         step_busy_bar.hide()
+        step_timer = QTimer(row_widget)
+        step_timer.setSingleShot(True)
         step_layout.addWidget(step_prefix)
         step_layout.addWidget(step_bar, 1)
         step_layout.addWidget(step_busy_bar, 1)
@@ -472,21 +518,45 @@ class DashboardProgressMixin:
             "counter": counter_label,
             "step_bar": step_bar,
             "step_busy_bar": step_busy_bar,
+            "step_anim": self._create_thread_step_animation(step_bar),
+            "step_timer": step_timer,
+            "pending_step_payload": None,
+            "displayed_status_text": "",
+            "last_step_switch_ts": 0.0,
         }
+        step_timer.timeout.connect(
+            lambda row_state=row: self._flush_pending_thread_step(row_state)
+        )
         self._set_progress_bar_paused(step_bar, self._progress_paused_visual)
         self._set_progress_bar_paused(step_busy_bar, self._progress_paused_visual)
         self._refresh_thread_progress_layout()
         return row
 
-    def _sync_thread_step_widget(
-        self,
-        row: Dict[str, Any],
-        *,
-        status_text: str,
-        step_current: int,
-        step_total: int,
-        running: bool,
-    ) -> None:
+    def _animate_thread_step_bar_to(self, row: Dict[str, Any], target_value: int) -> None:
+        step_bar = row.get("step_bar")
+        animation = row.get("step_anim")
+        if step_bar is None:
+            return
+        normalized = max(0, min(100, int(target_value)))
+        current_value = int(step_bar.value())
+        if current_value == normalized:
+            return
+        if animation is None:
+            _set_value_if_changed(step_bar, normalized)
+            return
+        try:
+            animation.stop()
+            animation.setStartValue(current_value)
+            animation.setEndValue(normalized)
+            animation.start()
+        except Exception:
+            _set_value_if_changed(step_bar, normalized)
+
+    def _apply_thread_step_payload(self, row: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        status_text = str(payload.get("status_text") or "")
+        step_current = max(0, int(payload.get("step_current") or 0))
+        step_total = max(0, int(payload.get("step_total") or 0))
+        running = bool(payload.get("running", True))
         step_bar = row.get("step_bar")
         step_busy_bar = row.get("step_busy_bar")
         if step_bar is None or step_busy_bar is None:
@@ -501,16 +571,68 @@ class DashboardProgressMixin:
             step_busy_bar.show()
             set_indeterminate_progress_ring_active(step_busy_bar, True)
             self._set_progress_bar_paused(step_busy_bar, self._progress_paused_visual)
+        else:
+            set_indeterminate_progress_ring_active(step_busy_bar, False)
+            step_busy_bar.hide()
+            step_bar.show()
+            self._animate_thread_step_bar_to(
+                row,
+                _resolve_thread_step_percent(step_current, step_total),
+            )
+            self._set_progress_bar_paused(step_bar, self._progress_paused_visual)
+
+        _set_text_if_changed(row.get("status"), status_text)
+        row["displayed_status_text"] = status_text
+        row["last_step_switch_ts"] = time.monotonic()
+
+    def _flush_pending_thread_step(self, row: Dict[str, Any]) -> None:
+        pending = row.get("pending_step_payload")
+        if not isinstance(pending, dict):
+            return
+        row["pending_step_payload"] = None
+        self._apply_thread_step_payload(row, pending)
+
+    def _sync_thread_step_widget(
+        self,
+        row: Dict[str, Any],
+        *,
+        status_text: str,
+        step_current: int,
+        step_total: int,
+        running: bool,
+    ) -> None:
+        payload = {
+            "status_text": status_text,
+            "step_current": step_current,
+            "step_total": step_total,
+            "running": running,
+        }
+        displayed_status_text = str(row.get("displayed_status_text") or "")
+        step_timer = row.get("step_timer")
+        if displayed_status_text == str(status_text or ""):
+            if step_timer is not None:
+                try:
+                    step_timer.stop()
+                except Exception:
+                    pass
+            row["pending_step_payload"] = None
+            self._apply_thread_step_payload(row, payload)
             return
 
-        set_indeterminate_progress_ring_active(step_busy_bar, False)
-        step_busy_bar.hide()
-        step_bar.show()
-        _set_value_if_changed(
-            step_bar,
-            _resolve_thread_step_percent(step_current, step_total),
+        elapsed_ms = int(
+            max(0.0, (time.monotonic() - float(row.get("last_step_switch_ts") or 0.0)) * 1000.0)
         )
-        self._set_progress_bar_paused(step_bar, self._progress_paused_visual)
+        remaining_ms = max(0, THREAD_STEP_MIN_VISIBLE_MS - elapsed_ms)
+        if remaining_ms <= 0 or step_timer is None:
+            row["pending_step_payload"] = None
+            self._apply_thread_step_payload(row, payload)
+            return
+
+        row["pending_step_payload"] = payload
+        try:
+            step_timer.start(remaining_ms)
+        except Exception:
+            self._apply_thread_step_payload(row, payload)
 
     def update_thread_progress(self, payload: dict):
         if not isinstance(payload, dict):
@@ -577,7 +699,6 @@ class DashboardProgressMixin:
             step_total = max(0, int(item.get("step_total") or 0))
             running = bool(item.get("running", True))
 
-            _set_text_if_changed(row["status"], status_text)
             _set_text_if_changed(row["counter"], f"成功 {success_count} | 提交失败 {fail_count}")
             self._sync_thread_step_widget(
                 row,
