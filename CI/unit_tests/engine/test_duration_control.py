@@ -116,6 +116,15 @@ class DurationControlTests:
         )
         assert waited == 250.0
 
+    def test_sample_answer_duration_seconds_uses_default_with_jitter_when_unconfigured(self, patch_attrs) -> None:
+        patch_attrs((duration_control.random, "gauss", lambda center, _std: center))
+        waited = duration_control.sample_answer_duration_seconds(
+            (0, 0),
+            survey_provider=SURVEY_PROVIDER_WJX,
+            default_unconfigured_seconds=90,
+        )
+        assert waited == 90.0
+
     @pytest.mark.asyncio
     async def test_completion_page_detects_complete_url_and_provider_signal(self, patch_attrs) -> None:
         assert await duration_control.is_survey_completion_page(_Driver(url="https://example.com/complete"))

@@ -45,15 +45,18 @@ def sample_answer_duration_seconds(
     answer_duration_range_seconds: Tuple[int, int] = (0, 0),
     *,
     survey_provider: Optional[str] = None,
+    default_unconfigured_seconds: int = 0,
 ) -> float:
     """按现有配置规则采样一次作答时长秒数。"""
 
     try:
         raw_min, raw_max = answer_duration_range_seconds
     except Exception:
-        return 0.0
+        raw_min = raw_max = default_unconfigured_seconds
     if not has_configured_answer_duration(answer_duration_range_seconds):
-        return 0.0
+        if default_unconfigured_seconds <= 0:
+            return 0.0
+        raw_min = raw_max = default_unconfigured_seconds
 
     min_delay = max(0, int(raw_min))
     max_delay = max(min_delay, int(raw_max))

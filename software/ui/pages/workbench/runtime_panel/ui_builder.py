@@ -73,7 +73,7 @@ def build_runtime_page_ui(page) -> None:
     page.answer_card = TimeRangeSettingCard(
         FluentIcon.STOP_WATCH,
         "作答时长",
-        "设置单份作答耗时（大于等于 0 秒），按20%比例随机上下抖动",
+        "设置单份作答耗时（大于等于 0 秒），未设置默认 90 秒，按20%比例随机上下抖动",
         max_seconds=None,
         parent=time_group,
     )

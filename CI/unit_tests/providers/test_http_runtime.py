@@ -61,6 +61,24 @@ def test_wjx_submitdata_keeps_frontend_skip_placeholders() -> None:
     assert submitdata == "1$2}2$-3,-3,-3}3$-3}4$(跳过)}5$1|2"
 
 
+def test_wjx_default_ktimes_uses_90_seconds_with_jitter(monkeypatch) -> None:
+    config = ExecutionConfig(survey_provider="wjx", answer_duration_range_seconds=(0, 0))
+    monkeypatch.setattr(wjx_http.random, "gauss", lambda center, _std: center)
+
+    assert wjx_http._sample_ktimes(config) == 90
+
+
+def test_wjx_ktimes_sampling_failure_falls_back_to_90(monkeypatch) -> None:
+    config = ExecutionConfig(survey_provider="wjx", answer_duration_range_seconds=(0, 0))
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(wjx_http, "sample_answer_duration_seconds", _raise)
+
+    assert wjx_http._sample_ktimes(config) == 90
+
+
 def test_qq_question_answer_builders_cover_choice_text_and_matrix() -> None:
     choice = qq_http._question_answer(
         {"id": "q1", "type": "radio", "options": [{"id": "o1", "text": "A"}, {"id": "o2", "text": "B"}]},

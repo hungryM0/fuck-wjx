@@ -694,13 +694,14 @@ def _sample_duration_seconds(config: ExecutionConfig) -> float:
         sampled = sample_answer_duration_seconds(
             config.answer_duration_range_seconds,
             survey_provider="credamo",
+            default_unconfigured_seconds=90,
         )
     except Exception:
         sampled = 0.0
     sampled_seconds = max(0.0, float(sampled or 0.0))
     if sampled_seconds > 0:
         return sampled_seconds
-    return random.uniform(9.0, 16.0)
+    return 90.0
 
 
 def _build_submit_body(

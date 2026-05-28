@@ -300,13 +300,18 @@ async def _build_action_plan(
 
 
 def _sample_ktimes(config: ExecutionConfig) -> int:
+    default_seconds = 90
     try:
-        sampled = sample_answer_duration_seconds(config.answer_duration_range_seconds, survey_provider="wjx")
+        sampled = sample_answer_duration_seconds(
+            config.answer_duration_range_seconds,
+            survey_provider="wjx",
+            default_unconfigured_seconds=default_seconds,
+        )
     except Exception:
-        sampled = 0.0
+        sampled = float(default_seconds)
     if sampled and sampled > 0:
         return max(1, int(round(sampled)))
-    return random.randint(10, 20)
+    return default_seconds
 
 
 async def brush_wjx_http(

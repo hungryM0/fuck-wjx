@@ -270,9 +270,16 @@ async def brush_qq_http(
         _record_action(ctx, action)
 
     try:
-        duration = int(sample_answer_duration_seconds(config.answer_duration_range_seconds, survey_provider="qq") or 60)
+        duration = int(
+            sample_answer_duration_seconds(
+                config.answer_duration_range_seconds,
+                survey_provider="qq",
+                default_unconfigured_seconds=90,
+            )
+            or 90
+        )
     except Exception:
-        duration = 60
+        duration = 90
     duration = max(1, duration)
     user_agent_value = str(user_agent or "").strip() or DEFAULT_USER_AGENT
     submit_body = {
