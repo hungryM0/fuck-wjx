@@ -181,7 +181,7 @@ class WjxParserTests:
             (wjx_parser, "extract_survey_title_from_html", lambda _html: "HTTP 标题"),
         )
 
-        with pytest.raises(RuntimeError, match="无法打开问卷链接"):
+        with pytest.raises(RuntimeError, match="无法打开问卷链接.*http-empty"):
             await wjx_parser.parse_wjx_survey("https://www.wjx.cn/vm/demo.aspx")
 
     @pytest.mark.asyncio

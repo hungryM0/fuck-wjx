@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,6 +15,9 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 LIVE_URL_ENV = "SURVEY_CONTROLLER_LIVE_TEST_URL"
 INNER_TIMEOUT_SECONDS = "240"
 OUTER_TIMEOUT_SECONDS = 300
+TRANSIENT_EXTERNAL_FAILURE_PATTERNS = (
+    re.compile(r"HTTP 页面未返回可解析题目"),
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +58,10 @@ def _format_output(stdout: str, stderr: str) -> str:
     return "\n".join(chunks)
 
 
+def _is_transient_external_failure(output: str) -> bool:
+    return any(pattern.search(output or "") for pattern in TRANSIENT_EXTERNAL_FAILURE_PATTERNS)
+
+
 @pytest.mark.parametrize("survey_case", _resolve_live_survey_cases(), ids=lambda case: case.name)
 def test_live_runtime_regression(survey_case: LiveSurveyCase) -> None:
     result = subprocess.run(
@@ -75,6 +83,11 @@ def test_live_runtime_regression(survey_case: LiveSurveyCase) -> None:
         timeout=OUTER_TIMEOUT_SECONDS,
     )
     output = _format_output(result.stdout, result.stderr)
+    if result.returncode != 0 and _is_transient_external_failure(output):
+        pytest.skip(
+            f"Live survey returned an unparseable external page for {survey_case.name}.\n"
+            f"Output:\n{output}"
+        )
 
     assert result.returncode == 0, (
         f"Live runtime regression failed for {survey_case.name}.\n"

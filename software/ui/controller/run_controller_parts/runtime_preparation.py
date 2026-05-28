@@ -103,6 +103,8 @@ def _validate_answer_datetime_window(config: RuntimeConfig, survey_provider: str
     if not supports_answer_datetime_window(survey_provider):
         return
     start_text, end_text = _resolve_answer_datetime_window(config)
+    if not start_text and not end_text:
+        return
     if not start_text or not end_text:
         raise RuntimePreparationError("见数作答时间窗未配完整，请先设置开始和结束日期时间")
     start_dt = parse_answer_datetime_string(start_text)

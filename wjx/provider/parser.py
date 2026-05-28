@@ -27,6 +27,16 @@ _PAUSED_SURVEY_ID_RE = re.compile(r"此问卷[（(]\d+[）)]已暂停")
 _NOT_OPEN_TIME_RE = re.compile(
     r"此问卷将于\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2})\s*开放"
 )
+_PAGE_SUMMARY_MAX_LENGTH = 120
+
+
+def _build_unparseable_page_summary(html: str) -> str:
+    text = _normalize_html_text(html)
+    if not text:
+        return "空页面"
+    if len(text) > _PAGE_SUMMARY_MAX_LENGTH:
+        text = f"{text[:_PAGE_SUMMARY_MAX_LENGTH]}..."
+    return text
 
 def is_paused_survey_page(html: str) -> bool:
     """检测页面是否为“问卷已暂停，不能填写”提示页。"""
@@ -161,7 +171,8 @@ async def parse_wjx_survey(url: str) -> Tuple[List[Dict[str, Any]], str]:
             raise RuntimeError(f"无法获取问卷网页：WinError 10013：{exc}") from exc
         raise RuntimeError(f"无法获取问卷网页：{exc}") from exc
     if not info:
-        raise RuntimeError("无法打开问卷链接，HTTP 页面未返回可解析题目")
+        summary = _build_unparseable_page_summary(resp.text)
+        raise RuntimeError(f"无法打开问卷链接，HTTP 页面未返回可解析题目：{summary}")
     normalized_title = _normalize_html_text(title) if title else ""
     return info, normalized_title
 
