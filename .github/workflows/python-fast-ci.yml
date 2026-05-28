@@ -47,6 +47,8 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: windows-latest
+    env:
+      SURVEY_CONTROLLER_UNIT_TEST_TIMEOUT_SECONDS: "300"
 
     steps:
       - name: Checkout repository
