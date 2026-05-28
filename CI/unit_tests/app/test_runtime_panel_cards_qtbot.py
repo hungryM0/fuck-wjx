@@ -75,14 +75,12 @@ class TestRuntimePanelCardsQtBot:
         card.set_provider("credamo")
         assert card._input_container.isEnabled() is True
 
-    def test_answer_datetime_window_card_keeps_duration_and_datetime_values(self, qtbot) -> None:
+    def test_answer_datetime_window_card_keeps_datetime_values(self, qtbot) -> None:
         card = AnswerDateTimeWindowSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=300)
         qtbot.addWidget(card)
 
-        card.setDurationRange((30, 90))
         card.setDateTimeWindow(("2026-02-10 09:00:00", "2026-02-10 10:00:00"))
 
-        assert card.getDurationRange() == (30, 90)
         assert card.getDateTimeWindow() == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
 
 

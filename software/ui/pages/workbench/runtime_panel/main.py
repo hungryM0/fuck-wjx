@@ -48,6 +48,7 @@ class RuntimePage(
     random_ua_card: "RandomUASettingCard"
     reliability_card: "ReliabilitySettingCard"
     interval_card: "TimeRangeSettingCard"
+    answer_duration_card: "TimeRangeSettingCard"
     answer_card: "AnswerDateTimeWindowSettingCard"
     ai_section: "RuntimeAISection"
 
@@ -75,7 +76,7 @@ class RuntimePage(
             random_ip_enabled=self.random_ip_card.switchButton.isChecked(),
             proxy_source=self.selected_proxy_source(),
             submit_interval=self._card_value_as_range(self.interval_card),
-            answer_duration=self.answer_card.getDurationRange(),
+            answer_duration=self._card_value_as_range(self.answer_duration_card),
             answer_datetime_window=self.answer_card.getDateTimeWindow(),
         )
         self.on_run_state_changed(self._thread_edit_locked())

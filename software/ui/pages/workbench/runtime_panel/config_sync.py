@@ -23,6 +23,7 @@ class RuntimeConfigSyncMixin:
     target_card: Any
     thread_card: Any
     interval_card: TimeRangeSettingCard
+    answer_duration_card: TimeRangeSettingCard
     answer_card: AnswerDateTimeWindowSettingCard
     random_ip_card: Any
     random_ua_card: Any
@@ -41,7 +42,7 @@ class RuntimeConfigSyncMixin:
             ),
         )
         cfg.submit_interval = self._card_value_as_range(self.interval_card)
-        cfg.answer_duration = self.answer_card.getDurationRange()
+        cfg.answer_duration = self._card_value_as_range(self.answer_duration_card)
         cfg.answer_datetime_window = self.answer_card.getDateTimeWindow()
         cfg.random_ip_enabled = self.random_ip_card.switchButton.isChecked()
         cfg.random_ua_enabled = self.random_ua_card.switchButton.isChecked()
@@ -80,7 +81,7 @@ class RuntimeConfigSyncMixin:
         page = cast(Any, self)
         self.target_card.spinBox.setValue(max(1, cfg.target))
         self.interval_card.setRange(cfg.submit_interval)
-        self.answer_card.setDurationRange(cfg.answer_duration)
+        self.answer_duration_card.setRange(cfg.answer_duration)
         self.answer_card.setDateTimeWindow(getattr(cfg, "answer_datetime_window", ("", "")))
         page._sync_answer_datetime_window_card()
 
@@ -179,7 +180,7 @@ class RuntimeConfigSyncMixin:
 
         answer_duration = state.get("answer_duration")
         if answer_duration is not None:
-            self._sync_duration_card_from_state(self.answer_card, answer_duration)
+            self._sync_range_card_from_state(self.answer_duration_card, answer_duration)
 
         answer_datetime_window = state.get("answer_datetime_window")
         if answer_datetime_window is not None:
@@ -227,21 +228,6 @@ class RuntimeConfigSyncMixin:
         card.blockSignals(True)
         try:
             card.setRange(desired_value)
-        finally:
-            card.blockSignals(False)
-
-    def _sync_duration_card_from_state(
-        self,
-        card: AnswerDateTimeWindowSettingCard,
-        raw_range,
-    ) -> None:
-        current_value = card.getDurationRange()
-        desired_value = self._range_value(raw_range)
-        if current_value == desired_value:
-            return
-        card.blockSignals(True)
-        try:
-            card.setDurationRange(desired_value)
         finally:
             card.blockSignals(False)
 

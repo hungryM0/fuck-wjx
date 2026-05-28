@@ -144,6 +144,7 @@ def test_runtime_page_builds_and_syncs_config_without_network(monkeypatch, qtbot
 
     assert page.target_card.spinBox.value() == 7
     assert page.thread_card.slider.slider.maximum() == HTTP_MAX_THREADS
+    assert page.answer_duration_card.getRange() == cfg.answer_duration
     assert cfg.target == 7
     assert cfg.threads <= HTTP_MAX_THREADS
     assert cfg.answer_datetime_window == ("", "")

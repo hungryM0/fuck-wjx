@@ -16,6 +16,7 @@ class RuntimeControlSyncMixin:
     controller: Any
     view: Any
     answer_card: Any
+    answer_duration_card: Any
     thread_card: Any
     interval_card: Any
     random_ip_card: Any
@@ -29,9 +30,9 @@ class RuntimeControlSyncMixin:
         page = cast(Any, self)
 
         def _focus_target():
-            target_edit = getattr(self.answer_card, "startPicker", None)
+            target_edit = getattr(self.answer_duration_card, "startPicker", None)
             try:
-                top_y = self.answer_card.mapTo(self.view, QPoint(0, 0)).y()
+                top_y = self.answer_duration_card.mapTo(self.view, QPoint(0, 0)).y()
                 target_scroll = max(0, int(top_y - 16))
                 page.verticalScrollBar().setValue(target_scroll)
             except Exception as exc:
@@ -50,7 +51,7 @@ class RuntimeControlSyncMixin:
                     level=logging.INFO,
                 )
             try:
-                page.ensureWidgetVisible(self.answer_card, 0, 24)
+                page.ensureWidgetVisible(self.answer_duration_card, 0, 24)
             except Exception as exc:
                 log_suppressed_exception(
                     "focus_answer_duration_setting: ensureWidgetVisible",

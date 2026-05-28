@@ -423,14 +423,12 @@ class TimeRangeSettingCard(OptionsSettingCard):
 
 
 class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
-    """见数专用的日期时间窗 + 作答时长组合卡。"""
+    """见数专用的日期时间窗设置卡。"""
 
-    durationChanged = Signal(tuple)
     datetimeWindowChanged = Signal(tuple)
 
     def __init__(self, icon, title, content, max_seconds: Optional[int] = 30 * 60, parent=None):
         self.max_seconds = None if max_seconds is None else max(0, int(max_seconds))
-        self._duration_range = (0, 0)
         self._datetime_window = ("", "")
         self._enabled_for_provider = False
         self._base_content = str(content or "")
@@ -468,21 +466,6 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         ):
             picker.setFixedWidth(160)
 
-        self._picker_max_seconds = 86399 if self.max_seconds is None else self.max_seconds
-        self.startDurationPicker = DurationTimePicker(
-            self._input_container,
-            max_seconds=self._picker_max_seconds,
-        )
-        self.endDurationPicker = DurationTimePicker(
-            self._input_container,
-            max_seconds=self._picker_max_seconds,
-        )
-        for picker in (self.startDurationPicker, self.endDurationPicker):
-            picker.setFixedWidth(240)
-            picker.setDurationSeconds(0)
-            install_tooltip_filter(picker)
-            picker.timeChanged.connect(self._on_duration_changed)
-
         self.inputEdit = self.startDatePicker
         self._start_row = self._build_datetime_row(
             "开始时间",
@@ -494,12 +477,8 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
             self.endDatePicker,
             self.endTimePicker,
         )
-        self._min_duration_row = self._build_duration_row("最短时长", self.startDurationPicker)
-        self._max_duration_row = self._build_duration_row("最长时长", self.endDurationPicker)
         input_layout.addLayout(self._start_row)
         input_layout.addLayout(self._end_row)
-        input_layout.addLayout(self._min_duration_row)
-        input_layout.addLayout(self._max_duration_row)
         self.viewLayout.addWidget(self._input_container)
         self._adjustViewSize()
 
@@ -528,18 +507,6 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         row.addStretch(1)
         row.addWidget(date_picker)
         row.addWidget(time_picker)
-        return row
-
-    def _build_duration_row(self, label_text: str, picker: DurationTimePicker):
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        label = BodyLabel(label_text, self._input_container)
-        label.setFixedWidth(72)
-        label.setStyleSheet("color: #606060;")
-        row.addWidget(label)
-        row.addStretch(1)
-        row.addWidget(picker)
         return row
 
     def _clear_datetime_window(self) -> None:
@@ -583,49 +550,6 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         if normalized != self._datetime_window:
             self._datetime_window = normalized
             self.datetimeWindowChanged.emit(normalized)
-
-    def _normalize_duration_range(self, start: int, end: int) -> tuple[int, int]:
-        low = max(0, min(int(start or 0), self._picker_max_seconds))
-        high = max(low, min(int(end or 0), self._picker_max_seconds))
-        return low, high
-
-    def _on_duration_changed(self, _time: QTime):
-        normalized = self._normalize_duration_range(
-            self.startDurationPicker.getDurationSeconds(),
-            self.endDurationPicker.getDurationSeconds(),
-        )
-        if normalized != (
-            self.startDurationPicker.getDurationSeconds(),
-            self.endDurationPicker.getDurationSeconds(),
-        ):
-            self.setDurationRange(normalized)
-            return
-        if normalized != self._duration_range:
-            self._duration_range = normalized
-            self.durationChanged.emit(normalized)
-
-    def getDurationRange(self) -> tuple[int, int]:
-        return self._duration_range
-
-    def setDurationRange(self, value_range) -> None:
-        if isinstance(value_range, (list, tuple)):
-            start = value_range[0] if len(value_range) >= 1 else 0
-            end = value_range[1] if len(value_range) >= 2 else start
-        else:
-            start = end = value_range
-        normalized = self._normalize_duration_range(start, end)
-        previous = self._duration_range
-        self._duration_range = normalized
-        self.startDurationPicker.blockSignals(True)
-        self.endDurationPicker.blockSignals(True)
-        try:
-            self.startDurationPicker.setDurationSeconds(normalized[0])
-            self.endDurationPicker.setDurationSeconds(normalized[1])
-        finally:
-            self.startDurationPicker.blockSignals(False)
-            self.endDurationPicker.blockSignals(False)
-        if normalized != previous:
-            self.durationChanged.emit(normalized)
 
     def getDateTimeWindow(self) -> tuple[str, str]:
         return self._datetime_window

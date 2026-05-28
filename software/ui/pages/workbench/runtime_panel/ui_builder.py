@@ -73,12 +73,19 @@ def build_runtime_page_ui(page) -> None:
     )
     page.answer_card = AnswerDateTimeWindowSettingCard(
         FluentIcon.STOP_WATCH,
-        "作答时间",
-        "设置见数的作答日期时间窗，并保留单份作答时长范围",
+        "作答日期时间范围",
+        "设置见数的作答开始与结束日期时间范围",
         max_seconds=30 * 60,
         parent=time_group,
     )
-    for card in (page.interval_card, page.answer_card):
+    page.answer_duration_card = TimeRangeSettingCard(
+        FluentIcon.STOP_WATCH,
+        "作答时长",
+        "设置单份问卷的作答时长范围",
+        max_seconds=30 * 60,
+        parent=time_group,
+    )
+    for card in (page.interval_card, page.answer_duration_card, page.answer_card):
         time_group.addSettingCard(card)
     layout.addWidget(time_group)
 

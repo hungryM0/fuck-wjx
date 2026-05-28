@@ -26,6 +26,7 @@ class RuntimeProxySyncMixin:
     controller: Any
     view: Any
     answer_card: Any
+    answer_duration_card: Any
     interval_card: Any
     random_ip_card: Any
     _last_benefit_proxy_compatible: bool | None
@@ -115,7 +116,7 @@ class RuntimeProxySyncMixin:
 
     def _current_proxy_required_minute_for_benefit(self) -> int:
         try:
-            answer_range = self.answer_card.getRange()
+            answer_range = self.answer_duration_card.getRange()
             return int(
                 get_proxy_minute_by_answer_seconds(
                     answer_range[1],
@@ -174,7 +175,7 @@ class RuntimeProxySyncMixin:
         page = cast(Any, self)
         self.controller.set_runtime_ui_state(
             submit_interval=page._card_value_as_range(self.interval_card),
-            answer_duration=self.answer_card.getDurationRange(),
+            answer_duration=page._card_value_as_range(self.answer_duration_card),
         )
 
     def _on_answer_datetime_window_changed(self, _value: Any):
