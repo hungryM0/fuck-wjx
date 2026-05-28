@@ -78,6 +78,17 @@ def _wechat_user_agent(user_agent: str | None) -> str:
     return str(USER_AGENT_PRESETS.get("wechat_android", {}).get("ua") or DEFAULT_USER_AGENT)
 
 
+def _is_wechat_user_agent(user_agent: str | None) -> bool:
+    text = str(user_agent or "").lower()
+    return "micromessenger" in text or "wechat" in text or "weixin" in text
+
+
+def _submit_source_from_user_agent(user_agent: str | None) -> str:
+    if _is_wechat_user_agent(user_agent):
+        return "weixin"
+    return "directphone"
+
+
 def _build_jqsign(jqnonce: str, ktimes: int) -> str:
     t_value = 1 if int(ktimes or 0) % 10 == 0 else int(ktimes or 0) % 10
     return "".join(chr(ord(ch) ^ t_value) for ch in jqnonce)
@@ -369,7 +380,7 @@ async def brush_wjx_http(
         "shortid": shortid,
         "starttime": _format_wjx_starttime(start_seconds),
         "cst": str(start_seconds * 1000),
-        "source": "directphone",
+        "source": _submit_source_from_user_agent(user_agent_value),
         "submittype": "1",
         "ktimes": str(ktimes),
         "rn": str(2000000000 + random.random() * 100000000),
