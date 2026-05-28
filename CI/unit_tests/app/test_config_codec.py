@@ -180,12 +180,16 @@ class ConfigCodecTests:
         assert cfg.questions_info == []
         assert cfg.question_entries == []
 
-    def test_answer_duration_legacy_single_value_expands_to_20_percent_range(self) -> None:
-        assert normalize_runtime_config_payload({"answer_duration": 90}).answer_duration == (72, 108)
-        assert normalize_runtime_config_payload({"answer_duration": ["90"]}).answer_duration == (72, 108)
+    def test_answer_duration_legacy_single_value_expands_to_10_percent_range(self) -> None:
+        assert normalize_runtime_config_payload({"answer_duration": 90}).answer_duration == (81, 99)
+        assert normalize_runtime_config_payload({"answer_duration": ["90"]}).answer_duration == (81, 99)
+        assert normalize_runtime_config_payload({"answer_duration": [180, 180]}).answer_duration == (
+            162,
+            198,
+        )
         assert normalize_runtime_config_payload({}).answer_duration == (60, 120)
         assert normalize_runtime_config_payload({"answer_duration": 9999}).answer_duration == (
-            1440,
+            1620,
             1800,
         )
         assert normalize_runtime_config_payload({"answer_duration": [1200, 9999]}).answer_duration == (

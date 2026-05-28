@@ -56,6 +56,14 @@ class TestRuntimePanelCardsQtBot:
         assert card.getRange() == (25, 25)
         assert ranges[-1] == (25, 25)
 
+    def test_duration_picker_accepts_formatted_confirmed_values(self, qtbot) -> None:
+        card = TimeRangeSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=300)
+        qtbot.addWidget(card)
+
+        card.startPicker._onConfirmed(["2 分", "30 秒"])
+
+        assert card.getRange() == (150, 150)
+
 
 class _FakeThread:
     def __init__(self) -> None:

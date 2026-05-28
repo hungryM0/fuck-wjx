@@ -174,7 +174,10 @@ class DurationMinuteFormatter(PickerColumnFormatter):
     """分钟列显示。"""
 
     def encode(self, value):
-        return f"{int(value)} 分"
+        text = str(value or "").strip()
+        if text.endswith("分"):
+            return text
+        return f"{int(text or 0)} 分"
 
     def decode(self, value: str):
         return str(value).replace("分", "").strip() or "0"
@@ -184,7 +187,10 @@ class DurationSecondFormatter(DigitFormatter):
     """秒列显示。"""
 
     def encode(self, value):
-        return f"{int(value):02d} 秒"
+        text = str(value or "").strip()
+        if text.endswith("秒"):
+            return text
+        return f"{int(text or 0):02d} 秒"
 
     def decode(self, value: str):
         return int(str(value).replace("秒", "").strip() or 0)

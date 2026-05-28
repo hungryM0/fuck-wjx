@@ -50,6 +50,15 @@ class RuntimeSettingsState:
                         high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(value[1])))
                         if low == 0 and high == 0:
                             return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                        if low == high:
+                            single = low
+                            if single <= 0:
+                                return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                            low = max(0, int(round(single * 0.9)))
+                            high = min(
+                                MAX_ANSWER_DURATION_SECONDS,
+                                max(low, int(round(single * 1.1))),
+                            )
                         return (low, high)
                     if len(value) == 1:
                         single = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value[0])))
@@ -59,8 +68,8 @@ class RuntimeSettingsState:
                     single = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value)))
                 if single <= 0:
                     return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
-                low = max(0, int(round(single * 0.8)))
-                high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(round(single * 1.2))))
+                low = max(0, int(round(single * 0.9)))
+                high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(round(single * 1.1))))
                 return (low, high)
             except Exception:
                 return DEFAULT_ANSWER_DURATION_RANGE_SECONDS

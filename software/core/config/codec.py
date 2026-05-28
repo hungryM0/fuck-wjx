@@ -157,8 +157,8 @@ def _legacy_answer_duration_to_range(value: int) -> Tuple[int, int]:
     normalized = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value or 0)))
     if normalized <= 0:
         return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
-    low = max(0, int(round(normalized * 0.8)))
-    high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(round(normalized * 1.2))))
+    low = max(0, int(round(normalized * 0.9)))
+    high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(round(normalized * 1.1))))
     return low, high
 
 
@@ -172,6 +172,8 @@ def _normalize_answer_duration_range(value: Any) -> Tuple[int, int]:
                 high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(value[1])))
                 if low == 0 and high == 0:
                     return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                if low == high:
+                    return _legacy_answer_duration_to_range(low)
                 return low, high
             if len(value) == 1:
                 return _legacy_answer_duration_to_range(int(value[0]))
