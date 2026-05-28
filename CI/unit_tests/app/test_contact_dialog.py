@@ -91,6 +91,7 @@ class ContactDialogTests:
         before = form.start_polling_calls
         dialog._start_status_polling_if_ready()
         assert form.start_polling_calls == before
+        dialog.close()
 
     def test_send_success_close_and_stop_polling(self, monkeypatch) -> None:
         monkeypatch.setattr(contact_dialog_module, "ContactForm", _FakeContactForm)

@@ -585,10 +585,14 @@ def run_unit_tests() -> tuple[dict | None, str | None]:
             env=env,
             timeout=UNIT_TEST_TIMEOUT_SECONDS,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        stdout_text = (exc.stdout or "").strip()
+        stderr_text = (exc.stderr or "").strip()
         return {
             "phase": "unit",
             "message": f"Unit tests timed out (>{UNIT_TEST_TIMEOUT_SECONDS}s).",
+            "stdout": stdout_text,
+            "stderr": stderr_text,
         }, None
 
     coverage_summary = extract_coverage_summary(result.stdout or "")
