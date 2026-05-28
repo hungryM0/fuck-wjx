@@ -2,44 +2,64 @@
 from __future__ import annotations
 
 import os
-import sys
+
+from PySide6.QtCore import QCoreApplication, QStandardPaths
 
 from software.app.settings_store import (
     CONFIG_DIRECTORY_SETTING_KEY,
     app_settings,
+    configure_qt_application_metadata,
     get_str_from_qsettings,
 )
 
 _APP_NAME = "SurveyController"
 
 
-def _expand_home_path(*parts: str) -> str:
-    return os.path.abspath(os.path.join(os.path.expanduser("~"), *parts))
+def _normalize_path(path: str) -> str:
+    return os.path.abspath(str(path or "").strip())
 
 
-def _get_env_path(key: str, *fallback_parts: str) -> str:
-    value = str(os.environ.get(key, "") or "").strip()
-    if value:
-        return os.path.abspath(value)
-    return _expand_home_path(*fallback_parts)
+def _strip_qt_app_suffix(path: str) -> str:
+    normalized = _normalize_path(path)
+    if not normalized:
+        return normalized
+    current = normalized
+    app_name = str(QCoreApplication.applicationName() or "").strip()
+    org_name = str(QCoreApplication.organizationName() or "").strip()
+    for name in (app_name, org_name):
+        if not name:
+            continue
+        if os.path.basename(current).strip().lower() == name.lower():
+            current = os.path.dirname(current)
+    return current
 
 
-def _get_macos_root(*parts: str) -> str:
-    return _expand_home_path("Library", *parts)
+def _get_standard_base_root(location: QStandardPaths.StandardLocation, *fallback_parts: str) -> str:
+    configure_qt_application_metadata()
+    path = str(QStandardPaths.writableLocation(location) or "").strip()
+    if path:
+        stripped = _strip_qt_app_suffix(path)
+        if stripped:
+            return stripped
+    return _normalize_path(os.path.join(os.path.expanduser("~"), *fallback_parts))
 
 
 def get_roaming_app_data_root() -> str:
     """返回用户漫游数据根目录。"""
-    if sys.platform == "darwin":
-        return _get_macos_root("Application Support")
-    return _get_env_path("APPDATA", "AppData", "Roaming")
+    return _get_standard_base_root(
+        QStandardPaths.StandardLocation.AppDataLocation,
+        "AppData",
+        "Roaming",
+    )
 
 
 def get_local_app_data_root() -> str:
     """返回用户本地数据根目录。"""
-    if sys.platform == "darwin":
-        return _get_macos_root("Caches")
-    return _get_env_path("LOCALAPPDATA", "AppData", "Local")
+    return _get_standard_base_root(
+        QStandardPaths.StandardLocation.AppLocalDataLocation,
+        "AppData",
+        "Local",
+    )
 
 
 def get_user_config_root() -> str:
@@ -61,7 +81,7 @@ def resolve_user_config_directory(settings=None) -> str:
     )
     if not configured_path:
         return get_default_user_config_directory()
-    return os.path.abspath(os.path.expanduser(configured_path))
+    return _normalize_path(os.path.expanduser(configured_path))
 
 
 def get_user_config_directory() -> str:
@@ -76,8 +96,6 @@ def get_user_local_data_root() -> str:
 
 def get_user_logs_directory() -> str:
     """返回日志目录。"""
-    if sys.platform == "darwin":
-        return os.path.join(_get_macos_root("Logs"), _APP_NAME)
     return os.path.join(get_user_local_data_root(), "logs")
 
 

@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
 
-
-import logging
-
 """
 应用配置常量
 
@@ -12,8 +9,7 @@ import logging
 import os
 import re
 import sys
-from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 from software.app.settings_store import (
     CONFIG_DIRECTORY_SETTING_KEY as _CONFIG_DIRECTORY_SETTING_KEY,
@@ -38,7 +34,6 @@ DEFAULT_AUTO_SAVE_LOGS = True
 DEFAULT_AUTO_SAVE_LOG_RETENTION_COUNT = 10
 AUTO_SAVE_LOG_RETENTION_OPTIONS = (3, 5, 10, 20, 30, 50)
 
-_ENV_FILE_NAME = ".env"
 def _read_windows_env_var(key: str) -> str:
     if sys.platform != "win32":
         return ""
@@ -62,84 +57,10 @@ def _read_windows_env_var(key: str) -> str:
         return ""
 
 
-def _find_env_file() -> Optional[Path]:
-    candidates = []
-    if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            candidates.append(Path(meipass))
-        try:
-            candidates.append(Path(sys.executable).resolve().parent)
-        except Exception as exc:
-            logging.warning(f"_find_env_file: {exc}")
-    try:
-        candidates.append(Path(__file__).resolve().parent)
-    except Exception as exc:
-        logging.warning(f"_find_env_file: {exc}")
-    candidates.append(Path.cwd())
-
-    seen = set()
-    for directory in candidates:
-        try:
-            resolved = directory.resolve()
-        except Exception:
-            continue
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        candidate = resolved / _ENV_FILE_NAME
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _parse_env_file(path: Path) -> Dict[str, str]:
-    env_map: Dict[str, str] = {}
-    try:
-        with path.open("r", encoding="utf-8") as fp:
-            for raw_line in fp:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip()
-                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
-                    value = value[1:-1]
-                if key:
-                    env_map[key] = value
-    except Exception as exc:
-        logging.warning(f"_parse_env_file: {exc}")
-    return env_map
-
-
-# 延迟初始化环境变量，避免模块导入时的阻塞
-_ENV_FILE_PATH: Optional[Path] = None
-_ENV_VARS: Dict[str, str] = {}
-_ENV_INITIALIZED = False
-
-
-def _ensure_env_initialized():
-    """确保环境变量已初始化（延迟加载）"""
-    global _ENV_FILE_PATH, _ENV_VARS, _ENV_INITIALIZED
-    if not _ENV_INITIALIZED:
-        _ENV_FILE_PATH = _find_env_file()
-        _ENV_VARS = _parse_env_file(_ENV_FILE_PATH) if _ENV_FILE_PATH else {}
-        _ENV_INITIALIZED = True
-
-
 def _resolve_env_value(key: str, default: str) -> str:
-    # 延迟初始化环境变量
-    _ensure_env_initialized()
-
     env_value = os.environ.get(key)
     if env_value:
         return env_value
-    file_value = _ENV_VARS.get(key)
-    if file_value:
-        return file_value
     registry_value = _read_windows_env_var(key)
     if registry_value:
         return registry_value

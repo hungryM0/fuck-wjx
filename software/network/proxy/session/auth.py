@@ -179,7 +179,14 @@ def _verify_persisted_session(session: RandomIPSession) -> None:
         failures.append("settings.quota_known")
 
     persisted_device_secret = read_secret(_DEVICE_SECRET_KEY)
-    if persisted_device_secret.value.strip() != expected_device_id:
+    if persisted_device_secret.status == "unsupported":
+        _log_session_event(
+            logging.WARNING,
+            "安全存储不可用，设备标识持久化校验降级为仅检查本地设置",
+            session,
+            device_secret=persisted_device_secret.status,
+        )
+    elif persisted_device_secret.value.strip() != expected_device_id:
         failures.append(f"secure_store.device_id[{persisted_device_secret.status}]")
 
     if failures:

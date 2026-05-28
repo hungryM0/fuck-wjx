@@ -37,7 +37,7 @@
 ## 开始使用
 
 > [!TIP]
-> **安装包：** 前往 [发行版](https://github.com/SurveyController/SurveyController/releases/latest) 下载 `SurveyController_<版本>_setup.exe`
+> **安装包：** 前往 [发行版](https://github.com/SurveyController/SurveyController/releases/latest) 下载最新版本 .exe 安装包，安装后直接运行即可
 
 ### 从源码运行
 
@@ -56,7 +56,20 @@ uv run python SurveyController.py
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-**环境要求：** Windows 10/11，Python 3.13.13+，Git
+### macOS 使用
+
+当前暂未提供 macOS 安装包，可以通过源码运行：
+```bash
+brew install python git uv
+git clone https://github.com/SurveyController/SurveyController.git
+cd SurveyController
+uv sync
+uv run python SurveyController.py
+```
+
+如果没有安装 Homebrew，可以先参考 [Homebrew 官网](https://brew.sh/) 安装。
+
+**环境要求：** Windows 10/11 或 macOS，Python 3.13.13+，Git
 
 ## 使用方法
 
@@ -77,12 +90,6 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 | **随机IP** | 是否使用随机IP或指定地区IP。使用代理IP时可能产生额外费用，请确认配额 |
 | **User-Agent** | HTTP 请求标识字符串，影响问卷后台显示的提交来源信息 |
 | **答题时长** | 每份问卷的作答时间。如无特殊需求建议不做设置 |
-
----
-
-## Mac 系统支持
-
-如果你需要查看支持 macOS 系统的源码，请切换到 [mac 分支](https://github.com/SurveyController/SurveyController/tree/mac)。
 
 ---
 

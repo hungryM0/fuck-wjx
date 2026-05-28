@@ -14,8 +14,10 @@ from PySide6.QtCore import (
     QPoint,
     QEasingCurve,
     QPropertyAnimation,
+    QUrl,
     Qt,
 )
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidgetItem,
@@ -158,7 +160,8 @@ class ConfigDrawer(QWidget):
         configs_dir = get_user_config_directory()
         os.makedirs(configs_dir, exist_ok=True)
         try:
-            os.startfile(configs_dir)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(configs_dir)):
+                raise RuntimeError("系统未提供可用的文件管理器")
         except Exception as exc:
             box = MessageBox("打开失败", f"无法打开配置文件夹：{exc}", self)
             box.yesButton.setText("知道了")

@@ -186,6 +186,31 @@ class RandomIPSessionAuthTests:
         assert snapshot["authenticated"] is True
         assert snapshot["remaining_quota"] == 2.0
 
+    def test_set_session_allows_unsupported_secure_store_when_settings_persisted(self, patch_attrs) -> None:
+        settings = _Settings()
+        _reset_auth_state(RandomIPSession(device_id="old-device"))
+        patch_attrs(
+            (auth, "_get_settings", lambda: settings),
+            (auth, "read_secret", lambda _key: _Secret("", "unsupported")),
+            (auth, "set_secret", lambda *_args, **_kwargs: None),
+        )
+
+        session = auth._set_session(
+            RandomIPSession(
+                device_id="device-linux",
+                user_id=9,
+                remaining_quota=2,
+                total_quota=5,
+                used_quota=3,
+                quota_known=True,
+            ),
+            verify_auth_persistence=True,
+        )
+
+        assert session.device_id == "device-linux"
+        assert settings.values[auth._settings_key("device_id")] == "device-linux"
+        assert settings.synced == 1
+
     def test_clear_session_preserves_device_id_and_removes_quota_fields(self, patch_attrs) -> None:
         settings = _Settings()
         _reset_auth_state(RandomIPSession(device_id="device-3", user_id=10, total_quota=1, used_quota=1, quota_known=True))

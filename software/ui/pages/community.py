@@ -4,8 +4,8 @@ import os
 import webbrowser
 from typing import Any, cast
 
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QPixmap, QPainter, QPainterPath
+from PySide6.QtCore import Qt, QSize, QUrl
+from PySide6.QtGui import QPixmap, QPainter, QPainterPath, QDesktopServices
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -265,7 +265,7 @@ class CommunityPage(ScrollArea):
         """打开QQ群二维码原图"""
         path = os.path.join(get_assets_directory(), "community_qr.jpg")
         if os.path.exists(path):
-            os.startfile(path)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ── 联系开发者卡片 ──
 
