@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import software.ui.pages.workbench.runtime_panel.random_ip_card as random_ip_module
+from PySide6.QtCore import QDateTime
 from software.ui.pages.workbench.runtime_panel.cards import (
     AnswerDateTimeWindowSettingCard,
     FluentIcon,
@@ -82,6 +83,23 @@ class TestRuntimePanelCardsQtBot:
         card.setDateTimeWindow(("2026-02-10 09:00:00", "2026-02-10 10:00:00"))
 
         assert card.getDateTimeWindow() == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
+        assert card.startTimePicker.columns[0].name() == "时"
+        assert card.startTimePicker.columns[1].name() == "分"
+        assert card.startTimePicker.isSecondVisible() is False
+
+    def test_answer_datetime_window_card_clamps_future_datetime(self, monkeypatch, qtbot) -> None:
+        fake_now = QDateTime.fromString("2026-02-10 09:15:00", "yyyy-MM-dd HH:mm:ss")
+        monkeypatch.setattr(
+            AnswerDateTimeWindowSettingCard,
+            "_now",
+            staticmethod(lambda: fake_now),
+        )
+        card = AnswerDateTimeWindowSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=300)
+        qtbot.addWidget(card)
+
+        card.setDateTimeWindow(("2026-02-10 10:00:00", "2026-02-11 08:00:00"))
+
+        assert card.getDateTimeWindow() == ("2026-02-10 09:15:00", "2026-02-10 08:00:00")
 
 
 class _FakeThread:

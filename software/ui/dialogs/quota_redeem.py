@@ -12,7 +12,9 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    FluentIcon,
     IndeterminateProgressRing,
+    IconWidget,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -54,9 +56,19 @@ class QuotaRedeemDialog(MessageBoxBase):
             Qt.ConnectionType.QueuedConnection,
         )
 
-        self.heroLabel = StrongBodyLabel("额度兑换", self.widget)
+        self.titleRow = QWidget(self.widget)
+        title_layout = QHBoxLayout(self.titleRow)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(8)
+        self.heroIcon = IconWidget(FluentIcon.SHOPPING_CART, self.titleRow)
+        self.heroIcon.setFixedSize(22, 22)
+        title_layout.addWidget(self.heroIcon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.heroLabel = StrongBodyLabel("额度兑换", self.titleRow)
         self.heroLabel.setWordWrap(True)
         self.heroLabel.setStyleSheet("font-size: 20px; font-weight: 700;")
+        title_layout.addWidget(self.heroLabel, 0, Qt.AlignmentFlag.AlignVCenter)
+        title_layout.addStretch(1)
 
         self.accountHintLabel = CaptionLabel("", self.widget)
         self.accountHintLabel.setWordWrap(True)
@@ -103,7 +115,7 @@ class QuotaRedeemDialog(MessageBoxBase):
         self.loadingLabel.hide()
 
         self.viewLayout.setSpacing(10)
-        self.viewLayout.addWidget(self.heroLabel)
+        self.viewLayout.addWidget(self.titleRow)
         self.viewLayout.addWidget(self.accountHintLabel)
         self.viewLayout.addWidget(self.formCard)
         self.viewLayout.addWidget(self.loadingLabel)

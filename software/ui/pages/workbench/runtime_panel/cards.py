@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QDate, QTime, Signal
+from PySide6.QtCore import QDate, QDateTime, QTime, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -17,11 +17,10 @@ from qfluentwidgets import (
     OptionsSettingCard,
     OptionsValidator,
     SwitchButton,
-    TimePicker,
     ZhDatePicker,
 )
 from qfluentwidgets.components.date_time.picker_base import DigitFormatter, PickerColumnFormatter
-from qfluentwidgets.components.date_time.time_picker import TimePickerBase
+from qfluentwidgets.components.date_time.time_picker import MiniuteFormatter, TimePickerBase
 
 from software.core.config.answer_datetime_window import (
     format_answer_datetime_string,
@@ -248,6 +247,47 @@ class DurationTimePicker(TimePickerBase):
             self.timeChanged.emit(self._time)
 
 
+class ZhHourMinuteTimePicker(TimePickerBase):
+    """中文 24 小时时分选择器。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent, showSeconds=False)
+        self.addColumn("时", range(0, 24), 120, formatter=DigitFormatter())
+        self.addColumn("分", range(0, 60), 120, formatter=MiniuteFormatter())
+
+    def setTime(self, time: QTime):
+        if not isinstance(time, QTime) or not time.isValid() or time.isNull():
+            return
+        self._time = QTime(time.hour(), time.minute(), 0)
+        self.setColumnValue(0, self._time.hour())
+        self.setColumnValue(1, self._time.minute())
+
+    def setSecondVisible(self, isVisible: bool):
+        del isVisible
+        self._isSecondVisible = False
+
+    def _onConfirmed(self, value: list):
+        super()._onConfirmed(value)
+        if len(value) < 2:
+            return
+        hour = int(self.decodeValue(0, value[0]))
+        minute = int(self.decodeValue(1, value[1]))
+        time = QTime(hour, minute, 0)
+        old_time = self._time
+        self.setTime(time)
+        if old_time != self._time:
+            self.timeChanged.emit(self._time)
+
+    def panelInitialValue(self):
+        if any(self.value()):
+            return self.value()
+        time = QTime.currentTime()
+        return [
+            self.encodeValue(0, time.hour()),
+            self.encodeValue(1, time.minute()),
+        ]
+
+
 class TimeRangeSettingCard(OptionsSettingCard):
     """时间范围设置卡。"""
 
@@ -454,9 +494,9 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         input_layout.setSpacing(10)
 
         self.startDatePicker = ZhDatePicker(self._input_container)
-        self.startTimePicker = TimePicker(self._input_container, showSeconds=True)
+        self.startTimePicker = ZhHourMinuteTimePicker(self._input_container)
         self.endDatePicker = ZhDatePicker(self._input_container)
-        self.endTimePicker = TimePicker(self._input_container, showSeconds=True)
+        self.endTimePicker = ZhHourMinuteTimePicker(self._input_container)
 
         for picker in (
             self.startDatePicker,
@@ -466,6 +506,8 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         ):
             picker.setFixedWidth(160)
 
+        self._limit_date_picker_to_now(self.startDatePicker)
+        self._limit_date_picker_to_now(self.endDatePicker)
         self.inputEdit = self.startDatePicker
         self._start_row = self._build_datetime_row(
             "开始时间",
@@ -496,7 +538,12 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         self._clear_datetime_window()
         self.set_provider("wjx")
 
-    def _build_datetime_row(self, label_text: str, date_picker: ZhDatePicker, time_picker: TimePicker):
+    def _build_datetime_row(
+        self,
+        label_text: str,
+        date_picker: ZhDatePicker,
+        time_picker: ZhHourMinuteTimePicker,
+    ):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
@@ -508,6 +555,42 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         row.addWidget(date_picker)
         row.addWidget(time_picker)
         return row
+
+    @staticmethod
+    def _now() -> QDateTime:
+        return QDateTime.currentDateTime()
+
+    def _limit_date_picker_to_now(self, picker: ZhDatePicker) -> None:
+        now = self._now().date()
+        current_year = now.year()
+        picker.setColumnItems(picker.yearIndex, range(current_year - 100, current_year + 1))
+        if picker.getDate().isValid() and picker.getDate() > now:
+            picker.setDate(now)
+
+    def _clamp_time_picker_to_now(
+        self,
+        date_picker: ZhDatePicker,
+        time_picker: ZhHourMinuteTimePicker,
+    ) -> None:
+        now = self._now()
+        selected_date = date_picker.getDate()
+        if not selected_date.isValid():
+            return
+        if selected_date > now.date():
+            date_picker.setDate(now.date())
+            selected_date = now.date()
+        if selected_date != now.date():
+            return
+        selected_time = time_picker.getTime()
+        max_time = QTime(now.time().hour(), now.time().minute(), 0)
+        if not selected_time.isValid() or selected_time > max_time:
+            time_picker.setTime(max_time)
+
+    def _apply_future_limit(self) -> None:
+        self._limit_date_picker_to_now(self.startDatePicker)
+        self._limit_date_picker_to_now(self.endDatePicker)
+        self._clamp_time_picker_to_now(self.startDatePicker, self.startTimePicker)
+        self._clamp_time_picker_to_now(self.endDatePicker, self.endTimePicker)
 
     def _clear_datetime_window(self) -> None:
         self._datetime_window = ("", "")
@@ -531,11 +614,11 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
             return "", ""
         start_dt = parse_answer_datetime_string(
             f"{self.startDatePicker.getDate().toString('yyyy-MM-dd')} "
-            f"{self.startTimePicker.getTime().toString('HH:mm:ss')}"
+            f"{self.startTimePicker.getTime().toString('HH:mm')}:00"
         )
         end_dt = parse_answer_datetime_string(
             f"{self.endDatePicker.getDate().toString('yyyy-MM-dd')} "
-            f"{self.endTimePicker.getTime().toString('HH:mm:ss')}"
+            f"{self.endTimePicker.getTime().toString('HH:mm')}:00"
         )
         return (
             format_answer_datetime_string(start_dt),
@@ -546,6 +629,7 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
         sender = self.sender()
         if sender is not None:
             sender.setProperty("_has_value", True)
+        self._apply_future_limit()
         normalized = self._compose_datetime_window()
         if normalized != self._datetime_window:
             self._datetime_window = normalized
@@ -585,9 +669,9 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
             self.startTimePicker.blockSignals(False)
             self.endDatePicker.blockSignals(False)
             self.endTimePicker.blockSignals(False)
+        self._apply_future_limit()
         self._datetime_window = (
-            format_answer_datetime_string(start_dt),
-            format_answer_datetime_string(end_dt),
+            *self._compose_datetime_window(),
         )
         if self._datetime_window != previous:
             self.datetimeWindowChanged.emit(self._datetime_window)

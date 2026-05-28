@@ -72,9 +72,9 @@ def build_runtime_page_ui(page) -> None:
         parent=time_group,
     )
     page.answer_card = AnswerDateTimeWindowSettingCard(
-        FluentIcon.STOP_WATCH,
-        "作答日期时间范围",
-        "设置见数的作答开始与结束日期时间范围",
+        FluentIcon.DATE_TIME,
+        "提交时间",
+        "设置见数的提交日期时间范围",
         max_seconds=30 * 60,
         parent=time_group,
     )
