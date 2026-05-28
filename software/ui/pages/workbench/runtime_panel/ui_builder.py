@@ -66,15 +66,15 @@ def build_runtime_page_ui(page) -> None:
     page.interval_card = TimeRangeSettingCard(
         FluentIcon.HISTORY,
         "提交间隔",
-        f"两次提交之间的等待时间（0-{page.SUBMIT_INTERVAL_MAX_SECONDS} 秒）",
+        f"两次提交之间的等待时间范围（0-{page.SUBMIT_INTERVAL_MAX_SECONDS} 秒）",
         max_seconds=page.SUBMIT_INTERVAL_MAX_SECONDS,
         parent=time_group,
     )
     page.answer_card = TimeRangeSettingCard(
         FluentIcon.STOP_WATCH,
         "作答时长",
-        "设置单份作答耗时（大于等于 0 秒），未设置默认 90 秒，按20%比例随机上下抖动",
-        max_seconds=None,
+        "设置单份作答耗时范围，默认 1-2 分钟，最长 30 分钟",
+        max_seconds=30 * 60,
         parent=time_group,
     )
     for card in (page.interval_card, page.answer_card):

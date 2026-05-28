@@ -37,6 +37,8 @@ _REVERSE_FILL_FORMATS = {
     REVERSE_FILL_FORMAT_WJX_SCORE,
     REVERSE_FILL_FORMAT_WJX_TEXT,
 }
+DEFAULT_ANSWER_DURATION_RANGE_SECONDS = (60, 120)
+MAX_ANSWER_DURATION_SECONDS = 30 * 60
 
 __all__ = [
     "CURRENT_CONFIG_SCHEMA_VERSION",
@@ -149,6 +151,39 @@ def _normalize_multi_text_blank_int_ranges(raw: Any) -> List[List[int]]:
     if not isinstance(raw, list):
         return []
     return [_normalize_random_int_range(item) for item in raw]
+
+
+def _legacy_answer_duration_to_range(value: int) -> Tuple[int, int]:
+    normalized = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value or 0)))
+    if normalized <= 0:
+        return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+    low = max(0, int(round(normalized * 0.8)))
+    high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(round(normalized * 1.2))))
+    return low, high
+
+
+def _normalize_answer_duration_range(value: Any) -> Tuple[int, int]:
+    if value in (None, "", []):
+        return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+    try:
+        if isinstance(value, (list, tuple)):
+            if len(value) >= 2:
+                low = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value[0])))
+                high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(value[1])))
+                if low == 0 and high == 0:
+                    return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                return low, high
+            if len(value) == 1:
+                return _legacy_answer_duration_to_range(int(value[0]))
+            return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+        return _legacy_answer_duration_to_range(int(value))
+    except Exception as exc:
+        log_suppressed_exception(
+            "_normalize_answer_duration_range failure",
+            exc,
+            level=logging.WARNING,
+        )
+        return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
 
 
 def _normalize_dimension_value(raw: Any) -> Optional[str]:
@@ -369,7 +404,7 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.target = _as_int(raw.get("target"), 1)
     config.threads = _as_int(raw.get("threads"), 1)
     config.submit_interval = _tuple_pair(raw.get("submit_interval"))
-    config.answer_duration = _tuple_pair(raw.get("answer_duration"))
+    config.answer_duration = _normalize_answer_duration_range(raw.get("answer_duration"))
     custom_proxy_api = str(raw.get("custom_proxy_api") or "").strip()
     proxy_source = str(raw.get("proxy_source") or "default").strip().lower()
     if proxy_source not in ("default", "benefit", "custom"):

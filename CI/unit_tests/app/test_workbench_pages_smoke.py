@@ -33,7 +33,7 @@ class _FakeController(QObject):
             "threads": 2,
             "random_ip_enabled": False,
             "proxy_source": "default",
-            "answer_duration": (0, 0),
+            "answer_duration": (60, 120),
         }
         self.runtime_updates: list[dict] = []
         self.parse_calls: list[str] = []

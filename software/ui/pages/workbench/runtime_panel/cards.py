@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDoubleValidator, QIntValidator
+from PySide6.QtCore import QTime, Signal
+from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
@@ -13,9 +13,13 @@ from qfluentwidgets import (
     FluentIcon,
     IndicatorPosition,
     LineEdit,
-    SettingCard,
+    OptionsConfigItem,
+    OptionsSettingCard,
+    OptionsValidator,
     SwitchButton,
 )
+from qfluentwidgets.components.date_time.picker_base import DigitFormatter, PickerColumnFormatter
+from qfluentwidgets.components.date_time.time_picker import TimePickerBase
 
 from software.core.psychometrics.psychometric import (
     DEFAULT_TARGET_ALPHA,
@@ -166,88 +170,240 @@ class ReliabilitySettingCard(ExpandGroupSettingCard):
             self.alphaEdit.setText(text)
 
 
-class TimeRangeSettingCard(SettingCard):
-    """时间设置卡。"""
+class DurationMinuteFormatter(PickerColumnFormatter):
+    """分钟列显示。"""
+
+    def encode(self, value):
+        return f"{int(value)} 分"
+
+    def decode(self, value: str):
+        return str(value).replace("分", "").strip() or "0"
+
+
+class DurationSecondFormatter(DigitFormatter):
+    """秒列显示。"""
+
+    def encode(self, value):
+        return f"{int(value):02d} 秒"
+
+    def decode(self, value: str):
+        return int(str(value).replace("秒", "").strip() or 0)
+
+
+class DurationTimePicker(TimePickerBase):
+    """只显示分钟和秒的时长选择器。"""
+
+    def __init__(self, parent=None, max_seconds: int = 86399):
+        super().__init__(parent=parent, showSeconds=True)
+        self.max_seconds = max(0, int(max_seconds or 0))
+        self._duration_seconds = 0
+        minute_max = max(0, self.max_seconds // 60)
+        self.addColumn("分钟", range(0, minute_max + 1), 120, formatter=DurationMinuteFormatter())
+        self.addColumn("秒", range(0, 60), 120, formatter=DurationSecondFormatter())
+
+    def getDurationSeconds(self) -> int:
+        return self._duration_seconds
+
+    def setDurationSeconds(self, seconds: int) -> None:
+        normalized = max(0, min(int(seconds or 0), self.max_seconds))
+        self._duration_seconds = normalized
+        minutes, remainder_seconds = divmod(normalized, 60)
+        hours, remainder_minutes = divmod(minutes, 60)
+        self._time = QTime(hours, remainder_minutes, remainder_seconds)
+        self.setColumnValue(0, minutes)
+        self.setColumnValue(1, remainder_seconds)
+
+    def getTime(self):
+        return self._time
+
+    def setTime(self, time: QTime):
+        if not isinstance(time, QTime) or not time.isValid():
+            self.setDurationSeconds(0)
+            return
+        self.setDurationSeconds(time.hour() * 3600 + time.minute() * 60 + time.second())
+
+    def _onConfirmed(self, value: list):
+        super()._onConfirmed(value)
+        if len(value) < 2:
+            return
+        minutes = self.decodeValue(0, value[0])
+        seconds = self.decodeValue(1, value[1])
+        duration_seconds = int(minutes) * 60 + int(seconds)
+        previous = self._duration_seconds
+        self.setDurationSeconds(duration_seconds)
+        if self._duration_seconds != previous:
+            self.timeChanged.emit(self._time)
+
+
+class TimeRangeSettingCard(OptionsSettingCard):
+    """时间范围设置卡。"""
 
     valueChanged = Signal(int)
+    rangeChanged = Signal(tuple)
 
     def __init__(self, icon, title, content, max_seconds: Optional[int] = 300, parent=None):
-        super().__init__(icon, title, content, parent)
-
         self.max_seconds = None if max_seconds is None else max(0, int(max_seconds))
-        self._current_value = 0
-
-        self._input_container = QWidget(self)
-        input_layout = QHBoxLayout(self._input_container)
-        input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(8)
-
-        self.inputEdit = LineEdit(self._input_container)
-        validator_max = 2147483647 if self.max_seconds is None else self.max_seconds
-        self.inputEdit.setValidator(QIntValidator(0, validator_max, self.inputEdit))
-        self.inputEdit.setFixedWidth(128)
-        self.inputEdit.setFixedHeight(36)
-        self.inputEdit.setText("0")
-        tooltip_text = (
-            "允许范围：大于等于 0 秒"
-            if self.max_seconds is None
-            else f"允许范围：0-{self.max_seconds} 秒"
+        self._current_range = (0, 0)
+        config_item = OptionsConfigItem(
+            "RuntimeTimeRange",
+            str(title or "TimeRange"),
+            "custom",
+            OptionsValidator(["custom"]),
         )
-        self.inputEdit.setToolTip(tooltip_text)
-        install_tooltip_filter(self.inputEdit)
-        self.inputEdit.textChanged.connect(self._on_text_changed)
-        self.inputEdit.editingFinished.connect(self._normalize_text)
+        super().__init__(config_item, icon, title, content, texts=["自定义"], parent=parent)
 
-        sec_label = BodyLabel("秒", self._input_container)
-        sec_label.setStyleSheet("color: #606060;")
+        self.setExpand(True)
+        self.choiceLabel.hide()
+        self.choiceLabel.setFixedWidth(0)
+        for button in self.buttonGroup.buttons():
+            button.hide()
+        self.viewLayout.setSpacing(12)
+        self.viewLayout.setContentsMargins(48, 12, 48, 16)
 
-        input_layout.addWidget(self.inputEdit)
-        input_layout.addWidget(sec_label)
+        self._input_container = QWidget(self.view)
+        input_layout = QVBoxLayout(self._input_container)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(10)
 
-        self.hBoxLayout.addWidget(self._input_container, 0, Qt.AlignmentFlag.AlignRight)
-        self.hBoxLayout.addSpacing(16)
+        picker_max_seconds = 86399 if self.max_seconds is None else self.max_seconds
+        self.startPicker = DurationTimePicker(
+            self._input_container,
+            max_seconds=picker_max_seconds,
+        )
+        self.endPicker = DurationTimePicker(
+            self._input_container,
+            max_seconds=picker_max_seconds,
+        )
+        for picker in (self.startPicker, self.endPicker):
+            picker.setFixedWidth(240)
+            picker.setDurationSeconds(0)
+
+        tooltip_text = (
+            "允许范围：0 分 00 秒 - 1439 分 59 秒"
+            if self.max_seconds is None
+            else f"允许范围：0 分 00 秒 - {self._format_seconds(self.max_seconds)}"
+        )
+        for picker in (self.startPicker, self.endPicker):
+            picker.setToolTip(tooltip_text)
+            install_tooltip_filter(picker)
+            picker.timeChanged.connect(self._on_time_changed)
+
+        self.inputEdit = self.startPicker
+        start_row = QHBoxLayout()
+        start_row.setContentsMargins(0, 0, 0, 0)
+        start_row.setSpacing(8)
+        end_row = QHBoxLayout()
+        end_row.setContentsMargins(0, 0, 0, 0)
+        end_row.setSpacing(8)
+
+        start_label = BodyLabel("最短时间", self._input_container)
+        end_label = BodyLabel("最长时间", self._input_container)
+        for label in (start_label, end_label):
+            label.setFixedWidth(72)
+            label.setStyleSheet("color: #606060;")
+
+        start_row.addWidget(start_label)
+        start_row.addStretch(1)
+        start_row.addWidget(self.startPicker)
+        end_row.addWidget(end_label)
+        end_row.addStretch(1)
+        end_row.addWidget(self.endPicker)
+        input_layout.addLayout(start_row)
+        input_layout.addLayout(end_row)
+
+        self.viewLayout.addWidget(self._input_container)
+        self._adjustViewSize()
 
     def _clamp_value(self, value: int) -> int:
         normalized = max(0, int(value))
         if self.max_seconds is None:
-            return normalized
+            return min(normalized, 86399)
         return min(normalized, self.max_seconds)
 
     @staticmethod
-    def _parse_digits(text: str, fallback: int) -> int:
-        raw = str(text or "").strip()
-        return int(raw) if raw.isdigit() else int(fallback)
+    def _time_to_seconds(value: QTime) -> int:
+        if not isinstance(value, QTime) or not value.isValid():
+            return 0
+        return max(0, value.hour() * 3600 + value.minute() * 60 + value.second())
 
-    def _on_text_changed(self, text: str):
-        value = self._clamp_value(self._parse_digits(text, fallback=0))
-        if value != self._current_value:
-            self._current_value = value
-            self.valueChanged.emit(value)
+    @staticmethod
+    def _seconds_to_time(value: int) -> QTime:
+        normalized = max(0, min(int(value or 0), 86399))
+        hours, remainder = divmod(normalized, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return QTime(hours, minutes, seconds)
 
-    def _normalize_text(self):
-        self.setValue(self.getValue())
+    @staticmethod
+    def _format_seconds(value: int) -> str:
+        normalized = max(0, int(value or 0))
+        minutes, seconds = divmod(normalized, 60)
+        return f"{minutes} 分 {seconds:02d} 秒"
+
+    def _normalize_range(self, start: int, end: int) -> tuple[int, int]:
+        low = self._clamp_value(start)
+        high = self._clamp_value(end)
+        if high < low:
+            high = low
+        return low, high
+
+    def _on_time_changed(self, _time: QTime):
+        start = self.startPicker.getDurationSeconds()
+        end = self.endPicker.getDurationSeconds()
+        normalized = self._normalize_range(start, end)
+        if (start, end) != normalized:
+            self.setRange(normalized)
+            return
+        if normalized != self._current_range:
+            self._current_range = normalized
+            self.valueChanged.emit(normalized[0])
+            self.rangeChanged.emit(normalized)
 
     def setEnabled(self, arg__1):
         super().setEnabled(arg__1)
-        self.inputEdit.setEnabled(arg__1)
+        self.startPicker.setEnabled(arg__1)
+        self.endPicker.setEnabled(arg__1)
 
     def getValue(self) -> int:
-        """获取当前秒数。"""
-        value = self._clamp_value(
-            self._parse_digits(self.inputEdit.text(), fallback=self._current_value)
-        )
-        self._current_value = value
-        return value
+        """获取当前范围起点秒数。"""
+        return self.getRange()[0]
+
+    def getRange(self) -> tuple[int, int]:
+        """获取当前秒数范围。"""
+        start = self.startPicker.getDurationSeconds()
+        end = self.endPicker.getDurationSeconds()
+        self._current_range = self._normalize_range(start, end)
+        return self._current_range
 
     def setValue(self, value: int):
-        """设置当前秒数。"""
-        value = self._clamp_value(value)
-        previous = self._current_value
-        self._current_value = value
-        display = str(value)
-        if self.inputEdit.text() != display:
-            self.inputEdit.blockSignals(True)
-            self.inputEdit.setText(display)
-            self.inputEdit.blockSignals(False)
-        if value != previous:
-            self.valueChanged.emit(value)
+        """设置固定秒数。"""
+        if isinstance(value, str):
+            OptionsSettingCard.setValue(self, value)
+            return
+        self.setRange((value, value))
+
+    def setRange(self, value_range):
+        """设置秒数范围。"""
+        if isinstance(value_range, (list, tuple)):
+            start = value_range[0] if len(value_range) >= 1 else 0
+            end = value_range[1] if len(value_range) >= 2 else start
+        else:
+            start = end = value_range
+        try:
+            normalized = self._normalize_range(int(start or 0), int(end or 0))
+        except Exception:
+            normalized = (0, 0)
+        previous = self._current_range
+        self._current_range = normalized
+
+        self.startPicker.blockSignals(True)
+        self.endPicker.blockSignals(True)
+        try:
+            self.startPicker.setDurationSeconds(normalized[0])
+            self.endPicker.setDurationSeconds(normalized[1])
+        finally:
+            self.startPicker.blockSignals(False)
+            self.endPicker.blockSignals(False)
+
+        if normalized != previous:
+            self.valueChanged.emit(normalized[0])
+            self.rangeChanged.emit(normalized)

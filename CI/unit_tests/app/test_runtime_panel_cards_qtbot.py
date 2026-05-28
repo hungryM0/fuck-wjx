@@ -41,6 +41,21 @@ class TestRuntimePanelCardsQtBot:
         assert card.getValue() == 10
         assert values[-1] == 10
 
+    def test_time_range_card_preserves_range_and_normalizes_end(self, qtbot) -> None:
+        card = TimeRangeSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=30)
+        qtbot.addWidget(card)
+
+        ranges: list[tuple[int, int]] = []
+        card.rangeChanged.connect(ranges.append)
+
+        card.setRange((5, 20))
+        assert card.getRange() == (5, 20)
+        assert ranges[-1] == (5, 20)
+
+        card.setRange((25, 10))
+        assert card.getRange() == (25, 25)
+        assert ranges[-1] == (25, 25)
+
 
 class _FakeThread:
     def __init__(self) -> None:

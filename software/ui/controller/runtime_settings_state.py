@@ -6,6 +6,9 @@ from typing import Any, Dict
 
 from software.core.config.schema import RuntimeConfig
 
+DEFAULT_ANSWER_DURATION_RANGE_SECONDS = (60, 120)
+MAX_ANSWER_DURATION_SECONDS = 30 * 60
+
 
 class RuntimeSettingsState:
     """集中管理运行参数当前值。"""
@@ -17,7 +20,7 @@ class RuntimeSettingsState:
         "survey_provider": "wjx",
         "proxy_source": "default",
         "submit_interval": (0, 0),
-        "answer_duration": (0, 0),
+        "answer_duration": DEFAULT_ANSWER_DURATION_RANGE_SECONDS,
     }
 
     def __init__(self) -> None:
@@ -32,11 +35,35 @@ class RuntimeSettingsState:
         if key == "proxy_source":
             normalized = str(value or "default").strip().lower()
             return normalized if normalized in {"default", "benefit", "custom"} else "default"
-        if key in {"answer_duration", "submit_interval"}:
+        if key == "submit_interval":
             raw = value if isinstance(value, (list, tuple)) else (0, 0)
             low = max(0, int(raw[0] if len(raw) >= 1 else 0))
             high = max(low, int(raw[1] if len(raw) >= 2 else low))
             return (low, high)
+        if key == "answer_duration":
+            try:
+                if value in (None, "", []):
+                    return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                if isinstance(value, (list, tuple)):
+                    if len(value) >= 2:
+                        low = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value[0])))
+                        high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(value[1])))
+                        if low == 0 and high == 0:
+                            return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                        return (low, high)
+                    if len(value) == 1:
+                        single = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value[0])))
+                    else:
+                        return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                else:
+                    single = min(MAX_ANSWER_DURATION_SECONDS, max(0, int(value)))
+                if single <= 0:
+                    return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
+                low = max(0, int(round(single * 0.8)))
+                high = min(MAX_ANSWER_DURATION_SECONDS, max(low, int(round(single * 1.2))))
+                return (low, high)
+            except Exception:
+                return DEFAULT_ANSWER_DURATION_RANGE_SECONDS
         return value
 
     def get(self) -> Dict[str, Any]:

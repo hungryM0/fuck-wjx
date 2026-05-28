@@ -28,7 +28,7 @@ class RuntimeControlSyncMixin:
         page = cast(Any, self)
 
         def _focus_target():
-            target_edit = getattr(self.answer_card, "inputEdit", None)
+            target_edit = getattr(self.answer_card, "startPicker", None)
             try:
                 top_y = self.answer_card.mapTo(self.view, QPoint(0, 0)).y()
                 target_scroll = max(0, int(top_y - 16))
@@ -42,7 +42,6 @@ class RuntimeControlSyncMixin:
             try:
                 if target_edit is not None:
                     target_edit.setFocus()
-                    target_edit.selectAll()
             except Exception as exc:
                 log_suppressed_exception(
                     "focus_answer_duration_setting: focus input",

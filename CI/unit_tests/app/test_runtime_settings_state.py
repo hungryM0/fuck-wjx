@@ -19,7 +19,7 @@ def test_runtime_settings_state_defaults() -> None:
             "survey_provider": SURVEY_PROVIDER_WJX,
             "proxy_source": "default",
             "submit_interval": (0, 0),
-            "answer_duration": (0, 0),
+            "answer_duration": (60, 120),
         },
         True,
     )
@@ -55,7 +55,7 @@ def test_runtime_settings_state_writes_synced_defaults_to_config() -> None:
         "survey_provider": SURVEY_PROVIDER_WJX,
         "proxy_source": "default",
         "submit_interval": (0, 0),
-        "answer_duration": (0, 0),
+        "answer_duration": (60, 120),
     }
 
 
@@ -78,6 +78,24 @@ def test_runtime_settings_state_normalizes_updates() -> None:
     assert current["proxy_source"] == "custom"
     assert current["submit_interval"] == (3, 3)
     assert current["answer_duration"] == (2, 8)
+
+
+def test_runtime_settings_state_expands_legacy_answer_duration_single_value() -> None:
+    state = RuntimeSettingsState()
+
+    current, changed = state.update(answer_duration=90)
+
+    assert changed is True
+    assert current["answer_duration"] == (72, 108)
+
+
+def test_runtime_settings_state_clamps_answer_duration_to_30_minutes() -> None:
+    state = RuntimeSettingsState()
+
+    current, changed = state.update(answer_duration=(1200, 9999))
+
+    assert changed is True
+    assert current["answer_duration"] == (1200, 1800)
 
 
 def test_runtime_settings_state_keeps_threads_when_locked() -> None:

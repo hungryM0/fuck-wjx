@@ -115,9 +115,10 @@ class RuntimeProxySyncMixin:
 
     def _current_proxy_required_minute_for_benefit(self) -> int:
         try:
+            answer_range = self.answer_card.getRange()
             return int(
                 get_proxy_minute_by_answer_seconds(
-                    self.answer_card.getValue(),
+                    answer_range[1],
                     survey_provider=self._current_survey_provider(),
                 )
             )
@@ -168,7 +169,7 @@ class RuntimeProxySyncMixin:
             payload={"source": source},
         )
 
-    def _on_time_settings_changed(self, _value: int):
+    def _on_time_settings_changed(self, _value: Any):
         self._evaluate_benefit_proxy_compatibility(show_tip=True)
         page = cast(Any, self)
         self.controller.set_runtime_ui_state(

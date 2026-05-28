@@ -167,7 +167,7 @@ class ConfigCodecTests:
         assert cfg.target == 1
         assert cfg.threads == 4
         assert cfg.submit_interval == (1, 3)
-        assert cfg.answer_duration == (0, 0)
+        assert cfg.answer_duration == (60, 120)
         assert cfg.random_ip_enabled is True
         assert cfg.proxy_source == "custom"
         assert cfg.random_ua_keys == ["pc_web"]
@@ -179,6 +179,19 @@ class ConfigCodecTests:
         assert cfg.ai_mode == "free"
         assert cfg.questions_info == []
         assert cfg.question_entries == []
+
+    def test_answer_duration_legacy_single_value_expands_to_20_percent_range(self) -> None:
+        assert normalize_runtime_config_payload({"answer_duration": 90}).answer_duration == (72, 108)
+        assert normalize_runtime_config_payload({"answer_duration": ["90"]}).answer_duration == (72, 108)
+        assert normalize_runtime_config_payload({}).answer_duration == (60, 120)
+        assert normalize_runtime_config_payload({"answer_duration": 9999}).answer_duration == (
+            1440,
+            1800,
+        )
+        assert normalize_runtime_config_payload({"answer_duration": [1200, 9999]}).answer_duration == (
+            1200,
+            1800,
+        )
 
     def test_select_user_agent_from_ratios_handles_empty_unknown_and_valid_devices(self, monkeypatch) -> None:
         assert _select_user_agent_from_ratios({"wechat": 0, "mobile": 0}) == (None, None)

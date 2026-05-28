@@ -75,8 +75,8 @@ class RuntimeConfigSyncMixin:
     def apply_config(self, cfg: RuntimeConfig):
         page = cast(Any, self)
         self.target_card.spinBox.setValue(max(1, cfg.target))
-        self.interval_card.setValue(self._range_start_value(cfg.submit_interval))
-        self.answer_card.setValue(self._range_start_value(cfg.answer_duration))
+        self.interval_card.setRange(cfg.submit_interval)
+        self.answer_card.setRange(cfg.answer_duration)
 
         self.random_ip_card.switchButton.blockSignals(True)
         self.random_ip_card.switchButton.setChecked(cfg.random_ip_enabled)
@@ -167,14 +167,13 @@ class RuntimeConfigSyncMixin:
             self.random_ip_card.switchButton.blockSignals(False)
             self.random_ip_card._sync_ip_enabled(bool(random_ip_enabled))
 
+        submit_interval = state.get("submit_interval")
+        if submit_interval is not None:
+            self._sync_range_card_from_state(self.interval_card, submit_interval)
+
         answer_duration = state.get("answer_duration")
-        if isinstance(answer_duration, (list, tuple)) and len(answer_duration) >= 2:
-            current_value = int(self.answer_card.getValue())
-            desired_value = self._range_start_value(answer_duration)
-            if current_value != desired_value:
-                self.answer_card.blockSignals(True)
-                self.answer_card.setValue(desired_value)
-                self.answer_card.blockSignals(False)
+        if answer_duration is not None:
+            self._sync_range_card_from_state(self.answer_card, answer_duration)
 
         proxy_source = state.get("proxy_source")
         if proxy_source is not None:
@@ -188,19 +187,34 @@ class RuntimeConfigSyncMixin:
 
     @staticmethod
     def _card_value_as_range(card: TimeRangeSettingCard) -> tuple[int, int]:
-        value = max(0, int(card.getValue()))
-        return value, value
+        return card.getRange()
 
     @staticmethod
-    def _range_start_value(raw_range) -> int:
+    def _range_value(raw_range) -> tuple[int, int]:
         if isinstance(raw_range, (list, tuple)):
-            if raw_range:
-                try:
-                    return max(0, int(raw_range[0]))
-                except Exception:
-                    pass
-            return 0
+            try:
+                low = max(0, int(raw_range[0] if len(raw_range) >= 1 else 0))
+                high = max(low, int(raw_range[1] if len(raw_range) >= 2 else low))
+                return low, high
+            except Exception:
+                return 0, 0
         try:
-            return max(0, int(cast(Any, raw_range)))
+            value = max(0, int(cast(Any, raw_range)))
+            return value, value
         except Exception:
-            return 0
+            return 0, 0
+
+    def _sync_range_card_from_state(
+        self,
+        card: TimeRangeSettingCard,
+        raw_range,
+    ) -> None:
+        current_value = card.getRange()
+        desired_value = self._range_value(raw_range)
+        if current_value == desired_value:
+            return
+        card.blockSignals(True)
+        try:
+            card.setRange(desired_value)
+        finally:
+            card.blockSignals(False)

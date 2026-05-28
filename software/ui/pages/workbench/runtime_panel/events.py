@@ -42,8 +42,8 @@ def bind_runtime_page_events(page: Any) -> None:
         payload_factory=lambda _index: {"source": page.selected_proxy_source()},
         forward_signal_args=False,
     )
-    page.interval_card.valueChanged.connect(page._on_time_settings_changed)
-    page.answer_card.valueChanged.connect(page._on_time_settings_changed)
+    page.interval_card.rangeChanged.connect(page._on_time_settings_changed)
+    page.answer_card.rangeChanged.connect(page._on_time_settings_changed)
     bind_logged_action(
         page.reliability_card.switchButton.checkedChanged,
         page._on_reliability_mode_toggled,

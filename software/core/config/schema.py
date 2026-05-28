@@ -22,7 +22,7 @@ class RuntimeConfig:
     target: int = 1
     threads: int = 1
     submit_interval: Tuple[int, int] = (0, 0)
-    answer_duration: Tuple[int, int] = (0, 0)
+    answer_duration: Tuple[int, int] = (60, 120)
     random_ip_enabled: bool = False
     proxy_source: str = "default"
     custom_proxy_api: str = ""
