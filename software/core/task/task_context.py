@@ -64,6 +64,7 @@ class ExecutionConfig:
 
     submit_interval_range_seconds: Tuple[int, int] = (0, 0)
     answer_duration_range_seconds: Tuple[int, int] = (0, 0)
+    answer_datetime_window_ms: Tuple[int, int] = (0, 0)
 
     random_proxy_ip_enabled: bool = False
     proxy_source: str = "default"

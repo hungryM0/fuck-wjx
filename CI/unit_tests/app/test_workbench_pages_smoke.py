@@ -34,6 +34,7 @@ class _FakeController(QObject):
             "random_ip_enabled": False,
             "proxy_source": "default",
             "answer_duration": (60, 120),
+            "answer_datetime_window": ("", ""),
         }
         self.runtime_updates: list[dict] = []
         self.parse_calls: list[str] = []
@@ -58,6 +59,7 @@ class _FakeController(QObject):
                 "random_ip_enabled": cfg.random_ip_enabled,
                 "proxy_source": cfg.proxy_source,
                 "answer_duration": cfg.answer_duration,
+                "answer_datetime_window": cfg.answer_datetime_window,
             }
         )
         if emit:
@@ -144,6 +146,7 @@ def test_runtime_page_builds_and_syncs_config_without_network(monkeypatch, qtbot
     assert page.thread_card.slider.slider.maximum() == HTTP_MAX_THREADS
     assert cfg.target == 7
     assert cfg.threads <= HTTP_MAX_THREADS
+    assert cfg.answer_datetime_window == ("", "")
     assert cfg.ai_system_prompt
 
 

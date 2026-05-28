@@ -704,6 +704,23 @@ def _sample_duration_seconds(config: ExecutionConfig) -> float:
     return 90.0
 
 
+def _sample_answer_start_time_ms(
+    config: ExecutionConfig,
+    *,
+    init_started_at_ms: int,
+    duration_seconds: float,
+) -> int:
+    window_start_ms, window_end_ms = getattr(config, "answer_datetime_window_ms", (0, 0))
+    if window_start_ms <= 0 or window_end_ms <= window_start_ms:
+        return int(init_started_at_ms)
+    duration_ms = max(1, int(round(float(duration_seconds or 0.0) * 1000)))
+    latest_start_ms = int(window_end_ms - duration_ms)
+    earliest_start_ms = int(window_start_ms)
+    if latest_start_ms <= earliest_start_ms:
+        return earliest_start_ms
+    return random.randint(earliest_start_ms, latest_start_ms)
+
+
 def _build_submit_body(
     *,
     short_url: str,
@@ -833,7 +850,11 @@ async def brush_credamo_http(
             raw_by_num=raw_by_num,
             actions=actions,
             config=config,
-            answer_started_at_ms=init_data.timestamp_ms,
+            answer_started_at_ms=_sample_answer_start_time_ms(
+                config,
+                init_started_at_ms=init_data.timestamp_ms,
+                duration_seconds=duration_seconds,
+            ),
             duration_seconds=duration_seconds,
         )
         await _save_answers(

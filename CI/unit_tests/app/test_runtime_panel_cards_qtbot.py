@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import software.ui.pages.workbench.runtime_panel.random_ip_card as random_ip_module
 from software.ui.pages.workbench.runtime_panel.cards import (
+    AnswerDateTimeWindowSettingCard,
     FluentIcon,
     RandomUASettingCard,
     ReliabilitySettingCard,
@@ -63,6 +64,26 @@ class TestRuntimePanelCardsQtBot:
         card.startPicker._onConfirmed(["2 分", "30 秒"])
 
         assert card.getRange() == (150, 150)
+
+    def test_answer_datetime_window_card_switches_provider_enabled_state(self, qtbot) -> None:
+        card = AnswerDateTimeWindowSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=300)
+        qtbot.addWidget(card)
+
+        card.set_provider("wjx")
+        assert card._input_container.isEnabled() is False
+
+        card.set_provider("credamo")
+        assert card._input_container.isEnabled() is True
+
+    def test_answer_datetime_window_card_keeps_duration_and_datetime_values(self, qtbot) -> None:
+        card = AnswerDateTimeWindowSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=300)
+        qtbot.addWidget(card)
+
+        card.setDurationRange((30, 90))
+        card.setDateTimeWindow(("2026-02-10 09:00:00", "2026-02-10 10:00:00"))
+
+        assert card.getDurationRange() == (30, 90)
+        assert card.getDateTimeWindow() == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
 
 
 class _FakeThread:

@@ -23,6 +23,7 @@ class RuntimeConfig:
     threads: int = 1
     submit_interval: Tuple[int, int] = (0, 0)
     answer_duration: Tuple[int, int] = (60, 120)
+    answer_datetime_window: Tuple[str, str] = ("", "")
     random_ip_enabled: bool = False
     proxy_source: str = "default"
     custom_proxy_api: str = ""

@@ -43,7 +43,8 @@ def bind_runtime_page_events(page: Any) -> None:
         forward_signal_args=False,
     )
     page.interval_card.rangeChanged.connect(page._on_time_settings_changed)
-    page.answer_card.rangeChanged.connect(page._on_time_settings_changed)
+    page.answer_card.durationChanged.connect(page._on_time_settings_changed)
+    page.answer_card.datetimeWindowChanged.connect(page._on_answer_datetime_window_changed)
     bind_logged_action(
         page.reliability_card.switchButton.checkedChanged,
         page._on_reliability_mode_toggled,

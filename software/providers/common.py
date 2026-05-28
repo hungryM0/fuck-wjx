@@ -82,6 +82,10 @@ def detect_survey_provider(url_value: str, default: str = SURVEY_PROVIDER_WJX) -
     return normalize_survey_provider(default)
 
 
+def supports_answer_datetime_window(provider: Any) -> bool:
+    return normalize_survey_provider(provider) == SURVEY_PROVIDER_CREDAMO
+
+
 def is_supported_survey_url(url_value: str) -> bool:
     return is_credamo_survey_url(url_value) or is_qq_survey_url(url_value) or is_wjx_domain(url_value)
 
@@ -142,6 +146,7 @@ __all__ = [
     "is_qq_survey_url",
     "is_credamo_survey_url",
     "detect_survey_provider",
+    "supports_answer_datetime_window",
     "is_supported_survey_url",
     "ensure_question_provider_fields",
     "ensure_questions_provider_fields",

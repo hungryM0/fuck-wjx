@@ -20,6 +20,7 @@ def test_runtime_settings_state_defaults() -> None:
             "proxy_source": "default",
             "submit_interval": (0, 0),
             "answer_duration": (60, 120),
+            "answer_datetime_window": ("", ""),
         },
         True,
     )
@@ -34,6 +35,7 @@ def test_runtime_settings_state_writes_synced_defaults_to_config() -> None:
         proxy_source="custom",
         submit_interval=(2, 4),
         answer_duration=(5, 6),
+        answer_datetime_window=("2026-02-10 09:00:00", "2026-02-10 10:00:00"),
     )
 
     state = RuntimeSettingsState()
@@ -48,6 +50,7 @@ def test_runtime_settings_state_writes_synced_defaults_to_config() -> None:
         "proxy_source": cfg.proxy_source,
         "submit_interval": cfg.submit_interval,
         "answer_duration": cfg.answer_duration,
+        "answer_datetime_window": cfg.answer_datetime_window,
     } == {
         "target": 1,
         "threads": 1,
@@ -56,6 +59,7 @@ def test_runtime_settings_state_writes_synced_defaults_to_config() -> None:
         "proxy_source": "default",
         "submit_interval": (0, 0),
         "answer_duration": (60, 120),
+        "answer_datetime_window": ("", ""),
     }
 
 
@@ -69,6 +73,7 @@ def test_runtime_settings_state_normalizes_updates() -> None:
         proxy_source="CUSTOM",
         submit_interval=(3, 1),
         answer_duration=[2, 8],
+        answer_datetime_window=("2026-02-10 09:00:00", "bad"),
     )
 
     assert changed is True
@@ -78,6 +83,7 @@ def test_runtime_settings_state_normalizes_updates() -> None:
     assert current["proxy_source"] == "custom"
     assert current["submit_interval"] == (3, 3)
     assert current["answer_duration"] == (2, 8)
+    assert current["answer_datetime_window"] == ("2026-02-10 09:00:00", "")
 
 
 def test_runtime_settings_state_expands_legacy_answer_duration_single_value() -> None:
@@ -135,6 +141,7 @@ def test_run_controller_writes_runtime_state_to_config(qapp) -> None:
         proxy_source="custom",
         submit_interval=(4, 2),
         answer_duration=(6, 9),
+        answer_datetime_window=("2026-02-10 09:00:00", "2026-02-10 10:00:00"),
     )
     cfg = RuntimeConfig()
 
@@ -146,6 +153,7 @@ def test_run_controller_writes_runtime_state_to_config(qapp) -> None:
     assert cfg.proxy_source == "custom"
     assert cfg.submit_interval == (4, 4)
     assert cfg.answer_duration == (6, 9)
+    assert cfg.answer_datetime_window == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
 
 
 def test_runtime_settings_state_writes_to_config() -> None:
@@ -158,6 +166,7 @@ def test_runtime_settings_state_writes_to_config() -> None:
         proxy_source="benefit",
         submit_interval=(5, 1),
         answer_duration=(8, 10),
+        answer_datetime_window=("2026-02-10 09:00:00", "2026-02-10 10:00:00"),
     )
     cfg = RuntimeConfig(url="https://example.test")
 
@@ -172,3 +181,4 @@ def test_runtime_settings_state_writes_to_config() -> None:
     assert cfg.proxy_source == "benefit"
     assert cfg.submit_interval == (5, 5)
     assert cfg.answer_duration == (8, 10)
+    assert cfg.answer_datetime_window == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")

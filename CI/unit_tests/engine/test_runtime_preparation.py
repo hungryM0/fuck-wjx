@@ -25,6 +25,7 @@ class RuntimePreparationTests:
         config.target = 5
         config.threads = 3
         config.answer_duration = (12, 20)
+        config.answer_datetime_window = ("", "")
         config.submit_interval = (1, 2)
         config.random_ip_enabled = True
         config.random_ua_enabled = True
@@ -108,8 +109,50 @@ class RuntimePreparationTests:
             'qq:p1:q1': artifacts.execution_config_template.questions_metadata[1]
         }
         assert artifacts.execution_config_template.answer_rules == [{'num': 1, 'equals': [1]}]
+        assert artifacts.execution_config_template.answer_datetime_window_ms == (0, 0)
         assert artifacts.execution_config_template.proxy_ip_pool == []
         sync_proxy_duration.assert_called_once_with((12, 20), survey_provider='qq')
+
+    def test_prepare_execution_artifacts_rejects_missing_credamo_answer_datetime_window(self) -> None:
+        config = self._build_config()
+        config.url = "https://www.credamo.com/s/A73QR3ano"
+        config.survey_provider = "credamo"
+        config.question_entries[0].survey_provider = "credamo"
+        config.questions_info[0]["provider"] = "credamo"
+        with pytest.raises(RuntimePreparationError, match="未配完整"):
+            prepare_execution_artifacts(config)
+
+    def test_prepare_execution_artifacts_rejects_invalid_credamo_answer_datetime_window(self) -> None:
+        config = self._build_config()
+        config.url = "https://www.credamo.com/s/A73QR3ano"
+        config.survey_provider = "credamo"
+        config.question_entries[0].survey_provider = "credamo"
+        config.questions_info[0]["provider"] = "credamo"
+        config.answer_datetime_window = ("2026-02-10 10:00:00", "2026-02-10 09:00:00")
+        with pytest.raises(RuntimePreparationError, match="必须晚于"):
+            prepare_execution_artifacts(config)
+
+    def test_prepare_execution_artifacts_rejects_narrow_credamo_answer_datetime_window(self) -> None:
+        config = self._build_config()
+        config.url = "https://www.credamo.com/s/A73QR3ano"
+        config.survey_provider = "credamo"
+        config.question_entries[0].survey_provider = "credamo"
+        config.questions_info[0]["provider"] = "credamo"
+        config.answer_datetime_window = ("2026-02-10 09:00:00", "2026-02-10 09:00:10")
+        with pytest.raises(RuntimePreparationError, match="太窄"):
+            prepare_execution_artifacts(config)
+
+    def test_prepare_execution_artifacts_builds_credamo_answer_datetime_window_ms(self) -> None:
+        config = self._build_config()
+        config.url = "https://www.credamo.com/s/A73QR3ano"
+        config.survey_provider = "credamo"
+        config.question_entries[0].survey_provider = "credamo"
+        config.questions_info[0]["provider"] = "credamo"
+        config.answer_datetime_window = ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
+        with patch('software.ui.controller.run_controller_parts.runtime_preparation.build_enabled_reverse_fill_spec', return_value=None), patch('software.ui.controller.run_controller_parts.runtime_preparation.configure_probabilities', return_value=None):
+            artifacts = prepare_execution_artifacts(config)
+        start_ms, end_ms = artifacts.execution_config_template.answer_datetime_window_ms
+        assert end_ms > start_ms > 0
 
     def test_prepare_execution_artifacts_uses_fallback_title_when_config_title_blank(self) -> None:
         config = self._build_config()

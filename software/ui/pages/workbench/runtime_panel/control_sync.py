@@ -9,6 +9,7 @@ from PySide6.QtCore import QPoint, QTimer
 
 from software.logging.action_logger import log_action
 from software.logging.log_utils import log_suppressed_exception
+from software.providers.common import normalize_survey_provider
 
 
 class RuntimeControlSyncMixin:
@@ -157,3 +158,14 @@ class RuntimeControlSyncMixin:
             self.random_ip_card.setLoading(bool(loading), str(message or ""))
         except Exception as exc:
             log_suppressed_exception("_apply_random_ip_loading", exc, level=logging.WARNING)
+
+    def _sync_answer_datetime_window_card(self) -> None:
+        try:
+            provider = normalize_survey_provider(
+                getattr(self.controller, "survey_provider", "")
+                or self.controller.get_runtime_ui_state().get("survey_provider")
+                or "wjx"
+            )
+            self.answer_card.set_provider(provider)
+        except Exception as exc:
+            log_suppressed_exception("_sync_answer_datetime_window_card", exc, level=logging.WARNING)

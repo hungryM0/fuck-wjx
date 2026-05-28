@@ -8,6 +8,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from software.core.reverse_fill import REVERSE_FILL_FORMAT_AUTO, REVERSE_FILL_FORMAT_WJX_SCORE, REVERSE_FILL_FORMAT_WJX_SEQUENCE, REVERSE_FILL_FORMAT_WJX_TEXT
+from software.core.config.answer_datetime_window import normalize_answer_datetime_window
 from software.core.config.schema import RuntimeConfig
 from software.core.psychometrics.psychometric import normalize_target_alpha
 from software.core.questions.consistency import normalize_rule_dict, sanitize_answer_rules
@@ -27,8 +28,8 @@ from software.providers.contracts import (
 from software.logging.log_utils import log_suppressed_exception
 from software.app.config import USER_AGENT_PRESETS
 
-CURRENT_CONFIG_SCHEMA_VERSION = 5
-_SUPPORTED_LEGACY_CONFIG_SCHEMA_VERSIONS = {3, 4}
+CURRENT_CONFIG_SCHEMA_VERSION = 6
+_SUPPORTED_LEGACY_CONFIG_SCHEMA_VERSIONS = {3, 4, 5}
 _LEGACY_CONFIG_KEYS = ("random_proxy_api", "ai_enabled")
 _TEXT_RANDOM_MODES = {"none", "name", "mobile", "id_card", "integer"}
 _REVERSE_FILL_FORMATS = {
@@ -233,6 +234,15 @@ def _migrate_config_payload_v4_to_v5(payload: Dict[str, Any]) -> Dict[str, Any]:
         migrated["reverse_fill_threads"] = max(1, int(migrated.get("reverse_fill_threads") or migrated.get("threads") or 1))
     except Exception:
         migrated["reverse_fill_threads"] = 1
+    migrated["config_schema_version"] = 5
+    return migrated
+
+
+def _migrate_config_payload_v5_to_v6(payload: Dict[str, Any]) -> Dict[str, Any]:
+    migrated = dict(payload)
+    migrated["answer_datetime_window"] = normalize_answer_datetime_window(
+        migrated.get("answer_datetime_window")
+    )
     migrated["config_schema_version"] = CURRENT_CONFIG_SCHEMA_VERSION
     return migrated
 
@@ -407,6 +417,9 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
     config.threads = _as_int(raw.get("threads"), 1)
     config.submit_interval = _tuple_pair(raw.get("submit_interval"))
     config.answer_duration = _normalize_answer_duration_range(raw.get("answer_duration"))
+    config.answer_datetime_window = normalize_answer_datetime_window(
+        raw.get("answer_datetime_window")
+    )
     custom_proxy_api = str(raw.get("custom_proxy_api") or "").strip()
     proxy_source = str(raw.get("proxy_source") or "default").strip().lower()
     if proxy_source not in ("default", "benefit", "custom"):
@@ -532,9 +545,13 @@ def _ensure_supported_config_payload(payload: Dict[str, Any], *, config_path: st
             config_path,
         )
         if schema_version == 3:
-            return _migrate_config_payload_v4_to_v5(_migrate_config_payload_v3_to_v4(payload))
+            return _migrate_config_payload_v5_to_v6(
+                _migrate_config_payload_v4_to_v5(_migrate_config_payload_v3_to_v4(payload))
+            )
         if schema_version == 4:
-            return _migrate_config_payload_v4_to_v5(payload)
+            return _migrate_config_payload_v5_to_v6(_migrate_config_payload_v4_to_v5(payload))
+        if schema_version == 5:
+            return _migrate_config_payload_v5_to_v6(payload)
     raise ValueError(
         f"配置文件版本不受支持（当前仅支持 schema v{CURRENT_CONFIG_SCHEMA_VERSION}，实际为 v{schema_version}）：{config_path}"
     )

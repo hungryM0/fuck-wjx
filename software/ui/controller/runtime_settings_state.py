@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from software.core.config.answer_datetime_window import normalize_answer_datetime_window
 from software.core.config.schema import RuntimeConfig
 
 DEFAULT_ANSWER_DURATION_RANGE_SECONDS = (60, 120)
@@ -21,6 +22,7 @@ class RuntimeSettingsState:
         "proxy_source": "default",
         "submit_interval": (0, 0),
         "answer_duration": DEFAULT_ANSWER_DURATION_RANGE_SECONDS,
+        "answer_datetime_window": ("", ""),
     }
 
     def __init__(self) -> None:
@@ -40,6 +42,8 @@ class RuntimeSettingsState:
             low = max(0, int(raw[0] if len(raw) >= 1 else 0))
             high = max(low, int(raw[1] if len(raw) >= 2 else low))
             return (low, high)
+        if key == "answer_datetime_window":
+            return normalize_answer_datetime_window(value)
         if key == "answer_duration":
             try:
                 if value in (None, "", []):
@@ -112,6 +116,7 @@ class RuntimeSettingsState:
             "proxy_source": getattr(config, "proxy_source", "default"),
             "submit_interval": getattr(config, "submit_interval", (0, 0)),
             "answer_duration": getattr(config, "answer_duration", (0, 0)),
+            "answer_datetime_window": getattr(config, "answer_datetime_window", ("", "")),
         }
         if not (preserve_threads or lock_threads):
             updates["threads"] = getattr(config, "threads", 1)
@@ -131,5 +136,9 @@ class RuntimeSettingsState:
         config.answer_duration = self.normalize_value(
             "answer_duration",
             state["answer_duration"],
+        )
+        config.answer_datetime_window = self.normalize_value(
+            "answer_datetime_window",
+            state["answer_datetime_window"],
         )
         return config

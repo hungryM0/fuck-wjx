@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple, cast
 
 from software.app.config import HTTP_MAX_THREADS
+from software.core.config.answer_datetime_window import (
+    answer_datetime_window_to_epoch_ms,
+    normalize_answer_datetime_window,
+    parse_answer_datetime_string,
+)
 from software.core.psychometrics.psychometric import normalize_target_alpha
 from software.core.questions.config import (
     configure_probabilities,
@@ -26,6 +31,7 @@ from software.providers.common import (
     detect_survey_provider,
     make_provider_question_key,
     normalize_survey_provider,
+    supports_answer_datetime_window,
 )
 from software.providers.contracts import SurveyQuestionMeta
 from software.providers.errors import (
@@ -87,6 +93,28 @@ def _resolve_survey_title(config: RuntimeConfig, fallback_title: str) -> str:
 def _resolve_proxy_answer_duration(config: RuntimeConfig) -> Tuple[int, int]:
     raw = getattr(config, "answer_duration", None) or (0, 0)
     return (int(raw[0]), int(raw[1]))
+
+
+def _resolve_answer_datetime_window(config: RuntimeConfig) -> tuple[str, str]:
+    return normalize_answer_datetime_window(getattr(config, "answer_datetime_window", ("", "")))
+
+
+def _validate_answer_datetime_window(config: RuntimeConfig, survey_provider: str) -> None:
+    if not supports_answer_datetime_window(survey_provider):
+        return
+    start_text, end_text = _resolve_answer_datetime_window(config)
+    if not start_text or not end_text:
+        raise RuntimePreparationError("见数作答时间窗未配完整，请先设置开始和结束日期时间")
+    start_dt = parse_answer_datetime_string(start_text)
+    end_dt = parse_answer_datetime_string(end_text)
+    if start_dt is None or end_dt is None:
+        raise RuntimePreparationError("见数作答时间窗格式无效，请重新选择日期时间")
+    if end_dt <= start_dt:
+        raise RuntimePreparationError("见数结束日期时间必须晚于开始日期时间")
+    max_duration_seconds = max(0, int((getattr(config, "answer_duration", (0, 0))[1])))
+    window_seconds = int((end_dt - start_dt).total_seconds())
+    if window_seconds < max_duration_seconds:
+        raise RuntimePreparationError("见数作答时间窗太窄，容不下当前最长作答时长")
 
 
 def _verify_wjx_survey_is_answerable(config: RuntimeConfig, survey_provider: str) -> None:
@@ -186,6 +214,9 @@ def _build_execution_config_template(
             int(getattr(config, "answer_duration", (0, 0))[0]),
             int(getattr(config, "answer_duration", (0, 0))[1]),
         ),
+        answer_datetime_window_ms=answer_datetime_window_to_epoch_ms(
+            getattr(config, "answer_datetime_window", ("", ""))
+        ),
         random_proxy_ip_enabled=bool(getattr(config, "random_ip_enabled", False)),
         proxy_source=str(getattr(config, "proxy_source", "default") or "default").strip().lower(),
         proxy_ip_pool=[],
@@ -224,6 +255,7 @@ def prepare_execution_artifacts(
         )
 
     survey_provider = _resolve_survey_provider(config)
+    _validate_answer_datetime_window(config, survey_provider)
     try:
         _verify_wjx_survey_is_answerable(config, survey_provider)
     except (SurveyStoppedError, SurveyEnterpriseUnavailableError) as exc:

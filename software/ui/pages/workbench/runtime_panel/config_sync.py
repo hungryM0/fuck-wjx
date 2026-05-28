@@ -7,7 +7,10 @@ from typing import Any, cast
 
 from software.core.config.schema import RuntimeConfig
 from software.logging.log_utils import log_suppressed_exception
-from software.ui.pages.workbench.runtime_panel.cards import TimeRangeSettingCard
+from software.ui.pages.workbench.runtime_panel.cards import (
+    AnswerDateTimeWindowSettingCard,
+    TimeRangeSettingCard,
+)
 from software.ui.pages.workbench.runtime_panel.proxy_source import (
     PROXY_SOURCE_CUSTOM,
     PROXY_SOURCE_DEFAULT,
@@ -20,7 +23,7 @@ class RuntimeConfigSyncMixin:
     target_card: Any
     thread_card: Any
     interval_card: TimeRangeSettingCard
-    answer_card: TimeRangeSettingCard
+    answer_card: AnswerDateTimeWindowSettingCard
     random_ip_card: Any
     random_ua_card: Any
     reliability_card: Any
@@ -38,7 +41,8 @@ class RuntimeConfigSyncMixin:
             ),
         )
         cfg.submit_interval = self._card_value_as_range(self.interval_card)
-        cfg.answer_duration = self._card_value_as_range(self.answer_card)
+        cfg.answer_duration = self.answer_card.getDurationRange()
+        cfg.answer_datetime_window = self.answer_card.getDateTimeWindow()
         cfg.random_ip_enabled = self.random_ip_card.switchButton.isChecked()
         cfg.random_ua_enabled = self.random_ua_card.switchButton.isChecked()
         cfg.random_ua_ratios = (
@@ -76,7 +80,9 @@ class RuntimeConfigSyncMixin:
         page = cast(Any, self)
         self.target_card.spinBox.setValue(max(1, cfg.target))
         self.interval_card.setRange(cfg.submit_interval)
-        self.answer_card.setRange(cfg.answer_duration)
+        self.answer_card.setDurationRange(cfg.answer_duration)
+        self.answer_card.setDateTimeWindow(getattr(cfg, "answer_datetime_window", ("", "")))
+        page._sync_answer_datetime_window_card()
 
         self.random_ip_card.switchButton.blockSignals(True)
         self.random_ip_card.switchButton.setChecked(cfg.random_ip_enabled)
@@ -173,7 +179,11 @@ class RuntimeConfigSyncMixin:
 
         answer_duration = state.get("answer_duration")
         if answer_duration is not None:
-            self._sync_range_card_from_state(self.answer_card, answer_duration)
+            self._sync_duration_card_from_state(self.answer_card, answer_duration)
+
+        answer_datetime_window = state.get("answer_datetime_window")
+        if answer_datetime_window is not None:
+            self._sync_datetime_window_card_from_state(self.answer_card, answer_datetime_window)
 
         proxy_source = state.get("proxy_source")
         if proxy_source is not None:
@@ -184,6 +194,7 @@ class RuntimeConfigSyncMixin:
                     emit_state=False,
                     show_tip=False,
                 )
+        page._sync_answer_datetime_window_card()
 
     @staticmethod
     def _card_value_as_range(card: TimeRangeSettingCard) -> tuple[int, int]:
@@ -216,5 +227,34 @@ class RuntimeConfigSyncMixin:
         card.blockSignals(True)
         try:
             card.setRange(desired_value)
+        finally:
+            card.blockSignals(False)
+
+    def _sync_duration_card_from_state(
+        self,
+        card: AnswerDateTimeWindowSettingCard,
+        raw_range,
+    ) -> None:
+        current_value = card.getDurationRange()
+        desired_value = self._range_value(raw_range)
+        if current_value == desired_value:
+            return
+        card.blockSignals(True)
+        try:
+            card.setDurationRange(desired_value)
+        finally:
+            card.blockSignals(False)
+
+    def _sync_datetime_window_card_from_state(
+        self,
+        card: AnswerDateTimeWindowSettingCard,
+        raw_window,
+    ) -> None:
+        desired_value = tuple(raw_window) if isinstance(raw_window, (list, tuple)) else ("", "")
+        if card.getDateTimeWindow() == desired_value:
+            return
+        card.blockSignals(True)
+        try:
+            card.setDateTimeWindow(desired_value)
         finally:
             card.blockSignals(False)

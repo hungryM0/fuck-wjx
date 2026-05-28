@@ -1118,6 +1118,34 @@ def test_credamo_api_payload_classifier() -> None:
     assert credamo_http.classify_credamo_api_payload({"success": False}) == credamo_http.CredamoSubmitResult.FAILED
 
 
+def test_credamo_samples_answer_start_time_inside_datetime_window(monkeypatch) -> None:
+    config = ExecutionConfig(
+        survey_provider="credamo",
+        answer_datetime_window_ms=(1710000000000, 1710003600000),
+    )
+    monkeypatch.setattr(credamo_http.random, "randint", lambda start, end: start + 1234)
+
+    started_at = credamo_http._sample_answer_start_time_ms(
+        config,
+        init_started_at_ms=1700000000000,
+        duration_seconds=70.0,
+    )
+
+    assert started_at == 1710000001234
+
+
+def test_credamo_datetime_window_falls_back_to_init_time_when_unconfigured() -> None:
+    config = ExecutionConfig(survey_provider="credamo")
+
+    started_at = credamo_http._sample_answer_start_time_ms(
+        config,
+        init_started_at_ms=1700000000000,
+        duration_seconds=70.0,
+    )
+
+    assert started_at == 1700000000000
+
+
 def _async_result(value):
     async def _runner(*_args, **_kwargs):
         return value

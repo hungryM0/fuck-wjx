@@ -18,6 +18,7 @@ from software.ui.pages.workbench.runtime_panel.ui_builder import build_runtime_p
 if TYPE_CHECKING:
     from software.ui.pages.workbench.runtime_panel.ai import RuntimeAISection
     from software.ui.pages.workbench.runtime_panel.cards import (
+        AnswerDateTimeWindowSettingCard,
         RandomUASettingCard,
         ReliabilitySettingCard,
         TimeRangeSettingCard,
@@ -47,7 +48,7 @@ class RuntimePage(
     random_ua_card: "RandomUASettingCard"
     reliability_card: "ReliabilitySettingCard"
     interval_card: "TimeRangeSettingCard"
-    answer_card: "TimeRangeSettingCard"
+    answer_card: "AnswerDateTimeWindowSettingCard"
     ai_section: "RuntimeAISection"
 
     def __init__(self, controller: RunController, parent=None):
@@ -65,6 +66,7 @@ class RuntimePage(
         self.controller.runStateChanged.connect(self.on_run_state_changed)
         self.controller.randomIpLoadingChanged.connect(self._apply_random_ip_loading)
         self._sync_random_ua(self.random_ua_card.isChecked())
+        self._sync_answer_datetime_window_card()
         self._apply_thread_limit()
         self.controller.set_runtime_ui_state(
             emit=False,
@@ -73,6 +75,7 @@ class RuntimePage(
             random_ip_enabled=self.random_ip_card.switchButton.isChecked(),
             proxy_source=self.selected_proxy_source(),
             submit_interval=self._card_value_as_range(self.interval_card),
-            answer_duration=self._card_value_as_range(self.answer_card),
+            answer_duration=self.answer_card.getDurationRange(),
+            answer_datetime_window=self.answer_card.getDateTimeWindow(),
         )
         self.on_run_state_changed(self._thread_edit_locked())

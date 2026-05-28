@@ -174,5 +174,10 @@ class RuntimeProxySyncMixin:
         page = cast(Any, self)
         self.controller.set_runtime_ui_state(
             submit_interval=page._card_value_as_range(self.interval_card),
-            answer_duration=page._card_value_as_range(self.answer_card),
+            answer_duration=self.answer_card.getDurationRange(),
+        )
+
+    def _on_answer_datetime_window_changed(self, _value: Any):
+        self.controller.set_runtime_ui_state(
+            answer_datetime_window=self.answer_card.getDateTimeWindow()
         )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QTime, Signal
+from PySide6.QtCore import QDate, QTime, Signal
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -17,16 +17,23 @@ from qfluentwidgets import (
     OptionsSettingCard,
     OptionsValidator,
     SwitchButton,
+    TimePicker,
+    ZhDatePicker,
 )
 from qfluentwidgets.components.date_time.picker_base import DigitFormatter, PickerColumnFormatter
 from qfluentwidgets.components.date_time.time_picker import TimePickerBase
 
+from software.core.config.answer_datetime_window import (
+    format_answer_datetime_string,
+    parse_answer_datetime_string,
+)
 from software.core.psychometrics.psychometric import (
     DEFAULT_TARGET_ALPHA,
     MAX_TARGET_ALPHA,
     MIN_TARGET_ALPHA,
     normalize_target_alpha,
 )
+from software.providers.common import supports_answer_datetime_window
 from software.ui.helpers.fluent_tooltip import install_tooltip_filter
 from software.ui.widgets.setting_cards import set_widget_enabled_with_opacity
 
@@ -413,3 +420,265 @@ class TimeRangeSettingCard(OptionsSettingCard):
         if normalized != previous:
             self.valueChanged.emit(normalized[0])
             self.rangeChanged.emit(normalized)
+
+
+class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
+    """见数专用的日期时间窗 + 作答时长组合卡。"""
+
+    durationChanged = Signal(tuple)
+    datetimeWindowChanged = Signal(tuple)
+
+    def __init__(self, icon, title, content, max_seconds: Optional[int] = 30 * 60, parent=None):
+        self.max_seconds = None if max_seconds is None else max(0, int(max_seconds))
+        self._duration_range = (0, 0)
+        self._datetime_window = ("", "")
+        self._enabled_for_provider = False
+        self._base_content = str(content or "")
+        config_item = OptionsConfigItem(
+            "RuntimeAnswerDateTimeWindow",
+            str(title or "AnswerDateTimeWindow"),
+            "custom",
+            OptionsValidator(["custom"]),
+        )
+        super().__init__(config_item, icon, title, content, texts=["自定义"], parent=parent)
+
+        self.setExpand(True)
+        self.choiceLabel.hide()
+        self.choiceLabel.setFixedWidth(0)
+        for button in self.buttonGroup.buttons():
+            button.hide()
+        self.viewLayout.setSpacing(12)
+        self.viewLayout.setContentsMargins(48, 12, 48, 16)
+
+        self._input_container = QWidget(self.view)
+        input_layout = QVBoxLayout(self._input_container)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(10)
+
+        self.startDatePicker = ZhDatePicker(self._input_container)
+        self.startTimePicker = TimePicker(self._input_container, showSeconds=True)
+        self.endDatePicker = ZhDatePicker(self._input_container)
+        self.endTimePicker = TimePicker(self._input_container, showSeconds=True)
+
+        for picker in (
+            self.startDatePicker,
+            self.endDatePicker,
+            self.startTimePicker,
+            self.endTimePicker,
+        ):
+            picker.setFixedWidth(160)
+
+        self._picker_max_seconds = 86399 if self.max_seconds is None else self.max_seconds
+        self.startDurationPicker = DurationTimePicker(
+            self._input_container,
+            max_seconds=self._picker_max_seconds,
+        )
+        self.endDurationPicker = DurationTimePicker(
+            self._input_container,
+            max_seconds=self._picker_max_seconds,
+        )
+        for picker in (self.startDurationPicker, self.endDurationPicker):
+            picker.setFixedWidth(240)
+            picker.setDurationSeconds(0)
+            install_tooltip_filter(picker)
+            picker.timeChanged.connect(self._on_duration_changed)
+
+        self.inputEdit = self.startDatePicker
+        self._start_row = self._build_datetime_row(
+            "开始时间",
+            self.startDatePicker,
+            self.startTimePicker,
+        )
+        self._end_row = self._build_datetime_row(
+            "结束时间",
+            self.endDatePicker,
+            self.endTimePicker,
+        )
+        self._min_duration_row = self._build_duration_row("最短时长", self.startDurationPicker)
+        self._max_duration_row = self._build_duration_row("最长时长", self.endDurationPicker)
+        input_layout.addLayout(self._start_row)
+        input_layout.addLayout(self._end_row)
+        input_layout.addLayout(self._min_duration_row)
+        input_layout.addLayout(self._max_duration_row)
+        self.viewLayout.addWidget(self._input_container)
+        self._adjustViewSize()
+
+        self._date_time_controls = (
+            self.startDatePicker,
+            self.startTimePicker,
+            self.endDatePicker,
+            self.endTimePicker,
+        )
+        for control in self._date_time_controls:
+            control.dateChanged.connect(self._on_datetime_window_changed) if isinstance(
+                control, ZhDatePicker
+            ) else control.timeChanged.connect(self._on_datetime_window_changed)
+
+        self._clear_datetime_window()
+        self.set_provider("wjx")
+
+    def _build_datetime_row(self, label_text: str, date_picker: ZhDatePicker, time_picker: TimePicker):
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        label = BodyLabel(label_text, self._input_container)
+        label.setFixedWidth(72)
+        label.setStyleSheet("color: #606060;")
+        row.addWidget(label)
+        row.addStretch(1)
+        row.addWidget(date_picker)
+        row.addWidget(time_picker)
+        return row
+
+    def _build_duration_row(self, label_text: str, picker: DurationTimePicker):
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        label = BodyLabel(label_text, self._input_container)
+        label.setFixedWidth(72)
+        label.setStyleSheet("color: #606060;")
+        row.addWidget(label)
+        row.addStretch(1)
+        row.addWidget(picker)
+        return row
+
+    def _clear_datetime_window(self) -> None:
+        self._datetime_window = ("", "")
+        self.startDatePicker.blockSignals(True)
+        self.startTimePicker.blockSignals(True)
+        self.endDatePicker.blockSignals(True)
+        self.endTimePicker.blockSignals(True)
+        try:
+            self.startDatePicker.setProperty("_has_value", False)
+            self.endDatePicker.setProperty("_has_value", False)
+            self.startTimePicker.setProperty("_has_value", False)
+            self.endTimePicker.setProperty("_has_value", False)
+        finally:
+            self.startDatePicker.blockSignals(False)
+            self.startTimePicker.blockSignals(False)
+            self.endDatePicker.blockSignals(False)
+            self.endTimePicker.blockSignals(False)
+
+    def _compose_datetime_window(self) -> tuple[str, str]:
+        if not all(bool(control.property("_has_value")) for control in self._date_time_controls):
+            return "", ""
+        start_dt = parse_answer_datetime_string(
+            f"{self.startDatePicker.getDate().toString('yyyy-MM-dd')} "
+            f"{self.startTimePicker.getTime().toString('HH:mm:ss')}"
+        )
+        end_dt = parse_answer_datetime_string(
+            f"{self.endDatePicker.getDate().toString('yyyy-MM-dd')} "
+            f"{self.endTimePicker.getTime().toString('HH:mm:ss')}"
+        )
+        return (
+            format_answer_datetime_string(start_dt),
+            format_answer_datetime_string(end_dt),
+        )
+
+    def _on_datetime_window_changed(self, _value):
+        sender = self.sender()
+        if sender is not None:
+            sender.setProperty("_has_value", True)
+        normalized = self._compose_datetime_window()
+        if normalized != self._datetime_window:
+            self._datetime_window = normalized
+            self.datetimeWindowChanged.emit(normalized)
+
+    def _normalize_duration_range(self, start: int, end: int) -> tuple[int, int]:
+        low = max(0, min(int(start or 0), self._picker_max_seconds))
+        high = max(low, min(int(end or 0), self._picker_max_seconds))
+        return low, high
+
+    def _on_duration_changed(self, _time: QTime):
+        normalized = self._normalize_duration_range(
+            self.startDurationPicker.getDurationSeconds(),
+            self.endDurationPicker.getDurationSeconds(),
+        )
+        if normalized != (
+            self.startDurationPicker.getDurationSeconds(),
+            self.endDurationPicker.getDurationSeconds(),
+        ):
+            self.setDurationRange(normalized)
+            return
+        if normalized != self._duration_range:
+            self._duration_range = normalized
+            self.durationChanged.emit(normalized)
+
+    def getDurationRange(self) -> tuple[int, int]:
+        return self._duration_range
+
+    def setDurationRange(self, value_range) -> None:
+        if isinstance(value_range, (list, tuple)):
+            start = value_range[0] if len(value_range) >= 1 else 0
+            end = value_range[1] if len(value_range) >= 2 else start
+        else:
+            start = end = value_range
+        normalized = self._normalize_duration_range(start, end)
+        previous = self._duration_range
+        self._duration_range = normalized
+        self.startDurationPicker.blockSignals(True)
+        self.endDurationPicker.blockSignals(True)
+        try:
+            self.startDurationPicker.setDurationSeconds(normalized[0])
+            self.endDurationPicker.setDurationSeconds(normalized[1])
+        finally:
+            self.startDurationPicker.blockSignals(False)
+            self.endDurationPicker.blockSignals(False)
+        if normalized != previous:
+            self.durationChanged.emit(normalized)
+
+    def getDateTimeWindow(self) -> tuple[str, str]:
+        return self._datetime_window
+
+    def setDateTimeWindow(self, window: tuple[str, str]) -> None:
+        start_text, end_text = window
+        start_dt = parse_answer_datetime_string(start_text)
+        end_dt = parse_answer_datetime_string(end_text)
+        previous = self._datetime_window
+        self.startDatePicker.blockSignals(True)
+        self.startTimePicker.blockSignals(True)
+        self.endDatePicker.blockSignals(True)
+        self.endTimePicker.blockSignals(True)
+        try:
+            if start_dt is not None:
+                self.startDatePicker.setDate(QDate(start_dt.year, start_dt.month, start_dt.day))
+                self.startTimePicker.setTime(QTime(start_dt.hour, start_dt.minute, start_dt.second))
+                self.startDatePicker.setProperty("_has_value", True)
+                self.startTimePicker.setProperty("_has_value", True)
+            else:
+                self.startDatePicker.setProperty("_has_value", False)
+                self.startTimePicker.setProperty("_has_value", False)
+            if end_dt is not None:
+                self.endDatePicker.setDate(QDate(end_dt.year, end_dt.month, end_dt.day))
+                self.endTimePicker.setTime(QTime(end_dt.hour, end_dt.minute, end_dt.second))
+                self.endDatePicker.setProperty("_has_value", True)
+                self.endTimePicker.setProperty("_has_value", True)
+            else:
+                self.endDatePicker.setProperty("_has_value", False)
+                self.endTimePicker.setProperty("_has_value", False)
+        finally:
+            self.startDatePicker.blockSignals(False)
+            self.startTimePicker.blockSignals(False)
+            self.endDatePicker.blockSignals(False)
+            self.endTimePicker.blockSignals(False)
+        self._datetime_window = (
+            format_answer_datetime_string(start_dt),
+            format_answer_datetime_string(end_dt),
+        )
+        if self._datetime_window != previous:
+            self.datetimeWindowChanged.emit(self._datetime_window)
+
+    def set_provider(self, provider: str) -> None:
+        enabled = supports_answer_datetime_window(provider)
+        self._enabled_for_provider = enabled
+        set_widget_enabled_with_opacity(self._input_container, enabled)
+        if enabled:
+            self._set_card_content(self._base_content)
+            return
+        self._set_card_content(f"{self._base_content}（仅见数可用）")
+
+    def _set_card_content(self, content: str) -> None:
+        label = getattr(self, "contentLabel", None)
+        if label is not None:
+            label.setText(content)
+            label.setVisible(bool(content))

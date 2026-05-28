@@ -30,6 +30,15 @@ class ConfigCodecTests:
         assert restored.reverse_fill_start_row == 3
         assert restored.reverse_fill_threads == 4
 
+    def test_runtime_config_roundtrip_keeps_answer_datetime_window(self) -> None:
+        config = RuntimeConfig(
+            answer_datetime_window=("2026-02-10 09:00:00", "2026-02-10 10:00:00")
+        )
+        payload = serialize_runtime_config(config)
+        restored = deserialize_runtime_config(payload)
+        assert payload["answer_datetime_window"] == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
+        assert restored.answer_datetime_window == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
+
     def test_legacy_v4_payload_is_upgraded_to_v5_with_reverse_fill_defaults(self) -> None:
         upgraded = _ensure_supported_config_payload({'config_schema_version': 4, 'reverse_fill_enabled': True, 'reverse_fill_source_path': 'D:/legacy.xlsx', 'reverse_fill_format': 'unknown', 'reverse_fill_start_row': 0, 'threads': 6}, config_path='legacy.json')
         assert upgraded['config_schema_version'] == CURRENT_CONFIG_SCHEMA_VERSION
@@ -38,6 +47,7 @@ class ConfigCodecTests:
         assert upgraded['reverse_fill_format'] == 'auto'
         assert upgraded['reverse_fill_start_row'] == 1
         assert upgraded['reverse_fill_threads'] == 6
+        assert upgraded["answer_datetime_window"] == ("", "")
 
     def test_runtime_config_roundtrip_keeps_questions_info_provider_metadata(self) -> None:
         config = RuntimeConfig(survey_provider='qq', questions_info=[SurveyQuestionMeta(num=3, title='联系方式', type_code='1', provider='qq', provider_question_id='question-3', provider_page_id='page-2', provider_type='text', option_texts=['姓名', '电话'], required=True, logic_parse_status='unknown', question_media=[{'kind': 'image', 'scope': 'title', 'index': None, 'source_url': 'https://example.com/q3.png', 'label': '题干图'}])])
@@ -91,6 +101,7 @@ class ConfigCodecTests:
         assert upgraded["dimension_groups"] == ["体验", "价格"]
         assert upgraded["reverse_fill_start_row"] == 1
         assert upgraded["reverse_fill_threads"] == 1
+        assert upgraded["answer_datetime_window"] == ("", "")
 
         with pytest.raises(ValueError, match="已移除的旧字段"):
             _ensure_supported_config_payload({"random_proxy_api": "old"}, config_path="bad.json")
@@ -149,6 +160,7 @@ class ConfigCodecTests:
                 "threads": "4",
                 "submit_interval": ["1", "3"],
                 "answer_duration": ["bad"],
+                "answer_datetime_window": ["2026-02-10 09:00:00", "bad"],
                 "random_ip_enabled": "yes",
                 "proxy_source": "bad",
                 "custom_proxy_api": "https://proxy.example",
@@ -168,6 +180,7 @@ class ConfigCodecTests:
         assert cfg.threads == 4
         assert cfg.submit_interval == (1, 3)
         assert cfg.answer_duration == (60, 120)
+        assert cfg.answer_datetime_window == ("2026-02-10 09:00:00", "")
         assert cfg.random_ip_enabled is True
         assert cfg.proxy_source == "custom"
         assert cfg.random_ua_keys == ["pc_web"]

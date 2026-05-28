@@ -7,6 +7,7 @@ from qfluentwidgets import FluentIcon, SettingCardGroup
 
 from software.ui.pages.workbench.runtime_panel.ai import RuntimeAISection
 from software.ui.pages.workbench.runtime_panel.cards import (
+    AnswerDateTimeWindowSettingCard,
     RandomUASettingCard,
     ReliabilitySettingCard,
     TimeRangeSettingCard,
@@ -70,10 +71,10 @@ def build_runtime_page_ui(page) -> None:
         max_seconds=page.SUBMIT_INTERVAL_MAX_SECONDS,
         parent=time_group,
     )
-    page.answer_card = TimeRangeSettingCard(
+    page.answer_card = AnswerDateTimeWindowSettingCard(
         FluentIcon.STOP_WATCH,
-        "作答时长",
-        "设置单份作答耗时范围，默认 1-2 分钟，最长 30 分钟",
+        "作答时间",
+        "设置见数的作答日期时间窗，并保留单份作答时长范围",
         max_seconds=30 * 60,
         parent=time_group,
     )
