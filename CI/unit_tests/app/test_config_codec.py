@@ -180,6 +180,18 @@ class ConfigCodecTests:
         assert cfg.questions_info == []
         assert cfg.question_entries == []
 
+    def test_random_ip_enabled_survives_official_proxy_sources(self) -> None:
+        for source in ("default", "benefit", "custom"):
+            cfg = normalize_runtime_config_payload(
+                {
+                    "random_ip_enabled": True,
+                    "proxy_source": source,
+                }
+            )
+
+            assert cfg.random_ip_enabled is True
+            assert cfg.proxy_source == source
+
     def test_answer_duration_legacy_single_value_expands_to_10_percent_range(self) -> None:
         assert normalize_runtime_config_payload({"answer_duration": 90}).answer_duration == (81, 99)
         assert normalize_runtime_config_payload({"answer_duration": ["90"]}).answer_duration == (81, 99)

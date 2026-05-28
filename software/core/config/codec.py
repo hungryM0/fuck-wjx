@@ -413,8 +413,7 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         proxy_source = "custom" if custom_proxy_api else "default"
     config.proxy_source = proxy_source
     config.custom_proxy_api = custom_proxy_api
-    desired_random_ip_enabled = _as_bool(raw.get("random_ip_enabled"), False)
-    config.random_ip_enabled = bool(desired_random_ip_enabled and proxy_source == "custom")
+    config.random_ip_enabled = _as_bool(raw.get("random_ip_enabled"), False)
     raw_area_code = raw.get("proxy_area_code")
     config.proxy_area_code = None if raw_area_code is None else str(raw_area_code)
     config.random_ua_enabled = bool(raw.get("random_ua_enabled", False))
