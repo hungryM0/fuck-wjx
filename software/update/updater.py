@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import importlib
 import os
 import re
 import sys
@@ -19,16 +20,14 @@ try:
 except ImportError:  # pragma: no cover
     version = None
 
-try:  # pragma: no cover - 缺依赖时统一走 unknown
-    import velopack
-except Exception:  # pragma: no cover
-    velopack = None
+_VELOPACK_MODULE_NAME = "velopack"
 
 
 def _get_velopack_module() -> Optional[Any]:
-    if velopack is None:
+    try:
+        return cast(Any, importlib.import_module(_VELOPACK_MODULE_NAME))
+    except Exception:
         return None
-    return cast(Any, velopack)
 
 
 def _preview_release_notes(text: str, limit: int) -> str:

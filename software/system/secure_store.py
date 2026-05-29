@@ -27,6 +27,7 @@ except Exception:  # pragma: no cover
 
 _REGISTRY_PATH = r"Software\SurveyController\SecureStore"
 _KEYRING_SERVICE = "SurveyController"
+_win_error = cast(Any, getattr(ctypes, "WinError", OSError))
 
 
 def _windows_dlls() -> Any:
@@ -70,7 +71,7 @@ def _crypt_protect_data(data: bytes) -> bytes:
         ctypes.byref(out_blob),
     )
     if not result:
-        raise ctypes.WinError()
+        raise _win_error()
     try:
         return ctypes.string_at(out_blob.pbData, out_blob.cbData)
     finally:
@@ -95,7 +96,7 @@ def _crypt_unprotect_data(data: bytes) -> bytes:
         ctypes.byref(out_blob),
     )
     if not result:
-        raise ctypes.WinError()
+        raise _win_error()
     try:
         return ctypes.string_at(out_blob.pbData, out_blob.cbData)
     finally:
@@ -105,10 +106,11 @@ def _crypt_unprotect_data(data: bytes) -> bytes:
 def _read_secret_windows(name: str) -> SecretReadResult:
     if winreg is None:
         return SecretReadResult(status="unsupported")
-    hkey = winreg.HKEY_CURRENT_USER
+    reg = cast(Any, winreg)
+    hkey = reg.HKEY_CURRENT_USER
     try:
-        with winreg.OpenKey(hkey, _REGISTRY_PATH) as reg_key:
-            encoded, _ = winreg.QueryValueEx(reg_key, name)
+        with reg.OpenKey(hkey, _REGISTRY_PATH) as reg_key:
+            encoded, _ = reg.QueryValueEx(reg_key, name)
     except FileNotFoundError:
         return SecretReadResult(status="not_found")
     except Exception as exc:
@@ -127,22 +129,24 @@ def _read_secret_windows(name: str) -> SecretReadResult:
 def _set_secret_windows(name: str, value: str) -> None:
     if winreg is None:
         raise RuntimeError("unsupported")
+    reg = cast(Any, winreg)
     encrypted = _crypt_protect_data(str(value).encode("utf-8"))
     encoded = base64.b64encode(encrypted).decode("ascii")
-    hkey = winreg.HKEY_CURRENT_USER
-    reg_key = winreg.CreateKeyEx(hkey, _REGISTRY_PATH, 0, winreg.KEY_WRITE)
+    hkey = reg.HKEY_CURRENT_USER
+    reg_key = reg.CreateKeyEx(hkey, _REGISTRY_PATH, 0, reg.KEY_WRITE)
     try:
-        winreg.SetValueEx(reg_key, name, 0, winreg.REG_SZ, encoded)
+        reg.SetValueEx(reg_key, name, 0, reg.REG_SZ, encoded)
     finally:
-        winreg.CloseKey(reg_key)
+        reg.CloseKey(reg_key)
 
 
 def _delete_secret_windows(name: str) -> None:
     if winreg is None:
         raise RuntimeError("unsupported")
-    hkey = winreg.HKEY_CURRENT_USER
-    with winreg.OpenKey(hkey, _REGISTRY_PATH, 0, winreg.KEY_SET_VALUE) as reg_key:
-        winreg.DeleteValue(reg_key, name)
+    reg = cast(Any, winreg)
+    hkey = reg.HKEY_CURRENT_USER
+    with reg.OpenKey(hkey, _REGISTRY_PATH, 0, reg.KEY_SET_VALUE) as reg_key:
+        reg.DeleteValue(reg_key, name)
 
 
 def _read_secret_macos(name: str) -> SecretReadResult:

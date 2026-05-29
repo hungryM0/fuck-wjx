@@ -12,6 +12,7 @@ from PySide6.QtGui import QIcon, QGuiApplication, QColor
 from PySide6.QtWidgets import QDialog
 from qfluentwidgets import (
     DotInfoBadge,
+    FluentWindow,
     InfoBadgePosition,
     InfoBar,
     InfoBarPosition,
@@ -60,13 +61,15 @@ from software.app.runtime_paths import get_resource_path
 
 from software.ui.shell.boot import create_boot_splash, finish_boot_splash
 
+_BaseFluentWindow = MSFluentWindow if sys.platform == "win32" else FluentWindow
+
 
 class MainWindow(
     MainWindowDialogsMixin,
     MainWindowLifecycleMixin,
     MainWindowLazyPagesMixin,
     MainWindowUpdateMixin,
-    MSFluentWindow,
+    _BaseFluentWindow,
 ):
     """主窗口，采用微软商店风格导航，支持主题动态切换。"""
 
@@ -259,16 +262,16 @@ class MainWindow(
         except Exception:
             logging.info("主题变更后刷新组件失败", exc_info=True)
 
-    def changeEvent(self, event):
+    def changeEvent(self, e):
         """系统主题/调色板变化时，在 AUTO 模式下重同步主题。"""
-        super().changeEvent(event)
+        super().changeEvent(e)
         watched_events = {
             QEvent.Type.ApplicationPaletteChange,
             QEvent.Type.PaletteChange,
         }
         if hasattr(QEvent.Type, "ThemeChange"):
             watched_events.add(QEvent.Type.ThemeChange)
-        if event.type() in watched_events:
+        if e.type() in watched_events:
             self._schedule_auto_theme_sync()
 
     def _schedule_auto_theme_sync(self):

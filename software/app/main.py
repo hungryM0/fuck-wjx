@@ -1,5 +1,6 @@
 """GUI 应用入口 - QApplication 初始化与主窗口启动"""
 import faulthandler
+import importlib
 import os
 import sys
 from typing import Any, Optional, cast
@@ -13,23 +14,21 @@ from software.app.user_paths import (
     ensure_user_data_directories,
     get_fatal_crash_log_path,
 )
-from software.logging.log_utils import setup_logging
 import software.network.http as http_client
+from software.logging.log_utils import setup_logging
 from software.ui.helpers.qfluent_compat import install_qfluentwidgets_animation_guards
 
-try:  # pragma: no cover - 缺依赖时仅禁用更新框架接入
-    import velopack
-except Exception:  # pragma: no cover
-    velopack = None
+_VELOPACK_MODULE_NAME = "velopack"
 
 
 _FAULT_HANDLER_STREAM = None
 
 
 def _get_velopack_module() -> Optional[Any]:
-    if velopack is None:
+    try:
+        return cast(Any, importlib.import_module(_VELOPACK_MODULE_NAME))
+    except Exception:
         return None
-    return cast(Any, velopack)
 
 
 def _is_velopack_lifecycle_hook(args: list[str]) -> bool:

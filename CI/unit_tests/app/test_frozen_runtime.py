@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import software.app.frozen_runtime as frozen_runtime
@@ -35,9 +36,15 @@ class FrozenRuntimeTests:
         ):
             frozen_runtime.prepare_frozen_runtime()
 
-        assert frozen_runtime.os.environ["PATH"].replace("\\", "/").startswith(
-            "D:/App/lib/PySide6;D:/App/lib/PySide6/Qt/libexec;D:/App/lib/shiboken6;"
+        expected_prefix = os.pathsep.join(
+            [
+                "D:/App/lib/PySide6",
+                "D:/App/lib/PySide6/Qt/libexec",
+                "D:/App/lib/shiboken6",
+                "",
+            ]
         )
+        assert frozen_runtime.os.environ["PATH"].replace("\\", "/").startswith(expected_prefix)
         assert frozen_runtime.os.environ["QT_PLUGIN_PATH"].replace("\\", "/") == "D:/App/lib/PySide6/plugins"
         assert added_dirs == [
             "D:/App/lib/PySide6",

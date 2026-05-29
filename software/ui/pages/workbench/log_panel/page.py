@@ -17,6 +17,7 @@ from qfluentwidgets import (
     SubtitleLabel,
     PrimaryPushButton,
     PushButton,
+    InfoBar,
     InfoBarIcon,
     InfoBarPosition,
     FluentIcon as FIF,
