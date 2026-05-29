@@ -17,7 +17,6 @@ from qfluentwidgets import (
     SubtitleLabel,
     PrimaryPushButton,
     PushButton,
-    InfoBar,
     InfoBarIcon,
     InfoBarPosition,
     FluentIcon as FIF,
@@ -30,6 +29,7 @@ from software.logging.log_utils import (
     export_full_log_to_file,
     log_suppressed_exception,
 )
+from software.ui.widgets.full_width_infobar import FullWidthInfoBar
 from software.app.config import LOG_BUFFER_CAPACITY, LOG_REFRESH_INTERVAL_MS
 from software.app.user_paths import (
     get_last_session_log_path,
@@ -91,7 +91,7 @@ class LogPage(QWidget):
         # 标题
         layout.addWidget(SubtitleLabel("日志", self))
 
-        self.bug_report_tip_bar = InfoBar(
+        self.bug_report_tip_bar = FullWidthInfoBar(
             icon=InfoBarIcon.WARNING,
             title="",
             content="遇到问题请提交完整的日志文件，而不是🤳💻或发送这个页面的截图；报错反馈会自动附带诊断日志",

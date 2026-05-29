@@ -168,6 +168,10 @@ class _FakeBar:
         self.moved_to = value
 
 
+class _FakeQObjectOnly:
+    pass
+
+
 class _FakeManager:
     managers: dict[str, type] = {}
 
@@ -331,6 +335,30 @@ class UiHelperAndParsingTests:
 
         bar.closedSignal.emit()
         assert id(bar) not in manager._surveycontroller_signal_callbacks
+
+    def test_install_infobar_manager_guards_uses_cached_animation_when_qt_property_degrades(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(qfluent_compat, "QParallelAnimationGroup", _FakeAnimationGroup)
+        monkeypatch.setattr(qfluent_compat, "QPropertyAnimation", _FakeAnimation)
+        monkeypatch.setattr(qfluent_compat, "isValid", lambda obj: not getattr(obj, "invalid", False))
+        qfluent_compat._install_infobar_manager_guards(_FakeManager)
+
+        manager = cast(Any, _FakeManager())
+        parent = _FakeParent()
+        first_bar = _FakeBar(parent)
+        second_bar = _FakeBar(parent)
+
+        manager.add(first_bar)
+        manager.add(second_bar)
+        second_bar.setProperty("dropAni", _FakeQObjectOnly())
+
+        manager._updateDropAni(parent)
+
+        cached_drop_ani = manager._surveycontroller_bar_animations[id(second_bar)]["dropAni"]
+        assert cached_drop_ani.start_value == (0, 0)
+        assert cached_drop_ani.end_value == ("pos", None)
 
     def test_ui_callback_dispatcher_covers_enqueue_drain_and_async_paths(
         self,

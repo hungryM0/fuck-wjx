@@ -112,8 +112,30 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
             setattr(self, "_surveycontroller_signal_callbacks", store)
         return store
 
+    def _get_bar_animation_store(self) -> dict[int, dict[str, Any]]:
+        store = getattr(self, "_surveycontroller_bar_animations", None)
+        if not isinstance(store, dict):
+            store = {}
+            setattr(self, "_surveycontroller_bar_animations", store)
+        return store
+
+    def _set_bar_animation(self, info_bar, key: str, animation: Any) -> None:
+        _get_bar_animation_store(self).setdefault(id(info_bar), {})[key] = animation
+
+    def _get_bar_animation(self, info_bar, key: str) -> Any:
+        required_method = "start" if key == "slideAni" else "setStartValue"
+        animation = _get_bar_animation_store(self).get(id(info_bar), {}).get(key)
+        if animation is not None and hasattr(animation, required_method):
+            return animation
+        try:
+            animation = info_bar.property(key)
+        except RuntimeError:
+            return None
+        return animation if hasattr(animation, required_method) else None
+
     def _drop_signal_callbacks(self, info_bar) -> None:
         _get_signal_callback_store(self).pop(id(info_bar), None)
+        _get_bar_animation_store(self).pop(id(info_bar), None)
 
     def _safe_add(self, info_bar) -> None:
         try:
@@ -145,6 +167,7 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
                 drop_ani.setEndValue(target_pos)
                 self.aniGroups[parent].addAnimation(drop_ani)
                 self.dropAnis.append(drop_ani)
+                _set_bar_animation(self, info_bar, "dropAni", drop_ani)
                 info_bar.setProperty("dropAni", drop_ani)
             except RuntimeError:
                 pass
@@ -154,6 +177,7 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
         try:
             slide_ani = self._createSlideAni(info_bar)
             self.slideAnis.append(slide_ani)
+            _set_bar_animation(self, info_bar, "slideAni", slide_ani)
             info_bar.setProperty("slideAni", slide_ani)
         except RuntimeError:
             try:
@@ -183,16 +207,13 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
 
     def _safe_update_drop_ani(self, parent):
         for bar in _prune_invalid_bars(self, parent):
-            try:
-                ani = bar.property("dropAni")
-            except RuntimeError:
-                continue
+            ani = _get_bar_animation(self, bar, "dropAni")
             if not ani:
                 continue
             try:
                 ani.setStartValue(bar.pos())
                 ani.setEndValue(self._pos(bar))
-            except (RuntimeError, ValueError):
+            except (AttributeError, RuntimeError, ValueError):
                 continue
 
     def _safe_remove(self, info_bar):
@@ -211,10 +232,7 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
         _drop_signal_callbacks(self, info_bar)
 
         if _is_alive(info_bar):
-            try:
-                drop_ani = info_bar.property("dropAni")
-            except RuntimeError:
-                drop_ani = None
+            drop_ani = _get_bar_animation(self, info_bar, "dropAni")
             if drop_ani:
                 try:
                     self.aniGroups[parent].removeAnimation(drop_ani)
@@ -225,10 +243,7 @@ def _install_infobar_manager_guards(info_bar_manager_cls) -> None:
                 except ValueError:
                     pass
 
-            try:
-                slide_ani = info_bar.property("slideAni")
-            except RuntimeError:
-                slide_ani = None
+            slide_ani = _get_bar_animation(self, info_bar, "slideAni")
             if slide_ani:
                 try:
                     self.slideAnis.remove(slide_ani)

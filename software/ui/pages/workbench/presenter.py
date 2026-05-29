@@ -32,6 +32,8 @@ class WorkbenchPresenter:
     def __init__(self, *, controller: Any, host: Any) -> None:
         self.controller = controller
         self.host = host
+        self._last_running_state: bool | None = None
+        self._last_pause_state: tuple[bool, str] | None = None
         self.state = WorkbenchState(host)
         self.runtime_page = RuntimePage(controller, host)
         self.strategy_page = QuestionStrategyPage(host)
@@ -201,8 +203,10 @@ class WorkbenchPresenter:
         progress = (snapshot or {}).get("progress") or {}
         threads = (snapshot or {}).get("threads") or {}
         random_ip = (snapshot or {}).get("random_ip") or {}
-        self.dashboard.on_run_state_changed(running)
-        self.reverse_fill_page.on_run_state_changed(running)
+        if getattr(self, "_last_running_state", None) != running:
+            self._last_running_state = running
+            self.dashboard.on_run_state_changed(running)
+            self.reverse_fill_page.on_run_state_changed(running)
         self.dashboard.set_random_ip_loading(
             bool(random_ip.get("loading")),
             str(random_ip.get("loading_message") or ""),
@@ -232,8 +236,11 @@ class WorkbenchPresenter:
             "initialization_logs": list((snapshot or {}).get("initialization", {}).get("logs") or []),
         }
         self.dashboard.update_thread_progress(thread_payload)
-        self.dashboard.on_pause_state_changed(paused, pause_reason if paused else "")
-        self.reverse_fill_page.on_pause_state_changed(paused, pause_reason if paused else "")
+        pause_state = (paused, pause_reason if paused else "")
+        if getattr(self, "_last_pause_state", None) != pause_state:
+            self._last_pause_state = pause_state
+            self.dashboard.on_pause_state_changed(*pause_state)
+            self.reverse_fill_page.on_pause_state_changed(*pause_state)
 
     def sync_reverse_fill_context(self) -> None:
         try:

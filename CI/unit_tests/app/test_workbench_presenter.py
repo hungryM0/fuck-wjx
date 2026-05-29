@@ -195,6 +195,8 @@ def _presenter_with_fakes() -> WorkbenchPresenter:
     dynamic = cast(Any, presenter)
     dynamic.controller = _FakeController()
     dynamic.host = _FakeHost()
+    dynamic._last_running_state = None
+    dynamic._last_pause_state = None
     presenter.state = WorkbenchState()
     dynamic.runtime_page = _FakeRuntimePage()
     dynamic.dashboard = _FakeDashboard()
@@ -311,6 +313,28 @@ def test_workbench_presenter_forwards_random_ip_loading_state() -> None:
 
     assert dashboard.loading_events[-1] == (True, "正在处理...")
     assert reverse_fill_page.loading_events[-1] == (True, "正在处理...")
+
+
+def test_workbench_presenter_skips_duplicate_run_and_pause_notifications() -> None:
+    presenter = _presenter_with_fakes()
+    dashboard = cast(_FakeDashboard, presenter.dashboard)
+    reverse_fill_page = cast(_FakeReverseFillPage, presenter.reverse_fill_page)
+    running_snapshot = {
+        "running": True,
+        "paused": False,
+        "status_text": "运行中",
+        "progress": {"current": 1, "target": 4},
+        "threads": {"rows": [], "num_threads": 0, "per_thread_target": 0},
+        "random_ip": {"loading": False, "loading_message": ""},
+    }
+
+    presenter.on_runtime_snapshot_changed(running_snapshot)
+    presenter.on_runtime_snapshot_changed(dict(running_snapshot))
+
+    assert dashboard.run_states == [True]
+    assert reverse_fill_page.run_states == [True]
+    assert dashboard.pause_states == [(False, "")]
+    assert reverse_fill_page.pause_states == [(False, "")]
 
 
 def test_workbench_presenter_builds_config_snapshot_from_single_builder_path() -> None:
