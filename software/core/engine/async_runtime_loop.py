@@ -19,7 +19,7 @@ from software.core.engine.async_round_resources import (
 from software.core.engine.async_scheduler import AsyncScheduler
 from software.core.engine.failure_reason import FailureReason
 from software.core.engine.run_stop_policy import RunStopPolicy
-from software.core.engine.runtime_ui_bridge import RuntimeUiBridge
+from software.core.engine.runtime_control_port import RuntimeControlPort
 from software.core.engine.runtime_error_handlers import handle_ai_runtime_error as _handle_ai_runtime_error_impl
 from software.core.engine.runtime_error_handlers import handle_submission_verification_error
 from software.core.engine.runtime_error_handlers import handle_survey_provider_unavailable_error
@@ -44,7 +44,7 @@ class AsyncSlotRunner:
         state: ExecutionState,
         run_context: AsyncRunContext,
         scheduler: AsyncScheduler,
-        runtime_bridge: RuntimeUiBridge | None = None,
+        runtime_bridge: RuntimeControlPort | None = None,
     ) -> None:
         self.slot_id = max(1, int(slot_id or 1))
         self.slot_label = f"Slot-{self.slot_id}"

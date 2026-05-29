@@ -12,7 +12,7 @@ from software.core.engine.async_events import AsyncRunContext
 from software.core.engine.async_runtime_loop import AsyncSlotRunner
 from software.core.engine.async_scheduler import AsyncScheduler
 from software.core.engine.async_status_bus import AsyncStatusBus
-from software.core.engine.runtime_ui_bridge import RuntimeUiBridge, set_random_ip_loading
+from software.core.engine.runtime_control_port import RuntimeControlPort, on_random_ip_loading_changed
 from software.core.task import ExecutionConfig, ExecutionState
 from software.network.proxy.api import fetch_proxy_batch_async
 from software.network.session_policy import (
@@ -82,7 +82,7 @@ class AsyncRuntimeEngine:
         *,
         config: ExecutionConfig,
         state: ExecutionState,
-        runtime_bridge: RuntimeUiBridge | None = None,
+        runtime_bridge: RuntimeControlPort | None = None,
     ) -> concurrent.futures.Future[Any]:
         if self._run_future is not None and not self._run_future.done():
             raise RuntimeError("任务已在运行中")
@@ -95,7 +95,7 @@ class AsyncRuntimeEngine:
         *,
         config: ExecutionConfig,
         state: ExecutionState,
-        runtime_bridge: RuntimeUiBridge | None = None,
+        runtime_bridge: RuntimeControlPort | None = None,
     ) -> None:
         self._stop_event = asyncio.Event()
         self._pause_event = asyncio.Event()
@@ -126,7 +126,7 @@ class AsyncRuntimeEngine:
                     if await wait_for_proxy_prefetch_cycle(state, state.stop_event):
                         return
                     continue
-                set_random_ip_loading(runtime_bridge, True, f"正在准备代理 0/{request_count}")
+                on_random_ip_loading_changed(runtime_bridge, True, f"正在准备代理 0/{request_count}")
                 fetch_lock_acquired = False
                 try:
                     fetch_lock_acquired = await _acquire_proxy_fetch_lock_async(state, state.stop_event)
@@ -140,7 +140,7 @@ class AsyncRuntimeEngine:
                         return
                     merged_count = merge_prefetched_proxy_leases(state, fetched)
                     if merged_count:
-                        set_random_ip_loading(
+                        on_random_ip_loading_changed(
                             runtime_bridge,
                             True,
                             f"正在准备代理 {min(merged_count, request_count)}/{request_count}",
@@ -153,7 +153,7 @@ class AsyncRuntimeEngine:
                             release_proxy_fetch_lock(state)
                         except Exception:
                             logging.info("释放随机IP异步预热锁失败", exc_info=True)
-                    set_random_ip_loading(runtime_bridge, False, "")
+                    on_random_ip_loading_changed(runtime_bridge, False, "")
                 if await wait_for_proxy_prefetch_cycle(state, state.stop_event):
                     return
 
@@ -261,7 +261,7 @@ class AsyncEngineClient:
         config: ExecutionConfig,
         state: ExecutionState,
         *,
-        runtime_bridge: RuntimeUiBridge | None = None,
+        runtime_bridge: RuntimeControlPort | None = None,
     ) -> concurrent.futures.Future[Any]:
         return self._engine.start_run(config=config, state=state, runtime_bridge=runtime_bridge)
 

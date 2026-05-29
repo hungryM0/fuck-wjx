@@ -177,7 +177,7 @@ class MainWindowLazyPagesMixin:
     def _get_ip_usage_page(self):
         """懒加载 IP 使用记录页面"""
         if self._ip_usage_page is None:
-            from software.ui.pages.more.ip_usage import IpUsagePage
+            from software.ui.pages.more.ip_usage_page import IpUsagePage
 
             self._ip_usage_page = IpUsagePage(self)
             self._ip_usage_page.setObjectName("ip_usage")

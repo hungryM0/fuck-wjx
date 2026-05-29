@@ -39,16 +39,6 @@ class ConfigCodecTests:
         assert payload["answer_datetime_window"] == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
         assert restored.answer_datetime_window == ("2026-02-10 09:00:00", "2026-02-10 10:00:00")
 
-    def test_legacy_v4_payload_is_upgraded_to_v5_with_reverse_fill_defaults(self) -> None:
-        upgraded = _ensure_supported_config_payload({'config_schema_version': 4, 'reverse_fill_enabled': True, 'reverse_fill_source_path': 'D:/legacy.xlsx', 'reverse_fill_format': 'unknown', 'reverse_fill_start_row': 0, 'threads': 6}, config_path='legacy.json')
-        assert upgraded['config_schema_version'] == CURRENT_CONFIG_SCHEMA_VERSION
-        assert upgraded['reverse_fill_enabled']
-        assert upgraded['reverse_fill_source_path'] == 'D:/legacy.xlsx'
-        assert upgraded['reverse_fill_format'] == 'auto'
-        assert upgraded['reverse_fill_start_row'] == 1
-        assert upgraded['reverse_fill_threads'] == 6
-        assert upgraded["answer_datetime_window"] == ("", "")
-
     def test_runtime_config_roundtrip_keeps_questions_info_provider_metadata(self) -> None:
         config = RuntimeConfig(survey_provider='qq', questions_info=[SurveyQuestionMeta(num=3, title='联系方式', type_code='1', provider='qq', provider_question_id='question-3', provider_page_id='page-2', provider_type='text', option_texts=['姓名', '电话'], required=True, logic_parse_status='unknown', question_media=[{'kind': 'image', 'scope': 'title', 'index': None, 'source_url': 'https://example.com/q3.png', 'label': '题干图'}])])
         payload = serialize_runtime_config(config)
@@ -86,27 +76,17 @@ class ConfigCodecTests:
         assert config.answer_rules[0]['equals'][0] == 0
         assert config.dimension_groups[0] == '情绪维度'
 
-    def test_legacy_v3_payload_deduplicates_dimensions_and_invalid_versions_raise(self) -> None:
-        upgraded = _ensure_supported_config_payload(
-            {
-                "config_schema_version": 3,
-                "dimension_groups": ["体验", "未分组", "体验", "", "价格"],
-                "reverse_fill_start_row": "bad",
-                "reverse_fill_threads": "bad",
-            },
-            config_path="legacy-v3.json",
-        )
-
-        assert upgraded["config_schema_version"] == CURRENT_CONFIG_SCHEMA_VERSION
-        assert upgraded["dimension_groups"] == ["体验", "价格"]
-        assert upgraded["reverse_fill_start_row"] == 1
-        assert upgraded["reverse_fill_threads"] == 1
-        assert upgraded["answer_datetime_window"] == ("", "")
-
+    def test_removed_legacy_versions_and_fields_raise(self) -> None:
         with pytest.raises(ValueError, match="已移除的旧字段"):
             _ensure_supported_config_payload({"random_proxy_api": "old"}, config_path="bad.json")
         with pytest.raises(ValueError, match="版本不受支持"):
             _ensure_supported_config_payload({"config_schema_version": 2}, config_path="bad.json")
+        with pytest.raises(ValueError, match="版本不受支持"):
+            _ensure_supported_config_payload({"config_schema_version": 3}, config_path="legacy-v3.json")
+        with pytest.raises(ValueError, match="版本不受支持"):
+            _ensure_supported_config_payload({"config_schema_version": 4}, config_path="legacy-v4.json")
+        with pytest.raises(ValueError, match="版本不受支持"):
+            _ensure_supported_config_payload({"config_schema_version": 5}, config_path="legacy-v5.json")
 
     def test_question_entry_normalizes_text_modes_ranges_provider_and_dimensions(self) -> None:
         entry = deserialize_question_entry(

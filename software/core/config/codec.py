@@ -29,7 +29,6 @@ from software.logging.log_utils import log_suppressed_exception
 from software.app.config import USER_AGENT_PRESETS
 
 CURRENT_CONFIG_SCHEMA_VERSION = 6
-_SUPPORTED_LEGACY_CONFIG_SCHEMA_VERSIONS = {3, 4, 5}
 _LEGACY_CONFIG_KEYS = ("random_proxy_api", "ai_enabled")
 _TEXT_RANDOM_MODES = {"none", "name", "mobile", "id_card", "integer"}
 _REVERSE_FILL_FORMATS = {
@@ -211,40 +210,6 @@ def _normalize_dimension_groups(raw: Any) -> List[str]:
         seen.add(normalized)
         groups.append(normalized)
     return groups
-
-
-def _migrate_config_payload_v3_to_v4(payload: Dict[str, Any]) -> Dict[str, Any]:
-    migrated = dict(payload)
-    migrated["dimension_groups"] = _normalize_dimension_groups(migrated.get("dimension_groups"))
-    migrated["config_schema_version"] = 4
-    return migrated
-
-
-def _migrate_config_payload_v4_to_v5(payload: Dict[str, Any]) -> Dict[str, Any]:
-    migrated = dict(payload)
-    migrated["reverse_fill_enabled"] = bool(migrated.get("reverse_fill_enabled", False))
-    migrated["reverse_fill_source_path"] = str(migrated.get("reverse_fill_source_path") or "")
-    reverse_fill_format = str(migrated.get("reverse_fill_format") or REVERSE_FILL_FORMAT_AUTO).strip().lower()
-    migrated["reverse_fill_format"] = reverse_fill_format if reverse_fill_format in _REVERSE_FILL_FORMATS else REVERSE_FILL_FORMAT_AUTO
-    try:
-        migrated["reverse_fill_start_row"] = max(1, int(migrated.get("reverse_fill_start_row") or 1))
-    except Exception:
-        migrated["reverse_fill_start_row"] = 1
-    try:
-        migrated["reverse_fill_threads"] = max(1, int(migrated.get("reverse_fill_threads") or migrated.get("threads") or 1))
-    except Exception:
-        migrated["reverse_fill_threads"] = 1
-    migrated["config_schema_version"] = 5
-    return migrated
-
-
-def _migrate_config_payload_v5_to_v6(payload: Dict[str, Any]) -> Dict[str, Any]:
-    migrated = dict(payload)
-    migrated["answer_datetime_window"] = normalize_answer_datetime_window(
-        migrated.get("answer_datetime_window")
-    )
-    migrated["config_schema_version"] = CURRENT_CONFIG_SCHEMA_VERSION
-    return migrated
 
 
 def serialize_question_entry(entry) -> Dict[str, Any]:
@@ -537,21 +502,6 @@ def _ensure_supported_config_payload(payload: Dict[str, Any], *, config_path: st
         current = dict(payload)
         current["config_schema_version"] = schema_version
         return current
-    if schema_version in _SUPPORTED_LEGACY_CONFIG_SCHEMA_VERSIONS:
-        logging.info(
-            "检测到旧版配置 schema v%s，已按当前 schema v%s 兼容加载: %s",
-            schema_version,
-            CURRENT_CONFIG_SCHEMA_VERSION,
-            config_path,
-        )
-        if schema_version == 3:
-            return _migrate_config_payload_v5_to_v6(
-                _migrate_config_payload_v4_to_v5(_migrate_config_payload_v3_to_v4(payload))
-            )
-        if schema_version == 4:
-            return _migrate_config_payload_v5_to_v6(_migrate_config_payload_v4_to_v5(payload))
-        if schema_version == 5:
-            return _migrate_config_payload_v5_to_v6(payload)
     raise ValueError(
         f"配置文件版本不受支持（当前仅支持 schema v{CURRENT_CONFIG_SCHEMA_VERSION}，实际为 v{schema_version}）：{config_path}"
     )

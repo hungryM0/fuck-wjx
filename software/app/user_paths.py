@@ -124,11 +124,6 @@ def get_last_session_log_path() -> str:
     return os.path.join(get_user_logs_directory(), "last_session.log")
 
 
-def get_legacy_migration_marker_path() -> str:
-    """返回旧版数据迁移标记文件路径。"""
-    return os.path.join(get_user_local_data_root(), "migration", "legacy_inno_v1.json")
-
-
 def ensure_user_data_directories() -> tuple[str, ...]:
     """确保应用用户目录存在。"""
     paths = (
@@ -138,7 +133,6 @@ def ensure_user_data_directories() -> tuple[str, ...]:
         get_user_logs_directory(),
         get_user_cache_directory(),
         get_user_updates_directory(),
-        os.path.dirname(get_legacy_migration_marker_path()),
     )
     for path in paths:
         os.makedirs(path, exist_ok=True)
@@ -151,7 +145,6 @@ __all__ = [
     "get_default_user_config_directory",
     "get_fatal_crash_log_path",
     "get_last_session_log_path",
-    "get_legacy_migration_marker_path",
     "get_local_app_data_root",
     "get_roaming_app_data_root",
     "get_user_cache_directory",

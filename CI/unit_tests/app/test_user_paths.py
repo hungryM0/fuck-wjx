@@ -58,11 +58,6 @@ class UserPathsTests:
         monkeypatch.setattr(user_paths, "get_user_logs_directory", lambda: str(tmp_path / "local-root" / "logs"))
         monkeypatch.setattr(user_paths, "get_user_cache_directory", lambda: str(tmp_path / "local-root" / "cache"))
         monkeypatch.setattr(user_paths, "get_user_updates_directory", lambda: str(tmp_path / "local-root" / "updates"))
-        monkeypatch.setattr(
-            user_paths,
-            "get_legacy_migration_marker_path",
-            lambda: str(tmp_path / "local-root" / "migration" / "legacy_inno_v1.json"),
-        )
 
         created = user_paths.ensure_user_data_directories()
 

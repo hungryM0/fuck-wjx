@@ -4,10 +4,7 @@ from typing import Any, Callable, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget
-from qfluentwidgets import InfoBar
-
 from software.logging.log_utils import log_suppressed_exception
-from software.ui.dialogs.quota_redeem import load_shop_icon
 from software.ui.pages.workbench.dashboard.event_binding import bind_dashboard_events
 from software.ui.pages.workbench.dashboard.feedback import dashboard_toast
 from software.ui.pages.workbench.dashboard.ui_builder import build_dashboard_page_ui
@@ -38,10 +35,6 @@ from software.core.config.schema import RuntimeConfig
 from software.ui.pages.workbench.runtime_panel.main import RuntimePage
 from software.ui.pages.workbench.strategy.page import QuestionStrategyPage
 from software.ui.pages.workbench.session import WorkbenchState
-
-_COMPAT_INFOBAR = InfoBar
-_COMPAT_LOAD_SHOP_ICON = load_shop_icon
-
 
 class DashboardPage(
     SurveyClipboardMixin,
