@@ -552,6 +552,19 @@ class DashboardProgressMixin:
         except Exception:
             _set_value_if_changed(step_bar, normalized)
 
+    def _set_thread_step_bar_value_immediately(self, row: Dict[str, Any], target_value: int) -> None:
+        step_bar = row.get("step_bar")
+        animation = row.get("step_anim")
+        if step_bar is None:
+            return
+        normalized = max(0, min(100, int(target_value)))
+        if animation is not None:
+            try:
+                animation.stop()
+            except Exception:
+                pass
+        _set_value_if_changed(step_bar, normalized)
+
     def _apply_thread_step_payload(self, row: Dict[str, Any], payload: Dict[str, Any]) -> None:
         status_text = str(payload.get("status_text") or "")
         step_current = max(0, int(payload.get("step_current") or 0))
@@ -575,10 +588,11 @@ class DashboardProgressMixin:
             set_indeterminate_progress_ring_active(step_busy_bar, False)
             step_busy_bar.hide()
             step_bar.show()
-            self._animate_thread_step_bar_to(
-                row,
-                _resolve_thread_step_percent(step_current, step_total),
-            )
+            target_percent = _resolve_thread_step_percent(step_current, step_total)
+            if running:
+                self._animate_thread_step_bar_to(row, target_percent)
+            else:
+                self._set_thread_step_bar_value_immediately(row, target_percent)
             self._set_progress_bar_paused(step_bar, self._progress_paused_visual)
 
         _set_text_if_changed(row.get("status"), status_text)

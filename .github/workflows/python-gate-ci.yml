@@ -102,7 +102,7 @@ jobs:
       matrix:
         include:
           - config_name: wjx
-            survey_url: https://v.wjx.cn/vm/tgRSrWd.aspx
+            survey_url: https://v.wjx.cn/vm/ei3sVrE.aspx
           - config_name: credamo
             survey_url: https://www.credamo.com/s/A73QR3ano
           - config_name: tencent
