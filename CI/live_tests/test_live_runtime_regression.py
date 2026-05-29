@@ -27,7 +27,7 @@ class LiveSurveyCase:
 
 
 DEFAULT_LIVE_SURVEY_CASES = (
-    LiveSurveyCase("wjx", "https://v.wjx.cn/vm/tgRSrWd.aspx"),
+    LiveSurveyCase("wjx", "https://v.wjx.cn/vm/ei3sVrE.aspx"),
     LiveSurveyCase("credamo", "https://www.credamo.com/s/A73QR3ano"),
     LiveSurveyCase("tencent", "https://wj.qq.com/s2/26070328/fa89/"),
 )

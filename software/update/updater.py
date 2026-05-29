@@ -23,6 +23,10 @@ except ImportError:  # pragma: no cover
 _VELOPACK_MODULE_NAME = "velopack"
 
 
+def _is_unsupported_update_platform() -> bool:
+    return sys.platform == "darwin"
+
+
 def _get_velopack_module() -> Optional[Any]:
     try:
         return cast(Any, importlib.import_module(_VELOPACK_MODULE_NAME))
@@ -146,7 +150,7 @@ def _fetch_latest_github_release() -> Optional[dict[str, Any]]:
 
 
 def _fetch_latest_velopack_feed_release() -> Optional[dict[str, Any]]:
-    if sys.platform != "win32" or not VELOPACK_FEED_URL or not VELOPACK_CHANNEL:
+    if _is_unsupported_update_platform() or not VELOPACK_FEED_URL or not VELOPACK_CHANNEL:
         return None
     feed_url = f"{VELOPACK_FEED_URL.rstrip('/')}/releases.{VELOPACK_CHANNEL}.json"
     try:
@@ -254,7 +258,7 @@ def _build_velopack_feed_update_result(current_version: str) -> dict[str, Any]:
 
 
 def _safe_create_update_manager():
-    if sys.platform != "win32":
+    if _is_unsupported_update_platform():
         return None
     velopack_module = _get_velopack_module()
     if velopack_module is None:
@@ -293,7 +297,7 @@ class UpdateManager:
     @staticmethod
     def check_updates() -> dict[str, Any]:
         current_version = str(__VERSION__ or "").strip()
-        if sys.platform != "win32":
+        if _is_unsupported_update_platform():
             return {"has_update": False, "status": "unsupported", "current_version": current_version}
         if not version:
             logging.warning("更新功能依赖 packaging 模块")
@@ -353,7 +357,7 @@ class UpdateManager:
         *,
         progress_callback: Optional[Callable[[int, int, float], None]] = None,
     ) -> bool:
-        if sys.platform != "win32":
+        if _is_unsupported_update_platform():
             raise RuntimeError("当前平台不支持自动更新")
         manager = _safe_create_update_manager()
         if manager is None:
@@ -370,7 +374,7 @@ class UpdateManager:
 
     @staticmethod
     def apply_downloaded_update(update_info: Any) -> None:
-        if sys.platform != "win32":
+        if _is_unsupported_update_platform():
             raise RuntimeError("当前平台不支持自动更新")
         manager = _safe_create_update_manager()
         if manager is None:
