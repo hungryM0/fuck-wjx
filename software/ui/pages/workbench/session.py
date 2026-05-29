@@ -114,7 +114,7 @@ class WorkbenchRunCoordinator:
         normalized_target = max(1, int(target or 1))
         self._reverse_fill_target_override = normalized_target
         try:
-            self.controller.set_runtime_ui_state(target=normalized_target)
+            self.controller.update_runtime_settings(target=normalized_target)
         except Exception:
             logging.debug("同步目标份数到运行态失败", exc_info=True)
 

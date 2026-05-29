@@ -192,7 +192,6 @@ class DashboardConfigIOMixin:
                 question_entries=self.workbench_state.get_entries(),
                 questions_info=self.workbench_state.questions_info,
             )
-            self.controller.config = cfg
         configs_dir = get_user_config_directory()
         os.makedirs(configs_dir, exist_ok=True)
         default_name = build_default_config_filename(self._survey_title)
@@ -213,7 +212,7 @@ class DashboardConfigIOMixin:
             )
             return
         try:
-            self.controller.save_current_config(path)
+            self.controller.save_current_config(path, config=cfg)
             log_action(
                 "CONFIG",
                 "save_config",

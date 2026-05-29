@@ -63,20 +63,46 @@ class RuntimePage(
         self.view.setObjectName("settings_view")
         build_runtime_page_ui(self)
         bind_runtime_page_events(self)
-        self.controller.runtimeUiStateChanged.connect(self._apply_runtime_ui_state)
-        self.controller.runStateChanged.connect(self.on_run_state_changed)
-        self.controller.randomIpLoadingChanged.connect(self._apply_random_ip_loading)
+        runtime_signal = getattr(self.controller, "runtimeSnapshotChanged", None)
+        if runtime_signal is not None and hasattr(runtime_signal, "connect"):
+            runtime_signal.connect(self._on_runtime_snapshot_changed)
+        else:
+            legacy_runtime_signal = getattr(self.controller, "runtimeUiStateChanged", None)
+            if legacy_runtime_signal is not None and hasattr(legacy_runtime_signal, "connect"):
+                legacy_runtime_signal.connect(self._apply_runtime_ui_state)
+            legacy_run_signal = getattr(self.controller, "runStateChanged", None)
+            if legacy_run_signal is not None and hasattr(legacy_run_signal, "connect"):
+                legacy_run_signal.connect(self.on_run_state_changed)
+            legacy_loading_signal = getattr(self.controller, "randomIpLoadingChanged", None)
+            if legacy_loading_signal is not None and hasattr(legacy_loading_signal, "connect"):
+                legacy_loading_signal.connect(self._apply_random_ip_loading)
         self._sync_random_ua(self.random_ua_card.isChecked())
         self._sync_answer_datetime_window_card()
         self._apply_thread_limit()
-        self.controller.set_runtime_ui_state(
-            emit=False,
-            target=self.target_card.spinBox.value(),
-            threads=self.thread_card.slider.value(),
-            random_ip_enabled=self.random_ip_card.switchButton.isChecked(),
-            proxy_source=self.selected_proxy_source(),
-            submit_interval=self._card_value_as_range(self.interval_card),
-            answer_duration=self._card_value_as_range(self.answer_duration_card),
-            answer_datetime_window=self.answer_card.getDateTimeWindow(),
-        )
+        updater = getattr(self.controller, "update_runtime_settings", None)
+        if callable(updater):
+            updater(
+                emit=False,
+                target=self.target_card.spinBox.value(),
+                threads=self.thread_card.slider.value(),
+                random_ip_enabled=self.random_ip_card.switchButton.isChecked(),
+                proxy_source=self.selected_proxy_source(),
+                submit_interval=self._card_value_as_range(self.interval_card),
+                answer_duration=self._card_value_as_range(self.answer_duration_card),
+                answer_datetime_window=self.answer_card.getDateTimeWindow(),
+            )
         self.on_run_state_changed(self._thread_edit_locked())
+        if hasattr(self.controller, "get_runtime_snapshot"):
+            self._on_runtime_snapshot_changed(self.controller.get_runtime_snapshot())
+        elif hasattr(self.controller, "get_runtime_ui_state"):
+            self._apply_runtime_ui_state(self.controller.get_runtime_ui_state())
+
+    def _on_runtime_snapshot_changed(self, snapshot: dict) -> None:
+        runtime_snapshot = dict(snapshot or {})
+        self._apply_runtime_ui_state(runtime_snapshot.get("settings") or {})
+        random_ip = runtime_snapshot.get("random_ip") or {}
+        self._apply_random_ip_loading(
+            bool(random_ip.get("loading")),
+            str(random_ip.get("loading_message") or ""),
+        )
+        self.on_run_state_changed(bool(runtime_snapshot.get("running")))

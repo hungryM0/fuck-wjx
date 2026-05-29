@@ -153,7 +153,7 @@ class DashboardRunActionsMixin:
                 exc,
                 level=logging.WARNING,
             )
-        self.controller.set_runtime_ui_state(proxy_source=source)
+        self.controller.update_runtime_settings(proxy_source=source)
         self._sync_custom_proxy_api_visible(source)
         self._refresh_ip_cost_infobar()
 
@@ -240,14 +240,19 @@ class DashboardRunActionsMixin:
         cfg.survey_title = str(self._survey_title or "")
         cfg.survey_provider = detect_survey_provider(
             cfg.url,
-            default=str(getattr(self.controller, "survey_provider", "wjx") or "wjx"),
+            default=str(
+                self.controller.get_survey_snapshot().get("survey_provider") or "wjx"
+            ),
         )
         writer = getattr(self.controller, "write_runtime_ui_state_to_config", None)
         if callable(writer):
             writer(cfg)
             cfg.survey_provider = detect_survey_provider(
                 cfg.url,
-                default=str(getattr(self.controller, "survey_provider", cfg.survey_provider) or cfg.survey_provider),
+                default=str(
+                    self.controller.get_survey_snapshot().get("survey_provider")
+                    or cfg.survey_provider
+                ),
             )
         else:
             self.runtime_page.update_config(cfg)

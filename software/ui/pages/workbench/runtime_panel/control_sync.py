@@ -98,7 +98,11 @@ class RuntimeControlSyncMixin:
             )
             return
 
-        final_enabled = bool(self.controller.get_runtime_ui_state().get("random_ip_enabled", False))
+        final_enabled = bool(
+            self.controller.get_runtime_snapshot()
+            .get("settings", {})
+            .get("random_ip_enabled", False)
+        )
         self.random_ip_card.switchButton.blockSignals(True)
         try:
             self.random_ip_card.switchButton.setChecked(final_enabled)
@@ -162,11 +166,15 @@ class RuntimeControlSyncMixin:
 
     def _sync_answer_datetime_window_card(self) -> None:
         try:
-            provider = normalize_survey_provider(
-                getattr(self.controller, "survey_provider", "")
-                or self.controller.get_runtime_ui_state().get("survey_provider")
-                or "wjx"
-            )
+            if hasattr(self.controller, "get_runtime_snapshot"):
+                provider_value = (
+                    self.controller.get_runtime_snapshot().get("settings", {}).get("survey_provider")
+                )
+            else:
+                provider_value = getattr(self.controller, "get_runtime_ui_state", lambda: {})().get(
+                    "survey_provider"
+                )
+            provider = normalize_survey_provider(provider_value or "wjx")
             self.answer_card.set_provider(provider)
         except Exception as exc:
             log_suppressed_exception("_sync_answer_datetime_window_card", exc, level=logging.WARNING)

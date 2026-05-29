@@ -7,12 +7,22 @@ from typing import Any
 from software.logging.action_logger import bind_logged_action
 
 
+def _update_runtime_settings(page: Any, **updates: Any) -> None:
+    updater = getattr(page.controller, "update_runtime_settings", None)
+    if callable(updater):
+        updater(**updates)
+        return
+    legacy = getattr(page.controller, "set_runtime_ui_state", None)
+    if callable(legacy):
+        legacy(**updates)
+
+
 def bind_runtime_page_events(page: Any) -> None:
     page.target_card.spinBox.valueChanged.connect(
-        lambda value: page.controller.set_runtime_ui_state(target=int(value))
+        lambda value: _update_runtime_settings(page, target=int(value))
     )
     page.thread_card.slider.valueChanged.connect(
-        lambda value: page.controller.set_runtime_ui_state(threads=int(value))
+        lambda value: _update_runtime_settings(page, threads=int(value))
     )
     bind_logged_action(
         page.random_ip_card.switchButton.checkedChanged,

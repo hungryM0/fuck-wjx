@@ -40,11 +40,6 @@ def bind_reverse_fill_events(page: Any) -> None:
     page.open_wizard_btn.clicked.connect(page._open_wizard)
     clipboard = QApplication.clipboard()
     clipboard.dataChanged.connect(page._on_clipboard_changed)
-    page.controller.surveyParsed.connect(page._on_survey_parsed)
-    page.controller.surveyParseFailed.connect(page._on_survey_parse_failed)
-    page.controller.runtimeUiStateChanged.connect(page._apply_runtime_ui_state)
-    page.controller.randomIpLoadingChanged.connect(page.set_random_ip_loading)
-    page._apply_runtime_ui_state(page.controller.get_runtime_ui_state())
     page.start_btn.clicked.connect(page._on_start_clicked)
     page.resume_btn.clicked.connect(page._on_resume_clicked)
     page.stop_btn.clicked.connect(page.controller.stop_run)
@@ -204,7 +199,7 @@ def on_survey_parsed(page: Any, info: list, title: str) -> None:
     page._survey_title = str(title or "").strip()
     page._parsed_url = page.url_edit.text().strip()
     page._survey_provider = normalize_survey_provider(
-        getattr(page.controller, "survey_provider", "")
+        page.controller.get_survey_snapshot().get("survey_provider")
         or detect_survey_provider(page.url_edit.text().strip(), default=""),
         default=page._survey_provider or "",
     )

@@ -66,23 +66,14 @@ class WorkbenchPresenter:
         self.reverse_fill_page.surveyUrlChanged.connect(self.sync_dashboard_url_from_reverse_fill)
         self.dashboard.url_edit.textChanged.connect(self.sync_reverse_fill_url_from_dashboard)
         self.state.entriesChanged.connect(lambda _count: self.sync_reverse_fill_context())
-        self.controller.surveyParsed.connect(
-            self.on_survey_parsed,
+        self.controller.surveySnapshotChanged.connect(
+            self.on_survey_snapshot_changed,
             Qt.ConnectionType.QueuedConnection,
         )
-        self.controller.surveyParseFailed.connect(
-            self.on_survey_parse_failed,
+        self.controller.runtimeSnapshotChanged.connect(
+            self.on_runtime_snapshot_changed,
             Qt.ConnectionType.QueuedConnection,
         )
-        self.controller.runStateChanged.connect(self.dashboard.on_run_state_changed)
-        self.controller.runStateChanged.connect(self.reverse_fill_page.on_run_state_changed)
-        self.controller.statusUpdated.connect(self.dashboard.update_status)
-        self.controller.statusUpdated.connect(self.reverse_fill_page.update_status)
-        self.controller.threadProgressUpdated.connect(self.dashboard.update_thread_progress)
-        self.controller.pauseStateChanged.connect(self.dashboard.on_pause_state_changed)
-        self.controller.pauseStateChanged.connect(self.reverse_fill_page.on_pause_state_changed)
-        self.controller.cleanupFinished.connect(self.dashboard.on_cleanup_finished)
-        self.controller.cleanupFinished.connect(self.reverse_fill_page.on_cleanup_finished)
 
     def apply_config(self, cfg: RuntimeConfig) -> None:
         self.runtime_page.apply_config(cfg)
@@ -125,16 +116,25 @@ class WorkbenchPresenter:
             question_entries=self.state.get_entries(),
             questions_info=self.state.questions_info,
         )
-        self.controller.config = cfg
+        if hasattr(self.controller, "config"):
+            self.controller.config = cfg
         return cfg
 
-    @Slot(list, str)
-    def on_survey_parsed(self, info: list[Any], title: str) -> None:
-        questions = ensure_survey_question_metas(info or [])
-        parsed_title = title or "问卷"
-        parsed_url = str(getattr(getattr(self.controller, "config", None), "url", "") or "")
+    @Slot(dict)
+    def on_survey_snapshot_changed(self, snapshot: dict[str, Any]) -> None:
+        phase = str((snapshot or {}).get("phase") or "")
+        parsed_url = str((snapshot or {}).get("url") or "")
         self.sync_dashboard_url_from_reverse_fill(parsed_url)
         self.sync_reverse_fill_url_from_dashboard(parsed_url)
+        if phase == "error":
+            self.on_survey_parse_failed(str((snapshot or {}).get("parse_error") or ""))
+            return
+        if phase != "ready":
+            return
+
+        questions = ensure_survey_question_metas((snapshot or {}).get("questions_info") or [])
+        parsed_title = str((snapshot or {}).get("survey_title") or "") or "问卷"
+        entries = list((snapshot or {}).get("question_entries") or [])
         self.strategy_page.set_questions_info(questions)
         if getattr(self.dashboard, "_open_wizard_after_parse", False):
             self.dashboard._open_wizard_after_parse = False
@@ -144,14 +144,30 @@ class WorkbenchPresenter:
                 lambda: self.open_parse_wizard_after_parse(info_snapshot, parsed_title),
             )
             return
-        self.state.set_questions(questions, self.controller.question_entries)
+        self.state.set_questions(questions, entries)
         self.strategy_page.set_dimension_groups([])
         self.strategy_page.set_entries(
             self.state.entries,
             self.state.entry_questions_info,
         )
-        self.dashboard.update_question_meta(parsed_title, len(self.controller.question_entries))
+        self.dashboard.update_question_meta(parsed_title, len(entries))
         self.sync_reverse_fill_context()
+
+    def on_survey_parsed(self, info: list[Any], title: str) -> None:
+        self.on_survey_snapshot_changed(
+            {
+                "phase": "ready",
+                "url": str(getattr(getattr(self.controller, "config", None), "url", "") or ""),
+                "survey_title": str(title or ""),
+                "survey_provider": str(
+                    getattr(self.controller, "survey_provider", "")
+                    or getattr(getattr(self.controller, "config", None), "survey_provider", "wjx")
+                    or "wjx"
+                ),
+                "questions_info": list(info or []),
+                "question_entries": list(getattr(self.controller, "question_entries", []) or []),
+            }
+        )
 
     @Slot(str)
     def on_survey_parse_failed(self, msg: str) -> None:
@@ -161,20 +177,56 @@ class WorkbenchPresenter:
             return
         self.dashboard._open_wizard_after_parse = False
 
+    @Slot(dict)
+    def on_runtime_snapshot_changed(self, snapshot: dict[str, Any]) -> None:
+        running = bool((snapshot or {}).get("running"))
+        paused = bool((snapshot or {}).get("paused"))
+        pause_reason = str((snapshot or {}).get("status_text") or "")
+        progress = (snapshot or {}).get("progress") or {}
+        threads = (snapshot or {}).get("threads") or {}
+        self.dashboard.on_run_state_changed(running)
+        self.reverse_fill_page.on_run_state_changed(running)
+        self.dashboard.update_status(
+            str((snapshot or {}).get("status_text") or ""),
+            int(progress.get("current") or 0),
+            int(progress.get("target") or 0),
+        )
+        self.reverse_fill_page.update_status(
+            str((snapshot or {}).get("status_text") or ""),
+            int(progress.get("current") or 0),
+            int(progress.get("target") or 0),
+        )
+        thread_payload = {
+            "threads": list(threads.get("rows") or []),
+            "target": int(progress.get("target") or 0),
+            "num_threads": int(threads.get("num_threads") or 0),
+            "per_thread_target": int(threads.get("per_thread_target") or 0),
+            "device_quota_fail_count": int(progress.get("device_quota_fail_count") or 0),
+            "initializing": bool((snapshot or {}).get("initialization", {}).get("active")),
+            "initializing_text": str((snapshot or {}).get("initialization", {}).get("text") or ""),
+            "initialization_logs": list((snapshot or {}).get("initialization", {}).get("logs") or []),
+        }
+        self.dashboard.update_thread_progress(thread_payload)
+        self.dashboard.on_pause_state_changed(paused, pause_reason if paused else "")
+        self.reverse_fill_page.on_pause_state_changed(paused, pause_reason if paused else "")
+
     def sync_reverse_fill_context(self) -> None:
         try:
             url_edit = getattr(self.dashboard, "url_edit", None)
             url_text = url_edit.text() if url_edit is not None and hasattr(url_edit, "text") else ""
-            survey_provider = str(
-                getattr(self.controller, "survey_provider", "")
-                or getattr(
-                    getattr(self.controller, "config", None),
-                    "survey_provider",
-                    "",
+            if hasattr(self.controller, "get_survey_snapshot"):
+                survey_provider = str(
+                    (self.controller.get_survey_snapshot().get("survey_provider") or "")
+                    or detect_survey_provider(url_text, default="")
+                    or ""
                 )
-                or detect_survey_provider(url_text, default="")
-                or ""
-            )
+            else:
+                survey_provider = str(
+                    getattr(self.controller, "survey_provider", "")
+                    or getattr(getattr(self.controller, "config", None), "survey_provider", "")
+                    or detect_survey_provider(url_text, default="")
+                    or ""
+                )
             self.reverse_fill_page.set_question_context(
                 self.state.questions_info,
                 self.state.get_entries(),
@@ -233,7 +285,9 @@ class WorkbenchPresenter:
     ) -> None:
         normalized_info = ensure_survey_question_metas(info or [])
         try:
-            pending_entries = copy.deepcopy(self.controller.question_entries)
+            pending_entries = copy.deepcopy(
+                self.controller.get_survey_snapshot().get("question_entries") or []
+            )
             selected_info: list[SurveyQuestionMeta | dict[str, Any]] = list(
                 copy.deepcopy(normalized_info)
             )
@@ -303,7 +357,10 @@ class WorkbenchPresenter:
                     )
                 pending_entries = merged_entries
             self.state.set_questions(normalized_info, pending_entries)
-            self.controller.question_entries = pending_entries
+            self.controller.replace_question_entries(
+                pending_entries,
+                questions_info=normalized_info,
+            )
             if not selected_issue_nums:
                 self.strategy_page.set_dimension_groups([])
             self.strategy_page.set_entries(

@@ -60,10 +60,10 @@ def bind_dashboard_events(page: Any) -> None:
     page._bind_progress_events()
     page.thread_view_seg.currentItemChanged.connect(page._on_thread_view_changed)
     page.target_spin.valueChanged.connect(
-        lambda value: page.controller.set_runtime_ui_state(target=int(value))
+        lambda value: page.controller.update_runtime_settings(target=int(value))
     )
     page.thread_spin.valueChanged.connect(
-        lambda value: page.controller.set_runtime_ui_state(threads=int(value))
+        lambda value: page.controller.update_runtime_settings(threads=int(value))
     )
     page.proxy_source_combo.currentIndexChanged.connect(page._on_proxy_source_changed)
     page.custom_proxy_api_edit.editingFinished.connect(page._on_custom_proxy_api_changed)
@@ -87,15 +87,11 @@ def bind_dashboard_events(page: Any) -> None:
         page="dashboard",
         forward_signal_args=False,
     )
-    page.controller.runtimeUiStateChanged.connect(page._apply_runtime_ui_state)
-    page.controller.randomIpLoadingChanged.connect(page.set_random_ip_loading)
     QApplication.clipboard().dataChanged.connect(page._on_clipboard_changed)
     page.add_action.triggered.connect(page._show_add_question_dialog)
     page.edit_action.triggered.connect(page._edit_selected_entries)
     page.del_action.triggered.connect(page._delete_selected_entries)
     page.clear_all_action.triggered.connect(page._clear_all_entries)
-    page.controller.surveyParsed.connect(page._on_survey_parsed)
-    page.controller.surveyParseFailed.connect(page._on_survey_parse_failed)
     page._ipBalanceChecked.connect(page._on_ip_balance_checked)
     try:
         page.workbench_state.entriesChanged.connect(page._on_question_entries_changed)

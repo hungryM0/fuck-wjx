@@ -7,8 +7,11 @@ from software.core.engine.runtime_control_port import (
     wait_if_paused,
 )
 
+RuntimeUiBridge = RuntimeControlPort
+
 __all__ = [
     "RuntimeControlPort",
+    "RuntimeUiBridge",
     "handle_random_ip_submission",
     "set_random_ip_loading",
     "wait_if_paused",

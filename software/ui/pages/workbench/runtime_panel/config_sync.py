@@ -148,7 +148,22 @@ class RuntimeConfigSyncMixin:
                 level=logging.WARNING,
             )
         self.ai_section.apply_config(cfg)
-        self.controller.sync_runtime_ui_state_from_config(cfg)
+        updater = getattr(self.controller, "update_runtime_settings", None)
+        if callable(updater):
+            updater(
+                target=max(1, int(cfg.target or 1)),
+                threads=max(self.MIN_THREADS, int(cfg.threads or self.MIN_THREADS)),
+                random_ip_enabled=bool(cfg.random_ip_enabled),
+                survey_provider=str(getattr(cfg, "survey_provider", "wjx") or "wjx"),
+                proxy_source=str(getattr(cfg, "proxy_source", PROXY_SOURCE_DEFAULT) or PROXY_SOURCE_DEFAULT),
+                submit_interval=getattr(cfg, "submit_interval", (0, 0)),
+                answer_duration=getattr(cfg, "answer_duration", (60, 120)),
+                answer_datetime_window=getattr(cfg, "answer_datetime_window", ("", "")),
+            )
+        else:
+            legacy = getattr(self.controller, "sync_runtime_ui_state_from_config", None)
+            if callable(legacy):
+                legacy(cfg)
 
     def _apply_runtime_ui_state(self, state: dict) -> None:
         page = cast(Any, self)

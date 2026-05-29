@@ -282,7 +282,7 @@ class DashboardRandomIPMixin:
                 self.random_ip_cb.setChecked(False)
                 self.random_ip_cb.blockSignals(False)
                 self._sync_random_ip_toggle_presentation(False)
-                self.controller.set_runtime_ui_state(random_ip_enabled=False)
+                self.controller.update_runtime_settings(random_ip_enabled=False)
             return
         if unknown_local_quota:
             self._sync_random_ip_usage_ring(mode="paused", percent=0, format_text="待校验")
@@ -306,7 +306,7 @@ class DashboardRandomIPMixin:
             self.random_ip_cb.setChecked(False)
             self.random_ip_cb.blockSignals(False)
             self._sync_random_ip_toggle_presentation(False)
-            self.controller.set_runtime_ui_state(random_ip_enabled=False)
+            self.controller.update_runtime_settings(random_ip_enabled=False)
 
     def _sync_random_ip_usage_ring(self, *, mode: str, percent: int, format_text: str) -> None:
         try:
@@ -381,10 +381,10 @@ class DashboardRandomIPMixin:
             return
 
         try:
-            state = self.controller.get_runtime_ui_state()
+            state = self.controller.get_runtime_snapshot().get("settings", {})
             current_source = str(state.get("proxy_source") or "").strip().lower()
         except Exception as exc:
-            context = "_update_ip_cost_infobar: self.controller.get_runtime_ui_state()"
+            context = "_update_ip_cost_infobar: self.controller.get_runtime_snapshot()"
             log_suppressed_exception(
                 context,
                 exc,
@@ -400,11 +400,11 @@ class DashboardRandomIPMixin:
 
     def _on_random_ip_toggled(self, enabled: bool):
         self._sync_random_ip_toggle_presentation(bool(enabled))
-        if self.controller.request_toggle_random_ip(bool(enabled), adapter=self.controller.adapter):
+        if self.controller.request_toggle_random_ip(bool(enabled)):
             return
 
         fallback_enabled = bool(
-            self.controller.get_runtime_ui_state().get("random_ip_enabled", False)
+            self.controller.get_runtime_snapshot().get("settings", {}).get("random_ip_enabled", False)
         )
         self.random_ip_cb.blockSignals(True)
         self.random_ip_cb.setChecked(fallback_enabled)

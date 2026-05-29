@@ -147,6 +147,15 @@ class ReverseFillPage(SurveyClipboardMixin, QWidget):
 
         build_reverse_fill_page_ui(self)
         self._bind_events()
+        if hasattr(self.controller, "get_runtime_snapshot"):
+            runtime_snapshot = self.controller.get_runtime_snapshot()
+            self._apply_runtime_ui_state(runtime_snapshot.get("settings") or {})
+            self.set_random_ip_loading(
+                bool(runtime_snapshot.get("random_ip", {}).get("loading")),
+                str(runtime_snapshot.get("random_ip", {}).get("loading_message") or ""),
+            )
+        elif hasattr(self.controller, "get_runtime_ui_state"):
+            self._apply_runtime_ui_state(self.controller.get_runtime_ui_state())
         self._refresh_preview()
         self._sync_start_button_state()
 
@@ -280,10 +289,10 @@ class ReverseFillPage(SurveyClipboardMixin, QWidget):
 
     def _on_random_ip_toggled(self, enabled: bool) -> None:
         self._sync_random_ip_toggle_presentation(bool(enabled))
-        if self.controller.request_toggle_random_ip(bool(enabled), adapter=self.controller.adapter):
+        if self.controller.request_toggle_random_ip(bool(enabled)):
             return
         fallback_enabled = bool(
-            self.controller.get_runtime_ui_state().get("random_ip_enabled", False)
+            self.controller.get_runtime_snapshot().get("settings", {}).get("random_ip_enabled", False)
         )
         self.random_ip_cb.blockSignals(True)
         self.random_ip_cb.setChecked(fallback_enabled)

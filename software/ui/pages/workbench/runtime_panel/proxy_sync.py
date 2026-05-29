@@ -73,7 +73,7 @@ class RuntimeProxySyncMixin:
             show_tip=bool(show_tip and normalized == PROXY_SOURCE_BENEFIT)
         )
         if emit_state:
-            self.controller.set_runtime_ui_state(proxy_source=normalized)
+            self.controller.update_runtime_settings(proxy_source=normalized)
         return normalized
 
     def set_custom_proxy_api(self, api_url: str) -> None:
@@ -107,8 +107,7 @@ class RuntimeProxySyncMixin:
     def _current_survey_provider(self) -> str:
         try:
             return str(
-                getattr(self.controller, "survey_provider", "")
-                or self.controller.get_runtime_ui_state().get("survey_provider")
+                self.controller.get_runtime_snapshot().get("settings", {}).get("survey_provider")
                 or "wjx"
             ).strip().lower()
         except Exception:
@@ -173,12 +172,12 @@ class RuntimeProxySyncMixin:
     def _on_time_settings_changed(self, _value: Any):
         self._evaluate_benefit_proxy_compatibility(show_tip=True)
         page = cast(Any, self)
-        self.controller.set_runtime_ui_state(
+        self.controller.update_runtime_settings(
             submit_interval=page._card_value_as_range(self.interval_card),
             answer_duration=page._card_value_as_range(self.answer_duration_card),
         )
 
     def _on_answer_datetime_window_changed(self, _value: Any):
-        self.controller.set_runtime_ui_state(
+        self.controller.update_runtime_settings(
             answer_datetime_window=self.answer_card.getDateTimeWindow()
         )

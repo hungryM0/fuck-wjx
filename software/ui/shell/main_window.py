@@ -165,13 +165,6 @@ class MainWindow(
         # 微软商店风格导航栏需要在事件循环后应用显示偏好，避免初始化时序抖动
         QTimer.singleShot(0, self._configure_navigation_interface)
         self._bind_controller_signals()
-        self.controller.configure_ui_bridge(
-            quota_request_form_opener=self._open_quota_request_form,
-            on_ip_counter=self._on_random_ip_counter_update,
-            message_handler=self._show_dialog_message,
-            confirm_handler=self.show_confirm_dialog,
-            custom_confirm_handler=self.show_custom_confirm_dialog_ui,
-        )
         self._refresh_title_random_ip_user_id()
         self.workbench.sync_reverse_fill_context()
         self._register_popups()
@@ -651,10 +644,7 @@ class MainWindow(
             self.show()
 
     def _bind_controller_signals(self):
-        self.controller.runFailed.connect(self._on_run_failed)
-        self.controller.quickBugReportSuggested.connect(self._prompt_quick_bug_report)
-        self.controller.freeAiUnstableSuggested.connect(self._notify_free_ai_unstable)
-        self.controller.submissionVerificationSuggested.connect(self._notify_submission_verification)
+        self.controller.controllerEvent.connect(self._on_controller_event)
         self.controller.on_ip_counter = self._on_random_ip_counter_update
 
     def _register_popups(self):
@@ -707,6 +697,37 @@ class MainWindow(
         self._toast(text, "error")
         if not self.isActiveWindow():
             self.show_task_result_system_notification("任务失败", text)
+
+    @Slot(dict)
+    def _on_controller_event(self, event: dict) -> None:
+        event_type = str((event or {}).get("type") or "").strip()
+        if event_type == "run_failed":
+            self._on_run_failed(str((event or {}).get("message") or ""))
+            return
+        if event_type == "dialog_message":
+            self._show_dialog_message(
+                str((event or {}).get("title") or ""),
+                str((event or {}).get("message") or ""),
+                str((event or {}).get("level") or "info"),
+            )
+            return
+        if event_type == "open_quota_request_form":
+            accepted = self._open_quota_request_form()
+            if accepted and bool((event or {}).get("retry_enable_random_ip")):
+                self.controller.request_toggle_random_ip(True)
+            return
+        if event_type == "quick_bug_report_suggested":
+            self._prompt_quick_bug_report()
+            return
+        if event_type == "free_ai_unstable":
+            self._notify_free_ai_unstable()
+            return
+        if event_type == "submission_verification_required":
+            self._notify_submission_verification(str((event or {}).get("message") or ""))
+            return
+        if event_type == "cleanup_finished":
+            self.dashboard.on_cleanup_finished()
+            self.reverse_fill_page.on_cleanup_finished()
 
     def _open_quota_request_form(self) -> bool:
         return self._open_quota_redeem_dialog()

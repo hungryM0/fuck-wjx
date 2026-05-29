@@ -135,7 +135,8 @@ class MainWindowLifecycleMixin:
             question_entries=self.workbench_state.get_entries(),
             questions_info=self.workbench_state.questions_info,
         )
-        self.controller.config = cfg
+        if hasattr(self.controller, "config"):
+            self.controller.config = cfg
         return cfg
 
     def _save_config_via_dialog(self, cfg) -> bool:

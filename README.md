@@ -32,8 +32,6 @@
 6. **配置导入导出** - 保存配置文件便于后续复用，跨设备同步
 7. **AI 主观题作答** - 填空题自动生成作答内容（限时免费），由 [@dAwn-Rebirth](https://github.com/dAwn-Rebirth) 贡献
 
----
-
 ## 开始使用
 
 > [!TIP]
@@ -79,8 +77,6 @@ uv run python SurveyController.py
 4. **设置运行参数** - 指定目标提交份数、并发数、随机IP等选项
 5. **启动任务** - 点击 `开始执行` 并等待任务完成
 
----
-
 ## 关键配置说明
 
 | 配置项 | 说明 |
@@ -94,15 +90,12 @@ uv run python SurveyController.py
 
 详细配置项请参考[教程文档](https://surveydoc.hungrym0.top/runtime.html)。
 
----
-
 ## 交流群
 
 如有疑问或需要技术支持，可加入QQ群：
 346131215
 
 <img width="256" alt="qq" src="assets/community_qr.jpg" />
----
 
 ## 参与贡献
 
@@ -110,8 +103,6 @@ uv run python SurveyController.py
 - 增加对更多题型的支持
 - 增加对更多问卷平台的支持
 - 性能优化与代码重构
-
----
 
 ## 贡献者
 
@@ -137,8 +128,6 @@ uv run python SurveyController.py
     <img src="https://github.com/qintaiyang.png" width="50" height="50" alt="qintaiyang" style="border-radius: 50%;" />
   </a>
 </div>
-
----
 
 ## Star History
 
