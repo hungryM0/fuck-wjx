@@ -25,6 +25,7 @@ class UpdateHelperTests:
 
     def test_check_updates_uses_velopack_feed_when_manager_missing(self) -> None:
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "__VERSION__", "3.1.1"),
             patch.object(updater, "_safe_create_update_manager", return_value=None),
             patch.object(
@@ -42,6 +43,7 @@ class UpdateHelperTests:
 
     def test_check_updates_returns_unknown_when_feed_fallback_missing(self) -> None:
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=None),
             patch.object(updater, "_fetch_latest_velopack_feed_release", return_value=None),
         ):
@@ -51,6 +53,7 @@ class UpdateHelperTests:
 
     def test_check_updates_returns_preview_when_feed_latest_is_older(self) -> None:
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=None),
             patch.object(
                 updater,
@@ -69,6 +72,7 @@ class UpdateHelperTests:
         manager.get_current_version.return_value = "3.1.2"
         manager.check_for_updates.return_value = None
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=manager),
             patch.object(updater, "_fetch_latest_velopack_feed_release", return_value={"Version": "3.1.2", "Type": "Full"}),
         ):
@@ -86,7 +90,10 @@ class UpdateHelperTests:
         manager = MagicMock()
         manager.get_current_version.return_value = "3.1.2"
         manager.check_for_updates.return_value = SimpleNamespace(TargetFullRelease=asset)
-        with patch.object(updater, "_safe_create_update_manager", return_value=manager):
+        with (
+            patch.object(updater.sys, "platform", "win32"),
+            patch.object(updater, "_safe_create_update_manager", return_value=manager),
+        ):
             result = updater.UpdateManager.check_updates()
         assert result["status"] == "outdated"
         assert result["has_update"] is True
@@ -100,6 +107,7 @@ class UpdateHelperTests:
         manager.get_current_version.return_value = "3.1.2"
         manager.check_for_updates.return_value = SimpleNamespace(TargetFullRelease=asset)
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=manager),
             patch.object(updater, "_fetch_github_release_by_tag", return_value={"body": "GitHub 里的发行说明"}),
         ):
@@ -113,6 +121,7 @@ class UpdateHelperTests:
         manager.get_current_version.return_value = "3.1.2"
         manager.check_for_updates.return_value = SimpleNamespace(TargetFullRelease=asset)
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=manager),
             patch.object(updater, "_fetch_github_release_by_tag", return_value=None),
             patch.object(updater, "_fetch_github_release_from_list", return_value={"body": "列表里的发行说明"}),
@@ -127,6 +136,7 @@ class UpdateHelperTests:
         manager.get_current_version.return_value = "3.1.2"
         manager.check_for_updates.return_value = SimpleNamespace(TargetFullRelease=asset)
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=manager),
             patch.object(updater, "_fetch_github_release_by_tag", return_value=None),
             patch.object(updater, "_fetch_github_release_from_list", return_value=None),
@@ -140,6 +150,7 @@ class UpdateHelperTests:
         manager.get_current_version.return_value = "3.1.4"
         manager.check_for_updates.return_value = None
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=manager),
             patch.object(updater, "_fetch_latest_velopack_feed_release", return_value={"Version": "3.1.3", "Type": "Full"}),
         ):
@@ -157,7 +168,10 @@ class UpdateHelperTests:
                 {"Version": "3.1.3", "Type": "Full"},
             ]
         }
-        with patch.object(updater.http_client, "get", return_value=response):
+        with (
+            patch.object(updater.sys, "platform", "win32"),
+            patch.object(updater.http_client, "get", return_value=response),
+        ):
             result = updater._fetch_latest_velopack_feed_release()
         assert result == {"Version": "3.1.3", "Type": "Full"}
 
@@ -165,7 +179,10 @@ class UpdateHelperTests:
         manager = MagicMock()
         manager.get_current_version.return_value = "3.1.2"
         manager.check_for_updates.side_effect = RuntimeError("network down")
-        with patch.object(updater, "_safe_create_update_manager", return_value=manager):
+        with (
+            patch.object(updater.sys, "platform", "win32"),
+            patch.object(updater, "_safe_create_update_manager", return_value=manager),
+        ):
             result = updater.UpdateManager.check_updates()
         assert result["status"] == "unknown"
 
@@ -180,14 +197,20 @@ class UpdateHelperTests:
             callback(100)
 
         manager.download_updates.side_effect = fake_download
-        with patch.object(updater, "_safe_create_update_manager", return_value=manager):
+        with (
+            patch.object(updater.sys, "platform", "win32"),
+            patch.object(updater, "_safe_create_update_manager", return_value=manager),
+        ):
             assert updater.UpdateManager.download_update(object(), progress_callback=on_progress)
         assert progress_values == [(5, 100, 0.0), (100, 100, 0.0)]
 
     def test_apply_downloaded_update_uses_apply_updates_and_exit(self) -> None:
         manager = MagicMock()
         update_info = object()
-        with patch.object(updater, "_safe_create_update_manager", return_value=manager):
+        with (
+            patch.object(updater.sys, "platform", "win32"),
+            patch.object(updater, "_safe_create_update_manager", return_value=manager),
+        ):
             updater.UpdateManager.apply_downloaded_update(update_info)
         manager.apply_updates_and_exit.assert_called_once_with(update_info)
 
@@ -195,6 +218,7 @@ class UpdateHelperTests:
         manager = MagicMock()
         update_info = object()
         with (
+            patch.object(updater.sys, "platform", "win32"),
             patch.object(updater, "_safe_create_update_manager", return_value=manager),
             patch.dict(updater.os.environ, {"SURVEYCONTROLLER_UPDATE_TEST_MODE": "1"}, clear=False),
         ):

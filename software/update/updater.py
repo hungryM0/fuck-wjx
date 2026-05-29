@@ -24,7 +24,7 @@ _VELOPACK_MODULE_NAME = "velopack"
 
 
 def _is_unsupported_update_platform() -> bool:
-    return sys.platform == "darwin"
+    return sys.platform != "win32"
 
 
 def _get_velopack_module() -> Optional[Any]:
