@@ -5,6 +5,7 @@ import os
 
 from PySide6.QtCore import QCoreApplication, QStandardPaths
 
+from software.app.path_utils import normalize_filesystem_path
 from software.app.settings_store import (
     CONFIG_DIRECTORY_SETTING_KEY,
     app_settings,
@@ -16,7 +17,7 @@ _APP_NAME = "SurveyController"
 
 
 def _normalize_path(path: str) -> str:
-    return os.path.abspath(str(path or "").strip())
+    return normalize_filesystem_path(str(path or "").strip())
 
 
 def _strip_qt_app_suffix(path: str) -> str:

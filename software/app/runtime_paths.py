@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import sys
 
+from software.app.path_utils import normalize_filesystem_path
+
 
 def _get_repo_root() -> str:
     return os.path.dirname(
@@ -32,7 +34,7 @@ def get_bundle_resource_root() -> str:
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
-            return os.path.abspath(meipass)
+            return normalize_filesystem_path(meipass)
         return os.path.dirname(sys.executable)
     return _get_repo_root()
 

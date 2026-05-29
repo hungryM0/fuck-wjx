@@ -79,6 +79,54 @@ def test_wjx_ktimes_sampling_failure_falls_back_to_90(monkeypatch) -> None:
     assert wjx_http._sample_ktimes(config) == 90
 
 
+@pytest.mark.asyncio
+async def test_wjx_starttime_extraction_prefers_page_value(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://www.wjx.cn/vm/demo.aspx",
+        survey_provider="wjx",
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", options=2, option_texts=["A", "B"]),
+    }
+    state = ExecutionState(config=config)
+    captured: dict[str, object] = {}
+    page_html = """
+    <html>
+      <body>
+        <input type="hidden" value="2026/5/30 1:23:18" id="starttime" name="starttime" />
+      </body>
+    </html>
+    """
+
+    async def fake_load(*_args, **_kwargs):
+        return page_html
+
+    async def fake_build_action(*_args, **_kwargs):
+        return AnswerAction(question_num=1, kind="choice", selected_indices=(0,), record_type="single")
+
+    async def fake_post(*_args, **kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(text="success")
+
+    monkeypatch.setattr(wjx_http, "_load_wjx_page", fake_load)
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+    monkeypatch.setattr(wjx_http.http_client, "apost", fake_post)
+    monkeypatch.setattr(wjx_http.time, "time", lambda: 1710000000.0)
+
+    ok = await wjx_http.brush_wjx_http(
+        config,
+        state,
+        proxy_address="http://1.1.1.1:80",
+        user_agent="UA",
+    )
+
+    expected_start = wjx_http._extract_wjx_starttime_seconds(page_html)
+
+    assert ok is True
+    assert captured["params"]["starttime"] == "2026/5/30 1:23:18"
+    assert captured["params"]["cst"] == str(expected_start * 1000)
+
+
 def test_qq_question_answer_builders_cover_choice_text_and_matrix() -> None:
     choice = qq_http._question_answer(
         {"id": "q1", "type": "radio", "options": [{"id": "o1", "text": "A"}, {"id": "o2", "text": "B"}]},
@@ -232,7 +280,7 @@ async def test_wjx_http_runtime_uses_proxy_and_posts_submitdata(monkeypatch) -> 
     captured: dict[str, object] = {}
 
     async def fake_load(*_args, **_kwargs):
-        return None
+        return "<html><body><input type='hidden' value='2026/5/30 1:23:18' id='starttime' name='starttime' /></body></html>"
 
     async def fake_build_action(*_args, **_kwargs):
         return AnswerAction(question_num=1, kind="choice", selected_indices=(0,), record_type="single")
@@ -255,6 +303,7 @@ async def test_wjx_http_runtime_uses_proxy_and_posts_submitdata(monkeypatch) -> 
     assert ok is True
     assert captured["proxies"] == "http://1.1.1.1:80"
     assert captured["data"] == {"submitdata": "1$1", "sceneId": "q0hcfsca"}
+    assert captured["params"]["starttime"] == "2026/5/30 1:23:18"
 
 
 @pytest.mark.asyncio
@@ -270,7 +319,7 @@ async def test_wjx_http_runtime_keeps_direct_source_for_wechat_user_agent(monkey
     captured: dict[str, object] = {}
 
     async def fake_load(*_args, **_kwargs):
-        return None
+        return "<html><body><input type='hidden' value='2026/5/30 1:23:18' id='starttime' name='starttime' /></body></html>"
 
     async def fake_build_action(*_args, **_kwargs):
         return AnswerAction(question_num=1, kind="choice", selected_indices=(0,), record_type="single")

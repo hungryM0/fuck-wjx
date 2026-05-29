@@ -32,7 +32,7 @@ class SystemHelpersTests:
         kernel = _Kernel32([1, 1])
         patch_attrs(
             (power_management.sys, "platform", "win32"),
-            (power_management.ctypes, "windll", type("Windll", (), {"kernel32": kernel})()),
+            (power_management, "_kernel32", lambda: kernel),
         )
         blocker = SystemSleepBlocker()
         assert blocker.acquire() is True
@@ -46,13 +46,13 @@ class SystemHelpersTests:
         kernel = _Kernel32([0])
         patch_attrs(
             (power_management.sys, "platform", "win32"),
-            (power_management.ctypes, "windll", type("Windll", (), {"kernel32": kernel})()),
+            (power_management, "_kernel32", lambda: kernel),
         )
         blocker = SystemSleepBlocker()
         assert blocker.acquire() is False
 
         kernel = _Kernel32([0])
-        patch_attrs((power_management.ctypes, "windll", type("Windll", (), {"kernel32": kernel})()))
+        patch_attrs((power_management, "_kernel32", lambda: kernel))
         blocker._active = True
         assert blocker.release() is False
         assert blocker.active is True

@@ -30,6 +30,7 @@ from software.app.config import (
     get_bool_from_qsettings,
     get_int_from_qsettings,
 )
+from software.app.path_utils import normalize_filesystem_path
 from software.app.user_paths import (
     get_default_user_config_directory,
     resolve_user_config_directory,
@@ -260,7 +261,7 @@ class SettingsPage(ScrollArea):
         return resolve_user_config_directory(self._settings)
 
     def _set_config_directory_content(self, directory: str) -> None:
-        normalized = os.path.abspath(os.path.expanduser(directory))
+        normalized = normalize_filesystem_path(directory)
         self.config_directory_card.setContent(normalized)
         self.config_directory_card.contentLabel.setToolTip(normalized)
 
@@ -403,7 +404,7 @@ class SettingsPage(ScrollArea):
         )
 
     def _apply_config_directory_state(self, directory: str, persist: bool = True) -> str:
-        normalized = os.path.abspath(os.path.expanduser(directory))
+        normalized = normalize_filesystem_path(directory)
         try:
             os.makedirs(normalized, exist_ok=True)
         except OSError as exc:

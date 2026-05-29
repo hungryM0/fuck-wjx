@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import html as html_lib
 import re
 import time
 import uuid
@@ -46,6 +47,22 @@ class WjxSubmitResult:
     REJECTED = "rejected"
 
 
+_WJX_STARTTIME_INPUT_PATTERNS = (
+    re.compile(
+        r'<input\b[^>]*\b(?:id|name)=["\']starttime["\'][^>]*\bvalue=["\']([^"\']+)["\']',
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r'<input\b[^>]*\bvalue=["\']([^"\']+)["\'][^>]*\b(?:id|name)=["\']starttime["\']',
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+_WJX_NOW_TIME_PATTERNS = (
+    re.compile(r'var\s+nowTime\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE),
+    re.compile(r'var\s+interviewStartTime\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE),
+)
+
+
 def _proxy_arg(proxy_address: str | None) -> Any:
     proxy = str(proxy_address or "").strip()
     return proxy if proxy else {}
@@ -71,6 +88,26 @@ def _submit_domain(url: str) -> str:
 def _format_wjx_starttime(timestamp_seconds: int) -> str:
     dt = datetime.fromtimestamp(int(timestamp_seconds))
     return f"{dt.year}/{dt.month}/{dt.day} {dt.hour}:{dt.minute}:{dt.second}"
+
+
+def _extract_wjx_starttime_seconds(page_html: str) -> int | None:
+    text = str(page_html or "")
+    if not text:
+        return None
+
+    for pattern in _WJX_STARTTIME_INPUT_PATTERNS + _WJX_NOW_TIME_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        raw_value = html_lib.unescape(str(match.group(1) or "").strip())
+        if not raw_value:
+            continue
+        for candidate in (raw_value, raw_value.replace("-", "/")):
+            try:
+                return int(datetime.strptime(candidate, "%Y/%m/%d %H:%M:%S").timestamp())
+            except ValueError:
+                continue
+    return None
 
 
 def _resolve_user_agent(user_agent: str | None) -> str:
@@ -246,7 +283,7 @@ def _raise_submit_rejected(
     raise RuntimeError(f"问卷星提交被拒绝：{reason}")
 
 
-async def _load_wjx_page(url: str, *, headers: dict[str, str], proxies: Any) -> None:
+async def _load_wjx_page(url: str, *, headers: dict[str, str], proxies: Any) -> str:
     response = await http_client.aget(url, timeout=15, headers=headers, proxies=proxies)
     response.raise_for_status()
     try:
@@ -259,6 +296,7 @@ async def _load_wjx_page(url: str, *, headers: dict[str, str], proxies: Any) -> 
     ) as exc:
         raise SurveyProviderUnavailableAtRuntimeError(str(exc)) from exc
     _parse_wjx_html(response.text)
+    return str(response.text or "")
 
 
 async def _build_actions(
@@ -349,7 +387,7 @@ async def brush_wjx_http(
         "User-Agent": user_agent_value,
         "Referer": config.url,
     }
-    await _load_wjx_page(config.url, headers=headers, proxies=proxies)
+    page_html = await _load_wjx_page(config.url, headers=headers, proxies=proxies)
 
     await update_http_submit_step(ctx, thread_name, "生成答案")
     plan = await _build_action_plan(
@@ -375,7 +413,7 @@ async def brush_wjx_http(
 
     current_ms = int(time.time() * 1000)
     ktimes = _sample_ktimes(config)
-    start_seconds = int(current_ms / 1000) - ktimes
+    start_seconds = _extract_wjx_starttime_seconds(page_html) or int(current_ms / 1000)
     jqnonce = str(uuid.uuid4())
     domain = _submit_domain(config.url)
     submit_url = f"https://{domain}/joinnew/processjq.ashx"

@@ -7,6 +7,41 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from PySide6.QtCore import QObject, QMimeData, Signal
+from PySide6.QtGui import QGuiApplication, QImage
+from PySide6.QtWidgets import QApplication
+
+
+class _InMemoryClipboard(QObject):
+    dataChanged = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._mime_data = QMimeData()
+        self._image = QImage()
+
+    def clear(self) -> None:
+        self._mime_data = QMimeData()
+        self._image = QImage()
+        self.dataChanged.emit()
+
+    def mimeData(self, *_args, **_kwargs) -> QMimeData:
+        return self._mime_data
+
+    def setMimeData(self, mime_data: QMimeData | None, *_args, **_kwargs) -> None:
+        self._mime_data = mime_data or QMimeData()
+        image_data = self._mime_data.imageData() if self._mime_data.hasImage() else None
+        self._image = image_data if isinstance(image_data, QImage) else QImage()
+        self.dataChanged.emit()
+
+    def image(self, *_args, **_kwargs) -> QImage:
+        return self._image
+
+    def setImage(self, image: QImage, *_args, **_kwargs) -> None:
+        self._image = QImage(image)
+        self._mime_data = QMimeData()
+        self._mime_data.setImageData(self._image)
+        self.dataChanged.emit()
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +56,14 @@ def isolate_qsettings(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     yield
 
     ai_settings._RUNTIME_AI_SETTINGS = None
+
+
+@pytest.fixture(autouse=True)
+def isolate_system_clipboard(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_clipboard = _InMemoryClipboard()
+    monkeypatch.setattr(QApplication, "clipboard", staticmethod(lambda *_args, **_kwargs: fake_clipboard))
+    monkeypatch.setattr(QGuiApplication, "clipboard", staticmethod(lambda *_args, **_kwargs: fake_clipboard))
+    yield
 
 
 @pytest.fixture

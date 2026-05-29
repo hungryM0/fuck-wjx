@@ -125,7 +125,7 @@ def _qt_message_handler(mode, context, message):
 def main():
     _run_velopack_startup()
     if _is_velopack_lifecycle_hook(sys.argv):
-        return
+        return 0
     if _should_run_update_test_probe():
         raise SystemExit(_run_update_test_probe())
 
@@ -150,16 +150,16 @@ def main():
     window = create_window()
     window.show()
 
-    exit_code = app.exec()
+    exit_code = int(app.exec())
 
     # 优雅关闭：停止日志系统后台线程
     from software.logging.log_utils import shutdown_logging
     shutdown_logging()
     _disable_fault_handler()
 
-    os._exit(int(exit_code))
+    return exit_code
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
 

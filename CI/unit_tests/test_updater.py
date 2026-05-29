@@ -170,6 +170,8 @@ class UpdateHelperTests:
         }
         with (
             patch.object(updater.sys, "platform", "win32"),
+            patch.object(updater, "VELOPACK_FEED_URL", "https://dl.example/surveycontroller/win/stable/"),
+            patch.object(updater, "VELOPACK_CHANNEL", "stable"),
             patch.object(updater.http_client, "get", return_value=response),
         ):
             result = updater._fetch_latest_velopack_feed_release()
