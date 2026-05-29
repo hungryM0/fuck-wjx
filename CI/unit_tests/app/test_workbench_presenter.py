@@ -45,6 +45,8 @@ class _FakeDashboard:
         self.wizard_calls: list[tuple[list[QuestionEntry], list, str | None]] = []
         self.wizard_result = True
         self.toasts: list[tuple[str, str]] = []
+        self.parse_success_calls: list[tuple[list, str]] = []
+        self.parse_failed_calls: list[str] = []
 
     def apply_config(self, cfg: RuntimeConfig) -> None:
         self.applied.append(cfg)
@@ -67,6 +69,12 @@ class _FakeDashboard:
 
     def _toast(self, text: str, level: str = "info", *_args, **_kwargs) -> None:
         self.toasts.append((text, level))
+
+    def _on_survey_parsed(self, info: list, title: str) -> None:
+        self.parse_success_calls.append((list(info or []), title))
+
+    def _on_survey_parse_failed(self, error_msg: str) -> None:
+        self.parse_failed_calls.append(str(error_msg or ""))
 
 
 class _FakeReverseFillPage:
@@ -218,6 +226,8 @@ def test_workbench_presenter_survey_parsed_updates_state_and_context() -> None:
     presenter.on_survey_parsed([meta], "Parsed")
 
     assert presenter.state.get_entries() == [entry]
+    assert [(item.num, item.title) for item in dashboard.parse_success_calls[-1][0]] == [(1, "Q1")]
+    assert dashboard.parse_success_calls[-1][1] == "Parsed"
     assert [(item.num, item.title) for item in strategy_page.questions_info] == [(1, "Q1")]
     assert strategy_page.dimension_groups == []
     assert dashboard.meta == ("Parsed", 1)

@@ -38,6 +38,21 @@ class DashboardConfigIOMixin:
         def _sync_start_button_state(self, running: bool | None = None) -> None: ...
         def window(self) -> Any: ...
 
+    @staticmethod
+    def _format_load_config_error(exc: Exception) -> str:
+        text = str(exc or "").strip()
+        if "已移除的旧字段" in text:
+            return "配置加载失败：字段已过期"
+        if "配置文件版本不受支持" in text or "配置不兼容" in text:
+            return "配置加载失败：版本不兼容"
+        if "配置文件为空" in text:
+            return "配置加载失败：文件为空"
+        if "JSON" in text and "顶层必须是对象" in text:
+            return "配置加载失败：文件格式错误"
+        if "读取配置失败" in text:
+            return "配置加载失败：文件损坏"
+        return f"载入失败：{text}" if text else "载入失败"
+
     def _on_show_config_list(self):
         try:
             self.config_drawer.open_drawer()
@@ -123,7 +138,7 @@ class DashboardConfigIOMixin:
                     detail=exc,
                 )
                 logging.error("手动载入配置失败: %s", exc, exc_info=True)
-                self._toast(f"载入失败：{exc}", "error")
+                self._toast(self._format_load_config_error(exc), "error")
                 return
             log_action(
                 "CONFIG",
@@ -150,7 +165,7 @@ class DashboardConfigIOMixin:
                 detail=exc,
             )
             logging.error("手动载入配置失败: %s", exc, exc_info=True)
-            self._toast(f"载入失败：{exc}", "error")
+            self._toast(self._format_load_config_error(exc), "error")
             return
         # 应用到界面
         self.runtime_page.apply_config(cfg)

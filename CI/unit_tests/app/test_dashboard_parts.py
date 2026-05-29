@@ -225,6 +225,19 @@ def test_dashboard_config_load_and_save_without_workbench(monkeypatch, tmp_path)
     page._load_config_from_path(str(config_path))
     assert page.toasts[-1][0] == "载入失败：broken"
 
+    page.controller.load_saved_config.side_effect = ValueError(
+        "配置不兼容: x -> 配置文件版本不受支持（当前仅支持 schema v6，实际为 v5）：x"
+    )
+    page._load_config_from_path(str(config_path))
+    assert page.toasts[-1][0] == "配置加载失败：版本不兼容"
+
+    page.controller.load_saved_config.side_effect = ValueError(
+        "配置不兼容: x -> 配置文件使用了已移除的旧字段（ai_enabled），请在旧版本客户端中重新保存后再导入：x"
+    )
+    page._load_config_from_path(str(config_path))
+    assert page.toasts[-1][0] == "配置加载失败：字段已过期"
+    page.controller.load_saved_config.side_effect = None
+
     monkeypatch.setattr(config_io_module.QFileDialog, "getSaveFileName", lambda *_args, **_kwargs: ("", ""))
     page._on_save_config()
     assert not page.controller.save_current_config.called
@@ -232,7 +245,8 @@ def test_dashboard_config_load_and_save_without_workbench(monkeypatch, tmp_path)
     save_path = tmp_path / "saved.json"
     monkeypatch.setattr(config_io_module.QFileDialog, "getSaveFileName", lambda *_args, **_kwargs: (str(save_path), ""))
     page._on_save_config()
-    page.controller.save_current_config.assert_called_once_with(str(save_path))
+    page.controller.save_current_config.assert_called_once()
+    assert page.controller.save_current_config.call_args.args[0] == str(save_path)
     assert page.toasts[-1][0] == "配置已保存"
 
     page.controller.save_current_config.side_effect = RuntimeError("no disk")

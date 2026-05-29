@@ -30,13 +30,15 @@ class _LineEdit:
 
 
 def _presenter() -> WorkbenchPresenter:
-    p = WorkbenchPresenter.__new__(WorkbenchPresenter)
-    p.controller = SimpleNamespace(
+    controller = SimpleNamespace(
         config=RuntimeConfig(url="https://www.wjx.cn/vm/demo.aspx", survey_provider="wjx"),
         question_entries=[QuestionEntry("single", [1, 1], question_num=1)],
         load_saved_config=MagicMock(),
         refresh_random_ip_counter=MagicMock(),
     )
+    controller.get_survey_snapshot = lambda: {"question_entries": controller.question_entries}
+    p = WorkbenchPresenter.__new__(WorkbenchPresenter)
+    p.controller = controller
     p.host = SimpleNamespace(toasts=[], _toast=lambda text, level="info": p.host.toasts.append((text, level)))
     p.state = WorkbenchState()
     p.runtime_page = SimpleNamespace(apply_config=MagicMock())
@@ -54,6 +56,8 @@ def _presenter() -> WorkbenchPresenter:
         update_question_meta=MagicMock(),
         build_base_config=MagicMock(return_value=RuntimeConfig(url="https://wjx.cn/vm/demo.aspx")),
         run_question_wizard=MagicMock(return_value=True),
+        _on_survey_parsed=MagicMock(),
+        _on_survey_parse_failed=MagicMock(),
         _toast=MagicMock(),
     )
     p.reverse_fill_page = SimpleNamespace(
@@ -228,6 +232,10 @@ def test_presenter_parse_success_failed_and_reverse_fill_wizard(monkeypatch) -> 
 
     p.dashboard._open_wizard_after_parse = True
     p.on_survey_parsed(info, "解析标题")
+    parsed_call = p.dashboard._on_survey_parsed.call_args
+    assert parsed_call is not None
+    assert parsed_call.args[1] == "解析标题"
+    assert [(item.num, item.title) for item in parsed_call.args[0]] == [(1, "Q1")]
     p.dashboard.run_question_wizard.assert_called()
     assert p.dashboard._open_wizard_after_parse is False
     assert p.controller.question_entries[0].question_num == 1
@@ -239,6 +247,7 @@ def test_presenter_parse_success_failed_and_reverse_fill_wizard(monkeypatch) -> 
 
     p.dashboard._open_wizard_after_parse = True
     p.on_survey_parse_failed("问卷已暂停")
+    p.dashboard._on_survey_parse_failed.assert_called_with("问卷已暂停")
     assert p.dashboard._open_wizard_after_parse is False
 
     p.state.set_questions(info, p.controller.question_entries)

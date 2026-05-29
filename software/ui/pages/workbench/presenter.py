@@ -135,6 +135,7 @@ class WorkbenchPresenter:
         questions = ensure_survey_question_metas((snapshot or {}).get("questions_info") or [])
         parsed_title = str((snapshot or {}).get("survey_title") or "") or "问卷"
         entries = list((snapshot or {}).get("question_entries") or [])
+        self._notify_dashboard_parse_succeeded(questions, parsed_title)
         self.strategy_page.set_questions_info(questions)
         if getattr(self.dashboard, "_open_wizard_after_parse", False):
             self.dashboard._open_wizard_after_parse = False
@@ -172,10 +173,25 @@ class WorkbenchPresenter:
     @Slot(str)
     def on_survey_parse_failed(self, msg: str) -> None:
         text = str(msg or "").strip()
+        self._notify_dashboard_parse_failed(text)
         if "问卷已暂停" in text:
             self.dashboard._open_wizard_after_parse = False
             return
         self.dashboard._open_wizard_after_parse = False
+
+    def _notify_dashboard_parse_succeeded(
+        self,
+        info: list[SurveyQuestionMeta],
+        title: str,
+    ) -> None:
+        handler = getattr(self.dashboard, "_on_survey_parsed", None)
+        if callable(handler):
+            handler(list(info or []), str(title or ""))
+
+    def _notify_dashboard_parse_failed(self, message: str) -> None:
+        handler = getattr(self.dashboard, "_on_survey_parse_failed", None)
+        if callable(handler):
+            handler(str(message or ""))
 
     @Slot(dict)
     def on_runtime_snapshot_changed(self, snapshot: dict[str, Any]) -> None:
