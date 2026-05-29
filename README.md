@@ -41,7 +41,7 @@
 
 ### 从源码运行
 
-如果你想参与测试最新功能或提交 Pull Request，可以参考以下步骤
+**环境要求：** Python 3.13.13+，Git
 
 克隆、安装依赖、运行源码：
 ```bash
@@ -68,8 +68,6 @@ uv run python SurveyController.py
 ```
 
 如果没有安装 Homebrew，可以先参考 [Homebrew 官网](https://brew.sh/) 安装。
-
-**环境要求：** Windows 10/11 或 macOS，Python 3.13.13+，Git
 
 ## 使用方法
 
