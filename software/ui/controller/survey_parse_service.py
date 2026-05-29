@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from software.core.config.schema import RuntimeConfig
 from software.core.questions.config import build_default_question_entries

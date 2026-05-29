@@ -15,6 +15,7 @@ class ProviderCommonTests:
     def test_wjx_helpers_accept_subdomains(self) -> None:
         assert is_wjx_domain('https://foo.wjx.top/demo')
         assert is_wjx_survey_url('https://sub.v.wjx.cn/m/demo.aspx')
+        assert is_wjx_survey_url('https://www.wjx.top/vm/wx9ez4J.aspx')
 
     def test_qq_and_credamo_helpers_reject_non_matching_paths(self) -> None:
         assert not is_qq_survey_url('https://wj.qq.com/not-a-survey')

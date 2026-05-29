@@ -36,14 +36,14 @@ class ConfigStoreTests:
     def test_load_config_reads_commented_json_payload(self, tmp_path: Path) -> None:
         path = tmp_path / "config.json"
         path.write_text(
-            """
-            {
+            f"""
+            {{
               // 用户手写注释
-              "config_schema_version": 5,
+              "config_schema_version": {CURRENT_CONFIG_SCHEMA_VERSION},
               "url": "https://www.wjx.cn/vm/demo.aspx",
               "target": "9",
               "threads": 3
-            }
+            }}
             """,
             encoding="utf-8",
         )

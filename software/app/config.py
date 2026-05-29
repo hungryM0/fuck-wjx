@@ -101,7 +101,7 @@ USER_AGENT_PRESETS = {
 # 默认随机 UA 选择范围
 DEFAULT_RANDOM_UA_KEYS = ["wechat_android", "mobile_android", "pc_web"]
 # 默认用户代理
-DEFAULT_USER_AGENT = USER_AGENT_PRESETS["wechat_android"]["ua"]
+DEFAULT_USER_AGENT = USER_AGENT_PRESETS["pc_web"]["ua"]
 
 # 默认 HTTP 请求头
 DEFAULT_HTTP_HEADERS = {

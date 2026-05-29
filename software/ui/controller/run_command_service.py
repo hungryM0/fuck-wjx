@@ -16,7 +16,7 @@ from software.core.config.schema import RuntimeConfig
 from software.core.engine.async_engine import AsyncEngineClient
 from software.core.engine.cleanup import CleanupRunner
 from software.core.engine.failure_reason import FailureReason
-from software.core.task import ExecutionConfig, ExecutionState, ProxyLease
+from software.core.task import ExecutionState, ProxyLease
 from software.io.config.store import load_config, save_config
 from software.system.power_management import SystemSleepBlocker
 from software.ui.controller.controller_events import event_payload
@@ -114,7 +114,7 @@ class RunCommandService(RandomIpRuntimeService, RunControllerInitializationMixin
         self._async_engine_client = async_engine_client
         self._cleanup_runner = cleanup_runner
         self._sleep_blocker = sleep_blocker
-        self._dispatch_to_ui_async = dispatch_async
+        self._dispatch_async = dispatch_async
         self._emit_event = emit_event
         self._runtime = _RuntimeLifecycleState()
         self.stop_event = threading.Event()
@@ -140,6 +140,9 @@ class RunCommandService(RandomIpRuntimeService, RunControllerInitializationMixin
             handle_random_ip_submission=self.handle_random_ip_submission,
         )
         self.adapter = _RandomIpUiAdapter(self)
+
+    def _dispatch_to_ui_async(self, callback: Callable[[], Any]) -> None:
+        self._dispatch_async(callback)
 
     def parent(self) -> None:
         return None

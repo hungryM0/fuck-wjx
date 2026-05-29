@@ -27,7 +27,16 @@ def on_random_ip_submission(
 ) -> None:
     if runtime_port is None:
         return
-    runtime_port.on_random_ip_submission(stop_signal)
+    handler = getattr(runtime_port, "on_random_ip_submission", None)
+    if callable(handler):
+        handler(stop_signal)
+        return
+    legacy_handler = getattr(runtime_port, "handle_random_ip_submission", None)
+    if callable(legacy_handler):
+        try:
+            legacy_handler(stop_signal)
+        except TypeError:
+            legacy_handler(stop_signal=stop_signal)
 
 
 def on_random_ip_loading_changed(

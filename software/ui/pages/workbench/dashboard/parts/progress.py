@@ -719,13 +719,6 @@ class DashboardProgressMixin:
         self._sync_start_button_state(running=running)
         self._sync_thread_slider_enabled(running=running)
         self.stop_btn.setEnabled(running)
-        log_action(
-            "RUN",
-            "run_state",
-            "controller",
-            "dashboard",
-            result="running" if running else "stopped",
-        )
         if not running:
             self.resume_btn.setEnabled(False)
             self.resume_btn.hide()
@@ -789,27 +782,12 @@ class DashboardProgressMixin:
             self.resume_btn.hide()
             return
         if paused:
-            log_action(
-                "RUN",
-                "pause_state",
-                "controller",
-                "dashboard",
-                result="paused",
-                payload={"reason": reason or "manual"},
-            )
             self._apply_progress_visual_state(True)
             self.resume_btn.show()
             self.resume_btn.setEnabled(True)
             msg = f"已暂停：{reason}" if reason else "已暂停"
             self._toast(msg, "warning", 2200)
         else:
-            log_action(
-                "RUN",
-                "pause_state",
-                "controller",
-                "dashboard",
-                result="resumed",
-            )
             self._apply_progress_visual_state(
                 self._status_requires_attention_visual(self.status_label.text())
             )

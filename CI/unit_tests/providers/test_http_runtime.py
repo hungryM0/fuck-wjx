@@ -258,7 +258,7 @@ async def test_wjx_http_runtime_uses_proxy_and_posts_submitdata(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_wjx_http_runtime_uses_wechat_source_for_wechat_user_agent(monkeypatch) -> None:
+async def test_wjx_http_runtime_keeps_direct_source_for_wechat_user_agent(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
@@ -290,7 +290,44 @@ async def test_wjx_http_runtime_uses_wechat_source_for_wechat_user_agent(monkeyp
     )
 
     assert ok is True
-    assert captured["params"]["source"] == "weixin"
+    assert captured["params"]["source"] == "directphone"
+
+
+@pytest.mark.asyncio
+async def test_wjx_http_runtime_uses_historical_default_ua_when_user_agent_is_not_explicitly_selected(monkeypatch) -> None:
+    config = ExecutionConfig(
+        url="https://www.wjx.cn/vm/demo.aspx",
+        survey_provider="wjx",
+    )
+    config.questions_metadata = {
+        1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", options=2, option_texts=["A", "B"]),
+    }
+    state = ExecutionState(config=config)
+    captured: dict[str, object] = {}
+
+    async def fake_load(*_args, **_kwargs):
+        return None
+
+    async def fake_build_action(*_args, **_kwargs):
+        return AnswerAction(question_num=1, kind="choice", selected_indices=(0,), record_type="single")
+
+    async def fake_post(*_args, **kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(text="success")
+
+    monkeypatch.setattr(wjx_http, "_load_wjx_page", fake_load)
+    monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
+    monkeypatch.setattr(wjx_http.http_client, "apost", fake_post)
+
+    ok = await wjx_http.brush_wjx_http(
+        config,
+        state,
+        user_agent=None,
+    )
+
+    assert ok is True
+    assert captured["params"]["source"] == "directphone"
+    assert "MicroMessenger" in str(captured["headers"]["User-Agent"])
 
 
 @pytest.mark.asyncio

@@ -198,8 +198,12 @@ def on_survey_parsed(page: Any, info: list, title: str) -> None:
     unsupported_count = sum(1 for item in parsed_info if bool(item.unsupported))
     page._survey_title = str(title or "").strip()
     page._parsed_url = page.url_edit.text().strip()
+    snapshot_getter = getattr(page.controller, "get_survey_snapshot", None)
+    raw_survey_snapshot = snapshot_getter() if callable(snapshot_getter) else {}
+    survey_snapshot = raw_survey_snapshot if isinstance(raw_survey_snapshot, dict) else {}
     page._survey_provider = normalize_survey_provider(
-        page.controller.get_survey_snapshot().get("survey_provider")
+        (survey_snapshot or {}).get("survey_provider")
+        or getattr(page.controller, "survey_provider", "")
         or detect_survey_provider(page.url_edit.text().strip(), default=""),
         default=page._survey_provider or "",
     )

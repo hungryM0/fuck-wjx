@@ -12,7 +12,7 @@ SURVEY_PROVIDER_CREDAMO = "credamo"
 SUPPORTED_SURVEY_PROVIDERS = {SURVEY_PROVIDER_WJX, SURVEY_PROVIDER_QQ, SURVEY_PROVIDER_CREDAMO}
 
 _WJX_ALLOWED_HOSTS = ("wjx.top", "wjx.cn", "wjx.com")
-_WJX_SURVEY_HOSTS = ("v.wjx.cn", "www.wjx.cn")
+_WJX_SURVEY_HOSTS = ("v.wjx.cn", "www.wjx.cn", "www.wjx.top")
 _QQ_ALLOWED_HOST = "wj.qq.com"
 _QQ_SURVEY_PATH_RE = re.compile(r"^/s\d+/\d+/[A-Za-z0-9_-]+/?$", re.IGNORECASE)
 _CREDAMO_ALLOWED_HOSTS = ("credamo.com", "credamo.cn")

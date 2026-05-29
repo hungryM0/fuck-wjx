@@ -1,6 +1,7 @@
 from __future__ import annotations
 import pytest
 
+from software.app.config import DEFAULT_USER_AGENT, USER_AGENT_PRESETS
 from software.core.config.codec import (
     CURRENT_CONFIG_SCHEMA_VERSION,
     _ensure_supported_config_payload,
@@ -18,6 +19,10 @@ from software.core.reverse_fill.schema import REVERSE_FILL_FORMAT_WJX_SEQUENCE
 from software.providers.contracts import SurveyQuestionMeta
 
 class ConfigCodecTests:
+
+    def test_default_user_agent_is_pc_web(self) -> None:
+        assert DEFAULT_USER_AGENT == USER_AGENT_PRESETS["pc_web"]["ua"]
+        assert "Windows NT" in DEFAULT_USER_AGENT
 
     def test_runtime_config_roundtrip_keeps_reverse_fill_fields(self) -> None:
         config = RuntimeConfig(reverse_fill_enabled=True, reverse_fill_source_path='D:/demo.xlsx', reverse_fill_format=REVERSE_FILL_FORMAT_WJX_SEQUENCE, reverse_fill_start_row=3, reverse_fill_threads=4)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from software.ui.controller.run_controller import EngineGuiAdapter
+from software.ui.controller.engine_adapter import EngineGuiAdapter
 
 
 class _FakeCleanupTarget:

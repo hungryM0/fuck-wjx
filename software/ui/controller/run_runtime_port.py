@@ -30,7 +30,7 @@ class RunRuntimePort(RuntimeControlPort):
         *,
         stop_signal: threading.Event,
         notify_random_ip_loading: Callable[[bool, str], Any],
-        handle_random_ip_submission: Callable[[Optional[threading.Event]], None],
+        handle_random_ip_submission: Callable[..., None],
     ) -> None:
         self.random_ip_enabled_state = BoolState(False)
         self.active_drivers: List[Any] = []
@@ -63,7 +63,7 @@ class RunRuntimePort(RuntimeControlPort):
     def on_random_ip_submission(self, stop_signal: Optional[StopSignalLike] = None) -> None:
         signal = stop_signal if isinstance(stop_signal, threading.Event) else None
         try:
-            self._handle_random_ip_submission(signal)
+            self._handle_random_ip_submission(stop_signal=signal)
         except Exception:
             logging.info("处理随机IP提交流程失败", exc_info=True)
 

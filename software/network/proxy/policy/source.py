@@ -15,7 +15,6 @@ from software.network.proxy.session.auth import (
 from software.app.config import (
     IP_EXTRACT_ENDPOINT,
     PROXY_MINUTE_OPTIONS,
-    PROXY_POOL_ORDINARY,
     PROXY_POOL_QUALITY,
     PROXY_SOURCE_CUSTOM,
     PROXY_QUOTA_COST_MAP,

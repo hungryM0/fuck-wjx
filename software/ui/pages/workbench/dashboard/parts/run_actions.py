@@ -238,19 +238,28 @@ class DashboardRunActionsMixin:
         cfg = RuntimeConfig()
         cfg.url = self.url_edit.text().strip()
         cfg.survey_title = str(self._survey_title or "")
+        snapshot_getter = getattr(self.controller, "get_survey_snapshot", None)
+        raw_survey_snapshot = snapshot_getter() if callable(snapshot_getter) else {}
+        survey_snapshot = raw_survey_snapshot if isinstance(raw_survey_snapshot, dict) else {}
+        controller_provider = str(
+            (survey_snapshot or {}).get("survey_provider")
+            or getattr(self.controller, "survey_provider", "")
+            or "wjx"
+        )
         cfg.survey_provider = detect_survey_provider(
             cfg.url,
-            default=str(
-                self.controller.get_survey_snapshot().get("survey_provider") or "wjx"
-            ),
+            default=controller_provider,
         )
         writer = getattr(self.controller, "write_runtime_ui_state_to_config", None)
         if callable(writer):
             writer(cfg)
+            raw_survey_snapshot = snapshot_getter() if callable(snapshot_getter) else {}
+            survey_snapshot = raw_survey_snapshot if isinstance(raw_survey_snapshot, dict) else {}
             cfg.survey_provider = detect_survey_provider(
                 cfg.url,
                 default=str(
-                    self.controller.get_survey_snapshot().get("survey_provider")
+                    (survey_snapshot or {}).get("survey_provider")
+                    or getattr(self.controller, "survey_provider", "")
                     or cfg.survey_provider
                 ),
             )
