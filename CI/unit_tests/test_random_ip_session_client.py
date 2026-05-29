@@ -56,21 +56,29 @@ class RandomIPSessionClientTests:
         monkeypatch.setattr(client.http_client, "apost", _apost)
         monkeypatch.setattr("software.network.proxy.session.auth._endpoint_name", lambda url: f"endpoint:{url}")
 
-        assert client._post_json("https://api.test/x", json_body={"a": 1}) == (
+        assert client._post_json("https://api.test/x", json_body={"a": 1}, timeout=12) == (
             "https://api.test/x",
-            {"json": {"a": 1}, "headers": {"X-Test": "1"}, "timeout": 10},
+            {"json": {"a": 1}, "headers": {"X-Test": "1"}, "timeout": 12},
         )
 
         import asyncio
 
-        assert asyncio.run(client._apost_json("https://api.test/y", json_body={"b": 2})) == (
+        assert asyncio.run(client._apost_json("https://api.test/y", json_body={"b": 2}, timeout=13)) == (
             "https://api.test/y",
-            {"json": {"b": 2}, "headers": {"X-Test": "1"}, "timeout": 10},
+            {"json": {"b": 2}, "headers": {"X-Test": "1"}, "timeout": 13},
         )
 
         monkeypatch.setattr(client.http_client, "post", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("timeout")))
-        with pytest.raises(RandomIPAuthError, match="network_error:timeout"):
+        with pytest.raises(RandomIPAuthError, match="network_error:RuntimeError: timeout"):
             client._post_json("https://api.test/fail", json_body={})
+
+        class EmptyNetworkError(Exception):
+            def __str__(self) -> str:
+                return ""
+
+        monkeypatch.setattr(client.http_client, "post", lambda *_args, **_kwargs: (_ for _ in ()).throw(EmptyNetworkError()))
+        with pytest.raises(RandomIPAuthError, match="network_error:EmptyNetworkError"):
+            client._post_json("https://api.test/empty-fail", json_body={})
 
     def test_parse_extract_payloads_cover_success_and_invalid_paths(self, monkeypatch) -> None:
         logged: list[str] = []

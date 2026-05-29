@@ -102,7 +102,14 @@ def _extract_error_payload(response: Any) -> RandomIPAuthError:
         detail = f"http_{getattr(response, 'status_code', 0) or 0}"
     return RandomIPAuthError(detail, status_code=int(getattr(response, "status_code", 0) or 0), retry_after_seconds=retry_after)
 
-def _post_json(url: str, *, json_body: Dict[str, Any]) -> Any:
+def _network_error_detail(exc: BaseException) -> str:
+    message = str(exc).strip()
+    exc_type = type(exc).__name__
+    if message:
+        return f"{exc_type}: {message}"
+    return exc_type
+
+def _post_json(url: str, *, json_body: Dict[str, Any], timeout: float = 10) -> Any:
     from .auth import _endpoint_name
 
     try:
@@ -110,18 +117,19 @@ def _post_json(url: str, *, json_body: Dict[str, Any]) -> Any:
             url,
             json=json_body,
             headers=_build_headers(),
-            timeout=10,
+            timeout=timeout,
         )
     except Exception as exc:
+        detail = _network_error_detail(exc)
         logging.warning(
             "随机IP请求失败：endpoint=%s error=%s",
             _endpoint_name(url),
-            exc,
+            detail,
         )
-        raise RandomIPAuthError(f"network_error:{exc}") from exc
+        raise RandomIPAuthError(f"network_error:{detail}") from exc
 
 
-async def _apost_json(url: str, *, json_body: Dict[str, Any]) -> Any:
+async def _apost_json(url: str, *, json_body: Dict[str, Any], timeout: float = 10) -> Any:
     from .auth import _endpoint_name
 
     try:
@@ -129,15 +137,16 @@ async def _apost_json(url: str, *, json_body: Dict[str, Any]) -> Any:
             url,
             json=json_body,
             headers=_build_headers(),
-            timeout=10,
+            timeout=timeout,
         )
     except Exception as exc:
+        detail = _network_error_detail(exc)
         logging.warning(
             "随机IP异步请求失败：endpoint=%s error=%s",
             _endpoint_name(url),
-            exc,
+            detail,
         )
-        raise RandomIPAuthError(f"network_error:{exc}") from exc
+        raise RandomIPAuthError(f"network_error:{detail}") from exc
 
 def _extract_proxy_item(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     host = str(data.get("host") or "").strip()

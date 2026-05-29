@@ -37,6 +37,18 @@ class LogUtilsTests:
         assert second
         assert mock_log.call_count == 2
 
+    def test_should_filter_runtime_probe_noise_messages(self) -> None:
+        assert log_utils._should_filter_noise(
+            "2026-05-07 00:07:55 [INFO] WJX 页面题目快照刷新：reason=question_2_expected_visible_miss count=8 elapsed=0.004s"
+        )
+        assert log_utils._should_filter_noise(
+            "2026-05-07 00:07:57 [INFO] 随机代理首载：探测页面可用性 timeout=2500ms interval=0.25s"
+        )
+        assert log_utils._should_filter_noise(
+            "2026-05-07 00:07:58 [INFO] WJX 题目处理耗时：question=5 type=4 elapsed=2.259s"
+        )
+        assert not log_utils._should_filter_noise("2026-05-07 00:07:59 [INFO] 提交成功")
+
     def test_export_full_log_to_file_prefers_session_log_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             source_path = os.path.join(temp_dir, 'session.log')

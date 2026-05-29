@@ -67,7 +67,7 @@ def bind_dashboard_events(page: Any) -> None:
     )
     page.proxy_source_combo.currentIndexChanged.connect(page._on_proxy_source_changed)
     page.custom_proxy_api_edit.editingFinished.connect(page._on_custom_proxy_api_changed)
-    page.random_ip_cb.toggled.connect(page._on_random_ip_toggled)
+    page.random_ip_cb.checkedChanged.connect(page._on_random_ip_toggled)
     bind_logged_action(
         page.card_btn.clicked,
         page._on_request_quota_clicked,

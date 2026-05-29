@@ -266,7 +266,7 @@ class RunControllerRandomIPTests:
         )
         ok, fallback = asyncio.run(controller._try_activate_random_ip_trial_async(controller.adapter))
         assert (ok, fallback) == (True, False)
-        assert controller.adapter.messages[-1][0] == "试用已领取"
+        assert controller.adapter.messages == []
 
         async def fake_activate_trial_async_already_claimed():
             raise RandomIPAuthError("trial_already_claimed")

@@ -121,6 +121,7 @@ class RunCommandService(RandomIpRuntimeService, RunControllerInitializationMixin
         self.worker_threads: List[threading.Thread] = []
         self._monitor_thread: Optional[threading.Thread] = None
         self._init_gate_thread: Optional[threading.Thread] = None
+        self._status_snapshot_monitor_thread: Optional[threading.Thread] = None
         self._execution_state: Optional[ExecutionState] = None
         self._close_shutdown_lock = threading.Lock()
         self._close_shutdown_thread: Optional[threading.Thread] = None
@@ -435,6 +436,7 @@ class RunCommandService(RandomIpRuntimeService, RunControllerInitializationMixin
                 },
             }
         )
+        self._start_status_snapshot_monitor(execution_state)
 
         run_future = self._async_engine_client.start_run(
             execution_config,
@@ -454,6 +456,46 @@ class RunCommandService(RandomIpRuntimeService, RunControllerInitializationMixin
         self._monitor_thread = monitor
         monitor.start()
         self.emit_status_snapshot()
+
+    def _start_status_snapshot_monitor(self, execution_state: ExecutionState) -> None:
+        previous = self._status_snapshot_monitor_thread
+        if isinstance(previous, threading.Thread) and previous.is_alive():
+            previous.join(timeout=0.5)
+
+        monitor = threading.Thread(
+            target=self._status_snapshot_monitor_loop,
+            args=(execution_state, self.stop_event),
+            daemon=True,
+            name="RuntimeStatusSnapshotMonitor",
+        )
+        self._status_snapshot_monitor_thread = monitor
+        monitor.start()
+
+    def _status_snapshot_monitor_loop(
+        self,
+        execution_state: ExecutionState,
+        stop_signal: threading.Event,
+    ) -> None:
+        while not stop_signal.is_set():
+            try:
+                execution_state.wait_for_runtime_change(
+                    stop_signal=stop_signal,
+                    timeout=0.25,
+                )
+            except Exception:
+                logging.debug("等待运行态变更失败", exc_info=True)
+                time.sleep(0.25)
+            if self._execution_state is not execution_state:
+                break
+            try:
+                self._dispatch_to_ui_async(self.emit_status_snapshot)
+            except Exception:
+                logging.debug("派发运行态快照失败", exc_info=True)
+        if self._execution_state is execution_state:
+            try:
+                self._dispatch_to_ui_async(self.emit_status_snapshot)
+            except Exception:
+                logging.debug("派发最终运行态快照失败", exc_info=True)
 
     def stop_run(self) -> None:
         ctx = self._execution_state

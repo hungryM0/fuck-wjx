@@ -128,7 +128,12 @@ def build_dashboard_page_ui(page: Any) -> None:
     spin_row.addStretch(1)
     left_column.addLayout(spin_row)
 
-    page.random_ip_row = RandomIpToggleRow(BodyLabel, page)
+    page.random_ip_row = RandomIpToggleRow(
+        BodyLabel,
+        page,
+        use_switch_style=True,
+        leading_label_text="随机IP：",
+    )
     page.random_ip_cb = page.random_ip_row.toggle_button
     page.random_ip_loading_ring = page.random_ip_row.loading_ring
     page.random_ip_loading_label = page.random_ip_row.loading_label

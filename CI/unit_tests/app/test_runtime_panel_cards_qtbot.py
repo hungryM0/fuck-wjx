@@ -137,6 +137,41 @@ def test_random_ip_toggle_row_loading_uses_progress_ring_helper(monkeypatch, qtb
     assert calls == [(row.loading_ring, True), (row.loading_ring, False)]
 
 
+def test_random_ip_toggle_row_supports_switch_style(qtbot) -> None:
+    row = RandomIpToggleRow(
+        toggle_row_module.BodyLabel,
+        use_switch_style=True,
+        leading_label_text="随机IP：",
+    )
+    qtbot.addWidget(row)
+
+    assert row.leading_label is not None
+    assert row.leading_label.text() == "随机IP："
+
+    row.sync_toggle_presentation(True)
+    assert row.toggle_button.isChecked() is True
+
+    row.sync_toggle_presentation(False)
+    assert row.toggle_button.isChecked() is False
+
+
+def test_random_ip_toggle_row_loading_disables_with_opacity(qtbot) -> None:
+    row = RandomIpToggleRow(toggle_row_module.BodyLabel, use_switch_style=True)
+    qtbot.addWidget(row)
+
+    row.set_loading(True, "处理中")
+    effect = row.toggle_button.graphicsEffect()
+    assert row.toggle_button.isEnabled() is False
+    assert effect is not None
+    assert round(float(effect.opacity()), 2) == 0.40
+
+    row.set_loading(False, "")
+    effect = row.toggle_button.graphicsEffect()
+    assert row.toggle_button.isEnabled() is True
+    assert effect is not None
+    assert round(float(effect.opacity()), 2) == 1.00
+
+
 class _FakeThread:
     def __init__(self) -> None:
         self.started = _SignalStub()

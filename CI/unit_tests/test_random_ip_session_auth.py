@@ -243,8 +243,8 @@ class RandomIPSessionAuthTests:
         _reset_auth_state(RandomIPSession(device_id="device-5", user_id=33, total_quota=10, quota_known=True))
         posted: list[dict[str, object]] = []
 
-        async def fake_post(_url: str, *, json_body: dict[str, object]):
-            posted.append(json_body)
+        async def fake_post(_url: str, *, json_body: dict[str, object], timeout: float = 10):
+            posted.append({"body": json_body, "timeout": timeout})
             return _Response(
                 {
                     "provider": "default",
@@ -268,15 +268,23 @@ class RandomIPSessionAuthTests:
 
         assert posted == [
             {
-                "user_id": 33,
-                "minute": 3,
-                "pool": "quality",
-                "upstream": "benefit",
-                "num": 2,
-                "area": "110100",
+                "body": {
+                    "user_id": 33,
+                    "minute": 3,
+                    "pool": "quality",
+                    "upstream": "benefit",
+                    "num": 2,
+                    "area": "110100",
+                },
+                "timeout": 12.0,
             }
         ]
         assert payload["items"][0]["host"] == "8.8.8.8"
+
+    def test_extract_request_timeout_scales_for_batch_request(self) -> None:
+        assert auth._extract_request_timeout_seconds(1) == 10.0
+        assert auth._extract_request_timeout_seconds(16) == 40.0
+        assert auth._extract_request_timeout_seconds(999) == 60.0
 
     def test_claim_bonus_updates_quota_snapshot(self, patch_attrs) -> None:
         _reset_auth_state(RandomIPSession(device_id="device-6", user_id=44, remaining_quota=1, total_quota=2, used_quota=1, quota_known=True))

@@ -47,6 +47,11 @@ class _FakeDashboard:
         self.toasts: list[tuple[str, str]] = []
         self.parse_success_calls: list[tuple[list, str]] = []
         self.parse_failed_calls: list[str] = []
+        self.run_states: list[bool] = []
+        self.loading_events: list[tuple[bool, str]] = []
+        self.status_updates: list[tuple[str, int, int]] = []
+        self.thread_payloads: list[dict] = []
+        self.pause_states: list[tuple[bool, str]] = []
 
     def apply_config(self, cfg: RuntimeConfig) -> None:
         self.applied.append(cfg)
@@ -76,6 +81,21 @@ class _FakeDashboard:
     def _on_survey_parse_failed(self, error_msg: str) -> None:
         self.parse_failed_calls.append(str(error_msg or ""))
 
+    def on_run_state_changed(self, running: bool) -> None:
+        self.run_states.append(bool(running))
+
+    def set_random_ip_loading(self, loading: bool, message: str = "") -> None:
+        self.loading_events.append((bool(loading), str(message or "")))
+
+    def update_status(self, text: str, current: int, target: int) -> None:
+        self.status_updates.append((str(text or ""), int(current), int(target)))
+
+    def update_thread_progress(self, payload: dict) -> None:
+        self.thread_payloads.append(dict(payload or {}))
+
+    def on_pause_state_changed(self, paused: bool, reason: str = "") -> None:
+        self.pause_states.append((bool(paused), str(reason or "")))
+
 
 class _FakeReverseFillPage:
     def __init__(self) -> None:
@@ -83,6 +103,10 @@ class _FakeReverseFillPage:
         self.applied: list[RuntimeConfig] = []
         self.contexts: list[dict] = []
         self.preview_refreshes = 0
+        self.run_states: list[bool] = []
+        self.loading_events: list[tuple[bool, str]] = []
+        self.status_updates: list[tuple[str, int, int]] = []
+        self.pause_states: list[tuple[bool, str]] = []
 
     def apply_config(self, cfg: RuntimeConfig) -> None:
         self.applied.append(cfg)
@@ -109,6 +133,18 @@ class _FakeReverseFillPage:
 
     def _refresh_preview(self) -> None:
         self.preview_refreshes += 1
+
+    def on_run_state_changed(self, running: bool) -> None:
+        self.run_states.append(bool(running))
+
+    def set_random_ip_loading(self, loading: bool, message: str = "") -> None:
+        self.loading_events.append((bool(loading), str(message or "")))
+
+    def update_status(self, text: str, current: int, target: int) -> None:
+        self.status_updates.append((str(text or ""), int(current), int(target)))
+
+    def on_pause_state_changed(self, paused: bool, reason: str = "") -> None:
+        self.pause_states.append((bool(paused), str(reason or "")))
 
 
 class _FakeStrategyPage:
@@ -255,6 +291,26 @@ def test_workbench_presenter_syncs_urls_without_looping() -> None:
 
     assert dashboard.url_edit.blocked == [True, False]
     assert reverse_fill_page.url_edit.blocked == [True, False]
+
+
+def test_workbench_presenter_forwards_random_ip_loading_state() -> None:
+    presenter = _presenter_with_fakes()
+    dashboard = cast(_FakeDashboard, presenter.dashboard)
+    reverse_fill_page = cast(_FakeReverseFillPage, presenter.reverse_fill_page)
+
+    presenter.on_runtime_snapshot_changed(
+        {
+            "running": False,
+            "paused": False,
+            "status_text": "等待配置...",
+            "progress": {"current": 0, "target": 0},
+            "threads": {"rows": [], "num_threads": 0, "per_thread_target": 0},
+            "random_ip": {"loading": True, "loading_message": "正在处理..."},
+        }
+    )
+
+    assert dashboard.loading_events[-1] == (True, "正在处理...")
+    assert reverse_fill_page.loading_events[-1] == (True, "正在处理...")
 
 
 def test_workbench_presenter_builds_config_snapshot_from_single_builder_path() -> None:

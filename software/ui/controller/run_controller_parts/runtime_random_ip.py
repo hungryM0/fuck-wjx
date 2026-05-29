@@ -13,7 +13,6 @@ from software.network.proxy.session import (
     RandomIPAuthError,
     activate_trial_async,
     format_random_ip_error,
-    format_quota_value,
     get_fresh_quota_snapshot,
     get_quota_snapshot,
     get_session_snapshot,
@@ -360,20 +359,6 @@ class RandomIpRuntimeService:
         total_quota = max(float(session.total_quota or 0.0), 0.0)
         used_quota = max(0.0, float(session.used_quota or 0.0))
         self._apply_random_ip_counter(adapter, used=used_quota, total=total_quota, custom_api=False)
-        if total_quota > 0:
-            self._show_random_ip_message(
-                adapter,
-                "试用已领取",
-                f"已领取免费试用，当前随机IP已用/总额度：{format_quota_value(used_quota)}/{format_quota_value(total_quota)}。",
-                level="info",
-            )
-        else:
-            self._show_random_ip_message(
-                adapter,
-                "试用已领取",
-                "已领取免费试用，随机IP账号已绑定到当前设备。",
-                level="info",
-            )
         return True, False
 
     async def _ensure_random_ip_ready_async(self, adapter: Optional[Any]) -> bool:

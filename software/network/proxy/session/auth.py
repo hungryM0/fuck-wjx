@@ -47,6 +47,9 @@ _SESSION_PREFIX = "random_ip_auth/"
 _DEVICE_SECRET_KEY = "random_ip/device_id"
 
 _SESSION_PERSIST_FAILED_DETAIL = "session_persist_failed"
+_EXTRACT_REQUEST_BASE_TIMEOUT_SECONDS = 10.0
+_EXTRACT_REQUEST_EXTRA_TIMEOUT_PER_PROXY_SECONDS = 2.0
+_EXTRACT_REQUEST_MAX_TIMEOUT_SECONDS = 60.0
 
 _session_lock = threading.RLock()
 
@@ -77,6 +80,14 @@ def _endpoint_name(url: str) -> str:
     host = str(parsed.netloc or "").strip() or "-"
     path = str(parsed.path or "").strip() or "/"
     return f"{host}{path}"
+
+def _extract_request_timeout_seconds(num: int) -> float:
+    """批量提取会等待上游返回多个 IP，超时随请求数量适度放宽。"""
+    request_num = max(1, _to_non_negative_int(num, 1))
+    timeout = _EXTRACT_REQUEST_BASE_TIMEOUT_SECONDS + (
+        (request_num - 1) * _EXTRACT_REQUEST_EXTRA_TIMEOUT_PER_PROXY_SECONDS
+    )
+    return min(_EXTRACT_REQUEST_MAX_TIMEOUT_SECONDS, timeout)
 
 def _ensure_loaded() -> None:
     global _session_loaded, _session
@@ -469,7 +480,11 @@ async def extract_proxy_async(
         body["area"] = area_code
 
     try:
-        response = await _apost_json(IP_EXTRACT_ENDPOINT, json_body=body)
+        response = await _apost_json(
+            IP_EXTRACT_ENDPOINT,
+            json_body=body,
+            timeout=_extract_request_timeout_seconds(request_num),
+        )
     except RandomIPAuthError as exc:
         _log_extract_proxy_issue("随机IP提取请求异常", request_body=body, attempt=1, error=exc)
         raise

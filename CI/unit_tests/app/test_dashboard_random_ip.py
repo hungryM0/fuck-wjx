@@ -206,9 +206,16 @@ class _FakeDashboard(DashboardRandomIPMixin):
         self.sync_calls = []
         self.controller = SimpleNamespace(
             set_runtime_ui_state=lambda **kwargs: self.sync_calls.append(("ui_state", kwargs)),
+            update_runtime_settings=lambda **kwargs: self.sync_calls.append(("ui_state", kwargs)),
             get_runtime_ui_state=lambda: {
                 "proxy_source": "default",
                 "random_ip_enabled": True,
+            },
+            get_runtime_snapshot=lambda: {
+                "settings": {
+                    "proxy_source": "default",
+                    "random_ip_enabled": True,
+                }
             },
             request_toggle_random_ip=lambda enabled, adapter=None: bool(enabled),
             adapter="adapter",
@@ -351,7 +358,8 @@ class DashboardRandomIPTests:
         assert dashboard._ip_cost_infobar.shown == 1
 
         dashboard.controller = SimpleNamespace(
-            get_runtime_ui_state=lambda: {"proxy_source": "benefit"}
+            get_runtime_ui_state=lambda: {"proxy_source": "benefit"},
+            get_runtime_snapshot=lambda: {"settings": {"proxy_source": "benefit"}},
         )
         DashboardRandomIPMixin._update_ip_cost_infobar(dashboard, False)
         assert dashboard._ip_benefit_infobar.shown == 1

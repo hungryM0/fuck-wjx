@@ -200,8 +200,17 @@ class WorkbenchPresenter:
         pause_reason = str((snapshot or {}).get("status_text") or "")
         progress = (snapshot or {}).get("progress") or {}
         threads = (snapshot or {}).get("threads") or {}
+        random_ip = (snapshot or {}).get("random_ip") or {}
         self.dashboard.on_run_state_changed(running)
         self.reverse_fill_page.on_run_state_changed(running)
+        self.dashboard.set_random_ip_loading(
+            bool(random_ip.get("loading")),
+            str(random_ip.get("loading_message") or ""),
+        )
+        self.reverse_fill_page.set_random_ip_loading(
+            bool(random_ip.get("loading")),
+            str(random_ip.get("loading_message") or ""),
+        )
         self.dashboard.update_status(
             str((snapshot or {}).get("status_text") or ""),
             int(progress.get("current") or 0),
