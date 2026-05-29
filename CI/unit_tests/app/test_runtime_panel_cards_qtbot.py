@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import software.ui.pages.workbench.runtime_panel.random_ip_card as random_ip_module
+import software.ui.pages.workbench.shared.random_ip_toggle_row as toggle_row_module
 from PySide6.QtCore import QDateTime
 from software.ui.pages.workbench.runtime_panel.cards import (
     AnswerDateTimeWindowSettingCard,
@@ -9,6 +10,7 @@ from software.ui.pages.workbench.runtime_panel.cards import (
     ReliabilitySettingCard,
     TimeRangeSettingCard,
 )
+from software.ui.pages.workbench.shared.random_ip_toggle_row import RandomIpToggleRow
 
 
 class TestRuntimePanelCardsQtBot:
@@ -100,6 +102,39 @@ class TestRuntimePanelCardsQtBot:
         card.setDateTimeWindow(("2026-02-10 10:00:00", "2026-02-11 08:00:00"))
 
         assert card.getDateTimeWindow() == ("2026-02-10 09:15:00", "2026-02-10 08:00:00")
+
+    def test_random_ip_card_loading_uses_progress_ring_helper(self, monkeypatch, qtbot) -> None:
+        card = random_ip_module.RandomIPSettingCard()
+        qtbot.addWidget(card)
+
+        calls: list[tuple[object, bool]] = []
+        monkeypatch.setattr(
+            random_ip_module,
+            "set_indeterminate_progress_ring_active",
+            lambda ring, active: calls.append((ring, bool(active))),
+        )
+
+        card.setLoading(True, "同步中")
+        card.setLoading(False, "")
+
+        assert calls == [(card.loadingRing, True), (card.loadingRing, False)]
+
+
+def test_random_ip_toggle_row_loading_uses_progress_ring_helper(monkeypatch, qtbot) -> None:
+    row = RandomIpToggleRow(toggle_row_module.BodyLabel)
+    qtbot.addWidget(row)
+
+    calls: list[tuple[object, bool]] = []
+    monkeypatch.setattr(
+        toggle_row_module,
+        "set_indeterminate_progress_ring_active",
+        lambda ring, active: calls.append((ring, bool(active))),
+    )
+
+    row.set_loading(True, "处理中")
+    row.set_loading(False, "")
+
+    assert calls == [(row.loading_ring, True), (row.loading_ring, False)]
 
 
 class _FakeThread:

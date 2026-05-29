@@ -37,6 +37,9 @@ def _presenter() -> WorkbenchPresenter:
         refresh_random_ip_counter=MagicMock(),
     )
     controller.get_survey_snapshot = lambda: {"question_entries": controller.question_entries}
+    controller.replace_question_entries = MagicMock(
+        side_effect=lambda entries, **_kwargs: setattr(controller, "question_entries", list(entries or []))
+    )
     p = WorkbenchPresenter.__new__(WorkbenchPresenter)
     p.controller = controller
     p.host = SimpleNamespace(toasts=[], _toast=lambda text, level="info": p.host.toasts.append((text, level)))

@@ -12,6 +12,8 @@ from qfluentwidgets import (
     TogglePushButton,
 )
 
+from software.ui.helpers.qfluent_compat import set_indeterminate_progress_ring_active
+
 
 class RandomIpToggleRow(QWidget):
     """Shared random IP toggle row used by dashboard and reverse fill pages."""
@@ -59,7 +61,7 @@ class RandomIpToggleRow(QWidget):
     def set_loading(self, loading: bool, message: str = "") -> None:
         active = bool(loading)
         text = str(message or "正在处理...") if active else ""
-        self.loading_ring.setVisible(active)
+        set_indeterminate_progress_ring_active(self.loading_ring, active)
         self.loading_label.setVisible(active)
         self.loading_label.setText(text)
         self.toggle_button.setEnabled(not active)
