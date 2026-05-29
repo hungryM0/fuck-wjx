@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, Iterable, List
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 SURVEY_PROVIDER_WJX = "wjx"
 SURVEY_PROVIDER_QQ = "qq"
@@ -90,6 +90,27 @@ def is_supported_survey_url(url_value: str) -> bool:
     return is_credamo_survey_url(url_value) or is_qq_survey_url(url_value) or is_wjx_domain(url_value)
 
 
+def normalize_survey_parse_url(url_value: str) -> str:
+    text = str(url_value or "").strip()
+    if not text:
+        return ""
+    candidate = text if "://" in text else f"https://{text}"
+    try:
+        parsed = urlsplit(candidate)
+    except Exception:
+        return text
+    scheme = (parsed.scheme or "https").lower()
+    netloc = (parsed.netloc or "").lower()
+    path = str(parsed.path or "")
+    fragment = str(parsed.fragment or "")
+    normalized = urlunsplit((scheme, netloc, path, parsed.query or "", fragment))
+    if detect_survey_provider(normalized, default="") != SURVEY_PROVIDER_CREDAMO:
+        return normalized
+    if path.lower().startswith("/s/") and not fragment:
+        return urlunsplit((scheme, netloc, "/answer.html", parsed.query or "", path))
+    return normalized
+
+
 def ensure_question_provider_fields(
     item: Dict[str, Any],
     *,
@@ -148,6 +169,7 @@ __all__ = [
     "detect_survey_provider",
     "supports_answer_datetime_window",
     "is_supported_survey_url",
+    "normalize_survey_parse_url",
     "ensure_question_provider_fields",
     "ensure_questions_provider_fields",
     "make_provider_question_key",

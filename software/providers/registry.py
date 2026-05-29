@@ -13,6 +13,7 @@ from software.providers.common import (
     SURVEY_PROVIDER_QQ,
     SURVEY_PROVIDER_WJX,
     detect_survey_provider,
+    normalize_survey_parse_url,
     normalize_survey_provider,
 )
 from software.providers.contracts import SurveyDefinition
@@ -21,8 +22,6 @@ from software.providers.hooks import (
     build_fill_http_hook,
     build_parse_hook,
 )
-from software.providers.survey_cache import parse_survey_with_cache
-
 def _resolve_provider(*, provider: Optional[str] = None, ctx: Any = None) -> str:
     if provider is not None:
         return normalize_survey_provider(provider, default=SURVEY_PROVIDER_WJX)
@@ -95,10 +94,8 @@ def _get_provider_adapter(*, provider: Optional[str] = None, ctx: Any = None, ur
 
 async def parse_survey(url: str) -> SurveyDefinition:
     """解析问卷结构，返回标准化后的 SurveyDefinition。"""
-    return await parse_survey_with_cache(
-        url,
-        lambda normalized_url: _get_provider_adapter(url=normalized_url).parse_survey_async(normalized_url),
-    )
+    normalized_url = normalize_survey_parse_url(url)
+    return await _get_provider_adapter(url=normalized_url).parse_survey_async(normalized_url)
 
 
 async def fill_survey(

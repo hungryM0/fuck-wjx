@@ -70,8 +70,6 @@ def test_settings_page_toggles_update_settings_and_related_widgets(qtbot, monkey
         ),
     )
     monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
-    monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
-
     page = SettingsPage(parent=fake_window)
     page.show()
     qtbot.waitUntil(lambda: page.navigation_text_card.isChecked() is True)
@@ -103,8 +101,6 @@ def test_settings_page_reset_restores_defaults(qtbot, monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
-    monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
-
     page = SettingsPage(parent=fake_window)
     page.show()
     qtbot.waitUntil(lambda: page.auto_update_card.isChecked() is True)
@@ -135,7 +131,6 @@ def test_settings_page_can_change_config_directory(qtbot, monkeypatch, tmp_path)
         ),
     )
     monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
-    monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
     monkeypatch.setattr(
         settings_module.QFileDialog,
         "getExistingDirectory",
@@ -168,7 +163,6 @@ def test_settings_page_shows_error_when_config_directory_creation_fails(qtbot, m
         ),
     )
     monkeypatch.setattr(settings_module, "reset_ai_settings", lambda: None)
-    monkeypatch.setattr(settings_module, "clear_survey_parse_cache", lambda: 0)
     monkeypatch.setattr(
         settings_module.QFileDialog,
         "getExistingDirectory",

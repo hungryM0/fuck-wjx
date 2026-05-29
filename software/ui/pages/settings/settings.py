@@ -37,7 +37,6 @@ from software.app.user_paths import (
 from software.integrations.ai import reset_ai_settings
 from software.logging.action_logger import bind_logged_action, log_action
 from software.logging.log_utils import log_suppressed_exception
-from software.providers.survey_cache import clear_survey_parse_cache
 from software.ui.helpers.message_bar import show_message_bar
 from software.ui.pages.settings.definitions import (
     APPEARANCE_SWITCHES,
@@ -71,7 +70,6 @@ class SettingsPage(ScrollArea):
     auto_save_logs_combo: "ComboBox"
     reset_ui_card: PrimaryPushSettingCard
     config_directory_card: PushSettingCard
-    clear_survey_cache_card: PushSettingCard
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -128,17 +126,9 @@ class SettingsPage(ScrollArea):
             self.tools_group,
         )
         self._refresh_config_directory_card_content()
-        self.clear_survey_cache_card = PushSettingCard(
-            "删除缓存",
-            FluentIcon.DELETE,
-            "删除问卷解析缓存",
-            "清空本地问卷解析缓存，下次解析时会重新抓取问卷结构",
-            self.tools_group,
-        )
         for card in (
             self.reset_ui_card,
             self.config_directory_card,
-            self.clear_survey_cache_card,
         ):
             self.tools_group.addSettingCard(card)
         layout.addWidget(self.tools_group)
@@ -251,16 +241,6 @@ class SettingsPage(ScrollArea):
             payload_factory=lambda: {"path": self._current_config_directory()},
             forward_signal_args=False,
         )
-        bind_logged_action(
-            self.clear_survey_cache_card.clicked,
-            self._on_clear_survey_parse_cache,
-            scope="CONFIG",
-            event="clear_survey_parse_cache",
-            target="clear_survey_cache_card",
-            page="settings",
-            forward_signal_args=False,
-        )
-
     def _window_parent(self):
         return self.window() or self
 
@@ -589,62 +569,3 @@ class SettingsPage(ScrollArea):
             result="success",
         )
 
-    def _on_clear_survey_parse_cache(self):
-        box = MessageBox(
-            "删除问卷解析缓存",
-            "确定要删除本地问卷解析缓存吗？\n删除后下次解析会重新请求问卷数据。",
-            self._window_parent(),
-        )
-        box.yesButton.setText("删除")
-        box.cancelButton.setText("取消")
-        if not box.exec():
-            log_action(
-                "CONFIG",
-                "clear_survey_parse_cache",
-                "clear_survey_cache_card",
-                "settings",
-                result="cancelled",
-            )
-            return
-
-        log_action(
-            "CONFIG",
-            "clear_survey_parse_cache",
-            "clear_survey_cache_card",
-            "settings",
-            result="confirmed",
-        )
-        try:
-            removed_count = clear_survey_parse_cache()
-        except Exception as exc:
-            log_action(
-                "CONFIG",
-                "clear_survey_parse_cache",
-                "clear_survey_cache_card",
-                "settings",
-                result="failed",
-                level=logging.ERROR,
-                detail=exc,
-            )
-            log_suppressed_exception(
-                "_on_clear_survey_parse_cache: clear_survey_parse_cache()",
-                exc,
-                level=logging.ERROR,
-            )
-            self._show_bar(f"删除问卷解析缓存失败：{exc}", "error", 3000)
-            return
-
-        message = (
-            "没有可删除的问卷解析缓存"
-            if removed_count <= 0
-            else f"已删除 {removed_count} 项问卷解析缓存"
-        )
-        self._show_bar(message, "success", 2500)
-        log_action(
-            "CONFIG",
-            "clear_survey_parse_cache",
-            "clear_survey_cache_card",
-            "settings",
-            result="success",
-            payload={"removed_count": removed_count},
-        )

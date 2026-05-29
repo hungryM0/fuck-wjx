@@ -102,7 +102,7 @@ import sys
 import traceback
 
 PREFIX = "__WJX_CHECK__"
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_QPA_PLATFORM", "minimal")
 os.environ.setdefault("WJX_IMPORT_CHECK", "1")
 
 try:
@@ -215,6 +215,13 @@ def make_child_env() -> dict[str, str]:
         "PYRIGHT_PYTHON_CACHE_DIR",
         str(Path(tempfile.gettempdir()) / "SurveyController-pyright-cache"),
     )
+    return env
+
+
+def make_window_smoke_env() -> dict[str, str]:
+    """为主窗口冒烟检查选择更稳的 Qt 平台插件。"""
+    env = make_child_env()
+    env["QT_QPA_PLATFORM"] = "minimal"
     return env
 
 
@@ -518,7 +525,7 @@ def run_module_import_checks(modules: Iterable[str]) -> list[dict]:
 
 
 def run_window_smoke_check() -> dict | None:
-    env = make_child_env()
+    env = make_window_smoke_env()
     try:
         result = subprocess.run(
             [sys.executable, "-c", WINDOW_SMOKE_CODE],

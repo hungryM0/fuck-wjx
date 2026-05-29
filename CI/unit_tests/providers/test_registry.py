@@ -11,25 +11,28 @@ from software.providers.contracts import SurveyDefinition
 from software.providers.hooks import build_fill_http_hook, build_parse_hook
 
 
-async def test_parse_survey_routes_detected_provider_through_cache_loader() -> None:
+async def test_parse_survey_routes_detected_provider_directly() -> None:
     qq_url = "https://wj.qq.com/s2/123/demo"
     adapter = SimpleNamespace(parse_survey_async=AsyncMock(return_value="qq-definition"))
-    async def _cache_loader(_url, loader):
-        return await loader(qq_url)
 
-    with (
-        patch.object(registry, "_get_provider_adapter", return_value=adapter),
-        patch.object(
-            registry,
-            "parse_survey_with_cache",
-            side_effect=_cache_loader,
-        ) as cache_mock,
-    ):
+    with patch.object(registry, "_get_provider_adapter", return_value=adapter):
         result = await registry.parse_survey(qq_url)
 
     assert result == "qq-definition"
-    cache_mock.assert_called_once()
     adapter.parse_survey_async.assert_awaited_once_with(qq_url)
+
+
+async def test_parse_survey_normalizes_credamo_short_url_before_dispatch() -> None:
+    short_url = "https://www.credamo.com/s/demo/"
+    normalized_url = "https://www.credamo.com/answer.html#/s/demo/"
+    adapter = SimpleNamespace(parse_survey_async=AsyncMock(return_value="credamo-definition"))
+
+    with patch.object(registry, "_get_provider_adapter", return_value=adapter) as adapter_mock:
+        result = await registry.parse_survey(short_url)
+
+    assert result == "credamo-definition"
+    adapter_mock.assert_called_once_with(url=normalized_url)
+    adapter.parse_survey_async.assert_awaited_once_with(normalized_url)
 
 
 async def test_fill_survey_uses_provider_run_context_and_selected_adapter() -> None:
