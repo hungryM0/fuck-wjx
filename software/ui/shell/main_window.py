@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import List
+from types import SimpleNamespace
+from typing import List, cast
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal, QEvent, Slot
 from PySide6.QtGui import QIcon, QGuiApplication, QColor
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QStackedWidget, QWidget
 from qfluentwidgets import (
     DotInfoBadge,
     FluentWindow,
@@ -62,6 +63,30 @@ from software.app.runtime_paths import get_resource_path
 from software.ui.shell.boot import create_boot_splash, finish_boot_splash
 
 _BaseFluentWindow = MSFluentWindow if sys.platform == "win32" else FluentWindow
+
+
+class _ImportCheckWindow(QWidget):
+    """macOS CI 下避开 qframelesswindow 原生窗口初始化。"""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"SurveyController v{__VERSION__}")
+        self.navigationInterface = object()
+        self.stackedWidget = QStackedWidget(self)
+        self.workbench = SimpleNamespace()
+        self.controller = SimpleNamespace(
+            request_shutdown_for_close=lambda timeout_seconds=5.0: None
+        )
+        for index in range(4):
+            page = QWidget(self)
+            page.setObjectName(f"import_check_page_{index}")
+            self.stackedWidget.addWidget(page)
+
+
+def _should_use_import_check_window() -> bool:
+    if sys.platform != "darwin":
+        return False
+    return str(os.environ.get(MainWindow._IMPORT_CHECK_ENV, "") or "").strip() == "1"
 
 
 class MainWindow(
@@ -805,4 +830,6 @@ class MainWindow(
 
 def create_window() -> MainWindow:
     """供入口调用的工厂函数。"""
+    if _should_use_import_check_window():
+        return cast(MainWindow, _ImportCheckWindow())
     return MainWindow()
