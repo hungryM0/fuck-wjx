@@ -294,6 +294,39 @@ class AsyncRuntimeLoopLargeTests:
         assert state.get_terminal_stop_snapshot()[1] == FailureReason.SUBMISSION_VERIFICATION_REQUIRED.value
 
     @pytest.mark.asyncio
+    async def test_run_submission_verification_with_random_proxy_retries_next_ip(self, monkeypatch) -> None:
+        config = ExecutionConfig(
+            url="https://www.wjx.cn/vm/demo.aspx",
+            survey_provider="wjx",
+            random_proxy_ip_enabled=True,
+            stop_on_fail_enabled=True,
+            fail_threshold=3,
+        )
+        runner, state, ctx, scheduler = _build_runner(config=config)
+        scheduler.acquire_values = [8, None]
+
+        def fail_submit(**_kwargs):
+            raise SubmissionVerificationRequiredError("当前随机 IP 已被风控，正在更换随机 IP 重试。")
+
+        async def select_proxy():
+            runner.proxy_session.proxy_address = "http://1.1.1.1:80"
+            return "http://1.1.1.1:80", "UA"
+
+        monkeypatch.setattr(runner.http_submitter, "submit", fail_submit)
+        monkeypatch.setattr(runner, "_prepare_round_context", lambda: asyncio.sleep(0, result=True))
+        monkeypatch.setattr(runner, "_select_session_proxy_and_ua", select_proxy)
+
+        await runner.run()
+        await asyncio.sleep(0)
+
+        assert not ctx.stop_event.is_set()
+        assert scheduler.release_calls[0]["requeue"] is True
+        assert state.is_proxy_in_cooldown("http://1.1.1.1:80")
+        assert runner.stop_policy.failure_calls[0]["failure_reason"] == FailureReason.SUBMISSION_VERIFICATION_REQUIRED
+        assert runner.stop_policy.failure_calls[0]["status_text"] == "触发验证，换IP"
+        assert state.get_terminal_stop_snapshot()[0] == ""
+
+    @pytest.mark.asyncio
     async def test_run_provider_unavailable_error_stops_without_requeue(self, monkeypatch) -> None:
         config = ExecutionConfig(url="https://www.wjx.cn/vm/demo.aspx", survey_provider="wjx")
         runner, state, ctx, scheduler = _build_runner(config=config)

@@ -17,6 +17,7 @@ from software.core.modes.duration_control import sample_answer_duration_seconds
 from software.core.persona.context import record_answer
 from software.core.questions.distribution import record_pending_distribution_choice
 from software.core.task import ExecutionConfig, ExecutionState
+from software.network.proxy.pool import mask_proxy_for_log
 from software.providers.answering import AnswerAction
 from software.providers.answering.recording import record_answer_action
 from software.providers.http_logic import HttpLogicPlan, build_http_logic_plan
@@ -35,6 +36,7 @@ from wjx.provider.parser import _parse_wjx_html, _raise_wjx_page_state_errors
 
 
 WJX_SUBMISSION_VERIFICATION_MESSAGE = "问卷星触发智能验证，当前链路已停止。请启用随机 IP 后再提交。"
+WJX_PROXY_SUBMISSION_VERIFICATION_MESSAGE = "问卷星触发智能验证，当前随机 IP 已被风控，正在更换随机 IP 重试。"
 _WJX_SUBMISSION_VERIFICATION_TEXT = "需要安全校验，请重新提交"
 
 
@@ -230,10 +232,20 @@ def classify_wjx_submit_response(response_text: str) -> str:
     return WjxSubmitResult.REJECTED
 
 
-def _raise_submit_rejected(config: ExecutionConfig, response_text: str) -> None:
+def _raise_submit_rejected(
+    config: ExecutionConfig,
+    response_text: str,
+    *,
+    proxy_address: str | None = None,
+) -> None:
     text = str(response_text or "").strip()
     if is_wjx_submission_verification_response(text):
-        raise SubmissionVerificationRequiredError(WJX_SUBMISSION_VERIFICATION_MESSAGE)
+        message = (
+            WJX_PROXY_SUBMISSION_VERIFICATION_MESSAGE
+            if str(proxy_address or "").strip()
+            else WJX_SUBMISSION_VERIFICATION_MESSAGE
+        )
+        raise SubmissionVerificationRequiredError(message)
     match = re.match(r"^\s*(\d+)〒(\d+)〒(.+)$", text)
     if not match:
         raise RuntimeError(f"问卷星提交被拒绝：{text[:200]}")
@@ -340,6 +352,8 @@ async def brush_wjx_http(
 
     shortid = _shortid_from_url(config.url)
     proxies = _proxy_arg(proxy_address)
+    if str(proxy_address or "").strip():
+        logging.info("问卷星 HTTP 会话使用随机IP：%s", mask_proxy_for_log(proxy_address))
     user_agent_value = _wechat_user_agent(user_agent)
     headers = {
         **DEFAULT_HTTP_HEADERS,
@@ -418,7 +432,7 @@ async def brush_wjx_http(
     await update_http_submit_step(ctx, thread_name, "校验结果")
     response_text = str(response.text or "").strip()
     if classify_wjx_submit_response(response_text) != WjxSubmitResult.SUCCESS:
-        _raise_submit_rejected(config, response_text)
+        _raise_submit_rejected(config, response_text, proxy_address=proxy_address)
     return True
 
 

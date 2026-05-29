@@ -1079,6 +1079,13 @@ def test_wjx_submit_rejected_detects_submission_verification() -> None:
     with pytest.raises(SubmissionVerificationRequiredError, match="启用随机 IP"):
         wjx_http._raise_submit_rejected(config, "7〒需要安全校验，请重新提交！")
 
+    with pytest.raises(SubmissionVerificationRequiredError, match="更换随机 IP"):
+        wjx_http._raise_submit_rejected(
+            config,
+            "7〒需要安全校验，请重新提交！",
+            proxy_address="http://1.1.1.1:80",
+        )
+
 
 def test_wjx_submit_response_classifier_keeps_verification_strict() -> None:
     assert wjx_http.classify_wjx_submit_response("10〒/joinnew/complete.aspx") == wjx_http.WjxSubmitResult.SUCCESS

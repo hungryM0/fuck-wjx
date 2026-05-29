@@ -186,6 +186,24 @@ class AsyncSlotRunner:
         )
 
     async def _handle_submission_verification_error(self, exc: SubmissionVerificationRequiredError) -> bool:
+        if self.config.random_proxy_ip_enabled and self.proxy_session.proxy_address:
+            try:
+                _mark_proxy_temporarily_bad(self.state, self.proxy_session.proxy_address)
+            except Exception:
+                logging.info("标记风控代理失败", exc_info=True)
+            stopped = self.stop_policy.record_failure(
+                self.stop_proxy,
+                thread_name=self.slot_label,
+                failure_reason=FailureReason.SUBMISSION_VERIFICATION_REQUIRED,
+                status_text="触发验证，换IP",
+                log_message=f"当前随机 IP 触发问卷星智能验证，本轮丢弃并更换 IP：{exc}",
+                terminal_stop_category="submission_verification_threshold",
+                force_stop_when_threshold_reached=True,
+                consume_reverse_fill_attempt=False,
+            )
+            if stopped:
+                self.run_context.stop_event.set()
+            return bool(stopped)
         return handle_submission_verification_error(
             exc,
             self.stop_proxy,
