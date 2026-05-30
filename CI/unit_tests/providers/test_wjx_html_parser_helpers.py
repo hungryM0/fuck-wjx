@@ -454,7 +454,7 @@ class WjxHtmlParserHelperTests:
             ],
         )
 
-    def test_jump_rule_helper_treats_wjx_mobile_jumpto_one_as_terminate_after_first_question(self) -> None:
+    def test_jump_rule_helper_treats_wjx_mobile_jumpto_one_as_terminate_without_keyword(self) -> None:
         question_div = _soup(
             """
             <div hasjump="1" type="3">
@@ -466,15 +466,15 @@ class WjxHtmlParserHelperTests:
 
         assert html_parser_rules._extract_jump_rules_from_html(
             question_div,
-            4,
-            ["继续作答", "从未办理、协助或了解过该事项"],
+            1,
+            ["是，应届毕业生", "否，暂时不是应届毕业生或准毕业生"],
         ) == (
             True,
             [
                 {
                     "option_index": 1,
                     "jumpto": 1,
-                    "option_text": "从未办理、协助或了解过该事项",
+                    "option_text": "否，暂时不是应届毕业生或准毕业生",
                     "terminates_survey": True,
                 }
             ],
