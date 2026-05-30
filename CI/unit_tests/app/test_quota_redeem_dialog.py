@@ -39,12 +39,16 @@ class _FakeLineEdit:
 class _FakeLabel:
     def __init__(self) -> None:
         self.value = ""
+        self.style = ""
 
     def setText(self, text: str) -> None:
         self.value = str(text)
 
     def text(self) -> str:
         return self.value
+
+    def setStyleSheet(self, style: str) -> None:
+        self.style = str(style)
 
 
 class _FakeMessageBox:
@@ -65,6 +69,7 @@ class _FakeDialog:
     validate = quota_redeem.QuotaRedeemDialog.validate
     eventFilter = quota_redeem.QuotaRedeemDialog.eventFilter
     _refresh_account_hint = quota_redeem.QuotaRedeemDialog._refresh_account_hint
+    _apply_account_hint_style = quota_redeem.QuotaRedeemDialog._apply_account_hint_style
     _on_redeem_finished = quota_redeem.QuotaRedeemDialog._on_redeem_finished
 
     def __init__(self, *, card_code: str = "") -> None:

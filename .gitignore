@@ -30,6 +30,7 @@ __pycache__/
 .uv-cache/
 *.pyc
 %SystemDrive%/
+/assets/promo-video/
 /configs/
 /logs/
 /worker/.dev.vars

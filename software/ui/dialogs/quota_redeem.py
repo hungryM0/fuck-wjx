@@ -23,6 +23,7 @@ from qfluentwidgets import (
     PushButton,
     SimpleCardWidget,
     StrongBodyLabel,
+    isDarkTheme,
 )
 
 from software.app.runtime_paths import get_resource_path
@@ -72,7 +73,7 @@ class QuotaRedeemDialog(MessageBoxBase):
 
         self.accountHintLabel = CaptionLabel("", self.widget)
         self.accountHintLabel.setWordWrap(True)
-        self.accountHintLabel.setStyleSheet("color: rgba(255, 255, 255, 0.55); font-size: 12px;")
+        self._apply_account_hint_style()
 
         self.formCard = SimpleCardWidget(self.widget)
         self.formCard.setStyleSheet(
@@ -132,6 +133,7 @@ class QuotaRedeemDialog(MessageBoxBase):
 
     def showEvent(self, e) -> None:
         super().showEvent(e)
+        self._apply_account_hint_style()
         self._refresh_account_hint()
         self._layout_yes_button_spinner()
 
@@ -202,6 +204,7 @@ class QuotaRedeemDialog(MessageBoxBase):
         super().reject()
 
     def _refresh_account_hint(self) -> None:
+        self._apply_account_hint_style()
         snapshot = get_session_snapshot()
         if not has_authenticated_session():
             self.accountHintLabel.setText(
@@ -210,6 +213,10 @@ class QuotaRedeemDialog(MessageBoxBase):
             return
         user_id = int(snapshot.get("user_id") or 0)
         self.accountHintLabel.setText(f"用户 ID：{user_id}")
+
+    def _apply_account_hint_style(self) -> None:
+        color = "rgba(255, 255, 255, 0.68)" if isDarkTheme() else "rgba(32, 32, 32, 0.72)"
+        self.accountHintLabel.setStyleSheet(f"color: {color}; font-size: 12px;")
 
     def _set_redeeming(self, redeeming: bool) -> None:
         self._redeeming = bool(redeeming)
