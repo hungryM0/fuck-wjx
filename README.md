@@ -170,7 +170,7 @@ sequenceDiagram
 如有疑问或需要技术支持，可加入QQ群：
 346131215
 
-<img width="256" alt="qq" src="assets/community_qr.jpg" />
+<img width="256" alt="qq" src="assets/community_qr.png" />
 
 ## 参与贡献
 
