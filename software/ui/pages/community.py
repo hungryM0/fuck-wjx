@@ -342,12 +342,12 @@ class CommunityPage(ScrollArea):
     def _build_license_card(self) -> ElevatedCardWidget:
         card, layout = self._create_grid_card("开源许可", FluentIcon.CERTIFICATE)
 
-        license_label = StrongBodyLabel("AGPL-3.0", card)
+        license_label = StrongBodyLabel("GPL-3.0", card)
         license_label.setStyleSheet("font-size: 18px; letter-spacing: 1px;")
         layout.addWidget(license_label)
 
         desc = BodyLabel(
-            "在分发程序或对其进行修改并通过网络向其他用户提供交互服务时，必须向这些用户提供相应的完整源代码，以确保用户获得与传统分发情形同等的自由与权利",
+            "分发程序或修改版本时，必须按 GPL-3.0 要求提供相应源代码，确保接收者获得使用、研究、修改和再分发的自由",
             card,
         )
         desc.setWordWrap(True)
