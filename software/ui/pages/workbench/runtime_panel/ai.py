@@ -116,7 +116,7 @@ class RuntimeAISection(QObject):
 
         self.ai_free_mode_bar = FullWidthInfoBar(
             InfoBarIcon.INFORMATION,
-            "AI填空限时免费至2026-06-30，如有长期使用需求请自行准备API Key。",
+            "AI填空限时免费至2026-06-28，如有长期使用需求请自行准备API Key。",
             "",
             orient=Qt.Orientation.Horizontal,
             isClosable=False,

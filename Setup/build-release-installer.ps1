@@ -181,8 +181,8 @@ if (-not $SkipSync) {
 Write-Step "Build standalone bundle with Nuitka"
 New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $nuitkaCacheRoot -Force | Out-Null
-# Work around a Nuitka 2.8.x Windows crash where short-path lookup runs before
-# the standalone dist directory is created.
+# Pre-create the standalone dist directory before invoking Nuitka to avoid
+# Windows short-path lookup failures during early build setup.
 New-Item -ItemType Directory -Path $nuitkaDistDir -Force | Out-Null
 Push-Location $repoRoot
 try {
