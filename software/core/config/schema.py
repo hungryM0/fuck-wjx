@@ -25,7 +25,7 @@ class RuntimeConfig:
     answer_duration: Tuple[int, int] = (60, 120)
     answer_datetime_window: Tuple[str, str] = ("", "")
     random_ip_enabled: bool = False
-    proxy_source: str = "custom"
+    proxy_source: str = "default"
     custom_proxy_api: str = ""
     proxy_area_code: Optional[str] = None
     random_ua_enabled: bool = False

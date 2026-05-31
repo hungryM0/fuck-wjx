@@ -386,9 +386,9 @@ def normalize_runtime_config_payload(raw: Dict[str, Any]) -> RuntimeConfig:
         raw.get("answer_datetime_window")
     )
     custom_proxy_api = str(raw.get("custom_proxy_api") or "").strip()
-    proxy_source = str(raw.get("proxy_source") or "custom").strip().lower()
+    proxy_source = str(raw.get("proxy_source") or "default").strip().lower()
     if proxy_source not in ("default", "benefit", "custom"):
-        proxy_source = "custom"
+        proxy_source = "default"
     config.proxy_source = proxy_source
     config.custom_proxy_api = custom_proxy_api
     config.random_ip_enabled = _as_bool(raw.get("random_ip_enabled"), False)

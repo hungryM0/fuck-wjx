@@ -145,7 +145,7 @@ def build_dashboard_page_ui(page: Any) -> None:
     proxy_source_row = QHBoxLayout()
     proxy_source_row.addWidget(BodyLabel("代理源：", page))
     page.proxy_source_combo = ComboBox(page)
-    page.proxy_source_combo.addItem("官方", userData="default")
+    page.proxy_source_combo.addItem("默认", userData="default")
     page.proxy_source_combo.addItem("限时福利", userData="benefit")
     page.proxy_source_combo.addItem("自定义", userData="custom")
     page.proxy_source_combo.setMinimumWidth(140)
