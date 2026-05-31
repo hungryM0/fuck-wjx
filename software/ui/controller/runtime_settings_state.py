@@ -19,7 +19,7 @@ class RuntimeSettingsState:
         "threads": 1,
         "random_ip_enabled": False,
         "survey_provider": "wjx",
-        "proxy_source": "default",
+        "proxy_source": "custom",
         "submit_interval": (0, 0),
         "answer_duration": DEFAULT_ANSWER_DURATION_RANGE_SECONDS,
         "answer_datetime_window": ("", ""),
@@ -113,7 +113,7 @@ class RuntimeSettingsState:
             "target": getattr(config, "target", 1),
             "random_ip_enabled": getattr(config, "random_ip_enabled", False),
             "survey_provider": getattr(config, "survey_provider", "wjx"),
-            "proxy_source": getattr(config, "proxy_source", "default"),
+            "proxy_source": getattr(config, "proxy_source", "custom"),
             "submit_interval": getattr(config, "submit_interval", (0, 0)),
             "answer_duration": getattr(config, "answer_duration", (0, 0)),
             "answer_datetime_window": getattr(config, "answer_datetime_window", ("", "")),
@@ -128,7 +128,7 @@ class RuntimeSettingsState:
         config.threads = max(1, int(state["threads"] or 1))
         config.random_ip_enabled = bool(state["random_ip_enabled"])
         config.survey_provider = str(state["survey_provider"] or "wjx")
-        config.proxy_source = str(state["proxy_source"] or "default")
+        config.proxy_source = str(state["proxy_source"] or "custom")
         config.submit_interval = self.normalize_value(
             "submit_interval",
             state["submit_interval"],

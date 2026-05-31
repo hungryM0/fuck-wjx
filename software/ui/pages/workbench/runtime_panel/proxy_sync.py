@@ -133,7 +133,7 @@ class RuntimeProxySyncMixin:
     def _show_benefit_proxy_limit_tip(self, minute: int) -> None:
         del minute
         parent = cast(Any, self).window() or self.view
-        content = "限时福利源只支持少部分城市。如地区不可用，请切回默认代理源。"
+        content = "限时福利源只支持少部分城市。如地区不可用，请切回官方代理源。"
         InfoBar.warning(
             "",
             content,

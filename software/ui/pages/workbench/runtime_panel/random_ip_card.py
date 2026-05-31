@@ -173,7 +173,7 @@ class RandomIPSettingCard(ExpandGroupSettingCard):
         source_row.addWidget(self.proxyTrialLink)
 
         self.proxyCombo = ComboBox(self._groupContainer)
-        self.proxyCombo.addItem("默认", userData=_PROXY_SOURCE_DEFAULT)
+        self.proxyCombo.addItem("官方", userData=_PROXY_SOURCE_DEFAULT)
         self.proxyCombo.addItem("限时福利", userData=_PROXY_SOURCE_BENEFIT)
         self.proxyCombo.addItem("自定义", userData=_PROXY_SOURCE_CUSTOM)
         self.proxyCombo.setMinimumWidth(200)
