@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QSizePolicy
 from qfluentwidgets import (
     Action,
@@ -14,6 +15,7 @@ from qfluentwidgets import (
     ComboBox,
     FluentIcon,
     HyperlinkButton,
+    InfoBadge,
     IndeterminateProgressRing,
     InfoBarIcon,
     LineEdit,
@@ -275,12 +277,21 @@ def build_dashboard_page_ui(page: Any) -> None:
 
     question_title_row = QHBoxLayout()
     question_title_row.setSpacing(8)
+    page.platform_badge = InfoBadge.custom(
+        "",
+        QColor("#d18a00"),
+        QColor("#d18a00"),
+        parent=page.thread_view_question_card,
+    )
+    page.platform_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    page.platform_badge.hide()
     page.title_label = SubtitleLabel("题目清单与操作", page.thread_view_question_card)
     page.title_label.setWordWrap(True)
     page.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     page.count_label = BodyLabel("0 题", page.thread_view_question_card)
     page.count_label.setStyleSheet("color: #6b6b6b;")
     page.count_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+    question_title_row.addWidget(page.platform_badge, 0, Qt.AlignmentFlag.AlignVCenter)
     question_title_row.addWidget(page.title_label, 1)
     question_title_row.addWidget(page.count_label, 0, Qt.AlignmentFlag.AlignTop)
     question_list_layout.addLayout(question_title_row)
