@@ -91,10 +91,11 @@ def test_wjx_scene_id_extraction_prefers_page_value() -> None:
 
 
 @pytest.mark.asyncio
-async def test_wjx_starttime_extraction_prefers_page_value(monkeypatch) -> None:
+async def test_wjx_submit_starttime_aligns_with_ktimes(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
+        answer_duration_range_seconds=(90, 90),
     )
     config.questions_metadata = {
         1: SurveyQuestionMeta(num=1, title="Q1", type_code="3", options=2, option_texts=["A", "B"]),
@@ -123,6 +124,7 @@ async def test_wjx_starttime_extraction_prefers_page_value(monkeypatch) -> None:
     monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
     monkeypatch.setattr(wjx_http.http_client, "apost", fake_post)
     monkeypatch.setattr(wjx_http.time, "time", lambda: 1710000000.0)
+    monkeypatch.setattr(wjx_http.random, "gauss", lambda center, _std: center)
 
     ok = await wjx_http.brush_wjx_http(
         config,
@@ -131,10 +133,11 @@ async def test_wjx_starttime_extraction_prefers_page_value(monkeypatch) -> None:
         user_agent="UA",
     )
 
-    expected_start = wjx_http._extract_wjx_starttime_seconds(page_html)
+    expected_start = 1710000000 - 90
 
     assert ok is True
-    assert captured["params"]["starttime"] == "2026/5/30 1:23:18"
+    assert captured["params"]["ktimes"] == "90"
+    assert captured["params"]["starttime"] == wjx_http._format_wjx_starttime(expected_start)
     assert captured["params"]["cst"] == str(expected_start * 1000)
 
 
@@ -339,6 +342,8 @@ async def test_wjx_http_runtime_uses_proxy_and_posts_submitdata(monkeypatch) -> 
     monkeypatch.setattr(wjx_http, "_load_wjx_page", fake_load)
     monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
     monkeypatch.setattr(wjx_http.http_client, "apost", fake_post)
+    monkeypatch.setattr(wjx_http.time, "time", lambda: 1710000000.0)
+    monkeypatch.setattr(wjx_http.random, "gauss", lambda center, _std: center)
 
     ok = await wjx_http.brush_wjx_http(
         config,
@@ -350,7 +355,7 @@ async def test_wjx_http_runtime_uses_proxy_and_posts_submitdata(monkeypatch) -> 
     assert ok is True
     assert captured["proxies"] == "http://1.1.1.1:80"
     assert captured["data"] == {"submitdata": "1$1", "sceneId": "q0hcfsca"}
-    assert captured["params"]["starttime"] == "2026/5/30 1:23:18"
+    assert captured["params"]["starttime"] == wjx_http._format_wjx_starttime(1710000000 - 90)
 
 
 @pytest.mark.asyncio

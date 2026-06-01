@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QDate, QDateTime, QTime, Signal
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtCore import QDate, QDateTime, QTime, Qt, Signal
+from PySide6.QtGui import QColor, QDoubleValidator
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     ExpandGroupSettingCard,
     FluentIcon,
+    InfoBadge,
     IndicatorPosition,
     LineEdit,
     OptionsConfigItem,
@@ -465,6 +466,8 @@ class TimeRangeSettingCard(OptionsSettingCard):
 class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
     """见数专用的日期时间窗设置卡。"""
 
+    CREDAMO_BADGE_COLOR = "#1f4f99"
+
     datetimeWindowChanged = Signal(tuple)
 
     def __init__(self, icon, title, content, max_seconds: Optional[int] = 30 * 60, parent=None):
@@ -479,6 +482,7 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
             OptionsValidator(["custom"]),
         )
         super().__init__(config_item, icon, title, content, texts=["自定义"], parent=parent)
+        self._install_credamo_badge()
 
         self.setExpand(True)
         self.choiceLabel.hide()
@@ -537,6 +541,31 @@ class AnswerDateTimeWindowSettingCard(OptionsSettingCard):
 
         self._clear_datetime_window()
         self.set_provider("wjx")
+
+    def _install_credamo_badge(self) -> None:
+        title_label = getattr(self.card, "titleLabel", None)
+        title_layout = getattr(self.card, "vBoxLayout", None)
+        if title_label is None or title_layout is None:
+            return
+
+        title_layout.removeWidget(title_label)
+        title_row = QWidget(self.card)
+        title_row_layout = QHBoxLayout(title_row)
+        title_row_layout.setContentsMargins(0, 0, 0, 0)
+        title_row_layout.setSpacing(8)
+        title_row_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.credamo_badge = InfoBadge.custom(
+            "见数",
+            QColor(self.CREDAMO_BADGE_COLOR),
+            QColor(self.CREDAMO_BADGE_COLOR),
+            parent=title_row,
+        )
+        self.credamo_badge.setObjectName("credamoBadge")
+        self.credamo_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_row_layout.addWidget(self.credamo_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        title_row_layout.addStretch(1)
+        title_layout.insertWidget(0, title_row, 0, Qt.AlignmentFlag.AlignLeft)
 
     def _build_datetime_row(
         self,

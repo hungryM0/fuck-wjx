@@ -120,6 +120,12 @@ def _extract_wjx_starttime_seconds(page_html: str) -> int | None:
     return None
 
 
+def _resolve_wjx_submit_start_seconds(*, current_ms: int, ktimes: int) -> int:
+    current_seconds = max(1, int(int(current_ms or 0) / 1000))
+    duration_seconds = max(1, int(ktimes or 1))
+    return max(1, current_seconds - duration_seconds)
+
+
 def _extract_wjx_scene_id(page_html: str) -> str:
     text = html_lib.unescape(str(page_html or ""))
     if not text:
@@ -437,7 +443,10 @@ async def brush_wjx_http(
 
     current_ms = int(time.time() * 1000)
     ktimes = _sample_ktimes(config)
-    start_seconds = _extract_wjx_starttime_seconds(page_html) or int(current_ms / 1000)
+    start_seconds = _resolve_wjx_submit_start_seconds(
+        current_ms=current_ms,
+        ktimes=ktimes,
+    )
     scene_id = _extract_wjx_scene_id(page_html)
     jqnonce = str(uuid.uuid4())
     domain = _submit_domain(config.url)

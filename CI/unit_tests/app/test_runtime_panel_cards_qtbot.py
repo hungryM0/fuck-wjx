@@ -78,6 +78,13 @@ class TestRuntimePanelCardsQtBot:
         card.set_provider("credamo")
         assert card._input_container.isEnabled() is True
 
+    def test_answer_datetime_window_card_shows_credamo_badge(self, qtbot) -> None:
+        card = AnswerDateTimeWindowSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=300)
+        qtbot.addWidget(card)
+
+        assert card.credamo_badge.text() == "见数"
+        assert card.CREDAMO_BADGE_COLOR == "#1f4f99"
+
     def test_answer_datetime_window_card_keeps_datetime_values(self, qtbot) -> None:
         card = AnswerDateTimeWindowSettingCard(FluentIcon.HISTORY, "标题", "说明", max_seconds=300)
         qtbot.addWidget(card)
