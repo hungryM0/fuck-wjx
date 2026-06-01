@@ -91,7 +91,7 @@ def test_wjx_scene_id_extraction_prefers_page_value() -> None:
 
 
 @pytest.mark.asyncio
-async def test_wjx_submit_starttime_aligns_with_ktimes(monkeypatch) -> None:
+async def test_wjx_submit_starttime_uses_page_starttime(monkeypatch) -> None:
     config = ExecutionConfig(
         url="https://www.wjx.cn/vm/demo.aspx",
         survey_provider="wjx",
@@ -123,7 +123,8 @@ async def test_wjx_submit_starttime_aligns_with_ktimes(monkeypatch) -> None:
     monkeypatch.setattr(wjx_http, "_load_wjx_page", fake_load)
     monkeypatch.setattr(wjx_http, "build_answer_action", fake_build_action)
     monkeypatch.setattr(wjx_http.http_client, "apost", fake_post)
-    monkeypatch.setattr(wjx_http.time, "time", lambda: 1710000000.0)
+    page_start = int(wjx_http.datetime.strptime("2026/5/30 1:23:18", "%Y/%m/%d %H:%M:%S").timestamp())
+    monkeypatch.setattr(wjx_http.time, "time", lambda: float(page_start + 5))
     monkeypatch.setattr(wjx_http.random, "gauss", lambda center, _std: center)
 
     ok = await wjx_http.brush_wjx_http(
@@ -133,12 +134,10 @@ async def test_wjx_submit_starttime_aligns_with_ktimes(monkeypatch) -> None:
         user_agent="UA",
     )
 
-    expected_start = 1710000000 - 90
-
     assert ok is True
-    assert captured["params"]["ktimes"] == "90"
-    assert captured["params"]["starttime"] == wjx_http._format_wjx_starttime(expected_start)
-    assert captured["params"]["cst"] == str(expected_start * 1000)
+    assert captured["params"]["ktimes"] == "5"
+    assert captured["params"]["starttime"] == "2026/5/30 1:23:18"
+    assert captured["params"]["cst"] == str(page_start * 1000)
 
 
 @pytest.mark.asyncio
